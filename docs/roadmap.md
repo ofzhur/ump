@@ -4,8 +4,9 @@
 
 ### M0 — Skeleton
 
-- Go module, `ump` and `ump-agent` binaries, CI, release builds
-  (linux/darwin/windows for the CLI, linux amd64/arm64 for the agent)
+- Go module, the single `ump` binary with the agent role, embedded target
+  payloads (linux amd64/arm64) and the two-stage release build for
+  linux/darwin/windows; CI
 - config loading, secret references, profile inheritance, validation
 - output formatting (`table`, `json`, `yaml`)
 
@@ -52,9 +53,10 @@
 
 ### M6 — Skill v1: organize
 
-- `repo_audit.py`, `inventory_check.py`, the adoption guide and migration
+- `ump repo audit`, `ump inventory check`, the adoption guide and migration
   phases
-- reference repository skeleton, templates (PR, runbook, ADR, health report)
+- `ump repo init`: reference repository skeleton and templates (PR, runbook,
+  ADR, health report)
 - health and drift reports as runbooks
 - validated by taking over a real, grown Terraform/Ansible repository
 
@@ -76,10 +78,6 @@
   (Debian vs. other bases, tool versions). Using a provider rescue only to
   kexec into UMP's own staging image would make step 4–10 fully identical
   everywhere, at the cost of one more reboot-like step.
-- **Agent fetch vs. push.** Downloading the agent from a release URL inside
-  the staging environment vs. uploading it from the CLI. Upload works
-  offline and guarantees version match; download is faster on slow
-  operator links.
 - **Inventory for handoff.** Proposed answer in [the skill](skill.md#who-owns-what):
   UMP exports, Ansible consumes it as a dynamic inventory, nothing is
   copied by hand. Still open: whether an explicit "expected machines" list

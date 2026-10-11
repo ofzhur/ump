@@ -73,11 +73,12 @@ are reported during inspection, before anything changes.
 
 ## Agent
 
-The **agent** (`ump-agent`) is a small static binary that UMP copies into
-the staging environment over SSH. It does the actual work on the machine:
+The **agent** is `ump` itself in its second role: the CLI uploads a copy
+of the binary for the target's platform into the staging environment over
+SSH and starts it as `ump agent`. It does the actual work on the machine:
 inspecting hardware, partitioning, unpacking the image, configuring the
 installed system. The CLI drives it remotely. See
-[architecture](architecture.md#the-agent).
+[architecture](architecture.md#one-binary-two-roles).
 
 ## Facts
 

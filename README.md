@@ -35,8 +35,8 @@ Hetzner-only integration and a ~1000 line bash installer. The lessons from it:
   a few questions: which machines exist, how do I power-cycle them, and how do
   I get them into a staging environment?
 - **Bash does not scale for the installer.** Disk planning, RAID/LVM, bootloaders
-  and network rendering need structure, tests and a dry run. UMP ships a small
-  agent binary to do this work on the target.
+  and network rendering need structure, tests and a dry run. UMP uploads
+  itself to the target and does this work in Go, in its agent role.
 
 ## What UMP does
 
@@ -119,7 +119,9 @@ UMP: which tool owns which fact, how a machine goes from order to
 service, what to check every week, how to take over a repository that has
 grown for years. The tool is designed to be driven by an agent as safely
 as by a person: machine-readable output everywhere, plans before changes,
-and approval as a separate, human-only step. See [the skill](docs/skill.md).
+and approval as a separate, human-only step. The skill ships inside the
+binary — `ump skill install` writes it out — so the two never drift
+apart. See [the skill](docs/skill.md).
 
 ## Documentation
 
@@ -136,7 +138,8 @@ and approval as a separate, human-only step. See [the skill](docs/skill.md).
 
 ## Goals
 
-- One static binary, no server, no database.
+- One static binary: the CLI, the on-target agent, the skill and the
+  repository templates are all inside it. No server, no database.
 - The same result on bare metal and in the cloud.
 - Declarative inputs, a visible plan, and explicit confirmation before
   anything destructive happens.

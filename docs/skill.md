@@ -70,14 +70,18 @@ skills/ump/
 │   ├── runbooks/               one file per workflow (see below)
 │   ├── adoption.md             audit checklist and migration phases for an existing repository
 │   └── troubleshooting.md      failure signatures of ump / terraform / ansible → next step
-├── scripts/
-│   ├── repo_audit.py           deterministic repository health report (JSON and Markdown)
-│   └── inventory_check.py      terraform outputs ↔ provider machines ↔ ansible inventory
 └── assets/
-    ├── repo-skeleton/          starter layout for a new infrastructure repository
-    ├── inventory_ump.py        Ansible dynamic inventory script wrapping `ump inventory export`
     └── templates/              infra PR description, runbook, ADR, health report
 ```
+
+The skill ships **no scripts**. Everything executable it relies on is a
+subcommand of `ump` — `ump repo audit`, `ump repo init`,
+`ump inventory check`, `ump inventory ansible` — because `ump` is a single
+binary: no interpreter is needed on the operator's machine, the logic is
+tested, versioned and redacts secrets like the rest of the tool, it cannot
+drift from the CLI, and an agent cannot "fix" a helper script by editing
+it. The skill itself is embedded in the binary; `ump skill install` writes
+it out.
 
 Sketch of the entry point:
 
@@ -105,10 +109,10 @@ metadata:
 5. Report: what changed, what was verified, what is left for a human.
 ```
 
-The skill lives in this repository under `skills/ump/` and is released
-together with the CLI, because it describes the CLI's commands and
-output. `ump skill install [--user|--project]` copies it into the agent's
-skill directory; `ump doctor` warns when the installed skill and the CLI
+The skill lives in this repository under `skills/ump/` and is embedded
+into the binary at build time, because it describes the CLI's commands and
+output. `ump skill install [--user|--project]` writes it into the agent's
+skill directory; `ump doctor` warns when the installed copy and the CLI
 disagree on versions. The body uses only files and shell commands — no
 agent-specific tool names — so it ports between agents that support the
 format.
@@ -177,8 +181,8 @@ overrides: they live here, in git, reviewed like everything else.
 
 ## The reference repository
 
-What "organized" means. New repositories start from
-`assets/repo-skeleton/`; existing ones are moved toward it in steps (see
+What "organized" means. New repositories start with `ump repo init`;
+existing ones are moved toward it in steps (see
 [Taking over an existing repository](#taking-over-an-existing-repository)).
 
 ```
@@ -203,7 +207,7 @@ infra/
 ├── ansible/
 │   ├── ansible.cfg
 │   ├── inventory/
-│   │   ├── ump.yml               dynamic inventory → `ump inventory export`
+│   │   ├── ump                   executable one-liner: exec ump inventory ansible "$@"
 │   │   ├── group_vars/           by env, role, provider, location
 │   │   └── host_vars/            rare; most per-host facts come from the inventory
 │   ├── playbooks/
@@ -267,7 +271,7 @@ does not reinvent the order.
 | **Change a disk layout** | new layout → data migration runbook → rebuild as above | PR; approval |
 | **Add or rotate users and keys** | edit `ump/users/*.yaml` → PR → Ansible `users` role on existing machines (`--check` first) → new installs pick it up automatically | PR; production run approval |
 | **Decommission** | Ansible: drain, remove from monitoring and DNS → Terraform destroy (cloud) or contract cancellation at the provider (bare metal, human only) → remove overlay entry → verify inventory | PR; a destroy apply; cancellation |
-| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump machine list --diff` (added or removed since last time) → `inventory_check.py` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
+| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump machine list --diff` (added or removed since last time) → `ump inventory check` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
 | **Health report** | reachability, machines in no inventory, contracts cancelled or expiring (`paid_until`), traffic, failed runs, expired approvals, pin freshness | none |
 | **Host down** | `ump machine show`, provider status and console, `ump ssh` diagnostics → propose: hard reset, rescue and inspect, or rebuild → execute the approved option → post-mortem note | every action beyond reading |
 | **Dependency bumps** | providers, collections, images, tools → one PR per bump with plan output | PR review |
@@ -299,7 +303,7 @@ working.
 
 | Phase | Goal | Typical PRs | Done when |
 |---|---|---|---|
-| **0 — Audit** | Understand without changing | `repo_audit.py` report plus the agent's reading → `docs/repo-health.md` and a migration plan as an ADR | the owner agrees with the plan |
+| **0 — Audit** | Understand without changing | `ump repo audit` report plus the agent's reading → `docs/repo-health.md` and a migration plan as an ADR | the owner agrees with the plan |
 | **1 — Safety** | Remove the ways to lose data or secrets | secrets out of git (sops or references), remote state with locking, pinned providers and collections, CI that runs plan and check | `terraform plan` and `--check` are clean and run in CI |
 | **2 — Structure** | Move to the reference layout | pure moves with `moved` blocks (plan shows no changes), one `site.yml`, roles deduplicated, playbook logic pushed into roles, hand-written inventory replaced by the generated one | layout matches; no behaviour change in any PR |
 | **3 — Provisioning** | Replace bespoke install paths with UMP | users and disk layouts extracted from scripts and roles into `ump/`; profiles per role; cloud-init snowflakes and install scripts retired; first machines rebuilt with UMP | every new machine goes through `ump install` |
@@ -316,7 +320,7 @@ Rules during adoption:
 - Everything the audit found but did not fix becomes an issue with the
   file and line.
 
-What the audit looks at (the deterministic part is `repo_audit.py`, the
+What the audit looks at (the deterministic part is `ump repo audit`, the
 judgement is the agent's):
 
 - structure: how machines get created today (Terraform? console? scripts?),
@@ -366,9 +370,9 @@ How the last line is enforced rather than hoped for:
   command line to the human. `ump skill install --with-permissions` writes
   a suggested allow/ask list for the agent in use.
 - **Secrets never enter the agent's context.** Configuration references
-  them; `ump` redacts them from all output including `-v`; the audit
-  scripts report locations, not values; the skill forbids printing secret
-  files.
+  them; `ump` redacts them from all output including `-v`;
+  `ump repo audit` reports locations, not values; the skill forbids
+  printing secret files.
 - **No improvisation on targets.** The agent uses the repository's entry
   points and the three tools. It does not hand-roll `ssh host 'wipefs …'`.
   Diagnostic SSH is read-only by rule; anything that changes a machine goes
@@ -427,8 +431,13 @@ Consequences for the CLI:
 - no prompts without a TTY; exit code 3 plus a message naming the missing
   approval
 - `ump inventory export --format ansible|json|hosts --group-by
-  env,role,provider,location,profile`, and a dynamic inventory script in the
-  skill's assets
+  env,role,provider,location,profile`, and `ump inventory ansible` speaking
+  Ansible's script-inventory protocol (`--list`, `--host`), so the inventory
+  file in the repository is a one-line exec wrapper
+- `ump inventory check` and `ump repo audit` (Markdown and JSON): the
+  deterministic halves of the drift check and the adoption audit
+- `ump repo init`: the reference repository skeleton and templates, from
+  the binary
 - `ump machine import --from terraform` reading `terraform output -json`
 - the machine overlay `ump/machines.yaml` with `defaults`, `match` and
   `machines`
@@ -436,8 +445,8 @@ Consequences for the CLI:
   keyed by code
 - `ump doctor`: tools, versions, credentials reachable (without printing
   them), skill ↔ CLI version match
-- `ump skill install [--user|--project] [--with-permissions]`,
-  `ump skill path`
+- `ump skill install [--user|--project] [--with-permissions]` writing the
+  embedded skill, `ump skill path`
 - redaction of secrets in every output stream, including verbose and debug
 - run logs that are agent-readable: `ump run show -o json`, `ump run logs`
   with step boundaries

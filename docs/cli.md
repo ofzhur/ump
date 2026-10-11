@@ -66,7 +66,12 @@ ump
 │
 ├── inventory
 │   ├── export   [--format ansible|json|hosts] [--group-by env,role,provider,location,profile]
+│   ├── ansible  --list | --host <name>            Ansible's script-inventory protocol, behind an exec wrapper
 │   └── check                                      provider machines vs. terraform outputs vs. ansible inventory
+│
+├── repo
+│   ├── init     [dir]                             write the reference repository skeleton
+│   └── audit    [dir] [-o markdown|json]          repository health report (see skill.md)
 │
 ├── run
 │   ├── list                                       past runs
@@ -83,6 +88,7 @@ ump
 │   └── path
 │
 ├── doctor                                         tools, versions, credentials reachable, skill version
+├── agent                                          (internal) the target-side role, started over SSH by install
 └── version
 ```
 

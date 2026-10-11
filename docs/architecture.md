@@ -12,7 +12,7 @@ starts.
 │ ump (CLI)                                 │        │ staging environment      │
 │                                           │  SSH   │ (rescue / UMP image)     │
 │  ┌─────────┐  ┌──────────┐  ┌──────────┐  │───────▶│                          │
-│  │ config  │  │ planner  │  │ runner   │  │        │  ump-agent               │
+│  │ config  │  │ planner  │  │ runner   │  │        │  ump agent (same binary) │
 │  │ profiles│  │ layouts  │  │ pipeline │  │◀───────│   inspect / partition /  │
 │  │ secrets │  │ templates│  │ steps    │  │ events │   install / configure    │
 │  └─────────┘  └──────────┘  └────┬─────┘  │        │                          │
@@ -27,39 +27,87 @@ starts.
 └───────────────────────────────────────────┘
 ```
 
-UMP consists of two binaries built from one Go module:
-
-- **`ump`** — the CLI the operator runs. It talks to provider APIs, computes
-  plans, drives the installation and performs the handoff.
-- **`ump-agent`** — a static Linux binary (amd64 and arm64) that is
-  uploaded into the staging environment and does the on-machine work.
+`ump` is **one binary**. The same program runs on the operator's machine
+as the CLI and on the target as the agent (`ump agent`, an internal
+subcommand started over SSH). Every `ump` build carries compressed copies
+of itself for the target platforms, so the macOS or Windows `ump` on a
+laptop can put a matching agent on any Linux machine — see
+[One binary, two roles](#one-binary-two-roles).
 
 There is no server, no database and no long-running process. Everything
-UMP needs is in the configuration files, the provider APIs and the machine
-itself.
+UMP needs is in the binary, the configuration files, the provider APIs and
+the machine itself. The only things fetched from elsewhere are data: OS
+images and the staging kernel and initramfs, by URL with pinned checksums.
 
 ## Language and dependencies
 
 Go, as in the earlier tool:
 
-- static binaries, trivial cross-compilation for the agent
+- static binaries; cross-compilation makes the embedded target payloads
+  cheap
 - good SSH support (`golang.org/x/crypto/ssh`) — no dependency on a local
   `ssh` binary, which matters for Windows and CI
 - existing provider SDKs (Hetzner Robot and Cloud, OVH, AWS, ...) and
   Redfish clients
-- the CLI and the agent share data types (facts, plans, layouts), so a
-  plan computed by the CLI is exactly what the agent executes
+- both roles are one program, so a plan computed by the CLI is exactly
+  what the agent executes, down to the struct
 
 On the target, the agent calls standard tools (`sgdisk`, `mdadm`, `lvm`,
 `mkfs.*`, `wipefs`, `unsquashfs`, `chroot`) instead of reimplementing them.
 Those tools are well tested and present in practically every rescue system.
 
+## One binary, two roles
+
+| Role | Runs on | Started by | Does |
+|---|---|---|---|
+| CLI | operator workstation, CI runner | the user or an AI agent | config, providers, planning, driving the pipeline, handoff |
+| agent | the target's staging environment, from RAM | the CLI, over SSH, as `ump agent` | inspect, partition, install, configure, bootloader |
+
+Both roles are the same code. The CLI refuses to drive an agent whose
+version and commit differ from its own; this is checked in the first
+handshake message.
+
+How the agent gets onto the target:
+
+1. If the operator's OS and architecture match the target's (a Linux
+   workstation or CI runner installing a Linux machine), the CLI uploads
+   the binary it is running.
+2. Otherwise it uses an **embedded payload**: every release of `ump`
+   contains compressed builds of itself for `linux/amd64` and
+   `linux/arm64`. The payloads are built from the same commit with the
+   `agent` build tag, which leaves out provider SDKs and operator-side
+   commands and keeps each one at a few megabytes. The CLI decompresses
+   the right one in memory and uploads it over the SSH session.
+3. `--agent-binary <path>` overrides both, for development and for
+   debugging the agent.
+
+Release builds are therefore two-stage: build the `agent`-tagged payloads
+for Linux, embed them, then build `ump` for every operator platform
+(Linux, macOS, Windows; amd64 and arm64). A development build without
+payloads still works on a matching platform and fails with a clear
+message otherwise.
+
+What is inside the binary:
+
+- the CLI and the agent role, with the target payloads
+- the skill (`ump skill install` writes it out) and the reference
+  repository skeleton and templates (`ump repo init`)
+- built-in defaults: a `base` profile, common disk layouts, image
+  definitions for Debian and Ubuntu
+- the Ansible inventory protocol (`ump inventory ansible`) — no
+  interpreter or helper script is needed anywhere
+
+What is not, by design, because it is data rather than tool: OS images
+and the staging kernel and initramfs (for `kexec`, the virtual-media ISO
+and PXE). Both are referenced by URL with a pinned checksum, cached under
+`~/.cache/ump/`, and can be pushed to the target over SSH when it has no
+outbound access.
+
 ## Proposed code layout
 
 ```
 cmd/
-  ump/                CLI entry point
-  ump-agent/          agent entry point
+  ump/                the one entry point; `ump agent` is the target-side role
 internal/
   cli/                cobra commands, output formatting (table/json/yaml)
   config/             config loading, profiles, inheritance, validation
@@ -77,6 +125,7 @@ internal/
   layout/             disk layout model, validation, resolver
   facts/              facts model (shared with agent)
   agent/
+    payload/          embedded target builds (linux/amd64, linux/arm64)
     proto/            message types shared by CLI and agent
     inspect/          hardware discovery
     disk/             wipe, partition, md, lvm, mkfs, mount
@@ -86,6 +135,10 @@ internal/
     network/          canonical network model + renderers
     boot/             bootloader installation (UEFI + legacy)
   handoff/            ansible, ansible-pull, script
+  repo/               `ump repo init` (skeleton, templates), `ump repo audit`
+  skill/              `ump skill install`: writes the embedded skill
+skills/
+  ump/                the skill, embedded into the binary at build time
 images/               recipes for UMP staging and OS images
 docs/
 ```
@@ -100,7 +153,7 @@ can be resumed with `ump install --resume <run-id>`.
 |---|---|---|---|
 | 1 | `resolve` | CLI | Look up the machine at the provider, load and validate the profile |
 | 2 | `enter` | CLI ↔ provider | Bring the machine into the staging environment using the chosen entry method; wait for SSH |
-| 3 | `bootstrap` | CLI → target | Upload `ump-agent` (matching architecture), check required tools |
+| 3 | `bootstrap` | CLI → target | Upload `ump` for the target's platform (itself or the embedded payload), start `ump agent`, handshake versions, check required tools |
 | 4 | `inspect` | agent | Collect facts: disks, RAM, CPU, firmware mode, NICs, addresses |
 | 5 | `plan` | CLI | Resolve layout + templates + network against facts and provider metadata |
 | 6 | `confirm` | CLI | Show the plan, require confirmation or a guard (see [safety](#safety)) |
@@ -216,8 +269,10 @@ installable without provider-specific image import.
 
 ## The agent
 
-The agent is a static binary started over SSH. The CLI and the agent talk
-over the SSH session's stdin/stdout with newline-delimited JSON messages:
+The agent is `ump` itself, started over SSH as `ump agent` (see
+[One binary, two roles](#one-binary-two-roles)). The CLI and the agent
+talk over the SSH session's stdin/stdout with newline-delimited JSON
+messages:
 
 ```
 CLI   → agent   {"id":1,"op":"inspect"}
@@ -362,7 +417,7 @@ UMP keeps only local, disposable state under XDG directories:
 
 ```
 ~/.config/ump/          config, profiles, layouts (user editable)
-~/.cache/ump/           machine listing cache, downloaded images and agents
+~/.cache/ump/           machine listing cache, downloaded OS and staging images
 ~/.local/state/ump/runs/<run-id>/
                         plan.json, facts.json, events.jsonl, result.json
 ```
