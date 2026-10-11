@@ -312,6 +312,31 @@ machine:
 - a machine that is already in rescue mode, has mounted target disks or
   shows unexpected hardware compared to the plan stops the run
 - every run leaves a log with the plan and all commands executed
+- approval can be separated from execution: `ump approve <run-id>` records
+  a TTY-only, plan-hash-bound, expiring approval that
+  `ump install --approved` consumes — the basis of the agent workflow in
+  [the skill](skill.md)
+- UMP never prompts without a TTY; it fails with exit code 3 and names the
+  missing approval
+
+## Agent interface
+
+UMP is meant to be driven by AI agents as well as people; the operating
+knowledge for that lives in [the skill](skill.md). The tool's side of the
+contract:
+
+- stable `-o json` for every command; plan output carries a `plan_hash`
+  and a text `summary`
+- approval as a separate, TTY-only command; no prompts without a TTY
+- structured errors with a code and a hint
+- secrets redacted from every output stream, including verbose and debug
+- `ump inventory export` and `ump machine import` as the seams to Ansible
+  and Terraform; the machine overlay (`machines.yaml`) for per-machine
+  intent
+- `ump doctor` to check that the installed skill and the CLI match
+
+None of this is agent-specific; scripts and CI benefit from the same
+properties.
 
 ## Secrets and keys
 

@@ -17,12 +17,15 @@ implementation; the point is to agree on the shape.
   needs a guard flag (see [architecture](architecture.md#safety)).
 - Global flags: `--config <file>`, `--account <name>`, `-v/--verbose`,
   `--no-color`.
+- UMP never prompts when stdin is not a TTY. It fails with exit code 3 and
+  names the approval that is missing (see `ump approve`).
 
 ## Overview
 
 ```
 ump
 ├── plan       <machine> --profile <name>          show what install would do
+├── approve    <run-id>                            approve a plan (interactive, TTY only)
 ├── install    <machine>... --profile <name>       install the OS
 ├── ssh        <machine> [-- command]              ssh into a machine
 ├── facts      <machine>                           inspect hardware (enters staging env if needed)
@@ -34,6 +37,7 @@ ump
 │   ├── power    <machine> on|off
 │   ├── rename   <machine> <name> [--rdns]
 │   ├── rescue   <machine> enable|disable [--flavour ...]
+│   ├── import   --from terraform [file]           names and labels of machines Terraform created
 │   ├── create   --account <name> --type <type> --location <loc>   (clouds)
 │   └── destroy  <machine>                                          (clouds)
 │
@@ -60,6 +64,10 @@ ump
 │   ├── fetch    <name>                            pre-download and verify
 │   └── build    <recipe>                          build an image from a recipe (later)
 │
+├── inventory
+│   ├── export   [--format ansible|json|hosts] [--group-by env,role,provider,location,profile]
+│   └── check                                      provider machines vs. terraform outputs vs. ansible inventory
+│
 ├── run
 │   ├── list                                       past runs
 │   ├── show     <run-id>                          plan, steps, result
@@ -70,6 +78,11 @@ ump
 │   ├── path                                       show config locations
 │   └── edit
 │
+├── skill
+│   ├── install  [--user|--project] [--with-permissions]
+│   └── path
+│
+├── doctor                                         tools, versions, credentials reachable, skill version
 └── version
 ```
 
@@ -93,14 +106,29 @@ plan from previously collected facts instead.
 
 ```
 ump install <machine>... --profile <name> [plan flags]
-            [--yes --confirm-machine <ref>] [--parallel N]
+            [--approved <run-id> | --yes --confirm-machine <ref>] [--parallel N]
             [--skip-handoff] [--keep-rescue] [--dry-run]
 ump install --resume <run-id>
 ```
 
 Runs the full pipeline (see [architecture](architecture.md#the-install-pipeline)).
 `--dry-run` goes up to and including `plan` and then prints the
-commands the agent would run.
+commands the agent would run. Without a TTY, an install needs either an
+approval from `ump approve` or `--yes` with a guard.
+
+### `ump approve`
+
+```
+ump approve <run-id> [--ttl 1h]
+```
+
+Shows the plan recorded by `ump plan` (or by an `install` that stopped at
+the confirmation step) and records an approval bound to the plan's hash.
+Refuses to run without a TTY: this is the step a human does, and an agent
+in a non-interactive shell cannot do it for itself. The approval expires,
+and is void if the facts or the profile change before the install. Built
+for the [skill](skill.md) workflow; useful on its own for a four-eyes
+process.
 
 ### `ump ssh`
 
@@ -149,6 +177,14 @@ $ ump install rack1-07 --profile storage --entry virtual-media
 
 # a machine that is not behind any API: boot something with SSH yourself
 $ ump install 192.0.2.50 --profile base --entry manual
+
+# agent-driven flow: the agent plans, a human approves, the agent installs
+$ ump plan prod-web-03 --profile web -o json       # agent
+$ ump approve run-7f3a                             # human, in a terminal
+$ ump install prod-web-03 --approved run-7f3a      # agent
+
+# Ansible inventory straight from the providers
+$ ump inventory export --format ansible --group-by env,role,provider
 ```
 
 ## Exit codes

@@ -18,6 +18,7 @@
 - disk layouts: GPT, md RAID, LVM, ext4/xfs/swap
 - QEMU integration tests: 1, 2 and 4 disks, UEFI and BIOS
 - `ump plan`, `ump install`, run logs
+- no prompts without a TTY; `ump approve` and `--approved`
 
 ### M2 — Hetzner Robot
 
@@ -32,6 +33,10 @@
 - `ansible`, `ansible-pull`, `script` handoff
 - parallel installs, `--resume`
 - non-interactive guards for CI
+- `ump inventory export`, `ump machine import --from terraform`, the
+  machine overlay
+- skill v0 (operate): `SKILL.md`, ownership, CLI cheat sheet, runbooks for
+  add / reinstall / decommission / drift; `ump skill install`, `ump doctor`
 
 ### M4 — Cloud and kexec
 
@@ -44,6 +49,14 @@
 
 - `redfish` provider, staging ISO, `virtual-media` entry
 - `ipmi` + iPXE
+
+### M6 — Skill v1: organize
+
+- `repo_audit.py`, `inventory_check.py`, the adoption guide and migration
+  phases
+- reference repository skeleton, templates (PR, runbook, ADR, health report)
+- health and drift reports as runbooks
+- validated by taking over a real, grown Terraform/Ansible repository
 
 ### Later
 
@@ -67,14 +80,17 @@
   the staging environment vs. uploading it from the CLI. Upload works
   offline and guarantees version match; download is faster on slow
   operator links.
-- **Inventory for handoff.** Should UMP write/update an Ansible inventory
-  file, or only pass the host on the command line and leave inventory to
-  the user?
-- **Machine-level overrides.** Some machines need one-off settings
-  (different layout, extra IPs). In the profile with a match rule, in a
-  per-machine file, or on the command line only?
+- **Inventory for handoff.** Proposed answer in [the skill](skill.md#who-owns-what):
+  UMP exports, Ansible consumes it as a dynamic inventory, nothing is
+  copied by hand. Still open: whether an explicit "expected machines" list
+  is needed to notice machines that should exist but do not.
+- **Machine-level overrides.** Proposed answer: the machine overlay
+  (`ump/machines.yaml`, see [the skill](skill.md#the-machine-overlay)) with
+  defaults, match rules and per-machine entries, in git.
 - **ZFS.** Popular on bare metal, but licensing and distribution support
   differ. Possibly as an optional OS family feature.
 - **Windows / BSD targets.** Out of scope for now; the agent and OS family
   split should not make them impossible.
 - **License.** To be decided before the first public release.
+- **Skill questions** — one skill or two, approval without a terminal, an
+  MCP server next to the CLI: see [the skill](skill.md#open-questions).

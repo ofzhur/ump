@@ -110,6 +110,17 @@ ALL DATA ON nvme0n1, nvme1n1 WILL BE DESTROYED.
 $ ump install web-01 --profile base
 ```
 
+## Two parts: the tool and the skill
+
+`ump` is the mechanism. The second part of the project is a **skill** —
+packaged operating knowledge in the Agent Skills format — that lets an AI
+agent run a hybrid fleet and its Terraform and Ansible repository with
+UMP: which tool owns which fact, how a machine goes from order to
+service, what to check every week, how to take over a repository that has
+grown for years. The tool is designed to be driven by an agent as safely
+as by a person: machine-readable output everywhere, plans before changes,
+and approval as a separate, human-only step. See [the skill](docs/skill.md).
+
 ## Documentation
 
 | Document | Contents |
@@ -120,6 +131,7 @@ $ ump install web-01 --profile base
 | [Configuration](docs/configuration.md) | Config files, profiles, users, network, secrets |
 | [Disk layouts](docs/disk-layouts.md) | The declarative disk layout format |
 | [Providers](docs/providers.md) | Provider capabilities and planned integrations |
+| [Skill](docs/skill.md) | The UMP skill: operating a hybrid fleet and its Terraform/Ansible repository with an AI agent; reference repository layout; safety model |
 | [Roadmap](docs/roadmap.md) | Milestones and open questions |
 
 ## Goals
@@ -132,6 +144,8 @@ $ ump install web-01 --profile base
 - Linux distribution support through pluggable OS families, starting with
   Debian and Ubuntu.
 - Clean handoff instead of reinventing configuration management.
+- Usable by AI agents as well as people: stable JSON output, plan/approve
+  separation, and a skill that carries the operating procedures.
 
 ## Non-goals
 
@@ -143,6 +157,8 @@ $ ump install web-01 --profile base
 - Replacing Terraform for cloud resource management. UMP can provision
   a cloud instance for convenience, but it is happy to take over instances
   that something else created.
+- An autonomous operator. The skill lets an agent do the work; every
+  destructive step needs a human approval the agent cannot produce itself.
 
 ## Author
 

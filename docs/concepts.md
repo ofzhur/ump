@@ -171,3 +171,27 @@ gets an ID and a local log directory with the plan, the agent's structured
 log and the final result. Runs consist of **steps**, and long steps can be
 resumed (for example after the operator's network connection dropped while
 waiting for a reboot).
+
+## Approval
+
+An **approval** is recorded consent to a destructive run: bound to the
+plan's hash, created by `ump approve` in an interactive terminal, expiring,
+and consumed by `ump install --approved`. Separating approval from
+execution lets an agent prepare and run an install while the decision
+stays human.
+
+## Machine overlay
+
+The **machine overlay** (`ump/machines.yaml`) holds per-machine intent
+that providers cannot carry: the profile, labels such as environment and
+role, and one-off overrides. It lives in the infrastructure repository and
+is read by UMP and, through the inventory export, by Ansible. See
+[the skill](skill.md#the-machine-overlay).
+
+## Skill
+
+The **skill** is the agent-facing half of UMP: operating knowledge in the
+Agent Skills format that tells an AI agent how to run a hybrid fleet and
+its Terraform and Ansible repository with UMP — ownership of facts,
+conventions, runbooks, the adoption path for an existing repository and
+the safety model. See [the skill](skill.md).
