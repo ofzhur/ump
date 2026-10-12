@@ -11,8 +11,9 @@ See [architecture](architecture.md#providers) for the interfaces.
 
 The table shows the **intended** use of each provider's API. Details are
 to be verified against the current APIs when each integration is
-implemented. Implemented today: `inventory` for `hetzner-robot`,
-`hetzner-cloud` and `ovh` (`ump get servers`).
+implemented. Implemented today: `inventory` (`ump get servers`) and
+`describe` (`ump describe server`) for `hetzner-robot`, `hetzner-cloud`
+and `ovh`.
 
 | Provider | Kind | inventory | power | rescue | create | rdns | network-info | virtual-media | Entry method |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
@@ -106,7 +107,8 @@ SSH as root. It is also the provider used by the integration test suite.
    resolved settings. A `Complete` hook can fill settings interactively
    (OVH uses it to request a consumer key).
 3. Implement `Provider` plus the optional capability interfaces
-   (`Inventory` first).
+   (`Inventory` first; `Describer` returns the provider's extra facts as
+   named sections for `ump describe server`).
 4. Map provider objects to UMP's `Machine` (ID, name, addresses, location,
    product, status, labels). Lower-case locations and statuses; keep
    product names as the provider spells them.

@@ -162,6 +162,7 @@ func selectMachines(ms []provider.Machine, refs []string) ([]provider.Machine, [
 type listResult struct {
 	account  string
 	typ      string
+	prov     provider.Provider
 	machines []provider.Machine
 	err      error
 }
@@ -189,6 +190,7 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account)
 		r.err = err
 		return r
 	}
+	r.prov = p
 	inv, ok := p.(provider.Inventory)
 	if !ok {
 		r.err = fmt.Errorf("account %s: provider type %s cannot list servers", name, acct.Type)

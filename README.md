@@ -16,8 +16,8 @@ same format, and a clean handoff to your configuration management (Ansible
 or anything else).
 
 > **Status:** early implementation. The CLI skeleton, the configuration
-> wizard and server listing for Hetzner Robot, Hetzner Cloud and OVHcloud
-> exist (see [Getting started](#getting-started)). Everything else in
+> wizard, and server listing and details for Hetzner Robot, Hetzner Cloud
+> and OVHcloud exist (see [Getting started](#getting-started)). Everything else in
 > these documents is design: it captures the ideas and the intended
 > architecture so that the implementation starts from a shared picture.
 
@@ -116,6 +116,7 @@ $ git clone git@github.com:ofzhur/ump.git && cd ump
 $ make                  # builds ./ump; `make install` puts it into your Go bin directory
 $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
 $ ./ump get servers     # every server of every account; -o wide|json|yaml|name
+$ ./ump describe server web-01   # everything the provider knows about one server
 $ ./ump config test     # re-check credentials any time
 ```
 

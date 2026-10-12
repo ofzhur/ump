@@ -36,6 +36,16 @@ type fakeProvider struct {
 	settings map[string]string
 }
 
+// Describe adds a section; it fails for db-01 to exercise the error path.
+func (f *fakeProvider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	if m.ID == "2" {
+		return nil, &provider.APIError{Provider: "fake", Status: 500, Message: "describe failed"}
+	}
+	s := provider.Section{Name: "Power"}
+	s.Add("state", "on").Add("reset_types", []string{"soft", "hard"}).Add("locked", false).Add("disk", provider.Bytes(40<<30)).Add("iso", nil)
+	return &provider.Details{Machine: m, Sections: []provider.Section{s}}, nil
+}
+
 func (f *fakeProvider) Type() string    { return "fake" }
 func (f *fakeProvider) Account() string { return f.account }
 func (f *fakeProvider) Capabilities() []provider.Capability {
@@ -573,5 +583,161 @@ func TestWizardInterrupted(t *testing.T) {
 	code = a.run(ctx, []string{"--config", e.cfgPath, "get", "servers"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" {
 		t.Errorf("interrupted listing: code %d, stderr %q", code, errOut.String())
+	}
+}
+
+// listOnlyProvider cannot describe machines; describe falls back to the listing.
+type listOnlyProvider struct{ inner *fakeProvider }
+
+func (l *listOnlyProvider) Type() string                        { return "listonly" }
+func (l *listOnlyProvider) Account() string                     { return l.inner.account }
+func (l *listOnlyProvider) Capabilities() []provider.Capability { return l.inner.Capabilities() }
+func (l *listOnlyProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	ms, err := l.inner.List(ctx)
+	for i := range ms {
+		ms[i].Provider = "listonly"
+	}
+	return ms, err
+}
+
+func init() {
+	provider.Register(provider.Type{
+		Name: "listonly", Kind: provider.KindCloud, Description: "Fake provider without describe",
+		Fields: []provider.Field{{Key: "password", Secret: true, Required: true}},
+		New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
+			return &listOnlyProvider{inner: &fakeProvider{account: account, settings: s}}, nil
+		},
+	})
+}
+
+func TestDescribeServerText(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	out, errOut, code := e.run("", false, "describe", "server", "web-01", "--account", "one")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d, stderr %q\n%s", code, errOut, out)
+	}
+	want := `Name:      web-01
+Ref:       fake/1
+Account:   one
+Provider:  fake
+Kind:      cloud
+Status:    running
+Location:  eu-1
+Product:   m1
+IPv4:      203.0.113.10
+IPv6:      2001:db8::/64
+Labels:    env=prod
+
+Power:
+  State:        on
+  Reset types:  soft
+                hard
+  Locked:       no
+  Disk:         40 GB
+  ISO:          <none>
+`
+	if out != want {
+		t.Errorf("text output:\n got %q\nwant %q", out, want)
+	}
+
+	// two servers, separated by a blank line; aliases work
+	out, _, code = e.run("", false, "describe", "srv", "web-01", "fake/1", "--account", "one")
+	if code != 0 || strings.Count(out, "Name:      web-01") != 2 || !strings.Contains(out, "\n\nName:") {
+		t.Errorf("two refs: code %d\n%s", code, out)
+	}
+}
+
+func TestDescribeServerFormats(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	out, _, code := e.run("", false, "describe", "server", "web-01", "--account", "one", "-o", "json")
+	if code != 0 {
+		t.Fatal(out)
+	}
+	var ds []struct {
+		provider.Machine
+		Details []struct {
+			Name   string         `json:"name"`
+			Fields map[string]any `json:"fields"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal([]byte(out), &ds); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if len(ds) != 1 || ds[0].Ref() != "fake/1" || len(ds[0].Details) != 1 || ds[0].Details[0].Name != "Power" ||
+		ds[0].Details[0].Fields["state"] != "on" || ds[0].Details[0].Fields["disk"] != float64(40<<30) || ds[0].Details[0].Fields["locked"] != false {
+		t.Errorf("unexpected JSON: %s", out)
+	}
+	if !strings.Contains(out, "\"disk\": 42949672960") {
+		t.Errorf("sizes must be plain numbers in JSON:\n%s", out)
+	}
+
+	out, _, code = e.run("", false, "describe", "server", "web-01", "--account", "one", "-o", "yaml")
+	if code != 0 || !strings.HasPrefix(out, "- provider: fake\n  account: one\n") || !strings.Contains(out, "  details:\n    - name: Power\n      fields:\n        state: \"on\"\n        reset_types:\n          - soft\n") {
+		t.Errorf("yaml: code %d\n%s", code, out)
+	}
+
+	_, errOut, code := e.run("", false, "describe", "server", "web-01", "-o", "wide")
+	if code != 2 || !strings.Contains(errOut, "unknown output format") {
+		t.Errorf("bad format: code %d, %q", code, errOut)
+	}
+}
+
+func TestDescribeServerErrors(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+
+	// not found
+	out, errOut, code := e.run("", false, "describe", "server", "nope", "--account", "one")
+	if code != 1 || out != "" || errOut != "ump: server \"nope\" not found\nump: 0 of 1 servers described\n" {
+		t.Errorf("not found: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	// JSON output stays an array even when nothing matched
+	out, _, _ = e.run("", false, "describe", "server", "nope", "--account", "one", "-o", "json")
+	if out != "[]\n" {
+		t.Errorf("json for nothing: %q", out)
+	}
+
+	// ambiguous: the same names exist in accounts one and three
+	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
+	_, errOut, code = e.run("", false, "describe", "server", "web-01", "--account", "one,three")
+	if code != 1 || !strings.Contains(errOut, `server "web-01" is ambiguous: fake/1 in account one, fake/1 in account three; use --account`) {
+		t.Errorf("ambiguous: code %d, %q", code, errOut)
+	}
+
+	// provider error while describing
+	_, errOut, code = e.run("", false, "describe", "server", "db-01", "--account", "one")
+	if code != 4 || !strings.Contains(errOut, "ump: account one: fake: describe failed (HTTP 500)") {
+		t.Errorf("provider error: code %d, %q", code, errOut)
+	}
+
+	// a failing account is reported, the lookup in the others still works, exit code 4
+	out, errOut, code = e.run("", false, "describe", "server", "web-01", "--account", "one,two")
+	if code != 4 || !strings.Contains(out, "Name:      web-01") || !strings.Contains(errOut, "account two: fake: authentication failed") {
+		t.Errorf("failing account: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	_, errOut, code = e.run("", false, "describe", "server", "nope", "--account", "one,two")
+	if code != 4 || !strings.Contains(errOut, `server "nope" not found (1 of 2 accounts could not be listed)`) {
+		t.Errorf("not found with failing account: code %d, %q", code, errOut)
+	}
+
+	// usage
+	_, errOut, code = e.run("", false, "describe", "server")
+	if code != 2 || !strings.Contains(errOut, "requires at least 1 arg") {
+		t.Errorf("no ref: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("", false, "describe", "pod", "x")
+	if code != 2 || !strings.Contains(errOut, `unknown resource type "pod"`) {
+		t.Errorf("unknown resource: code %d, %q", code, errOut)
+	}
+}
+
+func TestDescribeServerWithoutDescriber(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
+	out, errOut, code := e.run("", false, "describe", "server", "web-01")
+	if code != 0 || errOut != "" || !strings.Contains(out, "Ref:       listonly/1\n") || strings.Contains(out, "Power:") {
+		t.Errorf("fallback: code %d, stderr %q\n%s", code, errOut, out)
 	}
 }

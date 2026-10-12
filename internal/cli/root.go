@@ -117,7 +117,8 @@ func (a *app) newRootCmd() *cobra.Command {
 dedicated servers, cloud VMs and boxes in your own rack.
 
 Commands follow the kubectl shape: ` + "`ump get servers`" + ` lists machines of every
-configured provider account, ` + "`ump config`" + ` sets accounts up.`,
+configured provider account, ` + "`ump describe server NAME`" + ` shows one in detail,
+` + "`ump config`" + ` sets accounts up.`,
 		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -135,6 +136,7 @@ configured provider account, ` + "`ump config`" + ` sets accounts up.`,
 	pf.BoolVarP(&a.verbose, "verbose", "v", false, "log API requests to stderr")
 
 	root.AddCommand(a.newGetCmd())
+	root.AddCommand(a.newDescribeCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root

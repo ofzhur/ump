@@ -33,6 +33,8 @@ ump
 ├── get
 │   └── servers  [ref...] [-o table|wide|json|yaml|name] [--no-headers]
 │                                                  all servers of all accounts (--account to restrict)
+├── describe
+│   └── server   <ref>... [-o text|json|yaml]       everything the provider knows about a server
 ├── config                                         interactive wizard: add an account, test it, save it
 │   ├── view                                       the configuration, secrets redacted
 │   ├── path                                       where the configuration lives
@@ -142,6 +144,41 @@ lower-cased; `labels` are present where the provider has them. `-o wide`
 adds the IPv6, product and kind columns; `-o name` prints `provider/id`
 per line. `defaults.output` in the configuration sets the default format.
 
+## `ump describe server`
+
+```
+ump describe server NAME|ID|IP|PROVIDER/ID ... [--account <name>...] [-o text|json|yaml]
+```
+
+Finds each server across the configured accounts (the same references as
+`get`; a name that exists in several accounts has to be narrowed with
+`--account`) and prints the common fields followed by everything the
+provider reports about it, grouped in sections:
+
+| Provider | Sections |
+|---|---|
+| `hetzner-robot` | Contract (product, traffic, paid until, cancellation, storage box), Addresses, Features (reset, rescue, VNC, ...), Power (state and reset types from `/reset`), Rescue (active, systems, authorized keys from `/boot/rescue`) |
+| `hetzner-cloud` | Server (created, locked, rescue, backups, volumes), Type, Image, Location, Network (PTR records, floating IPs, private networks, firewalls), Traffic, Protection |
+| `ovh` dedicated | Server, Location, Boot (boot option, root device, rescue mail), Addresses, Service (creation, expiration, renewal), Hardware (memory, CPU, disks, boot mode) |
+| `ovh` instance | Instance (created, plan, billing), Flavor, Image, Addresses, Access (SSH key), Project |
+
+A section whose extra API call fails is kept with an `error` field, so a
+partial description stays honest. `-o json` and `-o yaml` always print an
+array; each element has the machine fields of `get servers` plus
+`details`, a list of `{"name": ..., "fields": {...}}` with typed values
+(sizes in bytes as numbers, booleans as booleans):
+
+```console
+$ ump describe server web-01 -o json | jq '.[0].details[] | select(.name == "Power").fields'
+{
+  "state": "running",
+  "reset_types": ["sw", "hw", "man"]
+}
+```
+
+Exit codes: 1 when a reference matched nothing or was ambiguous, 4 when a
+provider call failed or an account could not be listed.
+
 ## `ump config`
 
 Without a subcommand, `ump config` is an interactive wizard: it asks for
@@ -239,6 +276,7 @@ $ ump config test main
 $ ump get servers
 $ ump get servers -o wide --account main
 $ ump get servers -o json | jq '.[] | select(.status=="ready")'
+$ ump describe server web-01
 
 # reinstall one server
 $ ump plan web-01 --profile base
@@ -266,7 +304,7 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
 
-Everything after `ump get servers` in the examples is draft.
+Everything after `ump describe server` in the examples is draft.
 
 ## Exit codes
 
