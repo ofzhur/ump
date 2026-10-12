@@ -43,6 +43,9 @@ ump
 │   └── server   <ref>... [-o text|json|yaml]       everything the provider knows about a server
 ├── rename
 │   └── server   <ref> <new-name> [--force]         set the name at the provider (hostname at the next install)
+├── get rdns     [ref...] [-o table|json|yaml]      reverse DNS entries of servers' public addresses
+├── set rdns     <ref> [ptr-name] [--ip <addr>]     set the PTR of the primary IPv4 (or --ip); default: the server name
+├── delete rdns  <ref> [--ip <addr>]                remove the PTR
 ├── config                                         interactive wizard: add an account, test it, save it
 │   ├── view                                       the configuration, secrets redacted
 │   ├── path                                       where the configuration lives
@@ -252,7 +255,31 @@ codes: 1 for not found, ambiguous without a terminal, a name in use, or a
 provider that cannot rename; 2 for an invalid name; 4 when the provider
 refused.
 
-Reverse DNS is not touched; that is a separate command (planned).
+Reverse DNS is not touched; see `ump set rdns`.
+
+## Reverse DNS: `ump get|set|delete rdns`
+
+```
+ump get rdns [NAME|ID|IP|PROVIDER/ID ...] [-o table|json|yaml]
+ump set rdns NAME|ID|IP|PROVIDER/ID [PTR-NAME] [--ip <address>] [-o json|yaml]
+ump delete rdns NAME|ID|IP|PROVIDER/ID [--ip <address>]
+```
+
+`get rdns` lists the reverse DNS (PTR) entries of servers' public
+addresses: the primary IPv4 always, plus every other address of the
+server that has an entry (an IPv6 address in the server's prefix, an
+additional IP). `set rdns` sets the entry of the primary IPv4, or of the
+address given with `--ip`, which must belong to the server; without a
+PTR name the server's name is used, which is the convention: the machine
+name is the hostname is the reverse DNS. `delete rdns` removes the entry;
+Hetzner Cloud then shows its default again.
+
+Providers differ: Hetzner Robot and Hetzner Cloud accept any name;
+OVHcloud checks that the name resolves to the address first, so create
+the forward record before setting the PTR there. Providers without
+reverse DNS support are noted on stderr by `get rdns` and refused with
+exit code 1 by `set` and `delete`. `ump config types` shows which
+capabilities each provider type has.
 
 ## `ump config`
 
@@ -353,6 +380,7 @@ $ ump get servers -o wide --account main
 $ ump get servers -o json | jq '.[] | select(.status=="ready")'
 $ ump describe server web-01
 $ ump rename server web-01 prod-web-01
+$ ump set rdns prod-web-01 prod-web-01.example.net
 
 # reinstall one server
 $ ump plan web-01 --profile base
@@ -380,7 +408,7 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
 
-Everything after `ump rename server` in the examples is draft.
+Everything after `ump set rdns` in the examples is draft.
 
 ## Exit codes
 

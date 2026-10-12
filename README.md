@@ -119,6 +119,7 @@ $ ./ump get servers     # every server of every account; -o wide|json|yaml|name
 $ ./ump describe server web-01   # everything the provider knows about one server
 $ ./ump get servers --diff       # what was added, removed or changed since the last listing
 $ ./ump rename server web-01 prod-web-01   # the name at the provider; the hostname follows at the next install
+$ ./ump set rdns prod-web-01     # reverse DNS of the primary IPv4 = the server name
 $ ./ump config test     # re-check credentials any time
 ```
 

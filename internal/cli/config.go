@@ -116,12 +116,21 @@ func (a *app) newConfigTypesCmd() *cobra.Command {
 		Short: "List supported provider types and their settings",
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tw := tabwriter.NewWriter(a.stdout, 0, 8, 3, ' ', 0)
-			fmt.Fprintln(tw, "TYPE\tKIND\tDESCRIPTION")
+			rows := [][]string{}
 			for _, t := range provider.Types() {
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", t.Name, t.Kind, t.Description)
+				caps := make([]string, len(t.Capabilities))
+				for i, c := range t.Capabilities {
+					caps[i] = string(c)
+				}
+				capsText := strings.Join(caps, ", ")
+				if capsText == "" {
+					capsText = "<none>"
+				}
+				rows = append(rows, []string{t.Name, string(t.Kind), capsText, t.Description})
 			}
-			tw.Flush()
+			if err := writeTable(a.stdout, []string{"TYPE", "KIND", "CAPABILITIES", "DESCRIPTION"}, rows, false); err != nil {
+				return err
+			}
 			fmt.Fprintln(a.stdout)
 			fmt.Fprintln(a.stdout, "Settings, for `ump config add TYPE NAME --set KEY=VALUE` (VALUE may be plain, env:NAME, file:PATH or command:CMD):")
 			for _, t := range provider.Types() {

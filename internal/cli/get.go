@@ -18,7 +18,7 @@ import (
 	"github.com/ofzhur/ump/internal/provider"
 )
 
-var getResources = []string{"servers"}
+var getResources = []string{"servers", "rdns"}
 
 func (a *app) newGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -27,7 +27,8 @@ func (a *app) newGetCmd() *cobra.Command {
 		Short:   "List resources",
 		Long: `List resources from the configured provider accounts.
 
-Resources: servers (aliases: server, srv, machines, machine)`,
+Resources: servers (aliases: server, srv, machines, machine)
+           rdns    (aliases: ptr, reverse-dns): reverse DNS entries of servers`,
 		Example: `  # every server of every configured account
   ump get servers
 
@@ -51,6 +52,7 @@ Resources: servers (aliases: server, srv, machines, machine)`,
 		},
 	}
 	cmd.AddCommand(a.newGetServersCmd())
+	cmd.AddCommand(a.newGetRDNSCmd())
 	return cmd
 }
 

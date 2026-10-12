@@ -149,6 +149,8 @@ configured provider account, ` + "`ump describe server NAME`" + ` shows one in d
 	root.AddCommand(a.newGetCmd())
 	root.AddCommand(a.newDescribeCmd())
 	root.AddCommand(a.newRenameCmd())
+	root.AddCommand(a.newSetCmd())
+	root.AddCommand(a.newDeleteCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root

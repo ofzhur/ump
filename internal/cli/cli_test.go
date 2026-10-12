@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,9 +21,10 @@ import (
 func init() { provider.Register(fakeType) }
 
 var fakeType = provider.Type{
-	Name:        "fake",
-	Kind:        provider.KindCloud,
-	Description: "Fake provider for tests",
+	Name:         "fake",
+	Kind:         provider.KindCloud,
+	Description:  "Fake provider for tests",
+	Capabilities: []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS},
 	Fields: []provider.Field{
 		{Key: "login", Label: "Login", Help: "the login", Required: true},
 		{Key: "password", Label: "Password", Secret: true, Required: true},
@@ -37,6 +40,39 @@ var fakeType = provider.Type{
 type fakeProvider struct {
 	account  string
 	settings map[string]string
+}
+
+// fakePTRs is the reverse DNS state shared by all fake providers in a test.
+var fakePTRs = map[string]string{}
+
+// PTRs reports the primary IPv4 and every other address with an entry.
+func (f *fakeProvider) PTRs(ctx context.Context, m provider.Machine) ([]provider.PTR, error) {
+	if m.ID == "2" && f.settings["region"] == "us" {
+		return nil, &provider.APIError{Provider: "fake", Status: 500, Message: "ptr lookup failed"}
+	}
+	out := []provider.PTR{{IP: m.IPv4, Name: fakePTRs[m.Account+"/"+m.IPv4]}}
+	for key, name := range fakePTRs {
+		acct, ip, _ := strings.Cut(key, "/")
+		if acct != m.Account || ip == m.IPv4 {
+			continue
+		}
+		if addr, err := netip.ParseAddr(ip); err == nil && m.Matches(addr.String()) {
+			out = append(out, provider.PTR{IP: ip, Name: name})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeProvider) SetPTR(ctx context.Context, m provider.Machine, ip netip.Addr, name string) error {
+	if !m.Matches(ip.String()) {
+		return fmt.Errorf("fake: address %s does not belong to server %s", ip, m.ID)
+	}
+	if name == "" {
+		delete(fakePTRs, m.Account+"/"+ip.String())
+		return nil
+	}
+	fakePTRs[m.Account+"/"+ip.String()] = name
+	return nil
 }
 
 // Describe adds a section; it fails for db-01 to exercise the error path.
@@ -1051,5 +1087,122 @@ func TestRenameServer(t *testing.T) {
 	_, errOut, code = e.run("", false, "rename", "server", "web-01", "new-01")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot rename servers") {
 		t.Errorf("no renamer: code %d, %q", code, errOut)
+	}
+}
+
+func TestReverseDNSCommands(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	for k := range fakePTRs {
+		delete(fakePTRs, k)
+	}
+
+	// nothing set yet: the primary IPv4 of every server is listed without an entry
+	out, errOut, code := e.run("", false, "get", "rdns", "--account", "one")
+	if code != 0 || errOut != "" {
+		t.Fatalf("get rdns: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	expectRows(t, out, [][]string{
+		{"ACCOUNT", "SERVER", "IP", "PTR"},
+		{"one", "db-01", "203.0.113.11", "<none>"},
+		{"one", "web-01", "203.0.113.10", "<none>"},
+	})
+
+	// set with the server name as default, by name; then explicitly, by provider/id with an IPv6 address
+	out, errOut, code = e.run("", false, "set", "rdns", "web-01", "--account", "one")
+	if code != 0 || out != "Set reverse DNS of 203.0.113.10 (fake/1, account one) to web-01\n" || errOut != "" {
+		t.Errorf("set default: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	out, _, code = e.run("", false, "set", "ptr", "fake/1", "web-01.example.net.", "--ip", "2001:db8::1", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"ip": "2001:db8::1"`) || !strings.Contains(out, `"ptr": "web-01.example.net"`) {
+		t.Errorf("set with --ip json: code %d\n%s", code, out)
+	}
+	out, _, _ = e.run("", false, "get", "rdns", "web-01", "--account", "one")
+	expectRows(t, out, [][]string{
+		{"ACCOUNT", "SERVER", "IP", "PTR"},
+		{"one", "web-01", "203.0.113.10", "web-01"},
+		{"one", "web-01", "2001:db8::1", "web-01.example.net"},
+	})
+	out, _, code = e.run("", false, "get", "rdns", "web-01", "--account", "one", "-o", "json")
+	if code != 0 || !strings.HasPrefix(out, "[\n  {\n    \"provider\": \"fake\",") || !strings.Contains(out, `"server": "web-01"`) {
+		t.Errorf("get rdns json: code %d\n%s", code, out)
+	}
+
+	// delete, by default the primary IPv4; then the IPv6 entry
+	out, _, code = e.run("", false, "delete", "rdns", "web-01", "--account", "one")
+	if code != 0 || out != "Removed reverse DNS of 203.0.113.10 (fake/1, account one)\n" {
+		t.Errorf("delete: code %d, %q", code, out)
+	}
+	if _, _, code = e.run("", false, "delete", "reverse-dns", "web-01", "--ip", "2001:db8::1", "--account", "one"); code != 0 {
+		t.Errorf("delete --ip: code %d", code)
+	}
+	if len(fakePTRs) != 0 {
+		t.Errorf("entries left: %v", fakePTRs)
+	}
+
+	// errors: foreign address, invalid name, invalid address, not found, provider failure, usage
+	cases := []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"set", "rdns", "web-01", "x.example.net", "--ip", "203.0.113.99", "--account", "one"}, 1, "does not belong to server"},
+		{[]string{"set", "rdns", "web-01", "Bad_Name", "--account", "one"}, 2, "invalid name"},
+		{[]string{"set", "rdns", "web-01", "--ip", "nope", "--account", "one"}, 2, "invalid address"},
+		{[]string{"set", "rdns", "nope", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"set", "rdns"}, 2, "accepts between 1 and 2 arg(s)"},
+		{[]string{"delete", "rdns", "web-01", "x", "--account", "one"}, 2, "accepts 1 arg(s)"},
+		{[]string{"get", "rdns", "--account", "two", "-o", "name"}, 2, "unknown output format"},
+		{[]string{"set", "pods", "x"}, 2, `unknown resource type "pods"`},
+		{[]string{"delete", "pods", "x"}, 2, `unknown resource type "pods"`},
+		{[]string{"get", "rdns", "nope", "--account", "one"}, 1, `server "nope" not found`},
+	}
+	for _, c := range cases {
+		_, errOut, code := e.run("", false, c.args...)
+		if code != c.code || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d (want %d), stderr %q (want %q)", c.args, code, c.code, errOut, c.msg)
+		}
+	}
+	// a server whose lookup fails is reported, the others are listed, exit 4
+	e.write(strings.Replace(testConfig, "    password: wrong\n", "    password: {env: FAKE_PASS}\n", 1))
+	out, errOut, code = e.run("", false, "get", "rdns", "--account", "two")
+	if code != 4 || !strings.Contains(errOut, "ump: account two: fake/2: fake: ptr lookup failed") || len(fields(out)) != 2 {
+		t.Errorf("partial failure: code %d, stderr %q\n%s", code, errOut, out)
+	}
+
+	// a provider without reverse DNS support
+	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
+	out, errOut, code = e.run("", false, "get", "rdns")
+	if code != 0 || out != "" || errOut != "account lo: provider type listonly cannot manage reverse DNS\n" {
+		t.Errorf("unsupported get: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	_, errOut, code = e.run("", false, "set", "rdns", "web-01")
+	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot manage reverse DNS") {
+		t.Errorf("unsupported set: code %d, %q", code, errOut)
+	}
+}
+
+func TestConfigTypesCapabilities(t *testing.T) {
+	e := newTestEnv(t)
+	out, _, code := e.run("", false, "config", "types")
+	if code != 0 || !strings.Contains(out, "CAPABILITIES") {
+		t.Fatalf("code %d\n%s", code, out)
+	}
+	table, _, _ := strings.Cut(out, "\n\n") // the settings section below repeats the type names
+	for _, line := range strings.Split(table, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		switch f[0] {
+		case "hetzner-robot", "hetzner-cloud", "ovh":
+			if !strings.Contains(line, "inventory, describe, rename, rdns") {
+				t.Errorf("%s: capabilities missing in %q", f[0], line)
+			}
+		case "listonly":
+			if !strings.Contains(line, "<none>") {
+				t.Errorf("listonly: %q", line)
+			}
+		}
 	}
 }

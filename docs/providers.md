@@ -12,8 +12,11 @@ See [architecture](architecture.md#providers) for the interfaces.
 The table shows the **intended** use of each provider's API. Details are
 to be verified against the current APIs when each integration is
 implemented. Implemented today: `inventory` (`ump get servers`),
-`describe` (`ump describe server`) and `rename` (`ump rename server`)
-for `hetzner-robot`, `hetzner-cloud` and `ovh`.
+`describe` (`ump describe server`), `rename` (`ump rename server`) and
+`rdns` (`ump get|set|delete rdns`) for `hetzner-robot`, `hetzner-cloud`
+and `ovh`. Not every provider supports every feature: each provider
+declares its capabilities (`ump config types` lists them), and a command
+that needs one the provider lacks says so instead of failing half-way.
 
 | Provider | Kind | inventory | rename | power | rescue | create | rdns | network-info | virtual-media | Entry method |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
@@ -50,6 +53,10 @@ SSH as root. It is also the provider used by the integration test suite.
 - The server name is a free label, not required to be unique; `ump rename
   server` sets it with `POST /server/{number}` (form-encoded, like every
   Robot write).
+- Reverse DNS is account-wide (`GET /rdns`); UMP matches entries to a
+  server by its addresses (primary IP, additional IPs, subnets, the
+  IPv6 /64). Entries are created with `PUT /rdns/{ip}` and updated with
+  `POST /rdns/{ip}`; any name is accepted.
 - Rescue requires the SSH key to be registered at the account first; the
   provider registers UMP's staging key if its fingerprint is missing.
 - When the server is switched off, a hardware reset does nothing — a power
@@ -64,6 +71,9 @@ SSH as root. It is also the provider used by the integration test suite.
 - Server names must be unique within the project and valid hostnames;
   `ump rename server` uses `PUT /servers/{id}` and reports the API's
   `uniqueness_error` plainly.
+- Reverse DNS is set with the `change_dns_ptr` action for the IPv4 and
+  for single addresses inside the IPv6 /64; removing an entry restores
+  Hetzner's default (`static.….clients.your-server.de`).
 - Rescue can be enabled via the API with SSH keys, followed by a reset.
 - IPv4 is configured as `/32` with an on-link default gateway; the network
   model must express on-link routes.
@@ -80,14 +90,20 @@ SSH as root. It is also the provider used by the integration test suite.
 - Credentials are an application key and secret plus a consumer key. The
   wizard requests a consumer key (`POST /auth/credential`) with the access
   rules the implemented commands need, `GET /dedicated/server*`,
-  `GET /cloud/project*` and `PUT /cloud/project/*/instance/*`, and shows
-  the validation URL; a key that may not see one of the two families is
+  `GET /cloud/project*`, `PUT /cloud/project/*/instance/*`, `GET /ip/*`,
+  `POST /ip/*/reverse` and `DELETE /ip/*/reverse/*`, and shows the
+  validation URL; a key that may not see one of the two families is
   tolerated, that family is skipped. A key made elsewhere needs the same
   rules; a missing one shows up as `NOT_GRANTED_CALL` with the path.
 - `ump rename server` renames Public Cloud instances (`instanceName`).
   Dedicated servers cannot be renamed through the API: the display name
   is read-only in every public API model, the v2 IAM resource included,
   so UMP says so instead of pretending; set it in the control panel.
+- Reverse DNS lives on IP blocks (`/ip/{block}/reverse`): for a
+  dedicated server UMP uses the blocks routed to it (`/ips`), for an
+  instance the `/32` of each IPv4 and the `/64` of each IPv6. OVH
+  requires the name to resolve to the address before it accepts the
+  entry. The instance path is untested against the live API.
 - The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
 
 ### Clouds without rescue (AWS, GCP, ...)
