@@ -84,7 +84,15 @@ for every version uploaded, kept for rollbacks, and
 reader never sees a manifest whose files are not there yet.
 Give the bucket a public hostname (an R2 custom domain or `r2.dev`) and
 that hostname plus the prefix is the base URL:
-`UMP_RESCUE_URL=https://files.example.net/rescue`.
+`UMP_RESCUE_URL=https://files.example.net/rescue`. This project's images
+are published at `https://ump.zhurko.de/rescue`.
+
+The clients of that hostname are rescue systems with `curl`, not
+browsers, and they come from datacenter address space. A bot protection in
+front of the storage (a JavaScript challenge, a login page) answers
+such requests with a web page that no script can pass, so the hostname
+needs a rule that lets scripted clients through, and a test from a
+server, not from a laptop, before relying on it.
 
 ## What is in it
 
