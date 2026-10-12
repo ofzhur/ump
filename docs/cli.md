@@ -46,6 +46,11 @@ ump
 ├── get rdns     [ref...] [-o table|json|yaml]      reverse DNS entries of servers' public addresses
 ├── set rdns     <ref> [ptr-name] [--ip <addr>]     set the PTR of the primary IPv4 (or --ip); default: the server name
 ├── delete rdns  <ref> [--ip <addr>]                remove the PTR
+├── reboot       server <ref> [--hard|--power-cycle] [--wait] [--yes]
+├── start        server <ref> [--wait]
+├── stop         server <ref> [--hard] [--yes]
+├── rescue       server <ref> [--ssh-key <file>]... [--no-reboot] [--no-wait] [--yes]
+├── unrescue     server <ref> [--reboot] [--wait] [--yes]
 ├── config                                         interactive wizard: add an account, test it, save it
 │   ├── view                                       the configuration, secrets redacted
 │   ├── path                                       where the configuration lives
@@ -68,9 +73,6 @@ ump
 │
 ├── machine
 │   ├── show     <machine>
-│   ├── reboot   <machine> [--hard|--power-cycle]
-│   ├── power    <machine> on|off
-│   ├── rescue   <machine> enable|disable [--flavour ...]
 │   ├── import   --from terraform [file]           names and labels of machines Terraform created
 │   ├── create   --account <name> --type <type> --location <loc>   (clouds)
 │   └── destroy  <machine>                                          (clouds)
@@ -281,6 +283,56 @@ reverse DNS support are noted on stderr by `get rdns` and refused with
 exit code 1 by `set` and `delete`. `ump config types` shows which
 capabilities each provider type has.
 
+## Power: `ump reboot|start|stop server`
+
+```
+ump reboot server REF [--hard | --power-cycle] [--wait] [--yes]
+ump start  server REF [--wait]
+ump stop   server REF [--hard] [--yes]
+```
+
+`reboot` asks the operating system to reboot (ACPI) unless `--hard`
+resets the machine or `--power-cycle` cuts the power and switches it on
+again; a server that is switched off is switched on instead. `stop` asks
+the operating system to shut down unless `--hard` cuts the power. The
+commands return when the provider accepted the action (Hetzner Cloud
+actions are followed to completion); `--wait` then waits until SSH stops
+answering and answers again (exit code 5 after 10 minutes).
+
+Rebooting and stopping are disruptive: on a terminal they ask for
+confirmation, without one they need `--yes` (exit code 3 otherwise), as
+the [safety model](architecture.md#safety) says. Provider differences:
+Hetzner Robot presses the power button for on and off and has no reset
+for a switched-off server; OVHcloud dedicated servers know one reboot (a
+hardware reset) and cannot be switched on or off through the API.
+
+## Rescue: `ump rescue|unrescue server`
+
+```
+ump rescue   server REF [--ssh-key FILE]... [--no-keys] [--no-reboot] [--no-wait] [--yes] [-o json|yaml]
+ump unrescue server REF [--reboot] [--wait] [--yes]
+```
+
+`rescue` enables the provider's rescue system with your SSH public keys
+(`--ssh-key` files, else the first of `~/.ssh/id_ed25519.pub`,
+`id_ecdsa.pub`, `id_rsa.pub`), registering keys the provider does not
+know yet, then resets the server into it and waits until SSH answers.
+It prints how to connect and the password where the provider issues one.
+`--no-reboot` only arms the rescue system for the next boot, `--no-wait`
+returns right after the reset. This is the `rescue` entry method of the
+install pipeline, available on its own for inspection and repair.
+
+`unrescue` disables the rescue system so that the next boot is from disk,
+and with `--reboot` resets the server now.
+
+Provider differences: Hetzner Robot takes the fingerprints of keys
+registered at the account and issues a password only without keys;
+Hetzner Cloud takes project keys and always issues a password; OVHcloud
+dedicated servers take one rescue SSH key and mail the password to the
+rescue mail address otherwise; OVHcloud Public Cloud instances are
+rebooted into rescue mode by OVHcloud itself, with the instance's own
+keys and a returned password.
+
 ## `ump config`
 
 Without a subcommand, `ump config` is an interactive wizard: it asks for
@@ -381,6 +433,9 @@ $ ump get servers -o json | jq '.[] | select(.status=="ready")'
 $ ump describe server web-01
 $ ump rename server web-01 prod-web-01
 $ ump set rdns prod-web-01 prod-web-01.example.net
+$ ump reboot server prod-web-01 --wait
+$ ump rescue server prod-web-01            # inspect or repair it in the rescue system
+$ ump unrescue server prod-web-01 --reboot
 
 # reinstall one server
 $ ump plan web-01 --profile base
@@ -408,7 +463,7 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
 
-Everything after `ump set rdns` in the examples is draft.
+Everything after `ump unrescue server` in the examples is draft.
 
 ## Exit codes
 

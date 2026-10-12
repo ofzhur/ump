@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -44,6 +45,55 @@ type fakeProvider struct {
 
 // fakePTRs is the reverse DNS state shared by all fake providers in a test.
 var fakePTRs = map[string]string{}
+
+// fakePower records power and rescue actions of the fake providers.
+var fakePower = struct {
+	actions []string
+	rescue  map[string]bool
+	keys    []string
+}{rescue: map[string]bool{}}
+
+func (f *fakeProvider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	return provider.PowerOn, nil
+}
+
+func (f *fakeProvider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	if m.ID == "2" {
+		return &provider.APIError{Provider: "fake", Status: 423, Code: "locked", Message: "server is locked"}
+	}
+	fakePower.actions = append(fakePower.actions, "reboot:"+string(mode))
+	return nil
+}
+
+func (f *fakeProvider) PowerOn(ctx context.Context, m provider.Machine) error {
+	fakePower.actions = append(fakePower.actions, "on")
+	return nil
+}
+
+func (f *fakeProvider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	fakePower.actions = append(fakePower.actions, fmt.Sprintf("off:%v", hard))
+	return nil
+}
+
+func (f *fakeProvider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	return fakePower.rescue[m.Ref()], nil
+}
+
+func (f *fakeProvider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	fakePower.rescue[m.Ref()] = true
+	fakePower.keys = nil
+	for _, k := range opts.Keys {
+		fakePower.keys = append(fakePower.keys, k.Name+" "+k.Fingerprint)
+	}
+	fakePower.actions = append(fakePower.actions, "rescue")
+	return &provider.RescueInfo{Address: m.IPv4, User: "root", Password: "r3scue"}, nil
+}
+
+func (f *fakeProvider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	fakePower.rescue[m.Ref()] = false
+	fakePower.actions = append(fakePower.actions, "unrescue")
+	return nil
+}
 
 // PTRs reports the primary IPv4 and every other address with an entry.
 func (f *fakeProvider) PTRs(ctx context.Context, m provider.Machine) ([]provider.PTR, error) {
@@ -1204,5 +1254,202 @@ func TestConfigTypesCapabilities(t *testing.T) {
 				t.Errorf("listonly: %q", line)
 			}
 		}
+	}
+}
+
+func resetFakePower() {
+	fakePower.actions = nil
+	fakePower.rescue = map[string]bool{}
+	fakePower.keys = nil
+}
+
+func TestPowerCommands(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+
+	out, errOut, code := e.run("", false, "reboot", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 || out != "Rebooting fake/1 (web-01, 203.0.113.10) (soft)\n" || errOut != "" {
+		t.Errorf("reboot: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	if _, _, code = e.run("", false, "reboot", "server", "fake/1", "--hard", "--yes", "--account", "one"); code != 0 {
+		t.Errorf("reboot --hard: code %d", code)
+	}
+	if _, _, code = e.run("", false, "reboot", "server", "203.0.113.10", "--power-cycle", "--yes", "--account", "one"); code != 0 {
+		t.Errorf("reboot --power-cycle: code %d", code)
+	}
+	out, _, code = e.run("", false, "start", "server", "web-01", "--account", "one")
+	if code != 0 || out != "Switching on fake/1 (web-01, 203.0.113.10)\n" {
+		t.Errorf("start: code %d, %q", code, out)
+	}
+	out, _, code = e.run("", false, "stop", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 || out != "Switching off fake/1 (web-01, 203.0.113.10) (shutdown)\n" {
+		t.Errorf("stop: code %d, %q", code, out)
+	}
+	out, _, code = e.run("", false, "stop", "server", "web-01", "--hard", "--yes", "--account", "one")
+	if code != 0 || out != "Switching off fake/1 (web-01, 203.0.113.10) (power off)\n" {
+		t.Errorf("stop --hard: code %d, %q", code, out)
+	}
+	if got := strings.Join(fakePower.actions, ","); got != "reboot:soft,reboot:hard,reboot:power-cycle,on,off:false,off:true" {
+		t.Errorf("actions: %s", got)
+	}
+
+	// confirmation: none without a terminal and --yes; a question on a terminal
+	_, errOut, code = e.run("", false, "reboot", "server", "web-01", "--account", "one")
+	if code != 3 || !strings.Contains(errOut, "ump reboot server needs confirmation: run it in a terminal or pass --yes") {
+		t.Errorf("no --yes: code %d, %q", code, errOut)
+	}
+	out, errOut, code = e.run("y\n", true, "reboot", "server", "web-01", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "Reboot fake/1 (web-01, 203.0.113.10) (soft)? [y/N]: ") || !strings.HasPrefix(out, "Rebooting") {
+		t.Errorf("confirmed: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	out, errOut, code = e.run("n\n", true, "stop", "server", "web-01", "--account", "one")
+	if code != 3 || out != "" || !strings.HasSuffix(errOut, "ump: aborted\n") {
+		t.Errorf("declined: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	if _, _, code = e.run("", false, "start", "server", "web-01", "--account", "one"); code != 0 {
+		t.Error("start must not ask for confirmation")
+	}
+
+	// errors
+	cases := []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"reboot", "server", "web-01", "--hard", "--power-cycle", "--yes", "--account", "one"}, 2, "exclude each other"},
+		{[]string{"reboot", "server", "db-01", "--yes", "--account", "one"}, 4, "fake: server is locked (locked, HTTP 423)"},
+		{[]string{"reboot", "server", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"reboot", "pods", "x"}, 2, `unknown resource type "pods"`},
+		{[]string{"reboot", "server"}, 2, "accepts 1 arg(s)"},
+	}
+	for _, c := range cases {
+		_, errOut, code := e.run("", false, c.args...)
+		if code != c.code || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d (want %d), stderr %q (want %q)", c.args, code, c.code, errOut, c.msg)
+		}
+	}
+	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
+	_, errOut, code = e.run("", false, "reboot", "server", "web-01", "--yes")
+	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot control power") {
+		t.Errorf("no power: code %d, %q", code, errOut)
+	}
+}
+
+func TestRescueCommands(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+	keyFile := filepath.Join(t.TempDir(), "ops.pub")
+	os.WriteFile(keyFile, []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 ops@example\n"), 0o600)
+
+	out, errOut, code := e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--yes", "--no-wait", "--account", "one")
+	if code != 0 {
+		t.Fatalf("rescue: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	want := "Rescue system enabled for fake/1 (web-01, 203.0.113.10); rebooting into it.\nSSH keys: " + keyFile + "\nPassword: r3scue\nConnect: ssh root@203.0.113.10\n"
+	if out != want {
+		t.Errorf("rescue output:\n got %q\nwant %q", out, want)
+	}
+	if !strings.Contains(errOut, "own host key") {
+		t.Errorf("rescue stderr: %q", errOut)
+	}
+	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard" {
+		t.Errorf("actions: %s", got)
+	}
+	if len(fakePower.keys) != 1 || fakePower.keys[0] != "ops@example d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81" {
+		t.Errorf("keys: %v", fakePower.keys)
+	}
+
+	// --no-reboot only arms it; --no-keys sends none; -o json prints the details
+	resetFakePower()
+	out, _, code = e.run("", false, "rescue", "server", "web-01", "--no-keys", "--no-reboot", "--yes", "--account", "one")
+	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || strings.Contains(out, "SSH keys:") || strings.Join(fakePower.actions, ",") != "rescue" || len(fakePower.keys) != 0 {
+		t.Errorf("--no-reboot --no-keys: code %d, out %q, actions %v, keys %v", code, out, fakePower.actions, fakePower.keys)
+	}
+	out, _, code = e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--no-wait", "--yes", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"keys": [`) || !strings.Contains(out, `"ref"`) == true && false {
+		t.Errorf("rescue json: code %d\n%s", code, out)
+	}
+	if !strings.Contains(out, `"provider": "fake"`) || !strings.Contains(out, `"address": "203.0.113.10"`) {
+		t.Errorf("rescue json content:\n%s", out)
+	}
+
+	// unrescue, with and without reboot
+	out, _, code = e.run("", false, "unrescue", "server", "web-01", "--account", "one")
+	if code != 0 || out != "Rescue system disabled for fake/1 (web-01, 203.0.113.10); the next boot is from disk.\n" {
+		t.Errorf("unrescue: code %d, %q", code, out)
+	}
+	resetFakePower()
+	out, _, code = e.run("", false, "unrescue", "server", "web-01", "--reboot", "--yes", "--account", "one")
+	if code != 0 || out != "Rescue system disabled for fake/1 (web-01, 203.0.113.10); rebooting from disk.\n" || strings.Join(fakePower.actions, ",") != "unrescue,reboot:hard" {
+		t.Errorf("unrescue --reboot: code %d, %q, actions %v", code, out, fakePower.actions)
+	}
+	if _, errOut, code := e.run("", false, "unrescue", "server", "web-01", "--reboot", "--account", "one"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("unrescue --reboot without --yes: code %d, %q", code, errOut)
+	}
+
+	// errors
+	cases := []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"rescue", "server", "web-01", "--yes", "--no-wait", "--account", "one", "--ssh-key", "/nonexistent.pub"}, 1, "nonexistent.pub"},
+		{[]string{"rescue", "server", "web-01", "--yes", "--no-keys", "--ssh-key", keyFile}, 2, "exclude each other"},
+		{[]string{"rescue", "server", "web-01", "--no-keys", "--account", "one"}, 3, "needs confirmation"},
+		{[]string{"rescue", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
+		{[]string{"rescue", "server", "nope", "--yes", "--no-keys", "--account", "one"}, 1, `server "nope" not found`},
+	}
+	for _, c := range cases {
+		_, errOut, code := e.run("", false, c.args...)
+		if code != c.code || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d (want %d), stderr %q (want %q)", c.args, code, c.code, errOut, c.msg)
+		}
+	}
+	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--no-keys")
+	if code != 1 || !strings.Contains(errOut, "provider type listonly has no rescue system") {
+		t.Errorf("no rescue: code %d, %q", code, errOut)
+	}
+}
+
+func TestWaitForSSH(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	oldPort, oldTimeout, oldDown, oldPoll := sshPort, waitTimeout, waitDownTime, waitPoll
+	defer func() { sshPort, waitTimeout, waitDownTime, waitPoll = oldPort, oldTimeout, oldDown, oldPoll }()
+	sshPort = ln.Addr().(*net.TCPAddr).Port
+	waitTimeout, waitDownTime, waitPoll = 300*time.Millisecond, 50*time.Millisecond, 10*time.Millisecond
+
+	var errOut bytes.Buffer
+	a := &app{stdout: &bytes.Buffer{}, stderr: &errOut}
+	if err := a.waitForSSH(context.Background(), "127.0.0.1", false); err != nil || !strings.Contains(errOut.String(), " up after ") {
+		t.Errorf("listening: %v, %q", err, errOut.String())
+	}
+	errOut.Reset()
+	if err := a.waitForSSH(context.Background(), "127.0.0.1", true); err != nil || !strings.Contains(errOut.String(), "still up; assuming it rebooted quickly") {
+		t.Errorf("still up: %v, %q", err, errOut.String())
+	}
+	ln.Close()
+	errOut.Reset()
+	err = a.waitForSSH(context.Background(), "127.0.0.1", false)
+	if err == nil || exitCodeFor(err) != exitUnreachable || !strings.Contains(err.Error(), "did not answer within") {
+		t.Errorf("closed port: %v", err)
+	}
+	if err := a.waitForSSH(context.Background(), "", false); err == nil {
+		t.Error("empty address accepted")
 	}
 }

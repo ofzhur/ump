@@ -32,11 +32,12 @@ var Version = "dev"
 
 // Exit codes, see docs/cli.md.
 const (
-	exitOK       = 0
-	exitGeneric  = 1
-	exitUsage    = 2
-	exitAborted  = 3
-	exitProvider = 4
+	exitOK          = 0
+	exitGeneric     = 1
+	exitUsage       = 2
+	exitAborted     = 3
+	exitProvider    = 4
+	exitUnreachable = 5
 )
 
 // app holds the process-level dependencies so that tests can run commands
@@ -151,6 +152,11 @@ configured provider account, ` + "`ump describe server NAME`" + ` shows one in d
 	root.AddCommand(a.newRenameCmd())
 	root.AddCommand(a.newSetCmd())
 	root.AddCommand(a.newDeleteCmd())
+	root.AddCommand(a.newRebootCmd())
+	root.AddCommand(a.newStartCmd())
+	root.AddCommand(a.newStopCmd())
+	root.AddCommand(a.newRescueCmd())
+	root.AddCommand(a.newUnrescueCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root

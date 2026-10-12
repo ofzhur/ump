@@ -11,10 +11,10 @@ See [architecture](architecture.md#providers) for the interfaces.
 
 The table shows the **intended** use of each provider's API. Details are
 to be verified against the current APIs when each integration is
-implemented. Implemented today: `inventory` (`ump get servers`),
-`describe` (`ump describe server`), `rename` (`ump rename server`) and
-`rdns` (`ump get|set|delete rdns`) for `hetzner-robot`, `hetzner-cloud`
-and `ovh`. Not every provider supports every feature: each provider
+implemented. Implemented today, for `hetzner-robot`, `hetzner-cloud`
+and `ovh`: `inventory` (`ump get servers`), `describe`, `rename`, `rdns`
+(`ump get|set|delete rdns`), `power` (`ump reboot|start|stop server`)
+and `rescue` (`ump rescue|unrescue server`). Not every provider supports every feature: each provider
 declares its capabilities (`ump config types` lists them), and a command
 that needs one the provider lacks says so instead of failing half-way.
 
@@ -58,9 +58,13 @@ SSH as root. It is also the provider used by the integration test suite.
   IPv6 /64). Entries are created with `PUT /rdns/{ip}` and updated with
   `POST /rdns/{ip}`; any name is accepted.
 - Rescue requires the SSH key to be registered at the account first; the
-  provider registers UMP's staging key if its fingerprint is missing.
-- When the server is switched off, a hardware reset does nothing — a power
-  reset is needed.
+  provider registers keys whose fingerprint is missing (`POST /key`) and
+  arms the rescue system with `POST /boot/{number}/rescue`; Robot issues
+  a password only when no key is given.
+- When the server is switched off, a hardware reset does nothing, so
+  `ump reboot` presses the power button instead. `stop` is a short press
+  (ACPI shutdown) or, with `--hard`, a long press; `start` a short press.
+  The `man` reset type (a technician) is never used.
 - Provider network info: main IPv4, additional single IPs, subnets and the
   IPv6 /64.
 - Boot order on Hetzner dedicated servers usually has PXE first; this
@@ -74,7 +78,11 @@ SSH as root. It is also the provider used by the integration test suite.
 - Reverse DNS is set with the `change_dns_ptr` action for the IPv4 and
   for single addresses inside the IPv6 /64; removing an entry restores
   Hetzner's default (`static.….clients.your-server.de`).
-- Rescue can be enabled via the API with SSH keys, followed by a reset.
+- Rescue is enabled with the `enable_rescue` action and project SSH keys
+  (registered by fingerprint when missing), followed by a reset; Hetzner
+  always issues a root password. Actions are followed until they finish.
+- The API returns the place as a top-level `location` (`fsn1`) and
+  `datacenter: null`; UMP reads both for older responses.
 - IPv4 is configured as `/32` with an on-link default gateway; the network
   model must express on-link routes.
 - The stock images ship cloud-init. UMP installs its own image instead, so
@@ -91,14 +99,21 @@ SSH as root. It is also the provider used by the integration test suite.
   wizard requests a consumer key (`POST /auth/credential`) with the access
   rules the implemented commands need, `GET /dedicated/server*`,
   `GET /cloud/project*`, `PUT /cloud/project/*/instance/*`, `GET /ip/*`,
-  `POST /ip/*/reverse` and `DELETE /ip/*/reverse/*`, and shows the
-  validation URL; a key that may not see one of the two families is
+  `POST /ip/*/reverse`, `DELETE /ip/*/reverse/*`, `PUT /dedicated/server/*`,
+  `POST /dedicated/server/*/reboot` and the instance `reboot`,
+  `rescueMode`, `start` and `stop` actions, and shows the validation URL; a key that may not see one of the two families is
   tolerated, that family is skipped. A key made elsewhere needs the same
   rules; a missing one shows up as `NOT_GRANTED_CALL` with the path.
 - `ump rename server` renames Public Cloud instances (`instanceName`).
   Dedicated servers cannot be renamed through the API: the display name
   is read-only in every public API model, the v2 IAM resource included,
   so UMP says so instead of pretending; set it in the control panel.
+- A dedicated server has one reboot (`POST /reboot`, a hardware reset
+  as a task) and no power on/off through the API. Rescue means setting
+  the `rescue` boot option (`PUT` with `bootId`) and one `rescueSshKey`;
+  without a key OVH mails the password to the rescue mail address.
+  Instances reboot soft or hard, start and stop, and `rescueMode` puts
+  them into rescue (OVH reboots them itself and returns the password).
 - Reverse DNS lives on IP blocks (`/ip/{block}/reverse`): for a
   dedicated server UMP uses the blocks routed to it (`/ips`), for an
   instance the `/32` of each IPv4 and the `/64` of each IPv6. OVH
