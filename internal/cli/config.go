@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -336,7 +337,7 @@ the result. All accounts are tested when no name is given.`,
 				}
 			}
 			sort.Strings(names)
-			results := a.listAccounts(cmd.Context(), cfg, names)
+			results := a.listAccounts(cmd.Context(), cfg, names, cache.Open(path))
 			tw := tabwriter.NewWriter(a.stdout, 0, 8, 3, ' ', 0)
 			fmt.Fprintln(tw, "ACCOUNT\tTYPE\tRESULT")
 			failed := 0

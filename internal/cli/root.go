@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -53,6 +54,10 @@ type app struct {
 	saveTerm func() func()
 	// httpClient overrides the HTTP client handed to providers (tests).
 	httpClient *http.Client
+	// now is the clock, for cache timestamps; nil means time.Now.
+	now func() time.Time
+	// tz is the time zone for times shown to people; nil means local.
+	tz *time.Location
 
 	// global flags
 	configFlag string
@@ -88,6 +93,12 @@ func Main(args []string) int {
 }
 
 func (a *app) run(ctx context.Context, args []string) int {
+	if a.now == nil {
+		a.now = time.Now
+	}
+	if a.tz == nil {
+		a.tz = time.Local
+	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
@@ -287,6 +298,11 @@ func (a *app) selectAccounts(cmd *cobra.Command, cfg *config.Config) ([]string, 
 		names = append(names, n)
 	}
 	return names, nil
+}
+
+// fmtTime renders a time for people, in the configured zone.
+func (a *app) fmtTime(t time.Time) string {
+	return t.In(a.tz).Format("2006-01-02 15:04 MST")
 }
 
 func joinOrNone(list []string) string {

@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -25,6 +27,7 @@ var fakeType = provider.Type{
 		{Key: "password", Label: "Password", Secret: true, Required: true},
 		{Key: "region", Label: "Region", Choices: []string{"eu", "us"}, Default: "eu"},
 		{Key: "url", Label: "URL", Hidden: true},
+		{Key: "variant", Label: "Variant", Hidden: true},
 	},
 	New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
 		return &fakeProvider{account: account, settings: s}, nil
@@ -59,6 +62,15 @@ func (f *fakeProvider) List(ctx context.Context) ([]provider.Machine, error) {
 	if region == "" {
 		region = "eu"
 	}
+	if f.settings["variant"] == "b" {
+		// the world has moved on: web-01 changed, db-01 is gone, cache-01 is new
+		return []provider.Machine{
+			{Provider: "fake", Account: f.account, ID: "1", Name: "web-01", Kind: provider.KindCloud, IPv4: "203.0.113.12",
+				IPv6: "2001:db8::/64", Location: region + "-1", Product: "m1", Status: "off", Labels: map[string]string{"env": "prod"}},
+			{Provider: "fake", Account: f.account, ID: "3", Name: "cache-01", Kind: provider.KindCloud, IPv4: "203.0.113.13",
+				Location: region + "-1", Product: "m3", Status: "initializing"},
+		}, nil
+	}
 	return []provider.Machine{
 		{Provider: "fake", Account: f.account, ID: "1", Name: "web-01", Kind: provider.KindCloud, IPv4: "203.0.113.10",
 			IPv6: "2001:db8::/64", Location: region + "-1", Product: "m1", Status: "running", Labels: map[string]string{"env": "prod"}},
@@ -82,15 +94,18 @@ const testConfig = `accounts:
 type testEnv struct {
 	t       *testing.T
 	cfgPath string
+	// now is the clock the CLI sees; tests move it forward.
+	now time.Time
 }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("UMP_CONFIG", "")
 	t.Setenv("FAKE_PASS", "s3cret")
-	return &testEnv{t: t, cfgPath: filepath.Join(dir, "config.yaml")}
+	return &testEnv{t: t, cfgPath: filepath.Join(dir, "config.yaml"), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 }
 
 func (e *testEnv) write(text string) {
@@ -112,7 +127,7 @@ func (e *testEnv) read() string {
 func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr string, code int) {
 	e.t.Helper()
 	var out, errb bytes.Buffer
-	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb}
+	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC}
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
@@ -739,5 +754,157 @@ func TestDescribeServerWithoutDescriber(t *testing.T) {
 	out, errOut, code := e.run("", false, "describe", "server", "web-01")
 	if code != 0 || errOut != "" || !strings.Contains(out, "Ref:       listonly/1\n") || strings.Contains(out, "Power:") {
 		t.Errorf("fallback: code %d, stderr %q\n%s", code, errOut, out)
+	}
+}
+
+const variantB = "    variant: b\n"
+
+func TestGetServersDiff(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+
+	// first listing: nothing to compare, but the state is recorded
+	out, errOut, code := e.run("", false, "get", "servers", "--diff", "--account", "one")
+	if code != 0 || out != "" || errOut != "account one: first listing, nothing to compare yet (2 servers recorded)\n" {
+		t.Errorf("first diff: code %d, out %q, stderr %q", code, out, errOut)
+	}
+
+	// an hour later nothing changed
+	e.now = e.now.Add(time.Hour)
+	out, errOut, code = e.run("", false, "get", "servers", "--diff", "--account", "one")
+	if code != 0 || out != "" || errOut != "No changes since 2026-10-12 09:00 UTC (2 servers).\n" {
+		t.Errorf("unchanged diff: code %d, out %q, stderr %q", code, out, errOut)
+	}
+
+	// then the world moves on
+	e.write(strings.Replace(testConfig, "    password: {env: FAKE_PASS}\n", "    password: {env: FAKE_PASS}\n"+variantB, 1))
+	e.now = e.now.Add(time.Hour)
+	out, errOut, code = e.run("", false, "get", "servers", "--diff", "--account", "one")
+	if code != 0 {
+		t.Fatalf("diff: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	want := `CHANGE    ACCOUNT   PROVIDER   ID   NAME       IPV4           LOCATION   STATUS         DETAILS
+added     one       fake       3    cache-01   203.0.113.13   eu-1       initializing
+removed   one       fake       2    db-01      203.0.113.11   eu-1       off
+changed   one       fake       1    web-01     203.0.113.12   eu-1       off            ipv4: 203.0.113.10 → 203.0.113.12; status: running → off
+`
+	if out != want {
+		t.Errorf("diff table:\n got %q\nwant %q", out, want)
+	}
+	if errOut != "1 added, 1 removed, 1 changed, 0 unchanged since 2026-10-12 10:00 UTC.\n" {
+		t.Errorf("summary: %q", errOut)
+	}
+
+	// right after, nothing changed again; the JSON report says so
+	e.now = e.now.Add(time.Hour)
+	out, _, code = e.run("", false, "get", "servers", "--diff", "--account", "one", "-o", "json")
+	if code != 0 {
+		t.Fatal(out)
+	}
+	var report struct {
+		Accounts  []accountDiff  `json:"accounts"`
+		Changes   []cache.Change `json:"changes"`
+		Unchanged int            `json:"unchanged"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(report.Accounts) != 1 || !report.Accounts[0].Compared || report.Accounts[0].Since == nil ||
+		!report.Accounts[0].Since.Equal(time.Date(2026, 10, 12, 11, 0, 0, 0, time.UTC)) || len(report.Changes) != 0 || report.Unchanged != 2 {
+		t.Errorf("report: %s", out)
+	}
+
+	// --since reaches back to the earlier state; -o name marks the changes
+	out, errOut, code = e.run("", false, "get", "servers", "--since", "3h", "--account", "one", "-o", "name")
+	if code != 0 || out != "+ fake/3\n- fake/2\n~ fake/1\n" || errOut != "1 added, 1 removed, 1 changed, 0 unchanged since 2026-10-12 09:00 UTC.\n" {
+		t.Errorf("--since 3h: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	out, _, code = e.run("", false, "get", "servers", "--since", "2026-10-12T10:30:00Z", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"change": "added"`) {
+		t.Errorf("--since timestamp: code %d\n%s", code, out)
+	}
+	// before the history starts: not compared
+	_, errOut, code = e.run("", false, "get", "servers", "--since", "1w", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "account one: no listing from before 2026-10-05 12:00 UTC (the cache starts 2026-10-12 09:00 UTC)") {
+		t.Errorf("--since before history: code %d, %q", code, errOut)
+	}
+	// the JSON report explains a skipped account too
+	out, _, _ = e.run("", false, "get", "servers", "--since", "1w", "--account", "one", "-o", "json")
+	if !strings.Contains(out, `"compared": false`) || !strings.Contains(out, `"reason": "no listing from before`) {
+		t.Errorf("json for skipped account:\n%s", out)
+	}
+
+	// a failing account is reported and the others are still compared
+	_, errOut, code = e.run("", false, "get", "servers", "--diff")
+	if code != 4 || !strings.Contains(errOut, "account two: fake: authentication failed") || !strings.Contains(errOut, "No changes since") {
+		t.Errorf("failing account: code %d, %q", code, errOut)
+	}
+
+	// usage
+	for _, args := range [][]string{
+		{"get", "servers", "--diff", "web-01"},
+		{"get", "servers", "--cached", "--diff"},
+		{"get", "servers", "--cached", "--since", "1h"},
+		{"get", "servers", "--since", "yesterday"},
+	} {
+		if _, _, code := e.run("", false, args...); code != 2 {
+			t.Errorf("%v: code %d, want 2", args, code)
+		}
+	}
+}
+
+func TestGetServersCached(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	_, errOut, code := e.run("", false, "get", "servers", "--cached", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "account one: not in the cache yet") {
+		t.Errorf("empty cache: code %d, %q", code, errOut)
+	}
+	if _, _, code := e.run("", false, "get", "servers", "--account", "one"); code != 0 {
+		t.Fatal("listing failed")
+	}
+	// the provider now answers differently, the cache still has the old listing
+	e.write(strings.Replace(testConfig, "    password: {env: FAKE_PASS}\n", "    password: {env: FAKE_PASS}\n"+variantB, 1))
+	e.now = e.now.Add(time.Hour)
+	out, errOut, code := e.run("", false, "get", "servers", "--cached", "--account", "one")
+	if code != 0 || errOut != "From cache: one (2026-10-12 09:00 UTC)\n" {
+		t.Errorf("cached: code %d, stderr %q", code, errOut)
+	}
+	expectRows(t, out, [][]string{
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running"},
+	})
+	out, _, code = e.run("", false, "get", "servers", "--cached", "--account", "one", "db-01", "-o", "name")
+	if code != 0 || out != "fake/2\n" {
+		t.Errorf("cached lookup: code %d, %q", code, out)
+	}
+	// describe records listings as well
+	if _, _, code := e.run("", false, "describe", "server", "web-01", "--account", "one"); code != 0 {
+		t.Fatal("describe failed")
+	}
+	out, _, _ = e.run("", false, "get", "servers", "--cached", "--account", "one", "-o", "name")
+	if out != "fake/3\nfake/1\n" {
+		t.Errorf("cache after describe: %q", out)
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	cases := map[string]time.Time{
+		"30m": now.Add(-30 * time.Minute), "12h": now.Add(-12 * time.Hour), "7d": now.AddDate(0, 0, -7), "2w": now.AddDate(0, 0, -14),
+		"1h30m": now.Add(-90 * time.Minute), "2026-10-01": time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		"2026-10-01 10:30": time.Date(2026, 10, 1, 10, 30, 0, 0, time.UTC), "2026-10-01T10:30:00+02:00": time.Date(2026, 10, 1, 8, 30, 0, 0, time.UTC),
+	}
+	for in, want := range cases {
+		got, err := parseSince(in, now, time.UTC)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%q: got %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "yesterday", "-1h", "7 days"} {
+		if _, err := parseSince(bad, now, time.UTC); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }

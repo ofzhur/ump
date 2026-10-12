@@ -32,7 +32,9 @@ Implemented today:
 ump
 ├── get
 │   └── servers  [ref...] [-o table|wide|json|yaml|name] [--no-headers]
-│                                                  all servers of all accounts (--account to restrict)
+│                [--diff] [--since <time>] [--cached]
+│                                                  all servers of all accounts (--account to restrict);
+│                                                  what changed since the last listing; the cached listing
 ├── describe
 │   └── server   <ref>... [-o text|json|yaml]       everything the provider knows about a server
 ├── config                                         interactive wizard: add an account, test it, save it
@@ -143,6 +145,44 @@ code is 4. A reference that matches nothing gives exit code 1.
 lower-cased; `labels` are present where the provider has them. `-o wide`
 adds the IPv6, product and kind columns; `-o name` prints `provider/id`
 per line. `defaults.output` in the configuration sets the default format.
+
+### The listing cache and `--diff`
+
+Every successful listing of an account (by `get`, `describe` or `config
+test`) is recorded under `~/.cache/ump/listings/<config>/<account>/`. A
+new snapshot is written only when the listing changed, so the cache holds
+the history of observed states (the newest 50 per account), and deleting
+it is always safe.
+
+```
+ump get servers --diff                  # since the previous listing
+ump get servers --since 7d              # since the state as of a week ago (also 12h, 2026-10-01, RFC 3339)
+ump get servers --cached [ref...]       # the last listing, without any API call
+```
+
+`--diff` lists the current servers, compares them with the previous
+snapshot of each account and prints only what changed, with a `CHANGE`
+column (`added`, `removed`, `changed`) and a `DETAILS` column naming the
+changed fields (`status: ready → off`); removed servers show their last
+known state. A one-line summary goes to stderr (`1 added, 0 removed, 1
+changed, 3 unchanged since 2026-10-05 09:00 CEST.`), as does a note for an
+account that has no earlier snapshot. `-o name` prints `+`, `-` or `~`
+before each reference; `-o json` and `-o yaml` print a report:
+
+```json
+{
+  "accounts": [{"account": "hrobot", "compared": true, "since": "2026-10-05T07:00:00Z"}],
+  "changes": [
+    {"change": "added", "machine": {"provider": "hetzner-robot", "id": "1234568", "...": "..."}},
+    {"change": "changed", "fields": ["status"], "before": {"...": "..."}, "machine": {"...": "..."}},
+    {"change": "removed", "machine": {"...": "..."}}
+  ],
+  "unchanged": 3
+}
+```
+
+The exit code does not depend on whether something changed; it is 4 when
+an account could not be listed, as for a plain listing.
 
 ## `ump describe server`
 

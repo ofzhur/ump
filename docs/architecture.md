@@ -417,7 +417,8 @@ UMP keeps only local, disposable state under XDG directories:
 
 ```
 ~/.config/ump/          config, profiles, layouts (user editable)
-~/.cache/ump/           machine listing cache, downloaded OS and staging images
+~/.cache/ump/           listing snapshots (listings/<config>/<account>/<time>.json),
+                        downloaded OS and staging images
 ~/.local/state/ump/runs/<run-id>/
                         plan.json, facts.json, events.jsonl, result.json
 ```

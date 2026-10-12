@@ -117,6 +117,7 @@ $ make                  # builds ./ump; `make install` puts it into your Go bin 
 $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
 $ ./ump get servers     # every server of every account; -o wide|json|yaml|name
 $ ./ump describe server web-01   # everything the provider knows about one server
+$ ./ump get servers --diff       # what was added, removed or changed since the last listing
 $ ./ump config test     # re-check credentials any time
 ```
 

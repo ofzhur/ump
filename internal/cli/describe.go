@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -77,7 +77,7 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 		return err
 	}
 	ctx := cmd.Context()
-	results := a.listAccounts(ctx, cfg, names)
+	results := a.listAccounts(ctx, cfg, names, cache.Open(path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -176,18 +176,8 @@ func printDetails(w io.Writer, ds []provider.Details, f outputFormat) error {
 	if ds == nil {
 		ds = []provider.Details{}
 	}
-	switch f {
-	case formatJSON:
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(ds)
-	case formatYAML:
-		data, err := config.MarshalYAML(ds)
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(data)
-		return err
+	if f == formatJSON || f == formatYAML {
+		return printEncoded(w, ds, f)
 	}
 	for i, d := range ds {
 		if i > 0 {
