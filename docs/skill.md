@@ -265,7 +265,7 @@ does not reinvent the order.
 | Workflow | Sequence | Human gates |
 |---|---|---|
 | **Add a cloud machine** | Terraform module call → PR with plan → merge, apply → `ump machine import` → `ump plan` → approve → `ump install` → handoff to Ansible → verify → update README and runbooks | PR review; `ump approve` |
-| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump get servers` → rename to convention (`ump machine rename --rdns`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
+| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump get servers` → rename to convention (`ump rename server`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
 | **Reinstall / rebuild** | drain (Ansible: remove from LB, stop writers) → `ump plan` → approve → `ump install` → Ansible → undrain → verify | `ump approve` |
 | **OS upgrade across a fleet** | new image in `ump/images/` → bump profile → PR → canary rebuild → soak → remaining machines one at a time | PR; one approval per machine, or one for a named batch |
 | **Change a disk layout** | new layout → data migration runbook → rebuild as above | PR; approval |
@@ -346,7 +346,7 @@ when wrong. Three tiers:
 | Tier | Examples | The agent may |
 |---|---|---|
 | **Observe** | `ump get servers`, `ump machine show/facts`, `terraform plan`, `ansible --check --diff`, reading state, `ump ssh` with diagnostic commands | act freely and repeatedly |
-| **Change** | editing repository files, `terraform apply` of an additive plan, `ansible-playbook` against staging or an additive role, `ump machine rename` | act after showing the plan or diff, through a PR or an explicit go from the human |
+| **Change** | editing repository files, `terraform apply` of an additive plan, `ansible-playbook` against staging or an additive role, `ump rename server` | act after showing the plan or diff, through a PR or an explicit go from the human |
 | **Destroy** | `ump install`, `terraform apply` with destroys, Ansible against production data paths, power actions, DNS changes in production, contract cancellation | act only with an approval it could not have produced itself |
 
 How the last line is enforced rather than hoped for:

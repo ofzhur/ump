@@ -49,6 +49,15 @@ func (f *fakeProvider) Describe(ctx context.Context, m provider.Machine) (*provi
 	return &provider.Details{Machine: m, Sections: []provider.Section{s}}, nil
 }
 
+// Rename succeeds for every machine but db-01, which the provider refuses.
+func (f *fakeProvider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
+	if m.ID == "2" {
+		return provider.Machine{}, &provider.APIError{Provider: "fake", Status: 409, Code: "uniqueness_error", Message: "name taken"}
+	}
+	m.Name = name
+	return m, nil
+}
+
 func (f *fakeProvider) Type() string    { return "fake" }
 func (f *fakeProvider) Account() string { return f.account }
 func (f *fakeProvider) Capabilities() []provider.Capability {
@@ -956,4 +965,91 @@ func TestDuplicateNames(t *testing.T) {
 		t.Errorf("unique ref: code %d, stderr %q", code, errOut)
 	}
 	_ = out
+}
+
+func TestRenameServer(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+
+	out, errOut, code := e.run("", false, "rename", "server", "web-01", "prod-web-01", "--account", "one")
+	if code != 0 || out != "Renamed fake/1 (account one) from web-01 to prod-web-01\n" ||
+		errOut != "The hostname of the installed system is unchanged; ump install applies the new name.\n" {
+		t.Errorf("rename: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	out, _, code = e.run("", false, "rename", "server", "fake/1", "prod-web-01.example.net", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"name": "prod-web-01.example.net"`) || !strings.HasPrefix(out, "[\n") {
+		t.Errorf("rename json: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "rename", "server", "203.0.113.10", "x-01", "--account", "one", "-o", "name")
+	if code != 0 || out != "fake/1\n" {
+		t.Errorf("rename name output: code %d, %q", code, out)
+	}
+
+	// nothing to do when the name is already set
+	out, errOut, code = e.run("", false, "rename", "server", "web-01", "web-01", "--account", "one")
+	if code != 0 || out != "" || errOut != "fake/1 is already named web-01; nothing to do.\n" {
+		t.Errorf("same name: code %d, out %q, stderr %q", code, out, errOut)
+	}
+
+	// a name another server already has is refused unless forced
+	_, errOut, code = e.run("", false, "rename", "server", "web-01", "db-01", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, `the name "db-01" is already used by fake/2 (account one); pick another name or use --force`) {
+		t.Errorf("duplicate refused: code %d, %q", code, errOut)
+	}
+	out, _, code = e.run("", false, "rename", "server", "web-01", "db-01", "--account", "one", "--force")
+	if code != 0 || out != "Renamed fake/1 (account one) from web-01 to db-01\n" {
+		t.Errorf("forced: code %d, %q", code, out)
+	}
+
+	// invalid names are rejected before any API call
+	for _, bad := range []string{"Web-01", "web_01", ".web", "web-", "web..01", "", "a b"} {
+		_, errOut, code = e.run("", false, "rename", "server", "web-01", bad, "--account", "one")
+		if code != 2 || !strings.Contains(errOut, "invalid name") {
+			t.Errorf("name %q: code %d, %q", bad, code, errOut)
+		}
+	}
+	for _, good := range []string{"a", "web-01", "prod-web-01.example.net", "x1-y2"} {
+		if err := validateServerName(good); err != nil {
+			t.Errorf("name %q rejected: %v", good, err)
+		}
+	}
+	if err := validateServerName(strings.Repeat("a", 64)); err == nil {
+		t.Error("64-character label accepted")
+	}
+
+	// provider refusal, not found, usage
+	_, errOut, code = e.run("", false, "rename", "server", "db-01", "new-01", "--account", "one")
+	if code != 4 || !strings.Contains(errOut, "ump: account one: fake: name taken (uniqueness_error, HTTP 409)") {
+		t.Errorf("provider error: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("", false, "rename", "server", "nope", "new-01", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, `server "nope" not found`) {
+		t.Errorf("not found: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("", false, "rename", "server", "web-01")
+	if code != 2 || !strings.Contains(errOut, "accepts 2 arg(s)") {
+		t.Errorf("usage: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("", false, "rename", "server", "web-01", "x-01", "-o", "table", "--account", "one")
+	if code != 2 || !strings.Contains(errOut, "unknown output format") {
+		t.Errorf("table output: code %d, %q", code, errOut)
+	}
+
+	// duplicates ask on a terminal and fail without one
+	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
+	out, errOut, code = e.run("2\n", true, "rename", "server", "web-01", "new-01", "--account", "one,three")
+	if code != 0 || out != "Renamed fake/1 (account three) from web-01 to new-01\n" || !strings.Contains(errOut, "Which one?") {
+		t.Errorf("prompted rename: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	_, errOut, code = e.run("", false, "rename", "server", "web-01", "new-01", "--account", "one,three")
+	if code != 1 || !strings.Contains(errOut, `server "web-01" is ambiguous`) {
+		t.Errorf("ambiguous: code %d, %q", code, errOut)
+	}
+
+	// a provider without rename support
+	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
+	_, errOut, code = e.run("", false, "rename", "server", "web-01", "new-01")
+	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot rename servers") {
+		t.Errorf("no renamer: code %d, %q", code, errOut)
+	}
 }

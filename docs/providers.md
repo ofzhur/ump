@@ -11,22 +11,22 @@ See [architecture](architecture.md#providers) for the interfaces.
 
 The table shows the **intended** use of each provider's API. Details are
 to be verified against the current APIs when each integration is
-implemented. Implemented today: `inventory` (`ump get servers`) and
-`describe` (`ump describe server`) for `hetzner-robot`, `hetzner-cloud`
-and `ovh`.
+implemented. Implemented today: `inventory` (`ump get servers`),
+`describe` (`ump describe server`) and `rename` (`ump rename server`)
+for `hetzner-robot`, `hetzner-cloud` and `ovh`.
 
-| Provider | Kind | inventory | power | rescue | create | rdns | network-info | virtual-media | Entry method |
-|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
-| `hetzner-robot` | bare metal | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
-| `hetzner-cloud` | cloud | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
-| `ovh` | bare metal + cloud | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
-| `scaleway-baremetal` | bare metal | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
-| `aws-ec2` | cloud | ✓ | ✓ | – | ✓ | – | ✓ | – | kexec |
-| `gcp-compute` | cloud | ✓ | ✓ | – | ✓ | – | ✓ | – | kexec |
-| `redfish` | own hardware | ✓ (static) | ✓ | – | – | – | – | ✓ | virtual-media |
-| `ipmi` | own hardware | ✓ (static) | ✓ | – | – | – | – | – | pxe |
-| `libvirt` / `proxmox` | lab / private cloud | ✓ | ✓ | – | ✓ | – | – | ✓ | virtual-media |
-| `ssh` | anything with SSH | ✓ (static) | – | – | – | – | – | – | kexec, manual |
+| Provider | Kind | inventory | rename | power | rescue | create | rdns | network-info | virtual-media | Entry method |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
+| `hetzner-robot` | bare metal | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
+| `hetzner-cloud` | cloud | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
+| `ovh` | bare metal + cloud | ✓ | instances | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
+| `scaleway-baremetal` | bare metal | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
+| `aws-ec2` | cloud | ✓ | ✓ | ✓ | – | ✓ | – | ✓ | – | kexec |
+| `gcp-compute` | cloud | ✓ | – | ✓ | – | ✓ | – | ✓ | – | kexec |
+| `redfish` | own hardware | ✓ (static) | – | ✓ | – | – | – | – | ✓ | virtual-media |
+| `ipmi` | own hardware | ✓ (static) | – | ✓ | – | – | – | – | – | pxe |
+| `libvirt` / `proxmox` | lab / private cloud | ✓ | ✓ | ✓ | – | ✓ | – | – | ✓ | virtual-media |
+| `ssh` | anything with SSH | ✓ (static) | – | – | – | – | – | – | – | kexec, manual |
 
 `ssh` is the universal fallback: a static list of hosts, no API. With
 `kexec` it can reinstall any running Linux machine that is reachable over
@@ -47,6 +47,9 @@ SSH as root. It is also the provider used by the integration test suite.
 
 ### Hetzner Robot
 
+- The server name is a free label, not required to be unique; `ump rename
+  server` sets it with `POST /server/{number}` (form-encoded, like every
+  Robot write).
 - Rescue requires the SSH key to be registered at the account first; the
   provider registers UMP's staging key if its fingerprint is missing.
 - When the server is switched off, a hardware reset does nothing — a power
@@ -58,6 +61,9 @@ SSH as root. It is also the provider used by the integration test suite.
 
 ### Hetzner Cloud
 
+- Server names must be unique within the project and valid hostnames;
+  `ump rename server` uses `PUT /servers/{id}` and reports the API's
+  `uniqueness_error` plainly.
 - Rescue can be enabled via the API with SSH keys, followed by a reset.
 - IPv4 is configured as `/32` with an on-link default gateway; the network
   model must express on-link routes.
@@ -72,10 +78,16 @@ SSH as root. It is also the provider used by the integration test suite.
   `project_id`); a dedicated server's ID is its service name
   (`ns1234.ip-1-2-3.eu`), its name the IAM display name when one is set.
 - Credentials are an application key and secret plus a consumer key. The
-  wizard requests a read-only consumer key (`POST /auth/credential` with
-  the access rules `ump get servers` needs) and shows the validation URL;
-  a key that may not see one of the two families is tolerated, that family
-  is skipped.
+  wizard requests a consumer key (`POST /auth/credential`) with the access
+  rules the implemented commands need, `GET /dedicated/server*`,
+  `GET /cloud/project*` and `PUT /cloud/project/*/instance/*`, and shows
+  the validation URL; a key that may not see one of the two families is
+  tolerated, that family is skipped. A key made elsewhere needs the same
+  rules; a missing one shows up as `NOT_GRANTED_CALL` with the path.
+- `ump rename server` renames Public Cloud instances (`instanceName`).
+  Dedicated servers cannot be renamed through the API: the display name
+  is read-only in every public API model, the v2 IAM resource included,
+  so UMP says so instead of pretending; set it in the control panel.
 - The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
 
 ### Clouds without rescue (AWS, GCP, ...)

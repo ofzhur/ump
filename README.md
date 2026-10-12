@@ -118,6 +118,7 @@ $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh,
 $ ./ump get servers     # every server of every account; -o wide|json|yaml|name
 $ ./ump describe server web-01   # everything the provider knows about one server
 $ ./ump get servers --diff       # what was added, removed or changed since the last listing
+$ ./ump rename server web-01 prod-web-01   # the name at the provider; the hostname follows at the next install
 $ ./ump config test     # re-check credentials any time
 ```
 

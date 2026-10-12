@@ -4,9 +4,9 @@
 
 Done so far: the Go module and CLI skeleton with the kubectl-style command
 shape, configuration with secret references, the `ump config` wizard, and
-`ump get servers` and `ump describe server` for Hetzner Robot, Hetzner
-Cloud and OVHcloud, and the listing cache with `--diff`, `--since` and
-`--cached` (October 2026).
+`ump get servers`, `ump describe server` and `ump rename server` for
+Hetzner Robot, Hetzner Cloud and OVHcloud, and the listing cache with
+`--diff`, `--since` and `--cached` (October 2026).
 
 ### M0 — Skeleton
 
@@ -29,9 +29,9 @@ Cloud and OVHcloud, and the listing cache with `--diff`, `--since` and
 
 ### M2 — Hetzner Robot
 
-- Robot API: inventory, rescue, reset, rename, rDNS, SSH key registration
+- Robot API: inventory and rename (done), rescue, reset, rDNS, SSH key registration
 - `rescue` entry method
-- `ump get servers` and `ump describe server` (done), `ump machine reboot|rescue|rename`
+- `ump get servers`, `ump describe server` and `ump rename server` (done), `ump machine reboot|rescue`
 - listing cache with "added/removed since last time" (done)
 - IPv6 from provider network info
 

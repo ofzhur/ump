@@ -41,6 +41,8 @@ ump
 │                                                  what changed since the last listing; the cached listing
 ├── describe
 │   └── server   <ref>... [-o text|json|yaml]       everything the provider knows about a server
+├── rename
+│   └── server   <ref> <new-name> [--force]         set the name at the provider (hostname at the next install)
 ├── config                                         interactive wizard: add an account, test it, save it
 │   ├── view                                       the configuration, secrets redacted
 │   ├── path                                       where the configuration lives
@@ -65,7 +67,6 @@ ump
 │   ├── show     <machine>
 │   ├── reboot   <machine> [--hard|--power-cycle]
 │   ├── power    <machine> on|off
-│   ├── rename   <machine> <name> [--rdns]
 │   ├── rescue   <machine> enable|disable [--flavour ...]
 │   ├── import   --from terraform [file]           names and labels of machines Terraform created
 │   ├── create   --account <name> --type <type> --location <loc>   (clouds)
@@ -226,6 +227,33 @@ Exit codes: 1 when a reference matched nothing or was ambiguous without a
 terminal, 3 when the question was left with `q`, 4 when a provider call
 failed or an account could not be listed.
 
+## `ump rename server`
+
+```
+ump rename server NAME|ID|IP|PROVIDER/ID NEW-NAME [--force] [-o json|yaml|name]
+```
+
+Sets the name the server is known by at its provider: the server name at
+Hetzner Robot and Hetzner Cloud, the instance name of an OVHcloud Public
+Cloud instance (OVHcloud dedicated servers cannot be renamed through the
+API, and the command says so).
+The name is a label at the provider: the hostname of an installed
+operating system does not change. UMP uses the provider name as the
+machine name everywhere, including the hostname it sets when it installs
+the machine, so the new name has to be a valid hostname (lower-case
+letters, digits and hyphens, dots between labels).
+
+A name that another listed server already has is refused, so that renames
+do not create the duplicates that make references ambiguous; `--force`
+renames anyway. The server reference is resolved like for `describe`
+(duplicates are asked about on a terminal). Without `-o` the result is
+one sentence; `-o json` prints the renamed server as `get` would. Exit
+codes: 1 for not found, ambiguous without a terminal, a name in use, or a
+provider that cannot rename; 2 for an invalid name; 4 when the provider
+refused.
+
+Reverse DNS is not touched; that is a separate command (planned).
+
 ## `ump config`
 
 Without a subcommand, `ump config` is an interactive wizard: it asks for
@@ -324,6 +352,7 @@ $ ump get servers
 $ ump get servers -o wide --account main
 $ ump get servers -o json | jq '.[] | select(.status=="ready")'
 $ ump describe server web-01
+$ ump rename server web-01 prod-web-01
 
 # reinstall one server
 $ ump plan web-01 --profile base
@@ -351,7 +380,7 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
 
-Everything after `ump describe server` in the examples is draft.
+Everything after `ump rename server` in the examples is draft.
 
 ## Exit codes
 
