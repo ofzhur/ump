@@ -97,10 +97,13 @@ copy() { # copy KEY NEWKEY: within the bucket, on the server; large files go up 
 		return 0
 	fi
 	case "$tool" in
-	# R2 implements neither object tagging nor the tagging directive, which
-	# a copy with properties asks for; without any, the server copies the
-	# metadata (content type included) itself
-	aws) s3 cp --copy-props none "s3://$STORE_BUCKET/$1" "s3://$STORE_BUCKET/$2" ;;
+	# R2 implements neither object tagging nor the tagging directive that
+	# "aws s3 cp" sends for a copy; the low-level call sends only what it
+	# is told, and the server copies the metadata (content type) itself
+	aws)
+		AWS_ACCESS_KEY_ID="$STORE_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$STORE_SECRET_ACCESS_KEY" AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}" \
+			aws s3api copy-object --endpoint-url "$endpoint" --bucket "$STORE_BUCKET" --copy-source "$STORE_BUCKET/$1" --key "$2" --metadata-directive COPY >/dev/null
+		;;
 	rclone) s3 copyto "upload:$STORE_BUCKET/$1" "upload:$STORE_BUCKET/$2" ;;
 	esac
 	echo "copied   s3://$STORE_BUCKET/$2"
