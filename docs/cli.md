@@ -14,7 +14,11 @@ be converted to the same style as commands are built.
   so on when they are implemented.
 - Machines are addressed by a **machine reference**: `provider/id`, a
   name or an IP address (see [concepts](concepts.md#machine)). Several
-  references or `--selector` can be given where it makes sense.
+  references or `--selector` can be given where it makes sense. Names
+  need not be unique: `get` lists every match (with a note on stderr),
+  commands that act on one server ask which one is meant on a terminal
+  and otherwise fail with the candidates; `provider/id` and `--account`
+  disambiguate.
 - Every listing supports `-o table|wide|json|yaml`. JSON output is stable
   and meant for scripting.
 - Destructive commands ask for confirmation. `--yes` skips the prompt but
@@ -190,10 +194,12 @@ an account could not be listed, as for a plain listing.
 ump describe server NAME|ID|IP|PROVIDER/ID ... [--account <name>...] [-o text|json|yaml]
 ```
 
-Finds each server across the configured accounts (the same references as
-`get`; a name that exists in several accounts has to be narrowed with
-`--account`) and prints the common fields followed by everything the
-provider reports about it, grouped in sections:
+Finds each server across the configured accounts with the same references
+as `get`. A name that matches several servers is asked about on a
+terminal (the question goes to stderr, so `-o json` output stays clean);
+without a terminal the command fails with the candidates, and
+`provider/id` or `--account` picks one. Prints the common fields followed
+by everything the provider reports about it, grouped in sections:
 
 | Provider | Sections |
 |---|---|
@@ -216,8 +222,9 @@ $ ump describe server web-01 -o json | jq '.[0].details[] | select(.name == "Pow
 }
 ```
 
-Exit codes: 1 when a reference matched nothing or was ambiguous, 4 when a
-provider call failed or an account could not be listed.
+Exit codes: 1 when a reference matched nothing or was ambiguous without a
+terminal, 3 when the question was left with `q`, 4 when a provider call
+failed or an account could not be listed.
 
 ## `ump config`
 

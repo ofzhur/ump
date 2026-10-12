@@ -714,10 +714,10 @@ func TestDescribeServerErrors(t *testing.T) {
 		t.Errorf("json for nothing: %q", out)
 	}
 
-	// ambiguous: the same names exist in accounts one and three
+	// ambiguous without a terminal: the same names exist in accounts one and three
 	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
 	_, errOut, code = e.run("", false, "describe", "server", "web-01", "--account", "one,three")
-	if code != 1 || !strings.Contains(errOut, `server "web-01" is ambiguous: fake/1 in account one, fake/1 in account three; use --account`) {
+	if code != 1 || !strings.Contains(errOut, `ump: server "web-01" is ambiguous: fake/1 (account one), fake/1 (account three); use provider/id or --account`) {
 		t.Errorf("ambiguous: code %d, %q", code, errOut)
 	}
 
@@ -907,4 +907,53 @@ func TestParseSince(t *testing.T) {
 			t.Errorf("%q accepted", bad)
 		}
 	}
+}
+
+func TestDuplicateNames(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
+
+	// a listing shows every match and says so
+	out, errOut, code := e.run("", false, "get", "servers", "web-01", "--account", "one,three")
+	if code != 0 || len(fields(out)) != 3 || errOut != "Note: \"web-01\" matches 2 servers: fake/1 (account one), fake/1 (account three)\n" {
+		t.Errorf("get: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	out, errOut, code = e.run("", false, "get", "servers", "web-01", "--account", "one,three", "-o", "json")
+	if code != 0 || strings.Count(out, `"name": "web-01"`) != 2 || !strings.HasPrefix(errOut, "Note:") || strings.Contains(out, "Note:") {
+		t.Errorf("get json: code %d, stderr %q\n%s", code, errOut, out)
+	}
+
+	// on a terminal, describe asks which one; the question goes to stderr
+	out, errOut, code = e.run("2\n", true, "describe", "server", "web-01", "--account", "one,three")
+	if code != 0 {
+		t.Fatalf("describe with choice: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	for _, want := range []string{"Server \"web-01\" exists 2 times. Which one?\n", "  1) fake/1", "account one", "  2) fake/1", "account three", "  q) quit\n", "Choice: "} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, errOut)
+		}
+	}
+	if strings.Contains(out, "Choice") || !strings.HasPrefix(out, "Name:      web-01\nRef:       fake/1\nAccount:   three\n") {
+		t.Errorf("stdout after choosing 2:\n%s", out)
+	}
+	// JSON stays clean when stdin is a terminal but stdout is piped
+	out, _, code = e.run("1\n", true, "describe", "server", "web-01", "--account", "one,three", "-o", "json")
+	if code != 0 || !strings.HasPrefix(out, "[\n  {\n    \"provider\": \"fake\",") || !strings.Contains(out, `"account": "one"`) {
+		t.Errorf("json with prompt: code %d\n%s", code, out)
+	}
+	// an empty answer asks again; q aborts without describing anything
+	out, errOut, code = e.run("\n1\n", true, "describe", "server", "web-01", "--account", "one,three")
+	if code != 0 || strings.Count(errOut, "Choice: ") != 2 || !strings.Contains(errOut, "Please enter a number between 1 and 2, or q to quit.") || !strings.Contains(out, "Account:   one\n") {
+		t.Errorf("empty answer: code %d, stderr %q", code, errOut)
+	}
+	out, errOut, code = e.run("q\n", true, "describe", "server", "web-01", "--account", "one,three")
+	if code != 3 || out != "" || !strings.HasSuffix(errOut, "ump: aborted\n") {
+		t.Errorf("quit: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	// a unique reference never asks
+	out, errOut, code = e.run("", true, "describe", "server", "db-01", "--account", "one")
+	if code != 4 || strings.Contains(errOut, "Which one") {
+		t.Errorf("unique ref: code %d, stderr %q", code, errOut)
+	}
+	_ = out
 }

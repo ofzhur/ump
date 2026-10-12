@@ -12,8 +12,16 @@ always seen *through* a provider and is identified by a **machine reference**:
 | Form | Example | Meaning |
 |---|---|---|
 | `provider/id` | `hetzner-robot/1234567` | Unambiguous, provider-native ID |
-| `name` | `web-01` | Name as known at the provider (must be unique across providers) |
+| `name` | `web-01` | Name as known at the provider |
 | `ip` | `203.0.113.10` | Primary IPv4 or IPv6 address |
+
+Names are not unique: accounts that were not set up with UMP's naming
+convention can hold the same name twice, and some providers do not
+enforce unique names even within one account. UMP never fails because of
+that. A listing shows every server a reference matches. A command that
+needs exactly one server asks which one is meant when it runs in a
+terminal; without a terminal it fails and lists the candidates, so a
+script or an agent retries with `provider/id` or `--account`.
 
 UMP keeps no authoritative inventory of its own. The provider APIs are the
 source of truth; UMP only caches listings locally to show what changed

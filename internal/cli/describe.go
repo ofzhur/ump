@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -49,8 +50,10 @@ network and protection at Hetzner Cloud, service, boot and hardware at
 OVHcloud, and so on.
 
 Servers are found by name, provider ID, IP address or "provider/id" across
-the configured accounts (--account restricts the search). A name that
-exists in several accounts has to be narrowed down with --account.`,
+the configured accounts (--account restricts the search). Names are not
+unique: when a name matches several servers you are asked which one is
+meant; without a terminal the command fails and lists them, so use
+"provider/id" or --account there.`,
 		Args: usageArgs(cobra.MinimumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.describeServers(cmd, args, output)
@@ -97,32 +100,29 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 
 	var details []provider.Details
 	notFound, providerErrors := 0, 0
+	ui := a.resolverUI(cmd)
 	for _, ref := range refs {
-		var matches []provider.Machine
-		for _, m := range machines {
-			if m.Matches(ref) {
-				matches = append(matches, m)
-			}
-		}
+		m, err := a.resolveServer(ui, machines, ref)
+		var nf *notFoundError
+		var amb *ambiguousError
 		switch {
-		case len(matches) == 0:
+		case errors.As(err, &nf):
 			notFound++
 			if failed > 0 {
-				fmt.Fprintf(a.stderr, "ump: server %q not found (%d of %d accounts could not be listed)\n", ref, failed, len(results))
+				fmt.Fprintf(a.stderr, "ump: %v (%d of %d accounts could not be listed)\n", err, failed, len(results))
 			} else {
-				fmt.Fprintf(a.stderr, "ump: server %q not found\n", ref)
+				fmt.Fprintf(a.stderr, "ump: %v\n", err)
 			}
 			continue
-		case len(matches) > 1:
+		case errors.As(err, &amb):
 			notFound++
-			where := make([]string, len(matches))
-			for i, m := range matches {
-				where[i] = m.Ref() + " in account " + m.Account
-			}
-			fmt.Fprintf(a.stderr, "ump: server %q is ambiguous: %s; use --account\n", ref, strings.Join(where, ", "))
+			fmt.Fprintf(a.stderr, "ump: %v\n", err)
 			continue
+		case errors.Is(err, errQuit):
+			return withExit(exitAborted, errors.New("aborted"))
+		case err != nil:
+			return err
 		}
-		m := matches[0]
 		d, err := describeMachine(ctx, byAccount[m.Account].prov, m)
 		if err != nil {
 			if ctx.Err() != nil {

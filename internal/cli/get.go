@@ -152,8 +152,13 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	}
 	provider.SortMachines(machines)
 
-	var notFound []string
+	var notFound, duplicates []string
 	if len(refs) > 0 {
+		for _, ref := range refs {
+			if ms := matching(machines, ref); len(ms) > 1 {
+				duplicates = append(duplicates, fmt.Sprintf("%q matches %d servers: %s", ref, len(ms), candidates(ms)))
+			}
+		}
 		machines, notFound = selectMachines(machines, refs)
 	}
 
@@ -165,6 +170,9 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		return err
 	}
 
+	for _, d := range duplicates {
+		fmt.Fprintf(a.stderr, "Note: %s\n", d)
+	}
 	for _, r := range failed {
 		fmt.Fprintf(a.stderr, "ump: %v\n", r.err)
 	}

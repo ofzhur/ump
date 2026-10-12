@@ -30,10 +30,15 @@ type prompter struct {
 }
 
 func (a *app) newPrompter(ctx context.Context) *prompter {
+	return a.newPrompterTo(ctx, a.stdout)
+}
+
+// newPrompterTo returns a prompter that writes its questions to out.
+func (a *app) newPrompterTo(ctx context.Context, out io.Writer) *prompter {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &prompter{ctx: ctx, in: bufio.NewReader(a.stdin), out: a.stdout, readSecret: a.readSecret, saveTerm: a.saveTerm}
+	return &prompter{ctx: ctx, in: bufio.NewReader(a.stdin), out: out, readSecret: a.readSecret, saveTerm: a.saveTerm}
 }
 
 var (
@@ -170,8 +175,9 @@ func (p *prompter) Confirm(label string, def bool) (bool, error) {
 }
 
 // Choose shows a numbered menu and returns the index of the choice. The
-// first word of an item is accepted instead of its number; "q" leaves the
-// wizard with errQuit.
+// first word of an item is accepted instead of its number; "q" leaves
+// with errQuit. A negative def means there is no default and an answer
+// is required.
 func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 	p.Printf("%s\n", label)
 	for i, it := range items {
@@ -179,14 +185,22 @@ func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 	}
 	p.Printf("  q) quit\n")
 	for {
-		p.Printf("Choice [%d]: ", def+1)
+		if def >= 0 {
+			p.Printf("Choice [%d]: ", def+1)
+		} else {
+			p.Printf("Choice: ")
+		}
 		s, err := p.readLine()
 		if err != nil {
 			return 0, err
 		}
 		s = strings.TrimSpace(s)
 		if s == "" {
-			return def, nil
+			if def >= 0 {
+				return def, nil
+			}
+			p.Printf("Please enter a number between 1 and %d, or q to quit.\n", len(items))
+			continue
 		}
 		if isQuit(s) {
 			return 0, errQuit
