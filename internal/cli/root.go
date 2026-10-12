@@ -48,6 +48,9 @@ type app struct {
 	isTTY func() bool
 	// readSecret reads a line without echo; nil means "read a plain line".
 	readSecret func() (string, error)
+	// saveTerm captures the terminal state and returns a function that
+	// restores it, for prompts abandoned while the echo is off.
+	saveTerm func() func()
 	// httpClient overrides the HTTP client handed to providers (tests).
 	httpClient *http.Client
 
@@ -61,12 +64,25 @@ type app struct {
 func Main(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		// The first Ctrl-C cancels the context and lets commands unwind;
+		// a second one terminates the process the usual way.
+		<-ctx.Done()
+		stop()
+	}()
 	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
 	fd := int(os.Stdin.Fd())
 	a.isTTY = func() bool { return term.IsTerminal(fd) }
 	a.readSecret = func() (string, error) {
 		b, err := term.ReadPassword(fd)
 		return string(b), err
+	}
+	a.saveTerm = func() func() {
+		state, err := term.GetState(fd)
+		if err != nil {
+			return func() {}
+		}
+		return func() { _ = term.Restore(fd, state) }
 	}
 	return a.run(ctx, args)
 }

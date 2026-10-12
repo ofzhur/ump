@@ -91,6 +91,9 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, output string, noHea
 	}
 
 	results := a.listAccounts(cmd.Context(), cfg, names)
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
 	var machines []provider.Machine
 	var failed []listResult
 	for _, r := range results {

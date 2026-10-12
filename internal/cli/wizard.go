@@ -17,24 +17,72 @@ import (
 )
 
 // prompter implements provider.Prompter on the app's stdin and stdout.
+// Every read watches the context, so Ctrl-C (which cancels it) aborts a
+// prompt immediately instead of being noticed after the next Enter.
 type prompter struct {
+	ctx        context.Context
 	in         *bufio.Reader
 	out        io.Writer
 	readSecret func() (string, error)
+	// saveTerm captures the terminal state before hidden input and returns
+	// the function that restores it; needed when the read is abandoned.
+	saveTerm func() func()
 }
 
-func (a *app) newPrompter() *prompter {
-	return &prompter{in: bufio.NewReader(a.stdin), out: a.stdout, readSecret: a.readSecret}
+func (a *app) newPrompter(ctx context.Context) *prompter {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &prompter{ctx: ctx, in: bufio.NewReader(a.stdin), out: a.stdout, readSecret: a.readSecret, saveTerm: a.saveTerm}
 }
 
-var errInputClosed = withExit(exitAborted, errors.New("input closed"))
+var (
+	errInputClosed = withExit(exitAborted, errors.New("input closed"))
+	// errInterrupted is returned by a prompt when the context is cancelled
+	// (Ctrl-C). It prints as "interrupted" with exit code 3.
+	errInterrupted = &exitError{code: exitAborted, err: context.Canceled}
+	// errQuit is returned by a prompt when the user asks to leave the
+	// wizard. Nothing that was being entered is saved.
+	errQuit = errors.New("quit")
+)
+
+func isQuit(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "q", "quit", "exit":
+		return true
+	}
+	return false
+}
 
 func (p *prompter) Printf(format string, args ...any) {
 	fmt.Fprintf(p.out, format, args...)
 }
 
+type readResult struct {
+	s   string
+	err error
+}
+
+// await runs read in a goroutine and returns its result, or
+// errInterrupted when the context is cancelled first. An abandoned read
+// stays blocked on stdin; that is fine, the process is about to exit.
+func (p *prompter) await(read func() (string, error)) (string, error) {
+	ch := make(chan readResult, 1)
+	go func() {
+		s, err := read()
+		ch <- readResult{s, err}
+	}()
+	select {
+	case <-p.ctx.Done():
+		p.Printf("\n")
+		return "", errInterrupted
+	case r := <-ch:
+		return r.s, r.err
+	}
+}
+
 func (p *prompter) readLine() (string, error) {
-	s, err := p.in.ReadString('\n')
+	s, err := p.await(func() (string, error) { return p.in.ReadString('\n') })
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			if s != "" {
@@ -66,24 +114,35 @@ func (p *prompter) Line(label, def string) (string, error) {
 }
 
 // Secret implements provider.Prompter: input without echo on a terminal.
+// When the read is interrupted, the terminal state that the hidden read
+// changed is restored by hand, because the abandoned read never returns.
 func (p *prompter) Secret(label string) (string, error) {
 	p.Printf("%s: ", label)
-	if p.readSecret != nil {
-		s, err := p.readSecret()
-		p.Printf("\n")
+	if p.readSecret == nil {
+		s, err := p.readLine()
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(s), nil
 	}
-	s, err := p.readLine()
+	restore := func() {}
+	if p.saveTerm != nil {
+		restore = p.saveTerm()
+	}
+	s, err := p.await(p.readSecret)
 	if err != nil {
+		if errors.Is(err, errInterrupted) {
+			restore()
+		} else {
+			p.Printf("\n")
+		}
 		return "", err
 	}
+	p.Printf("\n")
 	return strings.TrimSpace(s), nil
 }
 
-// Confirm implements provider.Prompter.
+// Confirm implements provider.Prompter. "q" leaves the wizard.
 func (p *prompter) Confirm(label string, def bool) (bool, error) {
 	hint := "y/N"
 	if def {
@@ -103,17 +162,22 @@ func (p *prompter) Confirm(label string, def bool) (bool, error) {
 		case "n", "no":
 			return false, nil
 		}
-		p.Printf("Please answer y or n.\n")
+		if isQuit(s) {
+			return false, errQuit
+		}
+		p.Printf("Please answer y or n (or q to quit).\n")
 	}
 }
 
 // Choose shows a numbered menu and returns the index of the choice. The
-// first word of an item is accepted instead of its number.
+// first word of an item is accepted instead of its number; "q" leaves the
+// wizard with errQuit.
 func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 	p.Printf("%s\n", label)
 	for i, it := range items {
 		p.Printf("  %d) %s\n", i+1, it)
 	}
+	p.Printf("  q) quit\n")
 	for {
 		p.Printf("Choice [%d]: ", def+1)
 		s, err := p.readLine()
@@ -124,6 +188,9 @@ func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 		if s == "" {
 			return def, nil
 		}
+		if isQuit(s) {
+			return 0, errQuit
+		}
 		if n, err := strconv.Atoi(s); err == nil && n >= 1 && n <= len(items) {
 			return n - 1, nil
 		}
@@ -132,7 +199,7 @@ func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 				return i, nil
 			}
 		}
-		p.Printf("Please enter a number between 1 and %d.\n", len(items))
+		p.Printf("Please enter a number between 1 and %d, or q to quit.\n", len(items))
 	}
 }
 
@@ -153,53 +220,72 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	ui := a.newPrompter()
+	ctx := cmd.Context()
+	ui := a.newPrompter(ctx)
 	ui.Printf("UMP configuration wizard\n")
 	ui.Printf("Configuration file: %s\n", config.AbbreviateHome(path))
 	if len(cfg.Accounts) == 0 {
-		ui.Printf("No accounts configured yet.\n\n")
+		ui.Printf("No accounts configured yet.\n")
 	} else {
 		ui.Printf("Configured accounts:\n")
 		for _, n := range cfg.AccountNames() {
 			ui.Printf("  %-20s %s\n", n, cfg.Accounts[n].Type)
 		}
-		ui.Printf("\n")
 	}
-	for {
-		if err := a.wizardAddAccount(cmd.Context(), ui, cfg, path); err != nil {
-			return err
-		}
-		again, err := ui.Confirm("Add another account?", false)
-		if err != nil {
-			return err
-		}
-		if !again {
-			break
-		}
-		ui.Printf("\n")
-	}
-	ui.Printf("\nDone. Try: ump get servers\n")
-	return nil
-}
+	ui.Printf("Type q at a menu or press Ctrl-C to quit. To test or remove accounts: ump config test, ump config remove NAME.\n\n")
 
-func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Config, path string) error {
 	types := provider.Types()
 	items := make([]string, len(types))
 	for i, t := range types {
 		items[i] = fmt.Sprintf("%-14s %s", t.Name, t.Description)
 	}
-	idx, err := ui.Choose("Provider type", items, 0)
-	if err != nil {
-		return err
-	}
-	t := types[idx]
-	ui.Printf("\n")
-
-	var name string
+	added := 0
 	for {
-		name, err = ui.Line("Account name", suggestAccountName(cfg, t.Name))
+		idx, err := ui.Choose("Provider type", items, 0)
+		if errors.Is(err, errQuit) {
+			break
+		}
 		if err != nil {
 			return err
+		}
+		ui.Printf("\n")
+		saved, err := a.wizardAddAccount(ctx, ui, cfg, path, types[idx])
+		if errors.Is(err, errQuit) {
+			ui.Printf("Nothing saved for this account.\n")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if saved {
+			added++
+		}
+		again, err := ui.Confirm("Add another account?", false)
+		if errors.Is(err, errQuit) || (err == nil && !again) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		ui.Printf("\n")
+	}
+	if added == 0 {
+		ui.Printf("Nothing changed.\n")
+		return nil
+	}
+	ui.Printf("\nDone. Try: ump get servers\n")
+	return nil
+}
+
+// wizardAddAccount asks for one account of type t, tests it and saves it.
+// It reports whether the account was saved; errQuit means the user left.
+func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Config, path string, t provider.Type) (bool, error) {
+	var name string
+	for {
+		var err error
+		name, err = ui.Line("Account name", suggestAccountName(cfg, t.Name))
+		if err != nil {
+			return false, err
 		}
 		if err := config.ValidateAccountName(name); err != nil {
 			ui.Printf("%v\n", err)
@@ -208,7 +294,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		if existing, ok := cfg.Accounts[name]; ok {
 			replace, err := ui.Confirm(fmt.Sprintf("Account %q (%s) exists. Replace it?", name, existing.Type), false)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if !replace {
 				continue
@@ -232,7 +318,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			"a command that prints the secret (pass, op, sops, vault, ...)",
 		}, 0)
 		if err != nil {
-			return err
+			return false, err
 		}
 		storage = secretStorage(i)
 	}
@@ -261,7 +347,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			}
 			i, err := ui.Choose(f.Label, f.Choices, def)
 			if err != nil {
-				return err
+				return false, err
 			}
 			values[f.Key] = f.Choices[i]
 			acct.Settings[f.Key] = config.PlainValue(f.Choices[i])
@@ -269,7 +355,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			for {
 				v, err := ui.Line(f.Label, f.Default)
 				if err != nil {
-					return err
+					return false, err
 				}
 				if v == "" && f.Required {
 					ui.Printf("A value is required.\n")
@@ -287,7 +373,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 				for {
 					v, err := ui.Secret(f.Label)
 					if err != nil {
-						return err
+						return false, err
 					}
 					if v == "" && f.Required && !f.Deferrable {
 						ui.Printf("A value is required.\n")
@@ -305,7 +391,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			case storeEnv:
 				env, err := ui.Line("Environment variable holding the "+strings.ToLower(f.Label), envVarName(name, f.Key))
 				if err != nil {
-					return err
+					return false, err
 				}
 				acct.Settings[f.Key] = config.Value{Env: env}
 				switch v, ok := os.LookupEnv(env); {
@@ -322,7 +408,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 				for {
 					c, err := ui.Line("Command that prints the "+strings.ToLower(f.Label), "")
 					if err != nil {
-						return err
+						return false, err
 					}
 					if c == "" {
 						ui.Printf("A command is required.\n")
@@ -336,12 +422,12 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 						ui.Printf("  %v\n", err)
 						retry, err := ui.Confirm("Try another command?", true)
 						if err != nil {
-							return err
+							return false, err
 						}
 						if retry {
 							continue
 						}
-						return withExit(exitAborted, errors.New("aborted"))
+						return false, errQuit
 					}
 					acct.Settings[f.Key] = config.Value{Command: c}
 					values[f.Key] = v
@@ -354,13 +440,13 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 	if t.Complete != nil {
 		ui.Printf("\n")
 		if err := t.Complete(ctx, ui, values, a.providerOptions()); err != nil {
-			return err
+			return false, err
 		}
 	}
 	var generated []string // deferred keys that Complete filled in
 	for _, k := range deferred {
 		if values[k] == "" {
-			return fmt.Errorf("%s: %s is required", t.Name, k)
+			return false, fmt.Errorf("%s: %s is required", t.Name, k)
 		}
 		generated = append(generated, k)
 	}
@@ -372,7 +458,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		toValidate[k] = "(set later through the environment)"
 	}
 	if errs := t.Validate(toValidate); len(errs) > 0 {
-		return errs[0]
+		return false, errs[0]
 	}
 
 	ui.Printf("\n")
@@ -385,11 +471,11 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			ui.Printf("failed\n  %v\n", err)
 			save, err := ui.Confirm("Save the account anyway?", false)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if !save {
 				ui.Printf("Not saved.\n")
-				return nil
+				return false, nil
 			}
 		} else {
 			ui.Printf("ok (%s)\n", plural(n, "server"))
@@ -403,14 +489,14 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			}
 			p := secretFilePath(name, f.Key)
 			if err := config.WriteSecretFile(p, values[f.Key]); err != nil {
-				return err
+				return false, err
 			}
 			acct.Settings[f.Key] = config.Value{File: config.AbbreviateHome(p)}
 		}
 	}
 	cfg.Accounts[name] = acct
 	if err := config.Save(path, cfg); err != nil {
-		return err
+		return false, err
 	}
 	ui.Printf("Saved account %s (%s) to %s\n", name, t.Name, config.AbbreviateHome(path))
 	if storage == storeEnv {
@@ -433,7 +519,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			ui.Printf("Before running ump, set in your shell:\n%s\n", strings.Join(lines, "\n"))
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (a *app) testValues(ctx context.Context, t provider.Type, name string, values map[string]string) (int, error) {

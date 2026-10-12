@@ -150,7 +150,10 @@ secrets should be kept (files under `~/.config/ump/secrets/` readable only
 by you, environment variables, or a command such as `pass show ...`),
 tests the credentials with one API call and writes the account to the
 configuration. For OVHcloud it can request a consumer key for you and hand
-you the validation URL. Without a terminal it refuses with exit code 3.
+you the validation URL. `q` at any menu or yes/no question leaves the
+wizard, and Ctrl-C aborts at any prompt; an account is written only after
+its test passed (or you chose to save it anyway), so leaving never saves a
+half-entered account. Without a terminal it refuses with exit code 3.
 
 `ump config add <type> <name> --set KEY=VALUE ...` is the non-interactive
 form. A value is plain text or a secret reference: `env:NAME`,

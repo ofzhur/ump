@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -470,5 +471,107 @@ func TestWizardFailedTestIsNotSaved(t *testing.T) {
 	_, errOut, code := e.run("fake\n", true, "config")
 	if code != 3 || !strings.Contains(errOut, "input closed") {
 		t.Errorf("EOF: code %d, %q", code, errOut)
+	}
+}
+
+func TestWizardQuit(t *testing.T) {
+	e := newTestEnv(t)
+	// q at the provider menu: nothing to add
+	out, errOut, code := e.run("q\n", true, "config")
+	if code != 0 || errOut != "" || !strings.Contains(out, "  q) quit\n") || !strings.Contains(out, "Nothing changed.") {
+		t.Errorf("quit at menu: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	if _, err := os.Stat(e.cfgPath); !os.IsNotExist(err) {
+		t.Error("config file was created")
+	}
+	// q in the middle of adding an account: nothing saved
+	out, _, code = e.run("fake\nacc\nq\n", true, "config")
+	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") || !strings.Contains(out, "Nothing changed.") {
+		t.Errorf("quit mid-account: code %d\n%s", code, out)
+	}
+	if _, err := os.Stat(e.cfgPath); !os.IsNotExist(err) {
+		t.Error("config file was created")
+	}
+	// "exit" at a choice field, after the secret was typed
+	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\nexit\n", true, "config")
+	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") {
+		t.Errorf("exit at choice: code %d\n%s", code, out)
+	}
+	if _, err := os.Stat(secretFilePath("acc", "password")); !os.IsNotExist(err) {
+		t.Error("secret file was written although the account was not saved")
+	}
+	// q at the yes/no question after a save keeps what was saved
+	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\n\nq\n", true, "config")
+	if code != 0 || !strings.Contains(out, "Saved account acc (fake)") || !strings.Contains(out, "Done. Try: ump get servers") ||
+		strings.Contains(out, "Nothing changed.") {
+		t.Errorf("quit after save: code %d\n%s", code, out)
+	}
+	if !strings.Contains(e.read(), "  acc:\n    type: fake\n") {
+		t.Errorf("config:\n%s", e.read())
+	}
+	// q at the replace question
+	out, _, code = e.run("fake\nacc\nq\n", true, "config")
+	if code != 0 || !strings.Contains(out, "Replace it? [y/N]: ") || !strings.Contains(out, "Nothing saved for this account.") {
+		t.Errorf("quit at replace: code %d\n%s", code, out)
+	}
+}
+
+func TestWizardInterrupted(t *testing.T) {
+	e := newTestEnv(t)
+
+	// Ctrl-C while a prompt waits: stdin never answers, the context is cancelled.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	var out, errOut bytes.Buffer
+	a := &app{stdin: pr, stdout: &out, stderr: &errOut, isTTY: func() bool { return true }}
+	code := a.run(ctx, []string{"--config", e.cfgPath, "config"})
+	if code != 3 || errOut.String() != "ump: interrupted\n" {
+		t.Errorf("interrupted at prompt: code %d, stderr %q\n%s", code, errOut.String(), out.String())
+	}
+	if _, err := os.Stat(e.cfgPath); !os.IsNotExist(err) {
+		t.Error("config file was created")
+	}
+
+	// Ctrl-C during hidden input: the abandoned read never returns, so the
+	// terminal state captured before it must be restored by the wizard.
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	restored := false
+	out.Reset()
+	errOut.Reset()
+	a = &app{
+		stdin:  strings.NewReader("fake\nacc\n1\ncarol\n"),
+		stdout: &out,
+		stderr: &errOut,
+		isTTY:  func() bool { return true },
+		readSecret: func() (string, error) {
+			cancel()  // "Ctrl-C" arrives while the read is pending
+			select {} // and the read stays blocked forever
+		},
+		saveTerm: func() func() { return func() { restored = true } },
+	}
+	code = a.run(ctx, []string{"--config", e.cfgPath, "config"})
+	if code != 3 || errOut.String() != "ump: interrupted\n" || !restored {
+		t.Errorf("interrupted in secret: code %d, stderr %q, restored %v\n%s", code, errOut.String(), restored, out.String())
+	}
+	if !strings.HasSuffix(out.String(), "Password: \n") {
+		t.Errorf("prompt line not closed before the error:\n%q", out.String())
+	}
+	if _, err := os.Stat(e.cfgPath); !os.IsNotExist(err) {
+		t.Error("config file was created")
+	}
+
+	// a cancelled listing is "interrupted" too, not a provider error
+	e.write(testConfig)
+	out.Reset()
+	errOut.Reset()
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	a = &app{stdin: strings.NewReader(""), stdout: &out, stderr: &errOut}
+	code = a.run(ctx, []string{"--config", e.cfgPath, "get", "servers"})
+	if code != 3 || errOut.String() != "ump: interrupted\n" {
+		t.Errorf("interrupted listing: code %d, stderr %q", code, errOut.String())
 	}
 }
