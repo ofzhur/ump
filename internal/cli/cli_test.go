@@ -217,6 +217,17 @@ type testEnv struct {
 	versionAfter  int
 	kexeced       bool
 	versionPolls  int
+	// the installer: installs records its command lines; installExit
+	// makes it fail, installNoScript makes the fetch fail; reboots counts
+	// the reboots asked over SSH; booted: the installed system answers
+	// (bootFails: nothing with UMP's key answers after the reboot)
+	installs        []string
+	installExit     int
+	installNoScript bool
+	reboots         int
+	installed       bool
+	booted          bool
+	bootFails       bool
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -271,6 +282,7 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 		},
 	}
 	e.kexeced, e.versionPolls = false, 0
+	e.installed, e.booted, e.reboots = false, false, 0
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
@@ -308,6 +320,30 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 		}
 		e.kexeced = true
 		return "==> downloading the rescue image for amd64\n==> booting into the UMP rescue system; reconnect as root@203.0.113.10\n", "Connection reset by peer\n", 255
+	case strings.Contains(cmd, "/install/install.sh"):
+		e.installs = append(e.installs, cmd)
+		if e.installNoScript {
+			return "", "curl: (22) The requested URL returned error: 404\n", 22
+		}
+		if e.installExit != 0 {
+			return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n", "install.sh: no disk found\n", e.installExit
+		}
+		if strings.Contains(cmd, "--dry-run") {
+			return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n==> dry run: stopping here, no disk was touched\n", "", 0
+		}
+		e.installed = true
+		return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n==> installed: ubuntu-26.04 2026.10.12 (kernel 7.0.0-39-generic) as web-01 on vg0/root (17000 MB over 1 disk(s)); reboot to start it\n", "", 0
+	case cmd == "systemctl reboot":
+		e.reboots++
+		if e.installed && !e.bootFails {
+			e.kexeced, e.inImage, e.booted = false, false, true
+		}
+		return "", "Connection reset by peer\n", 255
+	case strings.HasPrefix(cmd, "sed -n 's/^PRETTY_NAME=//p' /etc/os-release"):
+		if e.booted {
+			return "Ubuntu 26.04.1 LTS\n/dev/mapper/vg0-root\nos=ubuntu-26.04 hostname=web-01 \n", "", 0
+		}
+		return "", "root@203.0.113.10: Permission denied (publickey).\n", 255
 	case cmd == "cat /etc/ump-rescue-version":
 		if e.kexeced || e.inImage {
 			e.versionPolls++
@@ -1882,6 +1918,138 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	} {
 		if _, errOut, code := e.run("", false, c.args...); code != 2 || !strings.Contains(errOut, c.msg) {
 			t.Errorf("%v: code %d, %q", c.args, code, errOut)
+		}
+	}
+}
+
+func installerPrefix(storage string) string {
+	return `f=/tmp/ump-install.sh; if command -v curl >/dev/null; then curl -fsSL ` + storage + `/install/install.sh -o "$f"; else wget -q -O "$f" ` + storage + `/install/install.sh; fi && bash "$f" --storage ` + storage + ` `
+}
+
+func TestInstallServer(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+
+	// through the provider's rescue system, the installer, a reboot, and
+	// the new system answering with UMP's key
+	out, errOut, code := e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 {
+		t.Fatalf("install: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	for _, want := range []string{
+		"Checking root access to 203.0.113.10 over SSH ... no.\n",
+		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+		"Installing ubuntu-26.04 on web-01 as web-01 ...\n",
+		"==> installed: ubuntu-26.04 2026.10.12",
+		"Rebooting web-01 into ubuntu-26.04 ...\n",
+		"Waiting for SSH on 203.0.113.10 to go down ...",
+		"web-01 is up: Ubuntu 26.04.1 LTS, hostname web-01, root on /dev/mapper/vg0-root.\n",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("progress line missing: %q in\n%s", want, errOut)
+		}
+	}
+	if out != "" {
+		t.Errorf("stdout: %q", out)
+	}
+	if len(e.installs) != 1 || !strings.HasPrefix(e.installs[0], installerPrefix("https://ump.zhurko.de")+"--os ubuntu-26.04 --hostname web-01") || strings.Contains(e.installs[0], "--ipv6") || strings.Contains(e.installs[0], "--mitigations") || strings.Contains(e.installs[0], "--dry-run") {
+		t.Errorf("installer command: %q", e.installs)
+	}
+	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard,unrescue" {
+		t.Errorf("provider actions: %s", got)
+	}
+	if e.reboots != 1 || len(e.sshCalls) != 0 {
+		t.Errorf("reboots %d, ssh hand-overs %v", e.reboots, e.sshCalls)
+	}
+
+	// the options reach the installer; --storage moves the rescue image too;
+	// the user's own public key goes along
+	resetFakePower()
+	e.directRoot = true
+	sshDir := filepath.Join(os.Getenv("HOME"), ".ssh")
+	os.MkdirAll(sshDir, 0o700)
+	os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("private\n"), 0o600)
+	os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop\n"), 0o644)
+	out, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one", "--hostname", "db-01.example.net", "--ipv6", "--mitigations", "--disks", "/dev/sda,/dev/sdb", "--timezone", "Europe/Berlin", "--storage", "https://files.example.net/ump/", "-o", "json")
+	if code != 0 {
+		t.Fatalf("install with options: code %d\n%s", code, out)
+	}
+	if !strings.HasPrefix(e.installs[1], installerPrefix("https://files.example.net/ump")+"--os ubuntu-26.04 --hostname db-01.example.net --ipv6 --mitigations --disks /dev/sda,/dev/sdb --timezone Europe/Berlin") {
+		t.Errorf("installer command with options: %q", e.installs[1])
+	}
+	if entries := e.entryCommands(); len(entries) != 2 || !strings.HasPrefix(entries[1], entryPrefix("https://files.example.net/ump/rescue")) || !strings.Contains(entries[1], "-K 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop'") {
+		t.Errorf("rescue entry with --storage and the user's key: %q", entries)
+	}
+	os.RemoveAll(sshDir)
+	if len(fakePower.actions) != 0 {
+		t.Errorf("direct installation must not touch the provider: %v", fakePower.actions)
+	}
+	for _, want := range []string{`"os": "ubuntu-26.04"`, `"hostname": "db-01.example.net"`, `"via": "direct"`, `"rebooted": true`, `"name": "Ubuntu 26.04.1 LTS"`, `"root": "/dev/mapper/vg0-root"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json: %q missing in\n%s", want, out)
+		}
+	}
+	e.directRoot = false
+
+	// the storage from the configuration
+	resetFakePower()
+	e.write(testConfig + "storage: https://mirror.example.org/ump\n")
+	_, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 || !strings.HasPrefix(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
+		t.Errorf("configured storage: code %d, %q, %q", code, e.installs[2], e.entryCommands()[2])
+	}
+	e.write(testConfig)
+
+	// --dry-run plans and leaves the server in the rescue system; --no-reboot installs and leaves it there
+	resetFakePower()
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--dry-run", "--account", "one")
+	if code != 0 || !strings.Contains(e.installs[3], " --dry-run") || e.reboots != 0 || !strings.Contains(errOut, "Dry run done; web-01 stays in the UMP rescue system (ump ssh server web-01 --staging).") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
+		t.Errorf("--dry-run: code %d, reboots %d, actions %v, stderr %q", code, e.reboots, fakePower.actions, errOut)
+	}
+	resetFakePower()
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--no-reboot", "--account", "one")
+	if code != 0 || e.reboots != 0 || !strings.Contains(errOut, "Installed; web-01 stays in the UMP rescue system, a reboot starts ubuntu-26.04.") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard,unrescue" {
+		t.Errorf("--no-reboot: code %d, reboots %d, actions %v, stderr %q", code, e.reboots, fakePower.actions, errOut)
+	}
+
+	// failures: the installer fails, the installer cannot be fetched, the new system does not answer
+	resetFakePower()
+	e.installExit = 1
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "install.sh: no disk found") || !strings.Contains(errOut, "ump: the installation on web-01 failed (exit status 1); the server stays in the UMP rescue system (ump ssh server web-01 --staging)") || e.reboots != 0 {
+		t.Errorf("failed installation: code %d, reboots %d, %q", code, e.reboots, errOut)
+	}
+	e.installExit = 0
+	resetFakePower()
+	e.installNoScript = true
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the installer from https://ump.zhurko.de/install/install.sh (exit status 22); the server must reach the storage") {
+		t.Errorf("no installer: code %d, %q", code, errOut)
+	}
+	e.installNoScript = false
+	resetFakePower()
+	e.bootFails = true
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "SSH answers on 203.0.113.10, but not with UMP's key; the new system may not have booted") {
+		t.Errorf("boot failure: code %d, %q", code, errOut)
+	}
+	e.bootFails = false
+
+	// usage and confirmation
+	for _, c := range []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"install", "server", "web-01", "--account", "one"}, 3, "needs confirmation"},
+		{[]string{"install", "server", "web-01", "--yes", "--hostname", "bad host", "--account", "one"}, 2, "invalid name"},
+		{[]string{"install", "server", "web-01", "--yes", "--via", "magic", "--account", "one"}, 2, `unknown --via "magic"`},
+		{[]string{"install", "server", "web-01", "--yes", "--os", "../x", "--account", "one"}, 2, "invalid --os"},
+		{[]string{"install", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
+	} {
+		if _, errOut, code := e.run("", false, c.args...); code != c.code || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d (want %d), %q", c.args, code, c.code, errOut)
 		}
 	}
 }

@@ -1,0 +1,3 @@
+# UMP: the CPU frequency governor; tuned's throughput-performance profile
+# sets the same. Change to "schedutil" or "powersave" to trade speed for power.
+GOVERNOR="performance"

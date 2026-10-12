@@ -177,6 +177,7 @@ configured provider account, ` + "`ump describe server NAME`" + ` shows one in d
 	root.AddCommand(a.newStartCmd())
 	root.AddCommand(a.newStopCmd())
 	root.AddCommand(a.newRescueCmd())
+	root.AddCommand(a.newInstallCmd())
 	root.AddCommand(a.newUnrescueCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())

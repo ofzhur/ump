@@ -1,0 +1,78 @@
+# Packages of the UMP Ubuntu base image, one per line. The kernel and the
+# boot loader packages of the architecture are added by build.sh.
+# Recommends are not installed.
+
+# init and base system
+systemd
+systemd-sysv
+systemd-resolved
+systemd-timesyncd
+udev
+dbus
+kmod
+apt
+apt-utils
+ubuntu-keyring
+ca-certificates
+tzdata
+sudo
+bash
+bash-completion
+coreutils
+util-linux
+procps
+less
+vim
+tmux
+htop
+rsync
+curl
+wget
+gnupg
+logrotate
+python3
+
+# boot
+initramfs-tools
+zstd
+grub2-common
+efibootmgr
+
+# disks
+lvm2
+mdadm
+e2fsprogs
+dosfstools
+gdisk
+parted
+smartmontools
+nvme-cli
+hdparm
+
+# network
+netplan.io
+iproute2
+iputils-ping
+ethtool
+openssh-server
+openssh-client
+mtr-tiny
+tcpdump
+
+# hardware
+pciutils
+usbutils
+dmidecode
+lshw
+
+# performance
+tuned
+cpufrequtils
+numactl
+
+# tools
+jq
+unzip
+xz-utils
+bzip2
+git

@@ -20,9 +20,12 @@ PLATFORMS  ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 export CGO_ENABLED := 0
 
 RESCUE_ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+OS_ARCH     ?= $(RESCUE_ARCH)
+# the images carry the day they were built as their version
+IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help rescue-image rescue-test upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help rescue-image rescue-test os-image upload
 
 all: build
 
@@ -46,8 +49,8 @@ fmt-check:
 	if [ -n "$$out" ]; then echo "files need gofmt:"; echo "$$out"; exit 1; fi
 
 scripts-check: ## syntax-check the shell scripts of the rescue image
-	@for f in images/rescue/*.sh; do bash -n "$$f" || exit 1; done
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup
+	@for f in images/*.sh images/rescue/*.sh images/ubuntu/*.sh install/*.sh; do bash -n "$$f" || exit 1; done
+	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/ubuntu/finish.sh
 
 check: fmt-check vet test scripts-check ## gofmt, go vet, the tests and the script syntax checks
 
@@ -65,13 +68,17 @@ clean: ## remove the binary and dist/
 
 rescue-image: ## build the rescue image for RESCUE_ARCH (amd64|arm64) in a privileged Debian container
 	$(CONTAINER) run --rm --privileged \
-		-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(VERSION) debian:trixie ./build.sh $(RESCUE_ARCH)
+		-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $(RESCUE_ARCH)
+
+os-image: ## build the Ubuntu base image for OS_ARCH (amd64|arm64) in a privileged Debian container
+	$(CONTAINER) run --rm --privileged \
+		-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $(OS_ARCH)
 
 rescue-test: ## boot the built rescue image for RESCUE_ARCH in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(RESCUE_ARCH)
 
-upload: ## publish every built rescue image (images/rescue/out/*) and the entry script to R2 (STORE_* from the environment)
-	images/rescue/upload.sh
+upload: ## publish every built image (rescue and OS) and the scripts to R2 (STORE_* from the environment)
+	images/upload.sh
 
 images/rescue/out/%/manifest.json:
 	$(MAKE) rescue-image RESCUE_ARCH=$*

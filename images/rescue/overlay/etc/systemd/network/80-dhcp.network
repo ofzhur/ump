@@ -9,3 +9,7 @@ IPv6AcceptRA=yes
 
 [DHCPv4]
 UseHostname=no
+UseDNS=no
+
+[IPv6AcceptRA]
+UseDNS=no

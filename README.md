@@ -15,11 +15,14 @@ base OS, identical users and SSH access, a network configuration in the
 same format, and a clean handoff to your configuration management (Ansible
 or anything else).
 
-> **Status:** early implementation. The CLI skeleton, the configuration
-> wizard, and server listing and details for Hetzner Robot, Hetzner Cloud
-> and OVHcloud exist (see [Getting started](#getting-started)). Everything else in
-> these documents is design: it captures the ideas and the intended
-> architecture so that the implementation starts from a shared picture.
+> **Status:** early implementation. The CLI, the configuration wizard,
+> server listing, details, renaming, reverse DNS, power and rescue for
+> Hetzner Robot, Hetzner Cloud and OVHcloud exist, as do UMP's own rescue
+> system and the first installation: `ump install server` puts Ubuntu
+> 26.04 on every disk of a server as one linear volume group (see
+> [Getting started](#getting-started)). The rest of these documents is
+> design: it captures the ideas and the intended architecture so that the
+> implementation starts from a shared picture.
 
 ## Principles
 
@@ -162,7 +165,9 @@ apart. See [the skill](docs/skill.md).
 | [Disk layouts](docs/disk-layouts.md) | The declarative disk layout format |
 | [Providers](docs/providers.md) | Provider capabilities and planned integrations |
 | [Skill](docs/skill.md) | The UMP skill: operating a hybrid fleet and its Terraform/Ansible repository with an AI agent; reference repository layout; safety model |
-| [Rescue image](images/rescue/README.md) | UMP's own rescue system: one kernel and initramfs per architecture, built from Debian, entered with kexec from any provider's rescue system |
+| [Rescue image](images/rescue/README.md) | UMP's own rescue system: one kernel and initramfs per architecture, built from Debian, entered with kexec from any provider's rescue system or running system; also the layout of the storage that serves it |
+| [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu 26.04 system `ump install` puts on disks, and its defaults |
+| [Installer](install/README.md) | what `ump install` runs in the rescue system: disks, LVM, the image, the boot loader |
 | [Roadmap](docs/roadmap.md) | Milestones and open questions |
 
 ## Goals

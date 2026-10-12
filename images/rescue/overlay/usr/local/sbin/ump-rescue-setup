@@ -7,10 +7,11 @@
 #   ump.mac=aa:bb:cc:dd:ee:ff         the interface to configure (or ump.iface=NAME)
 #   ump.ip=203.0.113.10/26,203.0.113.1    IPv4 address/prefix and gateway (on-link)
 #   ump.ip6=2001:db8::2/64,fe80::1        IPv6 address/prefix and gateway
-#   ump.dns=1.1.1.1,9.9.9.9
+#   ump.dns=10.0.0.53,10.0.0.54         resolvers; default 1.1.1.1 and 8.8.8.8
 #
 # Without ump.ip/ump.ip6, every Ethernet interface uses DHCP and router
-# advertisements (80-dhcp.network).
+# advertisements (80-dhcp.network); the resolvers stay the public ones,
+# not the provider's, unless ump.dns says otherwise.
 set -u
 
 cmdline="$(cat /proc/cmdline)"
@@ -45,6 +46,7 @@ fi
 ip4="$(param ump.ip || true)"
 ip6="$(param ump.ip6 || true)"
 dns="$(param ump.dns || true)"
+[ -n "$dns" ] || dns="1.1.1.1,8.8.8.8"
 mac="$(param ump.mac || true)"
 iface="$(param ump.iface || true)"
 if [ -n "$ip4$ip6" ]; then
@@ -76,6 +78,11 @@ if [ -n "$ip4$ip6" ]; then
 	} > "$f"
 	chmod 644 "$f"
 fi
+# the same resolvers for DHCP interfaces (80-dhcp.network ignores the
+# lease's) and as the global fallback
+mkdir -p /etc/systemd/resolved.conf.d /etc/systemd/network/80-dhcp.network.d
+printf '[Resolve]\nDNS=%s\n' "$(echo "$dns" | tr ',' ' ')" > /etc/systemd/resolved.conf.d/ump.conf
+{ printf '[Network]\n'; echo "$dns" | tr ',' '\n' | sed 's/^/DNS=/'; } > /etc/systemd/network/80-dhcp.network.d/dns.conf
 
 # fresh host keys every boot: this system never keeps state
 ssh-keygen -A >/dev/null 2>&1 || true

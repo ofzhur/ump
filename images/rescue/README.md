@@ -52,11 +52,11 @@ other files. Publish the directory as is (`<base-url>/<arch>/...`);
 ## Publishing
 
 ```console
-$ make upload                              # every image built in out/, and the entry script
-$ images/rescue/upload.sh arm64            # one architecture
+$ make upload                              # every built image (rescue and OS) and the scripts
+$ images/upload.sh rescue                  # one kind: rescue, os or scripts
 ```
 
-[`upload.sh`](upload.sh) puts the files into an S3-compatible bucket
+[`images/upload.sh`](../upload.sh) puts the files into an S3-compatible bucket
 through its S3 API (any S3-compatible store works the same), using the
 AWS CLI or rclone, whichever is installed. The settings come from the
 environment, so that nothing is written down in the repository:
@@ -67,7 +67,7 @@ environment, so that nothing is written down in the repository:
 | `STORE_ENDPOINT` | the S3 endpoint URL, instead of `STORE_ACCOUNT_ID` |
 | `STORE_ACCESS_KEY_ID`, `STORE_SECRET_ACCESS_KEY` | an API token with object read and write on the bucket (from the store's console) |
 | `STORE_BUCKET` | the bucket |
-| `STORE_PREFIX` | key prefix in the bucket, default `rescue` |
+| `STORE_PREFIX` | key prefix in the bucket, default none (the bucket root is the storage) |
 | `DRY_RUN=1` | print what would be uploaded |
 
 Keep them in a file the shell sources, for example `~/.config/ump/r2.env`
@@ -78,37 +78,40 @@ $ set -a; . ~/.config/ump/r2.env; set +a
 $ make upload
 ```
 
-The layout in the bucket is `<prefix>/<arch>/` for the current image
-(what the kexec script and `ump` fetch), `<prefix>/v/<version>/<arch>/`
-for every version uploaded, kept for rollbacks, and
-`<prefix>/kexec-into-rescue.sh`; `manifest.json` goes up last, so a
-reader never sees a manifest whose files are not there yet.
-Give the bucket a public hostname (an R2 custom domain or `r2.dev`) and
-that hostname plus the prefix is the base URL, `staging.image` in the
-ump configuration and `-u` of the script. This project's images are
-published at `https://ump.zhurko.de/rescue`, which is ump's default.
+The layout in the bucket is the storage layout below; per image,
+`manifest.json` goes up last, so a reader never sees a manifest whose
+files are not there yet, and every version uploaded is kept under `v/`
+for rollbacks. Give the bucket a public hostname (an R2 custom domain or
+`r2.dev`) and that hostname is the storage, `storage` in the ump
+configuration; this project's is `https://ump.zhurko.de`, ump's default,
+and the rescue image's base URL is `<storage>/rescue`.
 
 ### Your own storage
 
 Nothing ties ump to that hostname: any web server or object store that
 answers plain `GET` requests, without authentication, redirects to login
 pages or bot challenges, and that the servers can reach, does. Set
-`staging.image: https://files.example.net/ump` in the configuration (or
-`--image` on `ump rescue`) and serve this below the base URL:
+`storage: https://files.example.net/ump` in the configuration (or
+`--storage` on `ump install`, `--image` on `ump rescue` for the rescue
+image alone) and serve this below it:
 
 | Path | What it is |
 |---|---|
-| `kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
-| `<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
-| `<arch>/vmlinuz` | the kernel |
-| `<arch>/initrd.zst` | the system, as a zstd-compressed initramfs |
-| `<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
-| `<arch>/SHA256SUMS`, `<arch>/packages.txt` | for people; nothing fetches them |
-| `v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
+| `rescue/kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
+| `rescue/<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
+| `rescue/<arch>/vmlinuz` | the rescue kernel |
+| `rescue/<arch>/initrd.zst` | the rescue system, as a zstd-compressed initramfs |
+| `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
+| `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
+| `os/<os>/<arch>/manifest.json` | an [OS image](../ubuntu/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
+| `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
+| `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
+| `rescue/v/<version>/<arch>/...`, `os/<os>/v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
 
-`<arch>` is `amd64` or `arm64`. `make upload` produces exactly this
-layout from `out/`, and `upload.sh` is a short script to adapt for a
-store that is not S3-compatible.
+`<arch>` is `amd64` or `arm64`, `<os>` is `ubuntu-26.04`. `make upload`
+produces exactly this layout from the built images, and
+[`images/upload.sh`](../upload.sh) is a short script to adapt for a store
+that is not S3-compatible.
 
 The clients of that hostname are rescue systems with `curl`, not
 browsers, and they come from datacenter address space. A bot protection in
@@ -150,7 +153,7 @@ before networkd and sshd and reads the kernel command line:
 | `ump.mac=aa:bb:cc:dd:ee:ff` | the interface to configure (or `ump.iface=NAME`) |
 | `ump.ip=203.0.113.10/26,203.0.113.1` | IPv4 address with prefix, and the gateway (on-link, so `/32` setups work) |
 | `ump.ip6=2001:db8::2/64,fe80::1` | IPv6 address with prefix, and the gateway |
-| `ump.dns=1.1.1.1,9.9.9.9` | resolvers |
+| `ump.dns=10.0.0.53,10.0.0.54` | resolvers; without it 1.1.1.1 and 8.8.8.8, also for DHCP interfaces (the lease's resolvers are ignored) |
 
 Without `ump.ip` and `ump.ip6`, every Ethernet interface uses DHCP and
 router advertisements, which is what cloud VMs need. SSH host keys are
@@ -197,7 +200,7 @@ forces one of the two ways.
 
 [`kexec-into-rescue.sh`](kexec-into-rescue.sh) downloads the image for
 the machine's architecture, verifies the checksums, takes the current
-address, gateway, DNS, hostname, `console=` settings and `root`'s
+address, gateway, hostname, `console=` settings and `root`'s
 `authorized_keys` (which is where `ump rescue` put UMP's key) plus any
 `-K` keys, loads the image with `kexec` (the published static one, or the
 system's), syncs and remounts the file systems of a system that runs

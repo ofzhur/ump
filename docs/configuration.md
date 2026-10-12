@@ -68,12 +68,15 @@ accounts:
       - name: lab-01
         address: 192.0.2.50
 
+storage: https://ump.zhurko.de          # base URL of what UMP fetches onto machines: the rescue
+                                        # image (rescue/), the installer (install/) and the OS images
+                                        # (os/); this is the default, images/rescue/README.md says
+                                        # what a storage of your own must serve
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key; this is the default, generated
                                         # on first use (`ump config key` shows the public key)
-  image: https://ump.zhurko.de/rescue   # base URL of the UMP rescue image and entry script; this is
-                                        # the default; images/rescue/README.md says what a storage
-                                        # of your own must serve there
+  image: https://ump.zhurko.de/rescue   # the rescue image alone, when it lives elsewhere than
+                                        # <storage>/rescue
 ```
 
 ### Secret references

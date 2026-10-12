@@ -10,7 +10,7 @@
 #
 # Usage: kexec-into-rescue.sh -u https://example.net/ump/rescue [-a amd64|arm64]
 #            [-k AUTHORIZED_KEYS_FILE] [-K PUBLIC_KEY]... [-H HOSTNAME] [-i IFACE]
-#            [-c EXTRA_CMDLINE] [--no-exec] [--dry-run]
+#            [-d DNS,DNS] [-c EXTRA_CMDLINE] [--no-exec] [--dry-run]
 set -euo pipefail
 
 url="${UMP_RESCUE_URL:-}"
@@ -19,6 +19,7 @@ keys="/root/.ssh/authorized_keys"
 extra_keys=()
 host=""
 iface=""
+dns="1.1.1.1,8.8.8.8"
 extra=""
 exec_it=1
 dry=0
@@ -30,6 +31,7 @@ while [ $# -gt 0 ]; do
 	-K|--key) extra_keys+=("$2"); shift 2 ;;
 	-H|--hostname) host="$2"; shift 2 ;;
 	-i|--iface) iface="$2"; shift 2 ;;
+	-d|--dns) dns="$2"; shift 2 ;;
 	-c|--cmdline) extra="$2"; shift 2 ;;
 	--no-exec) exec_it=0; shift ;;
 	--dry-run) dry=1; shift ;;
@@ -90,17 +92,10 @@ ip4="$( { ip -o -4 addr show dev "$iface" scope global 2>/dev/null || true; } | 
 gw4="$( { ip -o -4 route show default dev "$iface" 2>/dev/null || true; } | first '{print $3}')"
 ip6="$( { ip -o -6 addr show dev "$iface" scope global 2>/dev/null || true; } | first '$0 !~ /deprecated|tentative|temporary/ {print $4}')"
 gw6="$( { ip -o -6 route show default dev "$iface" 2>/dev/null || true; } | first '{print $3}')"
-dns="$( { awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null || true; } | grep -v '^127\.' | paste -sd, - || true)"
-if [ -z "$dns" ] && command -v resolvectl >/dev/null; then
-	# the stub in resolv.conf hides the real servers: ask resolved for the
-	# link's list and, when that is empty because the servers are global
-	# (Hetzner's rescue system does that), for all of them; a %scope on a
-	# link-local server would name the old interface, so it goes
-	dns="$( { resolvectl dns "$iface" 2>/dev/null || true; resolvectl dns 2>/dev/null || true; } \
-		| sed 's/^[^:]*: *//; s/%[^ ]*//g' | tr ' ' '\n' | grep -v -e '^$' -e '^127\.' | awk '!seen[$0]++' | paste -sd, - || true)"
-fi
-[ -n "$dns" ] || dns="1.1.1.1,9.9.9.9"
 [ -n "$host" ] || host="$(hostname -s 2>/dev/null || echo ump-rescue)"
+# the resolvers are the public ones, not the provider's, unless -d says
+# otherwise; they go on the command line so that every image version
+# gets them, not only those with the same default built in
 
 # The running kernel knows which consoles this machine has (the provider's
 # rescue system was booted with the right ones); keep them, so that the

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,116 +201,53 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if err != nil {
 		return err
 	}
+	if providerOnly {
+		return a.providerRescueOnly(cmd, m, prov, keys, keyPath, keyPaths, command, o, format)
+	}
 	imageURL := strings.TrimRight(o.image, "/")
 	if imageURL == "" {
 		imageURL = cfg.StagingImage()
 	}
-	addr := m.IPv4
-	if addr == "" {
-		addr = m.IPv6
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != ""})
+	if err != nil {
+		return err
 	}
-	ctx := cmd.Context()
-	rs, hasRescue := prov.(provider.Rescue)
+	return a.connectRescue(cmd, m, entry.user, entry.addr, keyPath, keyPaths, command, o, format, "UMP rescue system",
+		&imageInfo{URL: imageURL, Version: entry.version, Via: entry.via}, entry.info)
+}
 
-	// The direct way: the server may already run the image, or let UMP in
-	// as root, in which case the provider is not needed at all.
-	if !providerOnly && o.via != "provider" && addr != "" {
-		fmt.Fprintf(a.stderr, "Checking root access to %s over SSH ...", addr)
-		identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
-		p, ok := a.probeHost(ctx, "root", addr, identities, false)
-		switch {
-		case ok && p.version != "":
-			fmt.Fprintf(a.stderr, " %s already runs the UMP rescue system %s.\n", m.Name, p.version)
-			return a.connectRescue(cmd, m, "root", addr, keyPath, keyPaths, command, o, format, "UMP rescue system",
-				&imageInfo{URL: imageURL, Version: p.version, Via: "running"}, nil)
-		case ok && p.root:
-			fmt.Fprintf(a.stderr, " yes (%s).\n", nonEmpty(p.os, "unknown system"))
-			if err := a.confirm(cmd, o.yes, fmt.Sprintf("Load the UMP rescue image on %s over SSH and kexec into it? The running system ends without a shutdown.", describeRef(m))); err != nil {
-				return err
-			}
-			fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s, without the provider's rescue system.\n", imageURL, m.Name)
-			if err := a.enterImage(ctx, "root", addr, identities, false, imageURL, rescueHostname(m.Name), keys); err != nil {
-				return err
-			}
-			version, err := a.waitForImage(ctx, addr, keyPath)
-			if err != nil {
-				return err
-			}
-			return a.connectRescue(cmd, m, "root", addr, keyPath, keyPaths, command, o, format, "UMP rescue system",
-				&imageInfo{URL: imageURL, Version: version, Via: "direct"}, nil)
-		case ok:
-			fmt.Fprintln(a.stderr, " no (not root).")
-		default:
-			fmt.Fprintln(a.stderr, " no.")
-		}
-		if o.via == "direct" {
-			return withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH; --via provider goes through the provider's rescue system", addr))
-		}
-		if !hasRescue {
-			return fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system", addr, m.Provider)
-		}
-		fmt.Fprintln(a.stderr, "Going through the provider's rescue system.")
-	}
-
-	if !hasRescue {
+// providerRescueOnly is the rescue command with the provider's rescue
+// system as the destination (--no-image, --no-reboot, --no-wait).
+func (a *app) providerRescueOnly(cmd *cobra.Command, m provider.Machine, prov provider.Provider, keys []provider.PublicKey, keyPath string, keyPaths, command []string, o rescueOptions, format outputFormat) error {
+	rs, ok := prov.(provider.Rescue)
+	if !ok {
 		return fmt.Errorf("account %s: provider type %s has no rescue system", m.Account, m.Provider)
 	}
 	pw, canReboot := prov.(provider.Power)
 	if !o.noReboot && !canReboot {
 		return fmt.Errorf("account %s: provider type %s cannot reboot; use --no-reboot and reboot the server yourself", m.Account, m.Provider)
 	}
-	var question string
-	switch {
-	case o.noReboot:
+	question := fmt.Sprintf("Boot %s into the provider's rescue system?", describeRef(m))
+	if o.noReboot {
 		question = fmt.Sprintf("Arm the rescue system for the next boot of %s?", describeRef(m))
-	case providerOnly:
-		question = fmt.Sprintf("Boot %s into the provider's rescue system?", describeRef(m))
-	default:
-		question = fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))
 	}
 	if err := a.confirm(cmd, o.yes, question); err != nil {
 		return err
 	}
-	wasUp := !o.noReboot && !o.noWait && a.probe(ctx, m.IPv4)
-	info, err := rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys})
-	if err != nil {
-		return fmt.Errorf("account %s: %w", m.Account, err)
-	}
-	rebooted := info.Reboots
-	if !o.noReboot && !info.Reboots {
-		if err := pw.Reboot(ctx, m, provider.RebootHard); err != nil {
-			return fmt.Errorf("account %s: rescue system enabled, but the reboot failed: %w", m.Account, err)
-		}
-		rebooted = true
-	}
-	user := info.User
-	if user == "" {
-		user = "root"
-	}
-	argv := sshArgs(user, info.Address, []string{keyPath}, true, true, command)
-	if providerOnly && format != "" {
-		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Keys: keyPaths, SSH: shellJoin(argv)}, format)
-	}
-	// with an encoded result to come, the progress must not get into it
+	ctx := cmd.Context()
+	// with an encoded result to come, the progress must not get into it;
+	// the encoded result itself comes right away, there is nothing to wait for
 	out := a.stdout
 	if format != "" {
-		out = a.stderr
+		out = io.Discard
 	}
-	switch {
-	case rebooted:
-		fmt.Fprintf(out, "Rescue system enabled for %s; rebooting into it.\n", describeRef(m))
-	default:
-		fmt.Fprintf(out, "Rescue system enabled for %s; it boots at the next reboot.\n", describeRef(m))
+	info, user, rebooted, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPaths, out, o.noReboot)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(out, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
-	if info.Password != "" {
-		fmt.Fprintf(out, "Password: %s\n", info.Password)
-	}
-	if len(info.HostKeys) > 0 {
-		fmt.Fprintf(out, "Host key fingerprints: %s\n", strings.Join(info.HostKeys, ", "))
-	}
-	if info.Note != "" {
-		fmt.Fprintf(out, "Note: %s\n", info.Note)
+	argv := sshArgs(user, info.Address, []string{keyPath}, true, true, command)
+	if format != "" {
+		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Keys: keyPaths, SSH: shellJoin(argv)}, format)
 	}
 	if info.Address == "" {
 		return nil
@@ -321,31 +259,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if err := a.waitForSSH(ctx, info.Address, wasUp); err != nil {
 		return err
 	}
-	if providerOnly {
-		return a.connectRescue(cmd, m, user, info.Address, keyPath, keyPaths, command, o, format, "rescue system", nil, info)
-	}
-
-	// The provider's rescue system is only the first hop.
-	p, ok := a.probeHost(ctx, user, info.Address, []string{keyPath}, true)
-	if !ok {
-		manual := shellJoin(sshArgs(user, info.Address, []string{keyPath}, true, true, nil))
-		return withExit(exitUnreachable, fmt.Errorf("the rescue system of %s did not accept UMP's key; connect by hand (%s) and run: curl -fsSL %s/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u %s", m.Name, manual, imageURL, imageURL))
-	}
-	if p.version != "" {
-		fmt.Fprintf(a.stderr, "%s already runs the UMP rescue system %s.\n", m.Name, p.version)
-		return a.connectRescue(cmd, m, user, info.Address, keyPath, keyPaths, command, o, format, "UMP rescue system",
-			&imageInfo{URL: imageURL, Version: p.version, Via: "running"}, info)
-	}
-	fmt.Fprintf(a.stderr, "Provider rescue system reached (%s); loading the UMP rescue image from %s.\n", nonEmpty(p.os, "unknown system"), imageURL)
-	if err := a.enterImage(ctx, user, info.Address, []string{keyPath}, true, imageURL, rescueHostname(m.Name), keys); err != nil {
-		return err
-	}
-	version, err := a.waitForImage(ctx, info.Address, keyPath)
-	if err != nil {
-		return err
-	}
-	return a.connectRescue(cmd, m, "root", info.Address, keyPath, keyPaths, command, o, format, "UMP rescue system",
-		&imageInfo{URL: imageURL, Version: version, Via: "provider"}, info)
+	return a.connectRescue(cmd, m, user, info.Address, keyPath, keyPaths, command, o, format, "rescue system", nil, info)
 }
 
 // connectRescue is the last step: the terminal is handed over to ssh, or

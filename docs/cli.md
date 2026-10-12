@@ -50,6 +50,7 @@ ump
 ├── start        server <ref> [--wait]
 ├── stop         server <ref> [--hard] [--yes]
 ├── rescue       server <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
+├── install      server <ref> [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
 ├── unrescue     server <ref> [--reboot] [--wait] [--yes]
 ├── ssh          server <ref> [--user <name>] [--staging] [-- command]
 ├── config                                         interactive wizard: add an account, test it, save it
@@ -370,6 +371,69 @@ system itself runs from RAM, so a reset leaves it; whether that boots
 from disk depends on the provider: Hetzner clears its rescue flag once
 its rescue system has booted, OVHcloud dedicated servers keep rescue as
 their boot option until `unrescue`.
+
+## Install: `ump install server`
+
+```
+ump install server REF [--os ubuntu-26.04] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+```
+
+Puts an operating system on the server's disks from a [UMP base
+image](../images/ubuntu/README.md) and boots it. The server is brought
+into the UMP rescue system the way `rescue` does it (as it is when it
+runs it already, by a kexec from the running system when that lets UMP
+in as root, else through the provider's rescue system); the
+[installer](../install/README.md) is fetched from the storage and run
+there, with its progress shown; the server is rebooted into the new
+system; ump waits until it answers over SSH with UMP's key and reports
+what came up:
+
+```console
+$ ump install server web-01
+Install ubuntu-26.04 on hetzner-cloud/123 (web-01, 203.0.113.10) as web-01? Every disk of the server is erased. [y/N] y
+Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 24.04.3 LTS).
+Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.
+...
+Waiting for the UMP rescue system on 203.0.113.10 ... up after 11s (ump-rescue 2026.10.13).
+Installing ubuntu-26.04 on web-01 as web-01 ...
+==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM
+==> disks (1): /dev/sda (19.1G SSD)
+==> layout lvm-linear: /dev/sda gets 1 MiB BIOS boot, 512 MiB EFI (vfat), 1 GiB /boot (ext4) and the rest as LVM; ...
+...
+==> installed: ubuntu-26.04 2026.10.13 (kernel 7.0.0-39-generic) as web-01 on vg0/root (17000 MB over 1 disk(s)); reboot to start it
+Rebooting web-01 into ubuntu-26.04 ...
+Waiting for SSH on 203.0.113.10 to go down ... down after 4s.
+Waiting for SSH on 203.0.113.10 ... up after 18s.
+web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root.
+```
+
+Every disk of the server is erased. The default layout, `lvm-linear`,
+puts the boot partitions on the first disk and makes every disk a
+physical volume of one volume group, with root as one linear volume over
+all of it (`--disks` limits the disks). The new system gets the server's
+name as hostname (`--hostname` for another; it must be a valid one), the
+address, gateway and interface of the rescue system (which `rescue`
+carried over from the running system), resolvers 1.1.1.1 and 8.8.8.8,
+root with UMP's key and the keys the rescue system had (`--ssh-key` adds
+files), the time zone (`--timezone`, default UTC), and a kernel command
+line with `mitigations=off` and `ipv6.disable=1`. Both cost performance
+and most servers need neither; `--mitigations` and `--ipv6` keep them on,
+and [the installer's README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
+says how to turn them on later. `--os` names the image (`ubuntu-26.04`
+is the first and so far the only one), `--storage` another storage than
+the configured one for the installer, the images and the rescue image.
+
+`--dry-run` brings the server into the rescue system, prints the
+installer's plan (machine, disks, layout, network, keys) and leaves it
+there without touching a disk. `--no-reboot` installs and leaves the
+server in the rescue system. `-o json` prints the result (the way in, the
+hostname, what answered after the reboot). Exit status 1 means the
+installer failed (its output says where; the server stays in the rescue
+system, `ump ssh server REF --staging` gets there), 5 that the new system
+did not answer after the reboot (look at the server's console). Providers
+that keep their rescue system as the boot option (OVHcloud) have it
+disabled before the reboot. Asks for confirmation on a terminal; without
+one, `--yes` is required.
 
 ## `ump ssh server`
 

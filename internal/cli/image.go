@@ -3,12 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/sshkey"
 )
 
 // imageWaitTimeout is how long the UMP rescue system has to answer after
@@ -63,11 +67,9 @@ func (a *app) probeHost(ctx context.Context, user, addr string, identities []str
 	return p, true
 }
 
-// entryCommand is what runs on the machine to load the image: it fetches
-// the entry script from the base URL (with curl, or wget where there is
-// no curl) and runs it with the base URL, the hostname and the keys to
-// carry over. Nothing is bundled with ump: the storage behind the base
-// URL is the one source, see images/rescue/README.md for what it serves.
+// entryCommand is what runs on the machine to load the image: the entry
+// script, fetched from the base URL, with the base URL, the hostname and
+// the keys to carry over.
 func entryCommand(url, hostname string, keys []provider.PublicKey) string {
 	args := []string{"-u", url}
 	if hostname != "" {
@@ -76,8 +78,7 @@ func entryCommand(url, hostname string, keys []provider.PublicKey) string {
 	for _, k := range keys {
 		args = append(args, "-K", k.Data)
 	}
-	script := shellJoin([]string{url + "/kexec-into-rescue.sh"})
-	return fmt.Sprintf(`f=/tmp/kexec-into-rescue.sh; if command -v curl >/dev/null; then curl -fsSL %s -o "$f"; else wget -q -O "$f" %s; fi && bash "$f" %s`, script, script, shellJoin(args))
+	return fetchAndRun(url+"/kexec-into-rescue.sh", "/tmp/kexec-into-rescue.sh", args)
 }
 
 // enterImage loads the image on the machine as user: the entry script
@@ -166,4 +167,177 @@ func nonEmpty(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// fetchAndRun is a shell command that fetches a script from the storage
+// (with curl, or wget where there is no curl) to path on the machine and
+// runs it with args. Nothing is bundled with ump: the storage is the one
+// source, see images/rescue/README.md for what it serves.
+func fetchAndRun(url, path string, args []string) string {
+	src := shellJoin([]string{url})
+	return fmt.Sprintf(`f=%s; if command -v curl >/dev/null; then curl -fsSL %s -o "$f"; else wget -q -O "$f" %s; fi && bash "$f" %s`, path, src, src, shellJoin(args))
+}
+
+// entryOptions say how a server is brought into the UMP rescue system.
+type entryOptions struct {
+	// via is auto (the default), direct or provider.
+	via string
+	// yes skips the questions (--yes); confirmed says the caller asked
+	// its own question already, so none is asked here either.
+	yes, confirmed bool
+	// quiet sends the provider's rescue details to stderr, because an
+	// encoded result follows on stdout.
+	quiet bool
+}
+
+// imageEntry is how a server was brought into the UMP rescue system and
+// how to reach it there.
+type imageEntry struct {
+	addr    string
+	user    string
+	version string
+	// via is running (it was there already), direct (a kexec from the
+	// running system) or provider (through its rescue system).
+	via string
+	// info is the provider's rescue system, when it was the way in.
+	info *provider.RescueInfo
+}
+
+// enableProviderRescue arms the provider's rescue system with the keys,
+// resets the server into it unless noReboot, and prints what the provider
+// gave (password, host keys, notes) to out.
+func (a *app) enableProviderRescue(ctx context.Context, m provider.Machine, rs provider.Rescue, pw provider.Power, keys []provider.PublicKey, keyPaths []string, out io.Writer, noReboot bool) (info *provider.RescueInfo, user string, rebooted, wasUp bool, err error) {
+	wasUp = !noReboot && a.probe(ctx, m.IPv4)
+	info, err = rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys})
+	if err != nil {
+		return nil, "", false, false, fmt.Errorf("account %s: %w", m.Account, err)
+	}
+	rebooted = info.Reboots
+	if !noReboot && !info.Reboots {
+		if err := pw.Reboot(ctx, m, provider.RebootHard); err != nil {
+			return nil, "", false, false, fmt.Errorf("account %s: rescue system enabled, but the reboot failed: %w", m.Account, err)
+		}
+		rebooted = true
+	}
+	user = info.User
+	if user == "" {
+		user = "root"
+	}
+	if rebooted {
+		fmt.Fprintf(out, "Rescue system enabled for %s; rebooting into it.\n", describeRef(m))
+	} else {
+		fmt.Fprintf(out, "Rescue system enabled for %s; it boots at the next reboot.\n", describeRef(m))
+	}
+	fmt.Fprintf(out, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
+	if info.Password != "" {
+		fmt.Fprintf(out, "Password: %s\n", info.Password)
+	}
+	if len(info.HostKeys) > 0 {
+		fmt.Fprintf(out, "Host key fingerprints: %s\n", strings.Join(info.HostKeys, ", "))
+	}
+	if info.Note != "" {
+		fmt.Fprintf(out, "Note: %s\n", info.Note)
+	}
+	return info, user, rebooted, wasUp, nil
+}
+
+// bringToImage brings the server into the UMP rescue system and reports
+// how to reach it: a server that runs it already is left as it is, a
+// running system that lets UMP in as root kexecs into it, otherwise the
+// provider's rescue system is the first hop. It says what it does on
+// stderr.
+func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider.Provider, keys []provider.PublicKey, keyPath string, keyPaths []string, imageURL string, o entryOptions) (*imageEntry, error) {
+	ctx := cmd.Context()
+	addr := m.IPv4
+	if addr == "" {
+		addr = m.IPv6
+	}
+	rs, hasRescue := prov.(provider.Rescue)
+	ask := func(question string) error {
+		if o.confirmed {
+			return nil
+		}
+		return a.confirm(cmd, o.yes, question)
+	}
+	hostname := rescueHostname(m.Name)
+
+	if o.via != "provider" && addr != "" {
+		fmt.Fprintf(a.stderr, "Checking root access to %s over SSH ...", addr)
+		identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
+		p, ok := a.probeHost(ctx, "root", addr, identities, false)
+		switch {
+		case ok && p.version != "":
+			fmt.Fprintf(a.stderr, " %s already runs the UMP rescue system %s.\n", m.Name, p.version)
+			return &imageEntry{addr: addr, user: "root", version: p.version, via: "running"}, nil
+		case ok && p.root:
+			fmt.Fprintf(a.stderr, " yes (%s).\n", nonEmpty(p.os, "unknown system"))
+			if err := ask(fmt.Sprintf("Load the UMP rescue image on %s over SSH and kexec into it? The running system ends without a shutdown.", describeRef(m))); err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s, without the provider's rescue system.\n", imageURL, m.Name)
+			if err := a.enterImage(ctx, "root", addr, identities, false, imageURL, hostname, keys); err != nil {
+				return nil, err
+			}
+			version, err := a.waitForImage(ctx, addr, keyPath)
+			if err != nil {
+				return nil, err
+			}
+			return &imageEntry{addr: addr, user: "root", version: version, via: "direct"}, nil
+		case ok:
+			fmt.Fprintln(a.stderr, " no (not root).")
+		default:
+			fmt.Fprintln(a.stderr, " no.")
+		}
+		if o.via == "direct" {
+			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH; --via provider goes through the provider's rescue system", addr))
+		}
+		if !hasRescue {
+			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system", addr, m.Provider)
+		}
+		fmt.Fprintln(a.stderr, "Going through the provider's rescue system.")
+	}
+
+	if !hasRescue {
+		return nil, fmt.Errorf("account %s: provider type %s has no rescue system", m.Account, m.Provider)
+	}
+	pw, canReboot := prov.(provider.Power)
+	if !canReboot {
+		return nil, fmt.Errorf("account %s: provider type %s cannot reboot; use ump rescue --no-reboot and reboot the server yourself", m.Account, m.Provider)
+	}
+	if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))); err != nil {
+		return nil, err
+	}
+	out := a.stdout
+	if o.quiet {
+		out = a.stderr
+	}
+	info, user, _, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPaths, out, false)
+	if err != nil {
+		return nil, err
+	}
+	if info.Address == "" {
+		return nil, errors.New("the provider named no address for its rescue system")
+	}
+	if err := a.waitForSSH(ctx, info.Address, wasUp); err != nil {
+		return nil, err
+	}
+	// the provider's rescue system is only the first hop
+	p, ok := a.probeHost(ctx, user, info.Address, []string{keyPath}, true)
+	if !ok {
+		manual := shellJoin(sshArgs(user, info.Address, []string{keyPath}, true, true, nil))
+		return nil, withExit(exitUnreachable, fmt.Errorf("the rescue system of %s did not accept UMP's key; connect by hand (%s) and run: curl -fsSL %s/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u %s", m.Name, manual, imageURL, imageURL))
+	}
+	if p.version != "" {
+		fmt.Fprintf(a.stderr, "%s already runs the UMP rescue system %s.\n", m.Name, p.version)
+		return &imageEntry{addr: info.Address, user: user, version: p.version, via: "running", info: info}, nil
+	}
+	fmt.Fprintf(a.stderr, "Provider rescue system reached (%s); loading the UMP rescue image from %s.\n", nonEmpty(p.os, "unknown system"), imageURL)
+	if err := a.enterImage(ctx, user, info.Address, []string{keyPath}, true, imageURL, hostname, keys); err != nil {
+		return nil, err
+	}
+	version, err := a.waitForImage(ctx, info.Address, keyPath)
+	if err != nil {
+		return nil, err
+	}
+	return &imageEntry{addr: info.Address, user: "root", version: version, via: "provider", info: info}, nil
 }

@@ -31,7 +31,12 @@ const (
 type Config struct {
 	Defaults Defaults           `yaml:"defaults,omitempty"`
 	Accounts map[string]Account `yaml:"accounts,omitempty"`
-	Staging  Staging            `yaml:"staging,omitempty"`
+	// Storage is the base URL of the storage that serves what UMP
+	// fetches onto machines: the rescue image, the installer and the
+	// operating system images (see images/rescue/README.md for the
+	// layout). Default: DefaultStorage, the project's own.
+	Storage string  `yaml:"storage,omitempty"`
+	Staging Staging `yaml:"staging,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -52,23 +57,32 @@ type Staging struct {
 	Key string `yaml:"key,omitempty"`
 	// Image is the base URL of the UMP rescue image (the staging system):
 	// <arch>/manifest.json and the files it names live below it. Default:
-	// DefaultStagingImage, the image published for this project.
+	// the rescue directory of the storage.
 	Image string `yaml:"image,omitempty"`
 }
 
 // StagingKeyFile is the default name of UMP's SSH key.
 const StagingKeyFile = "staging_ed25519"
 
-// DefaultStagingImage is where the rescue image is published.
-const DefaultStagingImage = "https://ump.zhurko.de/rescue"
+// DefaultStorage is where this project publishes its images and scripts.
+const DefaultStorage = "https://ump.zhurko.de"
+
+// StorageURL returns the base URL of the storage, without a trailing
+// slash.
+func (c *Config) StorageURL() string {
+	if c.Storage != "" {
+		return strings.TrimRight(c.Storage, "/")
+	}
+	return DefaultStorage
+}
 
 // StagingImage returns the base URL of the rescue image, without a
-// trailing slash.
+// trailing slash: staging.image when set, else <storage>/rescue.
 func (c *Config) StagingImage() string {
 	if c.Staging.Image != "" {
 		return strings.TrimRight(c.Staging.Image, "/")
 	}
-	return DefaultStagingImage
+	return c.StorageURL() + "/rescue"
 }
 
 // StagingKeyPath returns the path of UMP's SSH private key.

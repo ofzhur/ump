@@ -26,7 +26,10 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 - Debian family driver, systemd-networkd renderer
 - disk layouts: GPT, md RAID, LVM, ext4/xfs/swap
 - QEMU integration tests: 1, 2 and 4 disks, UEFI and BIOS
-- `ump plan`, `ump install`, run logs
+- `ump plan`, `ump install`, run logs (first `ump install`: done for
+  Ubuntu 26.04 with the lvm-linear layout, through the UMP rescue
+  system, with the installer and the base image fetched from the storage;
+  next: more layouts and a benchmarking round)
 - no prompts without a TTY; `ump approve` and `--approved`
 
 ### M2 — Hetzner Robot
