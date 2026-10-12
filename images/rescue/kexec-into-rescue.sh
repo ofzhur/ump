@@ -79,7 +79,12 @@ ip6="$( { ip -o -6 addr show dev "$iface" scope global 2>/dev/null || true; } | 
 gw6="$( { ip -o -6 route show default dev "$iface" 2>/dev/null || true; } | first '{print $3}')"
 dns="$( { awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null || true; } | grep -v '^127\.' | paste -sd, - || true)"
 if [ -z "$dns" ] && command -v resolvectl >/dev/null; then
-	dns="$(resolvectl dns "$iface" 2>/dev/null | sed 's/^[^:]*: *//' | tr ' ' ',' | sed 's/,*$//')"
+	# the stub in resolv.conf hides the real servers: ask resolved for the
+	# link's list and, when that is empty because the servers are global
+	# (Hetzner's rescue system does that), for all of them; a %scope on a
+	# link-local server would name the old interface, so it goes
+	dns="$( { resolvectl dns "$iface" 2>/dev/null || true; resolvectl dns 2>/dev/null || true; } \
+		| sed 's/^[^:]*: *//; s/%[^ ]*//g' | tr ' ' '\n' | grep -v -e '^$' -e '^127\.' | awk '!seen[$0]++' | paste -sd, - || true)"
 fi
 [ -n "$dns" ] || dns="1.1.1.1,9.9.9.9"
 [ -n "$host" ] || host="$(hostname -s 2>/dev/null || echo ump-rescue)"

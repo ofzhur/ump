@@ -204,6 +204,13 @@ cloud instance class. Measured on the 2026.10.12 build:
 | unpacked in RAM | 236 MB | 266 MB |
 | boot, checks and kexec entry with 1 GB | passes (QEMU) | passes (QEMU) |
 
+The first run on a real machine, a Hetzner Cloud instance with 1 GB
+(937 MB visible to the kernel) on 2026-10-12, measured: the provider's
+rescue system used 202 MB; with the image loaded through
+`kexec_file_load` and the downloads deleted, 369 MB; the UMP rescue
+system after boot, 395 MB (253 MB of it the unpacked root file system),
+with 542 MB available. SSH answered about ten seconds after `kexec -e`.
+
 ## Limitations and next steps
 
 - One static network configuration on one interface; bonds and VLANs
