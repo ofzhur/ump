@@ -1953,8 +1953,12 @@ func TestInstallServer(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout: %q", out)
 	}
-	if len(e.installs) != 1 || !strings.HasPrefix(e.installs[0], installerPrefix("https://ump.zhurko.de")+"--os ubuntu-26.04 --hostname web-01") || strings.Contains(e.installs[0], "--ipv6") || strings.Contains(e.installs[0], "--mitigations") || strings.Contains(e.installs[0], "--dry-run") {
+	if len(e.installs) != 1 || !strings.Contains(e.installs[0], installerPrefix("https://ump.zhurko.de")+"--os ubuntu-26.04 --hostname web-01") || strings.Contains(e.installs[0], "--ipv6") || strings.Contains(e.installs[0], "--mitigations") || strings.Contains(e.installs[0], "--dry-run") {
 		t.Errorf("installer command: %q", e.installs)
+	}
+	// root's keys of the new system are put into the rescue system first
+	if !strings.HasPrefix(e.installs[0], `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in 'ssh-ed25519 `) || !strings.Contains(e.installs[0], `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; f=/tmp/ump-install.sh;`) {
+		t.Errorf("keys not ensured before the installer: %q", e.installs[0])
 	}
 	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard,unrescue" {
 		t.Errorf("provider actions: %s", got)
@@ -1975,7 +1979,7 @@ func TestInstallServer(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("install with options: code %d\n%s", code, out)
 	}
-	if !strings.HasPrefix(e.installs[1], installerPrefix("https://files.example.net/ump")+"--os ubuntu-26.04 --hostname db-01.example.net --ipv6 --mitigations --disks /dev/sda,/dev/sdb --timezone Europe/Berlin") {
+	if !strings.Contains(e.installs[1], installerPrefix("https://files.example.net/ump")+"--os ubuntu-26.04 --hostname db-01.example.net --ipv6 --mitigations --disks /dev/sda,/dev/sdb --timezone Europe/Berlin") || !strings.Contains(e.installs[1], "me@laptop' 'ssh-ed25519 ") && !strings.Contains(e.installs[1], "for k in 'ssh-ed25519 ") {
 		t.Errorf("installer command with options: %q", e.installs[1])
 	}
 	if entries := e.entryCommands(); len(entries) != 2 || !strings.HasPrefix(entries[1], entryPrefix("https://files.example.net/ump/rescue")) || !strings.Contains(entries[1], "-K 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop'") {
@@ -1996,7 +2000,7 @@ func TestInstallServer(t *testing.T) {
 	resetFakePower()
 	e.write(testConfig + "storage: https://mirror.example.org/ump\n")
 	_, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
-	if code != 0 || !strings.HasPrefix(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
+	if code != 0 || !strings.Contains(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
 		t.Errorf("configured storage: code %d, %q, %q", code, e.installs[2], e.entryCommands()[2])
 	}
 	e.write(testConfig)

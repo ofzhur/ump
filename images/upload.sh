@@ -97,7 +97,8 @@ copy() { # copy KEY NEWKEY: within the bucket, on the server; large files go up 
 		return 0
 	fi
 	case "$tool" in
-	aws) s3 cp "s3://$STORE_BUCKET/$1" "s3://$STORE_BUCKET/$2" ;;
+	# R2 has no object tagging, which a plain copy would ask for
+	aws) s3 cp --copy-props metadata-directive "s3://$STORE_BUCKET/$1" "s3://$STORE_BUCKET/$2" ;;
 	rclone) s3 copyto "upload:$STORE_BUCKET/$1" "upload:$STORE_BUCKET/$2" ;;
 	esac
 	echo "copied   s3://$STORE_BUCKET/$2"

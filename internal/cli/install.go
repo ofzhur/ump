@@ -194,7 +194,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		fmt.Fprintf(a.stderr, "Installing %s on %s as %s ...\n", o.os, m.Name, hostname)
 	}
 	installer := storage + "/install/install.sh"
-	argv := withSSHOptions(sshArgs(entry.user, entry.addr, []string{keyPath}, true, true, []string{fetchAndRun(installer, "/tmp/ump-install.sh", args)}), batchOptions(10*time.Second)...)
+	// the keys for root of the new system are root's keys in the rescue
+	// system; a server that was there already got its keys from an earlier
+	// entry, so every key is put there first
+	remote := ensureKeysCommand(keys) + fetchAndRun(installer, "/tmp/ump-install.sh", args)
+	argv := withSSHOptions(sshArgs(entry.user, entry.addr, []string{keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
 	w := io.MultiWriter(a.stderr, &buf)
 	code, err := a.sshExec(ctx, argv, nil, w, w)
@@ -281,4 +285,17 @@ func (a *app) installedSystem(ctx context.Context, addr, keyPath string) (*insta
 		sys.Details = strings.TrimSpace(lines[2])
 	}
 	return sys, sys.Name != ""
+}
+
+// ensureKeysCommand is a shell command prefix that adds the keys to
+// root's authorized_keys on the machine, those that are not there yet.
+func ensureKeysCommand(keys []provider.PublicKey) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, shellJoin([]string{k.Data}))
+	}
+	return `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in ` + strings.Join(parts, " ") + `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; `
 }

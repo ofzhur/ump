@@ -311,7 +311,7 @@ mkdir -p "$TARGET/etc/netplan"
 		case "$ip4" in *,*) printf '        - to: default\n          via: "%s"\n          on-link: true\n' "${ip4#*,}" ;; esac
 		if [ "$ipv6" = 1 ]; then case "$ip6" in *,*) printf '        - to: "::/0"\n          via: "%s"\n          on-link: true\n' "${ip6#*,}" ;; esac; fi
 	fi
-	if [ "$ipv6" = 1 ]; then echo "      accept-ra: false"; else echo "      link-local: [ipv4]"; fi
+	if [ "$ipv6" = 1 ]; then echo "      accept-ra: false"; else echo "      link-local: []"; fi
 	echo "      nameservers:"
 	echo "        addresses: [$(echo "$dns" | sed 's/ /, /g')]"
 } > "$TARGET/etc/netplan/10-ump.yaml"

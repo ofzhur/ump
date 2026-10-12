@@ -414,8 +414,10 @@ all of it (`--disks` limits the disks). The new system gets the server's
 name as hostname (`--hostname` for another; it must be a valid one), the
 address, gateway and interface of the rescue system (which `rescue`
 carried over from the running system), resolvers 1.1.1.1 and 8.8.8.8,
-root with UMP's key and the keys the rescue system had (`--ssh-key` adds
-files), the time zone (`--timezone`, default UTC), and a kernel command
+root with UMP's key, your public keys next to the usual `~/.ssh/id_*`
+files, the keys the rescue system had, and `--ssh-key` files (a key that
+lives only in an agent: `ssh-add -L > me.pub` and `--ssh-key me.pub`),
+the time zone (`--timezone`, default UTC), and a kernel command
 line with `mitigations=off` and `ipv6.disable=1`. Both cost performance
 and most servers need neither; `--mitigations` and `--ipv6` keep them on,
 and [the installer's README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
