@@ -53,7 +53,10 @@ is in `packages.txt` of a build.
 - **Kernel command line:** the installer writes
   `/etc/default/grub.d/ump-cmdline.cfg` with `mitigations=off` and
   `ipv6.disable=1`, because both cost performance and most servers need
-  neither. To turn one back on, remove it from that file, run
+  neither, and `kho=off`, because the kernel's kexec handover would
+  reserve a large part of the memory for live updates that no server
+  does, and stop ump from re-entering its rescue system. To turn one
+  back on, remove it from that file, run
   `update-grub`, for IPv6 add the address and route to
   `/etc/netplan/10-ump.yaml` (`netplan apply`), and reboot.
   `ump install --mitigations` and `--ipv6` keep them on from the start.

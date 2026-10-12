@@ -418,7 +418,9 @@ root with UMP's key, your public keys next to the usual `~/.ssh/id_*`
 files, the keys the rescue system had, and `--ssh-key` files (a key that
 lives only in an agent: `ssh-add -L > me.pub` and `--ssh-key me.pub`),
 the time zone (`--timezone`, default UTC), and a kernel command
-line with `mitigations=off` and `ipv6.disable=1`. Both cost performance
+line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the
+kernel's kexec handover reserves memory for live updates and gets in the
+way of ump's own re-entry). Both cost performance
 and most servers need neither; `--mitigations` and `--ipv6` keep them on,
 and [the installer's README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
 says how to turn them on later. `--os` names the image (`ubuntu-26.04`

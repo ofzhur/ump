@@ -49,7 +49,9 @@ if [ -z "$arch" ]; then
 fi
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
 
-dir="/tmp/ump-rescue-$arch"
+# /var/tmp, not /tmp: on systems with /tmp in RAM (Ubuntu since 25.04) the
+# download would hold 100 MB of memory that the kexec needs
+dir="/var/tmp/ump-rescue-$arch"
 mkdir -p "$dir"
 fetch() { # fetch URL FILE: download, and say what went wrong when it did not
 	if command -v curl >/dev/null; then
@@ -126,7 +128,8 @@ if [ "$dry" = 1 ]; then
 fi
 
 kexec_bin="$dir/kexec"
-[ -x "$kexec_bin" ] || kexec_bin="$(command -v kexec || true)"
+# the published static kexec, unless it cannot run here (a noexec mount)
+[ -x "$kexec_bin" ] && "$kexec_bin" --version >/dev/null 2>&1 || kexec_bin="$(command -v kexec || true)"
 [ -n "$kexec_bin" ] || { echo "no kexec available: install kexec-tools or publish the static kexec with the image" >&2; exit 1; }
 echo "==> loading the rescue image"
 # kexec_file_load (-s) lets the kernel read the files itself, which is one

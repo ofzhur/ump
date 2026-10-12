@@ -35,8 +35,10 @@ the same.
    on-link gateway, or DHCP when nothing is known, IPv6 only with
    `--ipv6`, resolvers 1.1.1.1 and 8.8.8.8, root's `authorized_keys`,
    the kernel command line (`mitigations=off ipv6.disable=1` unless
-   `--mitigations`, `--ipv6`), time zone, a fresh machine id and SSH
-   host keys.
+   `--mitigations`, `--ipv6`, and `kho=off`: the kernel's kexec handover
+   would reserve up to half the memory of a small machine for live
+   updates, and stop ump from re-entering its rescue system), time zone,
+   a fresh machine id and SSH host keys.
 7. **Installs the boot loader:** GRUB on the EFI removable path
    (`EFI/BOOT/BOOT*.EFI`), which every firmware tries without a boot
    entry, and without writing one, so the firmware's boot order stays as

@@ -154,9 +154,13 @@ dns="1.1.1.1 8.8.8.8"
 nkeys="$(grep -c '^[a-z]' "$keys" || true)"
 [ "$nkeys" -gt 0 ] || die "$keys holds no key"
 
-kernel_cmdline=""
-[ "$mitigations" = 1 ] || kernel_cmdline="mitigations=off"
-[ "$ipv6" = 1 ] || kernel_cmdline="${kernel_cmdline:+$kernel_cmdline }ipv6.disable=1"
+# kho=off: the kernel's kexec handover (on by default in Ubuntu's kernel)
+# reserves a scratch area of up to half the memory of a small machine for
+# live updates of hypervisors, and that reservation starved the kexec
+# into the rescue system on a 1 GB machine
+kernel_cmdline="kho=off"
+[ "$mitigations" = 1 ] || kernel_cmdline="$kernel_cmdline mitigations=off"
+[ "$ipv6" = 1 ] || kernel_cmdline="$kernel_cmdline ipv6.disable=1"
 
 # --- the plan ----------------------------------------------------------
 
@@ -328,7 +332,9 @@ cat > "$TARGET/etc/default/grub.d/ump-cmdline.cfg" <<GRUB
 # (ipv6.disable=1): both cost performance, and most servers need neither.
 # To turn one back on, remove it from the line below and run update-grub;
 # for IPv6 also add the address and route to /etc/netplan/10-ump.yaml
-# (netplan apply). Then reboot.
+# (netplan apply). Then reboot. kho=off keeps the kernel's kexec handover
+# from reserving a large part of the memory for live updates, which no
+# server needs and which stops ump from re-entering its rescue system.
 GRUB_CMDLINE_LINUX_DEFAULT="$kernel_cmdline"
 GRUB
 
