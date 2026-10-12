@@ -28,6 +28,8 @@ accounts:
     consumer_key: plain-ck
 staging:
   key: ~/.config/ump/staging_ed25519
+future:
+  setting: kept
 `
 
 func TestLoadAndSaveRoundTrip(t *testing.T) {
@@ -56,8 +58,15 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	if cfg.Accounts["ovh"].Settings["application_secret"] != (Value{Command: "pass show ovh/as"}) {
 		t.Errorf("ovh: %+v", cfg.Accounts["ovh"])
 	}
-	if _, ok := cfg.Rest["staging"]; !ok {
+	if _, ok := cfg.Rest["future"]; !ok {
 		t.Errorf("unknown section not preserved: %v", cfg.Rest)
+	}
+	if cfg.Staging.Key != "~/.config/ump/staging_ed25519" || !strings.HasSuffix(cfg.StagingKeyPath(), "/.config/ump/staging_ed25519") || strings.HasPrefix(cfg.StagingKeyPath(), "~") {
+		t.Errorf("staging key: %q -> %q", cfg.Staging.Key, cfg.StagingKeyPath())
+	}
+	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	if got := New().StagingKeyPath(); got != "/tmp/xdg-test/ump/staging_ed25519" {
+		t.Errorf("default staging key path: %q", got)
 	}
 
 	out := filepath.Join(dir, "sub", "out.yaml")
@@ -74,7 +83,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	data, _ := os.ReadFile(out)
 	text := string(data)
 	for _, want := range []string{"password: {env: HROBOT_PASS}", "token: {file: ~/.config/ump/secrets/hcloud.token}",
-		"application_secret: {command: pass show ovh/as}", "consumer_key: plain-ck", "staging:", "output: wide", `login: '#ws+abc'`} {
+		"application_secret: {command: pass show ovh/as}", "consumer_key: plain-ck", "staging:", "  key: ~/.config/ump/staging_ed25519", "future:", "output: wide", `login: '#ws+abc'`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("saved config lacks %q:\n%s", want, text)
 		}

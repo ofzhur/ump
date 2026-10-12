@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // A throwaway key generated with ssh-keygen -t ed25519; its fingerprints
@@ -56,5 +58,43 @@ func TestReadFile(t *testing.T) {
 	}
 	if paths := DefaultPaths(); len(paths) != 3 || !strings.HasSuffix(paths[0], "id_ed25519.pub") {
 		t.Errorf("DefaultPaths: %v", paths)
+	}
+}
+
+func TestGenerateAndEnsure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "staging_ed25519")
+	k, created, err := Ensure(path, "ump@test")
+	if err != nil || !created {
+		t.Fatalf("Ensure: %v, created %v", err, created)
+	}
+	if k.Type != "ssh-ed25519" || k.Comment != "ump@test" || len(k.Blob) != 51 {
+		t.Errorf("generated key: %+v", k)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("private key mode: %v %v", fi, err)
+	}
+	if dfi, _ := os.Stat(filepath.Dir(path)); dfi.Mode().Perm() != 0o700 {
+		t.Errorf("key directory mode %v", dfi.Mode().Perm())
+	}
+	// the private key is valid OpenSSH and matches the public key
+	data, _ := os.ReadFile(path)
+	signer, err := ssh.ParsePrivateKey(data)
+	if err != nil {
+		t.Fatalf("private key: %v", err)
+	}
+	if string(signer.PublicKey().Marshal()) != string(k.Blob) {
+		t.Error("private key does not match the public key file")
+	}
+	// a second Ensure reuses it, never regenerates
+	k2, created, err := Ensure(path, "other")
+	if err != nil || created || k2.FingerprintSHA256() != k.FingerprintSHA256() {
+		t.Errorf("second Ensure: %+v %v %v", k2, created, err)
+	}
+	if _, err := Generate(path, "x"); err == nil {
+		t.Error("Generate overwrote an existing key")
+	}
+	if c := DefaultComment(); !strings.HasPrefix(c, "ump") {
+		t.Errorf("DefaultComment = %q", c)
 	}
 }

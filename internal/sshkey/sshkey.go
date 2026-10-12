@@ -3,15 +3,21 @@
 package sshkey
 
 import (
+	"crypto/ed25519"
 	"crypto/md5"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // Key is one SSH public key.
@@ -102,4 +108,82 @@ func DefaultPaths() []string {
 		out = append(out, filepath.Join(home, ".ssh", n))
 	}
 	return out
+}
+
+// Generate creates an ed25519 key pair: the private key in OpenSSH format
+// at path (mode 0600, never overwriting an existing file) and the public
+// key at path + ".pub".
+func Generate(path, comment string) (*Key, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	block, err := ssh.MarshalPrivateKey(priv, comment)
+	if err != nil {
+		return nil, err
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return nil, err
+	}
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+	if comment != "" {
+		line += " " + comment
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := pem.Encode(f, block); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	if err := os.WriteFile(path+".pub", []byte(line+"\n"), 0o644); err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	return Parse(line)
+}
+
+// Ensure returns the public key of the key pair at path, generating the
+// pair when the private key does not exist yet.
+func Ensure(path, comment string) (key *Key, created bool, err error) {
+	if _, err := os.Stat(path); err == nil {
+		k, err := ReadFile(path + ".pub")
+		if err != nil {
+			return nil, false, fmt.Errorf("%s exists but its public key cannot be read: %w", path, err)
+		}
+		return k, false, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, false, err
+	}
+	k, err := Generate(path, comment)
+	if err != nil {
+		return nil, false, err
+	}
+	return k, true, nil
+}
+
+// DefaultComment names a generated key after the user and machine.
+func DefaultComment() string {
+	host, _ := os.Hostname()
+	user := os.Getenv("USER")
+	if user == "" {
+		user = os.Getenv("USERNAME")
+	}
+	switch {
+	case user != "" && host != "":
+		return "ump@" + user + "@" + host
+	case host != "":
+		return "ump@" + host
+	}
+	return "ump"
 }

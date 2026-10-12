@@ -36,6 +36,9 @@ type RescueInfo struct {
 	// Reboots is set when the provider reboots the machine into the
 	// rescue system itself, so the caller must not reboot it again.
 	Reboots bool `json:"reboots,omitempty"`
+	// HostKeys are the fingerprints of the rescue system's SSH host keys
+	// when the provider reports them, for the operator to compare.
+	HostKeys []string `json:"host_keys,omitempty"`
 }
 
 // Rescue is implemented by providers that can boot a machine into a

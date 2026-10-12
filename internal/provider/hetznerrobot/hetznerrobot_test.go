@@ -363,7 +363,8 @@ func TestPowerAndRescue(t *testing.T) {
 				t.Errorf("rescue form: %v", r.PostForm)
 			}
 			rescueActive = true
-			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"os":"linux","arch":64,"active":true,"password":"r3scue","authorized_key":[],"host_key":[]}}`))
+			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"os":"linux","arch":64,"active":true,"password":"r3scue","authorized_key":[],
+			  "host_key":[{"key":{"fingerprint":"aa:bb:cc","type":"ED25519","size":256}}]}}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/boot/321/rescue":
 			rescueActive = false
 			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"active":false}}`))
@@ -428,7 +429,7 @@ func TestPowerAndRescue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Password != "r3scue" || info.Address != "203.0.113.10" || info.User != "root" {
+	if info.Password != "r3scue" || info.Address != "203.0.113.10" || info.User != "root" || strings.Join(info.HostKeys, ",") != "ED25519 aa:bb:cc" {
 		t.Errorf("rescue info: %+v", info)
 	}
 	if on, _ := rs.RescueEnabled(context.Background(), m); !on {

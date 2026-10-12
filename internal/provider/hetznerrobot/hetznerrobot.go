@@ -295,6 +295,9 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 	if info.Address == "" {
 		info.Address = r.ServerIP
 	}
+	for _, hk := range r.HostKey {
+		info.HostKeys = append(info.HostKeys, strings.TrimSpace(hk.Key.Type+" "+hk.Key.Fingerprint))
+	}
 	return info, nil
 }
 
@@ -567,6 +570,13 @@ type RescueInfo struct {
 			Size        int    `json:"size"`
 		} `json:"key"`
 	} `json:"authorized_key"`
+	HostKey []struct {
+		Key struct {
+			Fingerprint string `json:"fingerprint"`
+			Type        string `json:"type"`
+			Size        int    `json:"size"`
+		} `json:"key"`
+	} `json:"host_key"`
 }
 
 // Key is an SSH public key registered at the account (GET /key).

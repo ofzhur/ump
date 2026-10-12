@@ -31,6 +31,7 @@ const (
 type Config struct {
 	Defaults Defaults           `yaml:"defaults,omitempty"`
 	Accounts map[string]Account `yaml:"accounts,omitempty"`
+	Staging  Staging            `yaml:"staging,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -40,6 +41,26 @@ type Config struct {
 type Defaults struct {
 	// Output is the default output format (table, wide, json, yaml, name).
 	Output string `yaml:"output,omitempty"`
+}
+
+// Staging configures how UMP reaches staging environments (rescue
+// systems, later its own staging image).
+type Staging struct {
+	// Key is the path of UMP's own SSH private key; the public key is
+	// next to it with ".pub". Default: staging_ed25519 in the user's
+	// configuration directory. The key is generated on first use.
+	Key string `yaml:"key,omitempty"`
+}
+
+// StagingKeyFile is the default name of UMP's SSH key.
+const StagingKeyFile = "staging_ed25519"
+
+// StagingKeyPath returns the path of UMP's SSH private key.
+func (c *Config) StagingKeyPath() string {
+	if c.Staging.Key != "" {
+		return ExpandHome(c.Staging.Key)
+	}
+	return filepath.Join(UserConfigDir(), StagingKeyFile)
 }
 
 // Account is one configured provider account: a type and its settings.
