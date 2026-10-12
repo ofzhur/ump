@@ -1,0 +1,7 @@
+# build output
+/ump
+/ump.exe
+/dist/
+# test and coverage artifacts
+*.test
+*.out
