@@ -49,15 +49,17 @@ ump
 ├── reboot       server <ref> [--hard|--power-cycle] [--wait] [--yes]
 ├── start        server <ref> [--wait]
 ├── stop         server <ref> [--hard] [--yes]
-├── rescue       server <ref> [--ssh-key <file>]... [--no-reboot] [--no-wait] [--yes]
+├── rescue       server <ref> [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
 ├── unrescue     server <ref> [--reboot] [--wait] [--yes]
+├── ssh          server <ref> [--user <name>] [--staging] [-- command]
 ├── config                                         interactive wizard: add an account, test it, save it
 │   ├── view                                       the configuration, secrets redacted
 │   ├── path                                       where the configuration lives
 │   ├── types                                      provider types and their settings
 │   ├── add      <type> <name> --set k=v ...       non-interactive form (CI, agents)
 │   ├── remove   <name>
-│   └── test     [<name>...]                       check credentials and API access
+│   ├── test     [<name>...]                       check credentials and API access
+│   └── key      [-o json|yaml]                     UMP's own SSH public key (generated on first use)
 └── version
 ```
 
@@ -68,7 +70,6 @@ ump
 ├── plan       <machine> --profile <name>          show what install would do
 ├── approve    <run-id>                            approve a plan (interactive, TTY only)
 ├── install    <machine>... --profile <name>       install the OS
-├── ssh        <machine> [-- command]              ssh into a machine
 ├── facts      <machine>                           inspect hardware (enters staging env if needed)
 │
 ├── machine
@@ -309,21 +310,44 @@ hardware reset) and cannot be switched on or off through the API.
 ## Rescue: `ump rescue|unrescue server`
 
 ```
-ump rescue   server REF [--ssh-key FILE]... [--no-keys] [--no-reboot] [--no-wait] [--yes] [-o json|yaml]
+ump rescue   server REF [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
 ump unrescue server REF [--reboot] [--wait] [--yes]
 ```
 
-`rescue` enables the provider's rescue system with your SSH public keys
-(`--ssh-key` files, else the first of `~/.ssh/id_ed25519.pub`,
-`id_ecdsa.pub`, `id_rsa.pub`), registering keys the provider does not
-know yet, then resets the server into it and waits until SSH answers.
-It prints how to connect and the password where the provider issues one.
+`rescue` enables the provider's rescue system with UMP's own SSH key
+(see [`ump config key`](#ump-config-key)) and any `--ssh-key` files,
+registering keys the provider does not know yet, resets the server into
+it, waits until SSH answers and hands the terminal over to `ssh`, so you
+land in a root shell of the rescue system; exiting it returns to your
+shell. With a command after `--`, the command runs in the rescue system
+instead and its exit status becomes ump's, which is the form for scripts
+and agents (`ump rescue server web-01 --yes -- lsblk`). `--no-connect`
+prints the `ssh` command instead, as does a terminal-less run without a
+command; `-o json` prints the details (address, password where the
+provider issues one, the `ssh` command) without connecting.
+
 `--no-reboot` only arms the rescue system for the next boot, `--no-wait`
-returns right after the reset. This is the `rescue` entry method of the
-install pipeline, available on its own for inspection and repair.
+returns right after the reset; both print the `ssh` command for later.
+Rescue systems have a fresh host key every boot, so the connection skips
+host key checks; providers that report the host key fingerprints (Hetzner
+Robot) have them printed for comparison. This is the `rescue` entry
+method of the install pipeline, available on its own for inspection and
+repair.
 
 `unrescue` disables the rescue system so that the next boot is from disk,
 and with `--reboot` resets the server now.
+
+## `ump ssh server`
+
+```
+ump ssh server REF [--user <name>] [--staging] [-- COMMAND...]
+```
+
+Resolves the server and starts the local `ssh` client against its primary
+address: an interactive session, or the command after `--`, whose exit
+status becomes ump's. Your own SSH configuration and keys apply.
+`--staging` connects the way UMP does to rescue and staging systems: with
+UMP's own key and without host key checks.
 
 Provider differences: Hetzner Robot takes the fingerprints of keys
 registered at the account and issues a password only without keys;
@@ -354,6 +378,16 @@ every provider type. `view` shows the configuration with plaintext
 secrets redacted (references are shown as they are), `test` checks every
 account, `remove` deletes an account together with the secret files the
 wizard created for it.
+
+### `ump config key`
+
+UMP has its own SSH key pair, generated on first use (by `ump config key`
+or the first `ump rescue`) at `~/.config/ump/staging_ed25519`, or at the
+path set as `staging.key` in the configuration. It is what rescue
+systems and, later, the install pipeline are reached with, so it works
+whatever personal keys are around. `ump config key` prints the public
+key and its fingerprints (`-o json` for scripts); put the public key
+wherever UMP should be able to log in.
 
 ## Workflow commands
 
@@ -434,8 +468,10 @@ $ ump describe server web-01
 $ ump rename server web-01 prod-web-01
 $ ump set rdns prod-web-01 prod-web-01.example.net
 $ ump reboot server prod-web-01 --wait
-$ ump rescue server prod-web-01            # inspect or repair it in the rescue system
+$ ump rescue server prod-web-01            # into a root shell of the rescue system
+$ ump rescue server prod-web-01 --yes -- lsblk
 $ ump unrescue server prod-web-01 --reboot
+$ ump ssh server prod-web-01 -- uptime
 
 # reinstall one server
 $ ump plan web-01 --profile base

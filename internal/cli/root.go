@@ -59,6 +59,11 @@ type app struct {
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.
 	tz *time.Location
+	// ssh runs the local ssh client; nil means the real one.
+	ssh sshRunner
+	// probe reports whether SSH answers at an address; nil means a TCP
+	// connect to the SSH port.
+	probe func(ctx context.Context, addr string) bool
 
 	// global flags
 	configFlag string
@@ -100,6 +105,12 @@ func (a *app) run(ctx context.Context, args []string) int {
 	if a.tz == nil {
 		a.tz = time.Local
 	}
+	if a.ssh == nil {
+		a.ssh = runSSH
+	}
+	if a.probe == nil {
+		a.probe = sshAnswers
+	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
@@ -109,6 +120,10 @@ func (a *app) run(ctx context.Context, args []string) int {
 	if errors.Is(err, context.Canceled) {
 		fmt.Fprintln(a.stderr, "ump: interrupted")
 		return exitAborted
+	}
+	var silent exitCode
+	if errors.As(err, &silent) {
+		return int(silent)
 	}
 	fmt.Fprintf(a.stderr, "ump: %v\n", err)
 	code := exitCodeFor(err)
@@ -157,6 +172,7 @@ configured provider account, ` + "`ump describe server NAME`" + ` shows one in d
 	root.AddCommand(a.newStopCmd())
 	root.AddCommand(a.newRescueCmd())
 	root.AddCommand(a.newUnrescueCmd())
+	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root

@@ -404,9 +404,10 @@ password: { file: ~/.config/ump/secrets/hrobot }
 password: { command: "pass show robot/password" }
 ```
 
-SSH keys come from files or the SSH agent. UMP uses a dedicated key for
-staging access by default (generated per run or per account), and installs
-the users' own keys into the new system. Host keys of the installed
+UMP uses its own SSH key for staging access: an ed25519 pair generated
+on first use at `~/.config/ump/staging_ed25519` (`staging.key` in the
+configuration, `ump config key` to show it), put into every rescue
+system it boots. The users' own keys are installed into the new system. Host keys of the installed
 system are generated in the staging environment, so UMP knows them before
 the first boot and can verify the installed system without
 trust-on-first-use; they can be written to `known_hosts` on request.

@@ -47,7 +47,50 @@ Without a terminal, use ` + "`ump config add`" + ` instead.`,
 		a.newConfigAddCmd(),
 		a.newConfigRemoveCmd(),
 		a.newConfigTestCmd(),
+		a.newConfigKeyCmd(),
 	)
+	return cmd
+}
+
+func (a *app) newConfigKeyCmd() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:   "key",
+		Short: "Show UMP's own SSH key, generating it on first use",
+		Long: `Show the public key of UMP's own SSH key pair, which rescue systems and
+the install pipeline are reached with. The pair is generated on first use
+at the path in the configuration (staging.key), by default
+~/.config/ump/staging_ed25519, as an ed25519 key that only you can read.
+Put the public key wherever UMP should be able to log in.`,
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+			k, path, err := a.stagingKey(cfg)
+			if err != nil {
+				return err
+			}
+			if output != "" {
+				f, err := parseFormat(output)
+				if err != nil || (f != formatJSON && f != formatYAML) {
+					return usageErrorf(cmd, "unknown output format %q (use one of json, yaml)", output)
+				}
+				return printEncoded(a.stdout, struct {
+					Path      string `json:"path" yaml:"path"`
+					PublicKey string `json:"public_key" yaml:"public_key"`
+					SHA256    string `json:"fingerprint_sha256" yaml:"fingerprint_sha256"`
+					MD5       string `json:"fingerprint_md5" yaml:"fingerprint_md5"`
+				}{Path: path, PublicKey: k.Line(), SHA256: k.FingerprintSHA256(), MD5: k.FingerprintMD5()}, f)
+			}
+			fmt.Fprintf(a.stdout, "Path:         %s\n", config.AbbreviateHome(path))
+			fmt.Fprintf(a.stdout, "Public key:   %s\n", k.Line())
+			fmt.Fprintf(a.stdout, "Fingerprint:  %s (MD5 %s)\n", k.FingerprintSHA256(), k.FingerprintMD5())
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "print as json or yaml")
 	return cmd
 }
 

@@ -8,48 +8,54 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
 )
 
 type rescueOptions struct {
-	keyFiles []string
-	noKeys   bool
-	noReboot bool
-	noWait   bool
-	yes      bool
-	output   string
+	keyFiles  []string
+	noReboot  bool
+	noWait    bool
+	noConnect bool
+	yes       bool
+	output    string
 }
 
 func (a *app) newRescueCmd() *cobra.Command {
 	var o rescueOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
-		Short: "Boot a server into its provider's rescue system",
-		Long: `Enable the provider's rescue system for the server, with your SSH public
-keys, and reboot into it. The keys come from --ssh-key files, or from the
-first of ~/.ssh/id_ed25519.pub, id_ecdsa.pub and id_rsa.pub that exists;
-keys the provider does not know yet are registered there. Without any
-key (--no-keys), providers that issue a root password do so.
+		Use:   "server NAME|ID|IP|PROVIDER/ID [-- COMMAND...]",
+		Short: "Boot a server into its provider's rescue system and connect",
+		Long: `Enable the provider's rescue system for the server with UMP's own SSH
+key (generated on first use, see ump config key) and any --ssh-key files,
+registering keys the provider does not know yet, reset the server into
+it, wait until SSH answers and hand the terminal over to ssh. With a
+command after "--" the command runs in the rescue system instead and its
+exit status becomes ump's; --no-connect only prints how to connect.
 
-By default the command reboots the server (hard reset) and waits until
-SSH answers; --no-reboot only arms the rescue system for the next boot,
---no-wait does not wait. The rescue system has its own host key, so
-expect a known_hosts warning. Asks for confirmation on a terminal;
-without one, --yes is required.`,
-		Args: usageArgs(cobra.ExactArgs(1)),
+--no-reboot only arms the rescue system for the next boot; --no-wait
+returns right after the reset. Rescue systems have a fresh host key every
+boot, so the connection skips host key checks; providers that report the
+host key fingerprints have them printed. Asks for confirmation on a
+terminal; without one, --yes is required.`,
+		Args: usageArgs(cobra.MinimumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.rescueServer(cmd, args[0], o)
+			refs, command := splitDash(cmd.ArgsLenAtDash(), args)
+			if len(refs) != 1 {
+				return usageErrorf(cmd, "expected one server reference, got %d", len(refs))
+			}
+			return a.rescueServer(cmd, refs[0], command, o)
 		},
 	}
-	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "public key file to put into the rescue system (repeatable)")
-	sub.Flags().BoolVar(&o.noKeys, "no-keys", false, "do not put any SSH key into the rescue system")
+	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file to put into the rescue system (repeatable)")
 	sub.Flags().BoolVar(&o.noReboot, "no-reboot", false, "only arm the rescue system for the next boot")
-	sub.Flags().BoolVar(&o.noWait, "no-wait", false, "do not wait until SSH answers")
+	sub.Flags().BoolVar(&o.noWait, "no-wait", false, "do not wait until SSH answers (and do not connect)")
+	sub.Flags().BoolVar(&o.noConnect, "no-connect", false, "print how to connect instead of connecting")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
-	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the connection details as json or yaml")
-	return a.serverVerbCmd("rescue", "Boot a server into its rescue system", "Boot a server into its provider's rescue system.",
-		"  ump rescue server web-01\n  ump rescue server web-01 --ssh-key ~/.ssh/ops.pub --yes\n  ump rescue server web-01 --no-reboot", sub)
+	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the connection details as json or yaml instead of connecting")
+	return a.serverVerbCmd("rescue", "Boot a server into its rescue system and connect", "Boot a server into its provider's rescue system and connect to it.",
+		"  ump rescue server web-01\n  ump rescue server web-01 --yes -- lsblk\n  ump rescue server web-01 --no-reboot", sub)
 }
 
 func (a *app) newUnrescueCmd() *cobra.Command {
@@ -76,32 +82,46 @@ Some providers (OVHcloud Public Cloud) reboot the instance themselves.`,
 		"  ump unrescue server web-01 --reboot --wait", sub)
 }
 
-// rescueKeys collects the public keys for the rescue system.
-func rescueKeys(files []string) ([]provider.PublicKey, []string, error) {
-	var paths []string
-	if len(files) > 0 {
-		paths = files
-	} else {
-		for _, p := range sshkey.DefaultPaths() {
-			if _, err := os.Stat(p); err == nil {
-				paths = []string{p}
-				break
-			}
-		}
+// stagingKey returns UMP's own public key, generating the pair on first
+// use.
+func (a *app) stagingKey(cfg *config.Config) (*sshkey.Key, string, error) {
+	path := cfg.StagingKeyPath()
+	k, created, err := sshkey.Ensure(path, sshkey.DefaultComment())
+	if err != nil {
+		return nil, path, err
 	}
-	var keys []provider.PublicKey
-	for _, p := range paths {
+	if created {
+		fmt.Fprintf(a.stderr, "Generated UMP's SSH key at %s (public key %s).\n", config.AbbreviateHome(path), k.FingerprintSHA256())
+	}
+	return k, path, nil
+}
+
+// rescueKeys collects the public keys for the rescue system: UMP's own
+// key first, then the given files.
+func (a *app) rescueKeys(cfg *config.Config, files []string) (keys []provider.PublicKey, paths []string, keyPath string, err error) {
+	k, keyPath, err := a.stagingKey(cfg)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	keys = append(keys, provider.PublicKey{Name: keyName(k, keyPath+".pub"), Data: k.Line(), Fingerprint: k.FingerprintMD5()})
+	paths = append(paths, keyPath+".pub")
+	for _, p := range files {
 		k, err := sshkey.ReadFile(expandHome(p))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, "", err
 		}
-		name := k.Comment
-		if name == "" {
-			name = "ump-" + strings.TrimSuffix(filepath.Base(p), ".pub")
-		}
-		keys = append(keys, provider.PublicKey{Name: name, Data: k.Line(), Fingerprint: k.FingerprintMD5()})
+		keys = append(keys, provider.PublicKey{Name: keyName(k, p), Data: k.Line(), Fingerprint: k.FingerprintMD5()})
+		paths = append(paths, p)
 	}
-	return keys, paths, nil
+	return keys, paths, keyPath, nil
+}
+
+// keyName is the name a key is registered under at a provider.
+func keyName(k *sshkey.Key, path string) string {
+	if k.Comment != "" {
+		return k.Comment
+	}
+	return "ump-" + strings.TrimSuffix(filepath.Base(path), ".pub")
 }
 
 func expandHome(p string) string {
@@ -117,9 +137,10 @@ type rescueResult struct {
 	provider.Machine `yaml:",inline"`
 	Rescue           provider.RescueInfo `json:"rescue" yaml:"rescue"`
 	Keys             []string            `json:"keys,omitempty" yaml:"keys,omitempty"`
+	SSH              string              `json:"ssh,omitempty" yaml:"ssh,omitempty"`
 }
 
-func (a *app) rescueServer(cmd *cobra.Command, ref string, o rescueOptions) error {
+func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o rescueOptions) error {
 	format := outputFormat("")
 	if o.output != "" {
 		f, err := parseFormat(o.output)
@@ -128,17 +149,13 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, o rescueOptions) erro
 		}
 		format = f
 	}
-	if o.noKeys && len(o.keyFiles) > 0 {
-		return usageErrorf(cmd, "--no-keys and --ssh-key exclude each other")
+	cfg, _, err := a.loadConfig()
+	if err != nil {
+		return err
 	}
-	var keys []provider.PublicKey
-	var keyPaths []string
-	if !o.noKeys {
-		var err error
-		keys, keyPaths, err = rescueKeys(o.keyFiles)
-		if err != nil {
-			return err
-		}
+	keys, keyPaths, keyPath, err := a.rescueKeys(cfg, o.keyFiles)
+	if err != nil {
+		return err
 	}
 	m, prov, err := a.resolveOne(cmd, ref)
 	if err != nil {
@@ -160,7 +177,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, o rescueOptions) erro
 		return err
 	}
 	ctx := cmd.Context()
-	wasUp := !o.noReboot && !o.noWait && sshAnswers(ctx, m.IPv4)
+	wasUp := !o.noReboot && !o.noWait && a.probe(ctx, m.IPv4)
 	info, err := rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys})
 	if err != nil {
 		return fmt.Errorf("account %s: %w", m.Account, err)
@@ -172,8 +189,13 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, o rescueOptions) erro
 		}
 		rebooted = true
 	}
+	user := info.User
+	if user == "" {
+		user = "root"
+	}
+	argv := sshArgs(user, info.Address, keyPath, true, command)
 	if format != "" {
-		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: *info, Keys: keyPaths}, format)
+		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: *info, Keys: keyPaths, SSH: shellJoin(argv)}, format)
 	}
 	switch {
 	case rebooted:
@@ -181,27 +203,40 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, o rescueOptions) erro
 	default:
 		fmt.Fprintf(a.stdout, "Rescue system enabled for %s; it boots at the next reboot.\n", describeRef(m))
 	}
-	if len(keyPaths) > 0 {
-		fmt.Fprintf(a.stdout, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
-	}
+	fmt.Fprintf(a.stdout, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
 	if info.Password != "" {
 		fmt.Fprintf(a.stdout, "Password: %s\n", info.Password)
+	}
+	if len(info.HostKeys) > 0 {
+		fmt.Fprintf(a.stdout, "Host key fingerprints: %s\n", strings.Join(info.HostKeys, ", "))
 	}
 	if info.Note != "" {
 		fmt.Fprintf(a.stdout, "Note: %s\n", info.Note)
 	}
-	if rebooted && !o.noWait {
-		if err := a.waitForSSH(ctx, info.Address, wasUp); err != nil {
-			return err
-		}
+	if info.Address == "" {
+		return nil
 	}
-	user := info.User
-	if user == "" {
-		user = "root"
+	if !rebooted || o.noWait {
+		fmt.Fprintf(a.stdout, "Connect once it is up: %s\n", shellJoin(argv))
+		return nil
 	}
-	if info.Address != "" {
-		fmt.Fprintf(a.stdout, "Connect: ssh %s@%s\n", user, info.Address)
-		fmt.Fprintln(a.stderr, "The rescue system has its own host key; expect a known_hosts warning.")
+	if err := a.waitForSSH(ctx, info.Address, wasUp); err != nil {
+		return err
+	}
+	interactive := len(command) == 0
+	if o.noConnect || (interactive && (a.isTTY == nil || !a.isTTY())) {
+		fmt.Fprintf(a.stdout, "Connect: %s\n", shellJoin(argv))
+		return nil
+	}
+	if interactive {
+		fmt.Fprintf(a.stderr, "Connecting to the rescue system of %s as %s; exit the shell to return.\n", m.Name, user)
+	}
+	code, err := a.ssh(argv, interactive)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return exitCode(code)
 	}
 	return nil
 }

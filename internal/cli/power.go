@@ -185,7 +185,7 @@ func (a *app) powerCommand(cmd *cobra.Command, ref, verb string, o powerOptions)
 		if err := a.confirm(cmd, o.yes, fmt.Sprintf("Reboot %s (%s)?", describeRef(m), mode)); err != nil {
 			return err
 		}
-		wasUp := o.wait && sshAnswers(ctx, m.IPv4)
+		wasUp := o.wait && a.probe(ctx, m.IPv4)
 		if err := pw.Reboot(ctx, m, mode); err != nil {
 			return fmt.Errorf("account %s: %w", m.Account, err)
 		}
@@ -243,7 +243,7 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 	if wasUp {
 		fmt.Fprintf(a.stderr, "Waiting for SSH on %s to go down ...", addr)
 		deadline := start.Add(waitDownTime)
-		for sshAnswers(ctx, addr) {
+		for a.probe(ctx, addr) {
 			if time.Now().After(deadline) {
 				fmt.Fprintln(a.stderr, " still up; assuming it rebooted quickly.")
 				break
@@ -253,14 +253,14 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 				return err
 			}
 		}
-		if !sshAnswers(ctx, addr) {
+		if !a.probe(ctx, addr) {
 			fmt.Fprintf(a.stderr, " down after %s.\n", time.Since(start).Round(time.Second))
 		}
 	}
 	fmt.Fprintf(a.stderr, "Waiting for SSH on %s ...", addr)
 	deadline := time.Now().Add(waitTimeout)
 	lastDot := time.Now()
-	for !sshAnswers(ctx, addr) {
+	for !a.probe(ctx, addr) {
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
 			return withExit(exitUnreachable, fmt.Errorf("SSH on %s did not answer within %s", addr, waitTimeout))

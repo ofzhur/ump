@@ -191,6 +191,12 @@ type testEnv struct {
 	cfgPath string
 	// now is the clock the CLI sees; tests move it forward.
 	now time.Time
+	// sshCalls records the ssh command lines the CLI would have run.
+	sshCalls [][]string
+	// sshInteractive records whether each call handed the terminal over.
+	sshInteractive []bool
+	// sshExit is the exit status the fake ssh returns.
+	sshExit int
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -200,6 +206,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("UMP_CONFIG", "")
 	t.Setenv("FAKE_PASS", "s3cret")
+	// the fake probe always answers, so the "wait for SSH to go down" phase
+	// would otherwise last its full real-world duration
+	oldDown, oldPoll := waitDownTime, waitPoll
+	waitDownTime, waitPoll = 20*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { waitDownTime, waitPoll = oldDown, oldPoll })
 	return &testEnv{t: t, cfgPath: filepath.Join(dir, "config.yaml"), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 }
 
@@ -222,7 +233,14 @@ func (e *testEnv) read() string {
 func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr string, code int) {
 	e.t.Helper()
 	var out, errb bytes.Buffer
-	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC}
+	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
+		ssh: func(argv []string, interactive bool) (int, error) {
+			e.sshCalls = append(e.sshCalls, argv)
+			e.sshInteractive = append(e.sshInteractive, interactive)
+			return e.sshExit, nil
+		},
+		probe: func(ctx context.Context, addr string) bool { return true },
+	}
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
@@ -1342,37 +1360,81 @@ func TestRescueCommands(t *testing.T) {
 	resetFakePower()
 	keyFile := filepath.Join(t.TempDir(), "ops.pub")
 	os.WriteFile(keyFile, []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 ops@example\n"), 0o600)
+	umpKey := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
 
-	out, errOut, code := e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--yes", "--no-wait", "--account", "one")
+	// without a terminal and without a command: the key is generated, the
+	// rescue system armed with it, the server reset, and the ssh command printed
+	out, errOut, code := e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--yes", "--account", "one")
 	if code != 0 {
 		t.Fatalf("rescue: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	want := "Rescue system enabled for fake/1 (web-01, 203.0.113.10); rebooting into it.\nSSH keys: " + keyFile + "\nPassword: r3scue\nConnect: ssh root@203.0.113.10\n"
-	if out != want {
-		t.Errorf("rescue output:\n got %q\nwant %q", out, want)
+	if !strings.Contains(errOut, "Generated UMP's SSH key at ") {
+		t.Errorf("key generation not reported: %q", errOut)
 	}
-	if !strings.Contains(errOut, "own host key") {
-		t.Errorf("rescue stderr: %q", errOut)
+	if fi, err := os.Stat(umpKey); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("ump key: %v %v", fi, err)
+	}
+	wantPrefix := "Rescue system enabled for fake/1 (web-01, 203.0.113.10); rebooting into it.\nSSH keys: " + umpKey + ".pub, " + keyFile + "\nPassword: r3scue\n"
+	if !strings.HasPrefix(out, wantPrefix) {
+		t.Errorf("rescue output:\n got %q\nwant prefix %q", out, wantPrefix)
+	}
+	if !strings.Contains(out, "Connect: ssh -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR root@203.0.113.10\n") {
+		t.Errorf("connect line missing:\n%s", out)
 	}
 	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard" {
 		t.Errorf("actions: %s", got)
 	}
-	if len(fakePower.keys) != 1 || fakePower.keys[0] != "ops@example d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81" {
-		t.Errorf("keys: %v", fakePower.keys)
+	if len(fakePower.keys) != 2 || !strings.HasPrefix(fakePower.keys[0], "ump") || fakePower.keys[1] != "ops@example d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81" {
+		t.Errorf("keys sent to the provider: %v", fakePower.keys)
+	}
+	if len(e.sshCalls) != 0 {
+		t.Errorf("ssh must not run without a terminal: %v", e.sshCalls)
 	}
 
-	// --no-reboot only arms it; --no-keys sends none; -o json prints the details
+	// on a terminal the terminal is handed over to ssh
+	out, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || !strings.Contains(errOut, "Connecting to the rescue system of web-01 as root") {
+		t.Errorf("hand-over: code %d, calls %v, interactive %v, stderr %q", code, e.sshCalls, e.sshInteractive, errOut)
+	}
+	if argv := e.sshCalls[0]; argv[0] != "ssh" || argv[len(argv)-1] != "root@203.0.113.10" || !strings.Contains(strings.Join(argv, " "), "-i "+umpKey+" -o IdentitiesOnly=yes") {
+		t.Errorf("ssh argv: %v", argv)
+	}
+	if strings.Contains(out, "Connect:") {
+		t.Errorf("connect line printed although connected:\n%s", out)
+	}
+	if strings.Contains(errOut, "Generated UMP's SSH key") {
+		t.Error("the key was generated twice")
+	}
+
+	// a command after -- runs in the rescue system, its status becomes ump's
+	e.sshCalls, e.sshInteractive, e.sshExit = nil, nil, 7
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one", "--", "lsblk", "-d")
+	if code != 7 || strings.Contains(errOut, "ump:") || len(e.sshCalls) != 1 || e.sshInteractive[0] {
+		t.Errorf("command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
+	}
+	if argv := e.sshCalls[0]; strings.Join(argv[len(argv)-4:], " ") != "root@203.0.113.10 -- lsblk -d" {
+		t.Errorf("command argv: %v", argv)
+	}
+	e.sshExit = 0
+
+	// --no-connect, --no-reboot, --no-wait print the command for later; -o json carries it
+	e.sshCalls, e.sshInteractive = nil, nil
+	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--no-connect", "--account", "one")
+	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, "Connect: ssh -i ") {
+		t.Errorf("--no-connect: code %d, calls %v\n%s", code, e.sshCalls, out)
+	}
 	resetFakePower()
-	out, _, code = e.run("", false, "rescue", "server", "web-01", "--no-keys", "--no-reboot", "--yes", "--account", "one")
-	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || strings.Contains(out, "SSH keys:") || strings.Join(fakePower.actions, ",") != "rescue" || len(fakePower.keys) != 0 {
-		t.Errorf("--no-reboot --no-keys: code %d, out %q, actions %v, keys %v", code, out, fakePower.actions, fakePower.keys)
+	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-reboot", "--yes", "--account", "one")
+	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || !strings.Contains(out, "Connect once it is up: ssh -i ") || strings.Join(fakePower.actions, ",") != "rescue" || len(e.sshCalls) != 0 {
+		t.Errorf("--no-reboot: code %d, actions %v, calls %v\n%s", code, fakePower.actions, e.sshCalls, out)
 	}
-	out, _, code = e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--no-wait", "--yes", "--account", "one", "-o", "json")
-	if code != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"keys": [`) || !strings.Contains(out, `"ref"`) == true && false {
-		t.Errorf("rescue json: code %d\n%s", code, out)
+	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-wait", "--yes", "--account", "one")
+	if code != 0 || !strings.Contains(out, "Connect once it is up: ssh -i ") || len(e.sshCalls) != 0 {
+		t.Errorf("--no-wait: code %d\n%s", code, out)
 	}
-	if !strings.Contains(out, `"provider": "fake"`) || !strings.Contains(out, `"address": "203.0.113.10"`) {
-		t.Errorf("rescue json content:\n%s", out)
+	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
+	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"ssh": "ssh -i `) || !strings.Contains(out, umpKey+".pub") {
+		t.Errorf("rescue json: code %d, calls %v\n%s", code, e.sshCalls, out)
 	}
 
 	// unrescue, with and without reboot
@@ -1395,11 +1457,11 @@ func TestRescueCommands(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"rescue", "server", "web-01", "--yes", "--no-wait", "--account", "one", "--ssh-key", "/nonexistent.pub"}, 1, "nonexistent.pub"},
-		{[]string{"rescue", "server", "web-01", "--yes", "--no-keys", "--ssh-key", keyFile}, 2, "exclude each other"},
-		{[]string{"rescue", "server", "web-01", "--no-keys", "--account", "one"}, 3, "needs confirmation"},
+		{[]string{"rescue", "server", "web-01", "--yes", "--account", "one", "--ssh-key", "/nonexistent.pub"}, 1, "nonexistent.pub"},
+		{[]string{"rescue", "server", "web-01", "--account", "one"}, 3, "needs confirmation"},
 		{[]string{"rescue", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
-		{[]string{"rescue", "server", "nope", "--yes", "--no-keys", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"rescue", "server", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"rescue", "server", "web-01", "db-01", "--yes", "--account", "one"}, 2, "expected one server reference, got 2"},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -1408,9 +1470,66 @@ func TestRescueCommands(t *testing.T) {
 		}
 	}
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--no-keys")
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly has no rescue system") {
 		t.Errorf("no rescue: code %d, %q", code, errOut)
+	}
+}
+
+func TestSSHCommandAndKey(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	umpKey := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
+
+	// config key generates once and prints the public key
+	out, errOut, code := e.run("", false, "config", "key")
+	if code != 0 || !strings.Contains(errOut, "Generated UMP's SSH key") || !strings.Contains(out, "Public key:   ssh-ed25519 AAAA") || !strings.Contains(out, "Fingerprint:  SHA256:") {
+		t.Errorf("config key: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	out, errOut, code = e.run("", false, "config", "key", "-o", "json")
+	if code != 0 || errOut != "" || !strings.Contains(out, `"path": "`+umpKey+`"`) || !strings.Contains(out, `"fingerprint_md5"`) {
+		t.Errorf("config key json: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	pub, _ := os.ReadFile(umpKey + ".pub")
+	if !strings.Contains(out, strings.TrimSpace(string(pub))) {
+		t.Errorf("json lacks the public key line:\n%s", out)
+	}
+
+	// ssh server: a command without a terminal, the user's own keys
+	e.sshExit = 3
+	_, errOut, code = e.run("", false, "ssh", "server", "web-01", "--account", "one", "--", "uname", "-a")
+	if code != 3 || errOut != "" || len(e.sshCalls) != 1 || e.sshInteractive[0] {
+		t.Errorf("ssh command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
+	}
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh root@203.0.113.10 -- uname -a" {
+		t.Errorf("ssh argv: %q", argv)
+	}
+	e.sshExit = 0
+	// --staging uses UMP's key without host key checks; --user changes the login
+	e.sshCalls, e.sshInteractive = nil, nil
+	_, _, code = e.run("", false, "ssh", "server", "fake/1", "--staging", "--user", "deploy", "--account", "one", "--", "id")
+	if code != 0 || len(e.sshCalls) != 1 {
+		t.Fatalf("ssh --staging: code %d, calls %v", code, e.sshCalls)
+	}
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR deploy@203.0.113.10 -- id" {
+		t.Errorf("ssh --staging argv: %q", argv)
+	}
+	// interactive needs a terminal
+	e.sshCalls, e.sshInteractive = nil, nil
+	_, errOut, code = e.run("", false, "ssh", "server", "web-01", "--account", "one")
+	if code != 3 || !strings.Contains(errOut, "needs a terminal") || len(e.sshCalls) != 0 {
+		t.Errorf("interactive without terminal: code %d, %q, calls %v", code, errOut, e.sshCalls)
+	}
+	_, _, code = e.run("", true, "ssh", "server", "web-01", "--account", "one")
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh root@203.0.113.10" {
+		t.Errorf("interactive: code %d, calls %v %v", code, e.sshCalls, e.sshInteractive)
+	}
+	_, errOut, code = e.run("", false, "ssh", "server", "nope", "--account", "one", "--", "id")
+	if code != 1 || !strings.Contains(errOut, `server "nope" not found`) {
+		t.Errorf("not found: code %d, %q", code, errOut)
+	}
+	if got := shellJoin([]string{"ssh", "-o", "a b", "x'y", "root@h"}); got != `ssh -o 'a b' 'x'\''y' root@h` {
+		t.Errorf("shellJoin = %q", got)
 	}
 }
 
@@ -1435,7 +1554,7 @@ func TestWaitForSSH(t *testing.T) {
 	waitTimeout, waitDownTime, waitPoll = 300*time.Millisecond, 50*time.Millisecond, 10*time.Millisecond
 
 	var errOut bytes.Buffer
-	a := &app{stdout: &bytes.Buffer{}, stderr: &errOut}
+	a := &app{stdout: &bytes.Buffer{}, stderr: &errOut, probe: sshAnswers}
 	if err := a.waitForSSH(context.Background(), "127.0.0.1", false); err != nil || !strings.Contains(errOut.String(), " up after ") {
 		t.Errorf("listening: %v, %q", err, errOut.String())
 	}

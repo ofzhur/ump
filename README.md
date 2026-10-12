@@ -121,7 +121,8 @@ $ ./ump get servers --diff       # what was added, removed or changed since the 
 $ ./ump rename server web-01 prod-web-01   # the name at the provider; the hostname follows at the next install
 $ ./ump set rdns prod-web-01     # reverse DNS of the primary IPv4 = the server name
 $ ./ump reboot server prod-web-01 --wait
-$ ./ump rescue server prod-web-01          # boot the provider's rescue system with your SSH key
+$ ./ump rescue server prod-web-01          # boot the rescue system and land in its root shell
+$ ./ump rescue server prod-web-01 --yes -- lsblk   # or run one command there
 $ ./ump config test     # re-check credentials any time
 ```
 
