@@ -3,12 +3,14 @@ package hetznerrobot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -325,5 +327,120 @@ func TestReverseDNS(t *testing.T) {
 	}
 	if count["GET /rdns"] != 2 || count["PUT /rdns/203.0.113.50"] != 1 || count["POST /rdns/203.0.113.50"] != 1 || count["POST /rdns/203.0.113.10"] != 1 {
 		t.Errorf("requests: %v", log)
+	}
+}
+
+func TestPowerAndRescue(t *testing.T) {
+	powerPoll = time.Millisecond
+	status := "running"
+	rescueActive := false
+	keys := []string{"0f:1e:2d:3c:4b:5a:69:78:87:96:a5:b4:c3:d2:e1:f0"}
+	var resets []string
+	_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/reset/321":
+			w.Write([]byte(`{"reset":{"server_ip":"203.0.113.10","server_number":321,"type":["sw","hw","power","power_long","man"],"operating_status":"` + status + `"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/reset/321":
+			r.ParseForm()
+			typ := r.PostForm.Get("type")
+			resets = append(resets, typ)
+			switch typ {
+			case "power_long":
+				status = "shut off"
+			case "power":
+				if status == "shut off" {
+					status = "running"
+				} else {
+					status = "shut off"
+				}
+			}
+			w.Write([]byte(`{"reset":{"server_ip":"203.0.113.10","server_number":321,"type":"` + typ + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/boot/321/rescue":
+			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"os":["linux","vkvm"],"arch":[64],"active":` + fmt.Sprint(rescueActive) + `,"password":null,"authorized_key":[],"host_key":[]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/boot/321/rescue":
+			r.ParseForm()
+			if r.PostForm.Get("os") != "linux" || len(r.PostForm["authorized_key[]"]) != 2 {
+				t.Errorf("rescue form: %v", r.PostForm)
+			}
+			rescueActive = true
+			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"os":"linux","arch":64,"active":true,"password":"r3scue","authorized_key":[],"host_key":[]}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/boot/321/rescue":
+			rescueActive = false
+			w.Write([]byte(`{"rescue":{"server_ip":"203.0.113.10","server_number":321,"active":false}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/key":
+			var items []string
+			for _, fp := range keys {
+				items = append(items, `{"key":{"name":"k","fingerprint":"`+fp+`","type":"ED25519","size":256,"data":"ssh-ed25519 AAAA"}}`)
+			}
+			w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+		case r.Method == http.MethodPost && r.URL.Path == "/key":
+			r.ParseForm()
+			if r.PostForm.Get("name") != "laptop" || !strings.HasPrefix(r.PostForm.Get("data"), "ssh-ed25519 ") {
+				t.Errorf("key form: %v", r.PostForm)
+			}
+			keys = append(keys, "d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"key":{"name":"laptop","fingerprint":"d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81","type":"ED25519","size":256,"data":"ssh-ed25519 AAAA"}}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	pw := inv.(provider.Power)
+	m := provider.Machine{ID: "321", IPv4: "203.0.113.10"}
+	if st, err := pw.PowerState(context.Background(), m); err != nil || st != provider.PowerOn {
+		t.Errorf("PowerState: %v %v", st, err)
+	}
+	if err := pw.Reboot(context.Background(), m, provider.RebootSoft); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Reboot(context.Background(), m, provider.RebootHard); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Reboot(context.Background(), m, provider.RebootPowerCycle); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.PowerOff(context.Background(), m, true); err != nil {
+		t.Fatal(err)
+	}
+	// off now: a hard reboot becomes a power-on, power off is a no-op
+	if err := pw.Reboot(context.Background(), m, provider.RebootHard); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.PowerOff(context.Background(), m, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.PowerOn(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(resets, ","); got != "sw,hw,power_long,power,power_long,power,power,power" {
+		t.Errorf("resets: %s", got)
+	}
+
+	rs := inv.(provider.Rescue)
+	if on, _ := rs.RescueEnabled(context.Background(), m); on {
+		t.Error("rescue reported active")
+	}
+	info, err := rs.EnableRescue(context.Background(), m, provider.RescueOptions{Keys: []provider.PublicKey{
+		{Name: "ops", Fingerprint: "0F:1E:2D:3C:4B:5A:69:78:87:96:A5:B4:C3:D2:E1:F0", Data: "ssh-rsa AAAA"},
+		{Name: "laptop", Fingerprint: "d7:0b:dd:9a:1b:64:cf:90:82:28:e2:50:f2:dc:bf:81", Data: "ssh-ed25519 AAAA test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Password != "r3scue" || info.Address != "203.0.113.10" || info.User != "root" {
+		t.Errorf("rescue info: %+v", info)
+	}
+	if on, _ := rs.RescueEnabled(context.Background(), m); !on {
+		t.Error("rescue not active")
+	}
+	if err := rs.DisableRescue(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.DisableRescue(context.Background(), m); err != nil {
+		t.Errorf("disable when inactive: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Errorf("keys registered: %v", keys)
 	}
 }

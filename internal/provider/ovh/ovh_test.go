@@ -38,6 +38,12 @@ type fakeAPI struct {
 	renamed      string
 	reverse      map[string]map[string]string
 	calls        atomic.Int32
+
+	bootID          int
+	rescueKey       string
+	rebooted        int
+	instanceRescue  bool
+	instanceActions []string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -103,10 +109,39 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write([]byte(`["ns1.ip-203-0-113.eu","ns2.ip-203-0-113.eu"]`))
 	case "/dedicated/server/ns1.ip-203-0-113.eu":
+		if r.Method == http.MethodPut {
+			var fields map[string]any
+			json.Unmarshal(body, &fields)
+			if v, ok := fields["bootId"]; ok {
+				f.bootID = int(v.(float64))
+			}
+			if v, ok := fields["rescueSshKey"]; ok {
+				f.rescueKey = v.(string)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if f.bootID == 0 {
+			f.bootID = 1
+		}
 		w.Write([]byte(`{"name":"ns1.ip-203-0-113.eu","ip":"203.0.113.20","datacenter":"gra2","region":"eu-west-gra","state":"ok",
 		  "powerState":"poweredOn","commercialRange":"rise-1","os":"debian12_64","serverId":1001,"iam":{"displayName":"db-01","id":"x"},
-		  "bootId":1,"rootDevice":"/dev/sda","rescueMail":"ops@example.net","monitoring":true,"supportLevel":"pro","linkSpeed":1000,
+		  "bootId":` + fmt.Sprint(f.bootID) + `,"rootDevice":"/dev/sda","rescueMail":"ops@example.net","monitoring":true,"supportLevel":"pro","linkSpeed":1000,
 		  "availabilityZone":"eu-west-gra-a","rack":"R42"}`))
+	case "/dedicated/server/ns1.ip-203-0-113.eu/reboot":
+		f.rebooted++
+		w.Write([]byte(`{"taskId":555,"function":"hardReboot","status":"todo","comment":"Reboot asked"}`))
+	case "/dedicated/server/ns1.ip-203-0-113.eu/boot":
+		switch r.URL.Query().Get("bootType") {
+		case "rescue":
+			w.Write([]byte(`[1122]`))
+		case "harddisk":
+			w.Write([]byte(`[1]`))
+		default:
+			w.Write([]byte(`[1,1122]`))
+		}
+	case "/dedicated/server/ns1.ip-203-0-113.eu/boot/1122":
+		w.Write([]byte(`{"bootId":1122,"bootType":"rescue","description":"Rescue 64 pro","kernel":"rescue64-pro"}`))
 	case "/dedicated/server/ns1.ip-203-0-113.eu/serviceInfos":
 		w.Write([]byte(`{"creation":"2025-01-15","expiration":"2026-11-15","status":"ok","renewalType":"automaticV2016",
 		  "renew":{"automatic":true,"deleteAtExpiration":false,"forced":false}}`))
@@ -117,6 +152,24 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		  "processorName":"Intel Xeon E-2386G","coresPerProcessor":6,"threadsPerProcessor":12,
 		  "diskGroups":[{"description":"","numberOfDisks":2,"diskSize":{"unit":"GB","value":512},"diskType":"NVME","raidController":"soft"}],
 		  "bootMode":"uefi","formFactor":"1u"}`))
+	case "/cloud/project/p1/instance/uuid-1/reboot":
+		var req struct {
+			Type string `json:"type"`
+		}
+		json.Unmarshal(body, &req)
+		f.instanceActions = append(f.instanceActions, "reboot:"+req.Type)
+		w.WriteHeader(http.StatusOK)
+	case "/cloud/project/p1/instance/uuid-1/start", "/cloud/project/p1/instance/uuid-1/stop":
+		f.instanceActions = append(f.instanceActions, strings.TrimPrefix(r.URL.Path, "/cloud/project/p1/instance/uuid-1/"))
+		w.WriteHeader(http.StatusOK)
+	case "/cloud/project/p1/instance/uuid-1/rescueMode":
+		var req struct {
+			Rescue bool `json:"rescue"`
+		}
+		json.Unmarshal(body, &req)
+		f.instanceRescue = req.Rescue
+		f.instanceActions = append(f.instanceActions, fmt.Sprintf("rescue:%v", req.Rescue))
+		w.Write([]byte(`{"adminPassword":"adm1n"}`))
 	case "/cloud/project/p1/instance/uuid-1":
 		if r.Method == http.MethodPut {
 			var req struct {
@@ -133,7 +186,11 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		if f.renamed != "" {
 			name = f.renamed
 		}
-		w.Write([]byte(`{"id":"uuid-1","name":"` + name + `","status":"ACTIVE","region":"GRA11","created":"2026-03-01T10:00:00Z","planCode":"b3-8.consumption",
+		status := "ACTIVE"
+		if f.instanceRescue {
+			status = "RESCUE"
+		}
+		w.Write([]byte(`{"id":"uuid-1","name":"` + name + `","status":"` + status + `","region":"GRA11","created":"2026-03-01T10:00:00Z","planCode":"b3-8.consumption",
 		  "flavor":{"name":"b3-8","type":"ovh.b3","vcpus":2,"ram":8192,"disk":50,"osType":"linux"},
 		  "image":{"name":"Debian 12","type":"linux","user":"debian","visibility":"public"},"sshKey":{"name":"laptop"},"monthlyBilling":null,
 		  "ipAddresses":[{"ip":"10.0.0.5","type":"private","version":4,"networkId":"net-1"},{"ip":"198.51.100.7","type":"public","version":4},{"ip":"2001:db8:7::1","type":"public","version":6}]}`))
@@ -529,5 +586,73 @@ func TestReverseDNS(t *testing.T) {
 	ptrs, _ = rd.PTRs(context.Background(), vm)
 	if len(ptrs) != 1 || ptrs[0].Name != "vm-01.example.net" {
 		t.Errorf("instance PTRs after set: %+v", ptrs)
+	}
+}
+
+func TestPowerAndRescue(t *testing.T) {
+	f := newFakeAPI(t)
+	p := f.provider(t)
+	pw, rs := p.(provider.Power), p.(provider.Rescue)
+	ded := provider.Machine{ID: "ns1.ip-203-0-113.eu", Kind: provider.KindBareMetal, IPv4: "203.0.113.20"}
+	vm := provider.Machine{ID: "uuid-1", Kind: provider.KindCloud, IPv4: "198.51.100.7", Labels: map[string]string{"project_id": "p1"}}
+
+	if st, err := pw.PowerState(context.Background(), ded); err != nil || st != provider.PowerOn {
+		t.Errorf("dedicated PowerState: %v %v", st, err)
+	}
+	if err := pw.Reboot(context.Background(), ded, provider.RebootSoft); err != nil || f.rebooted != 1 {
+		t.Errorf("dedicated reboot: %v, %d", err, f.rebooted)
+	}
+	if err := pw.PowerOff(context.Background(), ded, true); err == nil || !strings.Contains(err.Error(), "cannot be switched on or off") {
+		t.Errorf("dedicated power off: %v", err)
+	}
+	if on, err := rs.RescueEnabled(context.Background(), ded); err != nil || on {
+		t.Errorf("dedicated rescue state: %v %v", on, err)
+	}
+	info, err := rs.EnableRescue(context.Background(), ded, provider.RescueOptions{Keys: []provider.PublicKey{{Data: "ssh-ed25519 AAAA one"}, {Data: "ssh-ed25519 BBBB two"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.bootID != 1122 || f.rescueKey != "ssh-ed25519 AAAA one" || info.Reboots || !strings.Contains(info.Note, "one rescue SSH key") || info.Address != "203.0.113.20" {
+		t.Errorf("dedicated rescue: bootId %d key %q info %+v", f.bootID, f.rescueKey, info)
+	}
+	if on, err := rs.RescueEnabled(context.Background(), ded); err != nil || !on {
+		t.Errorf("dedicated rescue state after enable: %v %v", on, err)
+	}
+	if err := rs.DisableRescue(context.Background(), ded); err != nil || f.bootID != 1 {
+		t.Errorf("dedicated unrescue: %v, bootId %d", err, f.bootID)
+	}
+
+	if st, err := pw.PowerState(context.Background(), vm); err != nil || st != provider.PowerOn {
+		t.Errorf("instance PowerState: %v %v", st, err)
+	}
+	for _, mode := range []provider.RebootMode{provider.RebootSoft, provider.RebootHard, provider.RebootPowerCycle} {
+		if err := pw.Reboot(context.Background(), vm, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pw.PowerOff(context.Background(), vm, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.PowerOn(context.Background(), vm); err != nil {
+		t.Fatal(err)
+	}
+	info, err = rs.EnableRescue(context.Background(), vm, provider.RescueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Password != "adm1n" || !info.Reboots {
+		t.Errorf("instance rescue: %+v", info)
+	}
+	if on, _ := rs.RescueEnabled(context.Background(), vm); !on {
+		t.Error("instance rescue not reported")
+	}
+	if st, _ := pw.PowerState(context.Background(), vm); st != provider.PowerOn {
+		t.Errorf("instance in rescue should count as on, got %s", st)
+	}
+	if err := rs.DisableRescue(context.Background(), vm); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.instanceActions, ","); got != "reboot:soft,reboot:hard,stop,start,stop,start,rescue:true,rescue:false" {
+		t.Errorf("instance actions: %s", got)
 	}
 }

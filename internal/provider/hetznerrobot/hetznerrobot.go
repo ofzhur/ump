@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -59,7 +60,14 @@ var Type = provider.Type{
 	New: newProvider,
 }
 
-var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS, provider.CapPower, provider.CapRescue}
+
+// RescueOS is the rescue system Robot boots.
+const RescueOS = "linux"
+
+// powerPoll is how often the power state is checked while waiting for a
+// power cycle.
+var powerPoll = 3 * time.Second
 
 // Provider is a configured Hetzner Robot account.
 type Provider struct {
@@ -129,6 +137,178 @@ func addresses(s Server) (singles, prefixes []string) {
 		prefixes = append(prefixes, s.ServerIPv6Net+"/64")
 	}
 	return singles, prefixes
+}
+
+func (p *Provider) number(m provider.Machine) (int, error) {
+	n, err := strconv.Atoi(m.ID)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not a server number", TypeName, m.ID)
+	}
+	return n, nil
+}
+
+// PowerState implements provider.Power from GET /reset.
+func (p *Provider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	n, err := p.number(m)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	r, err := p.client.GetReset(ctx, n)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	return powerState(r.OperatingStatus), nil
+}
+
+func powerState(operatingStatus string) provider.PowerState {
+	switch operatingStatus {
+	case "running":
+		return provider.PowerOn
+	case "shut off":
+		return provider.PowerOff
+	}
+	return provider.PowerUnknown
+}
+
+// Reboot implements provider.Power. A hardware or software reset does
+// nothing on a server that is switched off, so one that is off is
+// switched on instead. A power cycle is a long press of the power button,
+// a wait until the server is off, and a short press.
+func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	n, err := p.number(m)
+	if err != nil {
+		return err
+	}
+	r, err := p.client.GetReset(ctx, n)
+	if err != nil {
+		return err
+	}
+	if powerState(r.OperatingStatus) == provider.PowerOff {
+		return p.client.Reset(ctx, n, "power")
+	}
+	switch mode {
+	case provider.RebootSoft:
+		return p.client.Reset(ctx, n, "sw")
+	case provider.RebootPowerCycle:
+		if err := p.client.Reset(ctx, n, "power_long"); err != nil {
+			return err
+		}
+		if err := p.waitPower(ctx, n, provider.PowerOff); err != nil {
+			return err
+		}
+		return p.client.Reset(ctx, n, "power")
+	}
+	return p.client.Reset(ctx, n, "hw")
+}
+
+// PowerOn implements provider.Power with a short press of the power button.
+func (p *Provider) PowerOn(ctx context.Context, m provider.Machine) error {
+	n, err := p.number(m)
+	if err != nil {
+		return err
+	}
+	r, err := p.client.GetReset(ctx, n)
+	if err != nil {
+		return err
+	}
+	if powerState(r.OperatingStatus) == provider.PowerOn {
+		return nil
+	}
+	return p.client.Reset(ctx, n, "power")
+}
+
+// PowerOff implements provider.Power: a short press of the power button
+// asks the operating system to shut down, a long press cuts the power.
+func (p *Provider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	n, err := p.number(m)
+	if err != nil {
+		return err
+	}
+	r, err := p.client.GetReset(ctx, n)
+	if err != nil {
+		return err
+	}
+	if powerState(r.OperatingStatus) == provider.PowerOff {
+		return nil
+	}
+	if hard {
+		return p.client.Reset(ctx, n, "power_long")
+	}
+	return p.client.Reset(ctx, n, "power")
+}
+
+func (p *Provider) waitPower(ctx context.Context, n int, want provider.PowerState) error {
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		r, err := p.client.GetReset(ctx, n)
+		if err != nil {
+			return err
+		}
+		if powerState(r.OperatingStatus) == want {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return &provider.APIError{Provider: TypeName, Message: fmt.Sprintf("server %d did not reach power state %s in time", n, want)}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(powerPoll):
+		}
+	}
+}
+
+// RescueEnabled implements provider.Rescue.
+func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	n, err := p.number(m)
+	if err != nil {
+		return false, err
+	}
+	r, err := p.client.GetRescue(ctx, n)
+	if err != nil {
+		return false, err
+	}
+	return r.Active, nil
+}
+
+// EnableRescue implements provider.Rescue: keys unknown to the account
+// are registered first, because Robot only takes fingerprints of
+// registered keys; then the rescue system is armed for the next boot.
+func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	n, err := p.number(m)
+	if err != nil {
+		return nil, err
+	}
+	var fingerprints []string
+	for _, k := range opts.Keys {
+		fp, err := p.client.EnsureKey(ctx, k)
+		if err != nil {
+			return nil, err
+		}
+		fingerprints = append(fingerprints, fp)
+	}
+	r, err := p.client.EnableRescue(ctx, n, fingerprints)
+	if err != nil {
+		return nil, err
+	}
+	info := &provider.RescueInfo{Address: m.IPv4, User: "root", Password: r.Password}
+	if info.Address == "" {
+		info.Address = r.ServerIP
+	}
+	return info, nil
+}
+
+// DisableRescue implements provider.Rescue.
+func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	n, err := p.number(m)
+	if err != nil {
+		return err
+	}
+	r, err := p.client.GetRescue(ctx, n)
+	if err != nil || !r.Active {
+		return err
+	}
+	return p.client.DisableRescue(ctx, n)
 }
 
 // PTRs implements provider.ReverseDNS from the account-wide entry list.
@@ -253,15 +433,12 @@ func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.
 		d.Sections = append(d.Sections, provider.ErrorSection("Power", err))
 	}
 	if r, err := p.client.GetRescue(ctx, number); err == nil {
-		keys, archs := []string{}, []string{}
+		keys := []string{}
 		for _, k := range r.AuthorizedKey {
 			keys = append(keys, k.Key.Name+" ("+k.Key.Fingerprint+")")
 		}
-		for _, a := range r.Arch {
-			archs = append(archs, fmt.Sprint(a))
-		}
 		rescue := provider.Section{Name: "Rescue"}
-		rescue.Add("active", r.Active).Add("systems", nonNil(r.OS)).Add("architectures", archs).Add("authorized_keys", keys)
+		rescue.Add("active", r.Active).Add("systems", r.Systems()).Add("architectures", r.Architectures()).Add("authorized_keys", keys)
 		d.Sections = append(d.Sections, rescue)
 	} else if !isNotFound(err) {
 		d.Sections = append(d.Sections, provider.ErrorSection("Rescue", err))
@@ -372,11 +549,16 @@ type ResetInfo struct {
 	OperatingStatus string   `json:"operating_status"`
 }
 
-// RescueInfo is GET /boot/{server-number}/rescue.
+// RescueInfo is GET /boot/{server-number}/rescue, and the answer to
+// enabling it (then with the generated password). OS and Arch are the
+// lists of options while the rescue system is inactive and the chosen
+// values once it is active; Systems and Architectures read both.
 type RescueInfo struct {
-	OS            []string `json:"os"`
-	Arch          []any    `json:"arch"`
-	Active        bool     `json:"active"`
+	ServerIP      string `json:"server_ip"`
+	OS            any    `json:"os"`
+	Arch          any    `json:"arch"`
+	Active        bool   `json:"active"`
+	Password      string `json:"password"`
 	AuthorizedKey []struct {
 		Key struct {
 			Name        string `json:"name"`
@@ -387,10 +569,50 @@ type RescueInfo struct {
 	} `json:"authorized_key"`
 }
 
+// Key is an SSH public key registered at the account (GET /key).
+type Key struct {
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	Type        string `json:"type"`
+	Size        int    `json:"size"`
+	Data        string `json:"data"`
+}
+
 // RDNS is one reverse DNS entry of the account (GET /rdns).
 type RDNS struct {
 	IP  string `json:"ip"`
 	PTR string `json:"ptr"`
+}
+
+// Systems returns the rescue operating systems (available, or the active one).
+func (r *RescueInfo) Systems() []string { return anyStrings(r.OS) }
+
+// Architectures returns the rescue architectures (available, or the active one).
+func (r *RescueInfo) Architectures() []string { return anyStrings(r.Arch) }
+
+func anyStrings(v any) []string {
+	switch x := v.(type) {
+	case nil:
+		return []string{}
+	case string:
+		return []string{x}
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			out = append(out, anyString(e))
+		}
+		return out
+	}
+	return []string{anyString(v)}
+}
+
+func anyString(v any) string {
+	if f, ok := v.(float64); ok {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return fmt.Sprint(v)
 }
 
 // Subnet is an address block assigned to a server.
@@ -470,6 +692,73 @@ func (c *Client) RenameServer(ctx context.Context, number int, name string) (*Se
 		return nil, err
 	}
 	return &raw.Server, nil
+}
+
+// Reset triggers a reset of the given type: sw, hw, power, power_long.
+// "man" (a technician) is deliberately not offered.
+func (c *Client) Reset(ctx context.Context, number int, typ string) error {
+	return c.postForm(ctx, "/reset/"+strconv.Itoa(number), url.Values{"type": {typ}}, nil)
+}
+
+// ListKeys returns the SSH keys registered at the account.
+func (c *Client) ListKeys(ctx context.Context) ([]Key, error) {
+	var raw []struct {
+		Key Key `json:"key"`
+	}
+	if err := c.get(ctx, "/key", &raw); err != nil {
+		if isCode(err, http.StatusNotFound, "NOT_FOUND") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]Key, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, r.Key)
+	}
+	return out, nil
+}
+
+// EnsureKey returns the fingerprint of a registered key equal to k,
+// registering it when the account does not have it yet.
+func (c *Client) EnsureKey(ctx context.Context, k provider.PublicKey) (string, error) {
+	keys, err := c.ListKeys(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, have := range keys {
+		if strings.EqualFold(have.Fingerprint, k.Fingerprint) {
+			return have.Fingerprint, nil
+		}
+	}
+	var raw struct {
+		Key Key `json:"key"`
+	}
+	if err := c.postForm(ctx, "/key", url.Values{"name": {k.Name}, "data": {k.Data}}, &raw); err != nil {
+		return "", err
+	}
+	return raw.Key.Fingerprint, nil
+}
+
+// EnableRescue arms the rescue system (POST /boot/{n}/rescue) with the
+// fingerprints of registered keys; without keys Robot generates a
+// password, which the answer carries.
+func (c *Client) EnableRescue(ctx context.Context, number int, fingerprints []string) (*RescueInfo, error) {
+	form := url.Values{"os": {RescueOS}}
+	for _, fp := range fingerprints {
+		form.Add("authorized_key[]", fp)
+	}
+	var raw struct {
+		Rescue RescueInfo `json:"rescue"`
+	}
+	if err := c.postForm(ctx, "/boot/"+strconv.Itoa(number)+"/rescue", form, &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Rescue, nil
+}
+
+// DisableRescue disarms the rescue system (DELETE /boot/{n}/rescue).
+func (c *Client) DisableRescue(ctx context.Context, number int) error {
+	return c.do(ctx, http.MethodDelete, "/boot/"+strconv.Itoa(number)+"/rescue", "", nil, nil)
 }
 
 // ListRDNS returns every reverse DNS entry of the account.
@@ -587,6 +876,12 @@ func parseError(status int, body []byte) error {
 		}
 	case apiErr.Code == "IP_NOT_FOUND":
 		apiErr.Message = "the address is not assigned to this account"
+	case apiErr.Code == "RESET_MANUAL_ACTIVE":
+		apiErr.Message = "a manual reset is already in progress"
+	case apiErr.Code == "RESET_FAILED":
+		apiErr.Message = "the reset failed at Hetzner; try again or contact support"
+	case apiErr.Code == "BOOT_ALREADY_ENABLED":
+		apiErr.Message = "another boot option is already active; disable it first"
 	case apiErr.Code == "RATE_LIMIT_EXCEEDED":
 		apiErr.Message = "rate limit exceeded (the Robot API allows 200 requests per hour)"
 	case apiErr.Message == "":

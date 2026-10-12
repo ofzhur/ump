@@ -53,6 +53,12 @@ var DefaultAccessRules = []AccessRule{
 	{Method: "GET", Path: "/ip/*"},
 	{Method: "POST", Path: "/ip/*/reverse"},
 	{Method: "DELETE", Path: "/ip/*/reverse/*"},
+	{Method: "PUT", Path: "/dedicated/server/*"},
+	{Method: "POST", Path: "/dedicated/server/*/reboot"},
+	{Method: "POST", Path: "/cloud/project/*/instance/*/reboot"},
+	{Method: "POST", Path: "/cloud/project/*/instance/*/rescueMode"},
+	{Method: "POST", Path: "/cloud/project/*/instance/*/start"},
+	{Method: "POST", Path: "/cloud/project/*/instance/*/stop"},
 }
 
 const listParallelism = 8
@@ -96,7 +102,7 @@ var Type = provider.Type{
 	Complete: complete,
 }
 
-var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS, provider.CapPower, provider.CapRescue}
 
 // Provider is a configured OVHcloud account.
 type Provider struct {
@@ -175,6 +181,191 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability { return capabilities }
+
+func (p *Provider) projectID(m provider.Machine) (string, error) {
+	id := m.Labels["project_id"]
+	if id == "" {
+		return "", fmt.Errorf("%s: instance %s has no project_id label", TypeName, m.ID)
+	}
+	return id, nil
+}
+
+var errDedicatedPower = &provider.APIError{Provider: TypeName,
+	Message: "dedicated servers cannot be switched on or off through the OVHcloud API; use the control panel (or reboot)"}
+
+// PowerState implements provider.Power.
+func (p *Provider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	if m.Kind != provider.KindCloud {
+		s, err := p.client.GetDedicatedServer(ctx, m.ID)
+		if err != nil {
+			return provider.PowerUnknown, err
+		}
+		switch s.PowerState {
+		case "poweredOn":
+			return provider.PowerOn, nil
+		case "poweredOff":
+			return provider.PowerOff, nil
+		}
+		return provider.PowerUnknown, nil
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	in, err := p.client.GetInstance(ctx, projectID, m.ID)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	return instancePower(in.Status), nil
+}
+
+func instancePower(status string) provider.PowerState {
+	switch strings.ToUpper(status) {
+	case "ACTIVE", "RESCUE", "RESCUED":
+		return provider.PowerOn
+	case "SHUTOFF", "STOPPED", "PAUSED", "SUSPENDED", "SHELVED", "SHELVED_OFFLOADED":
+		return provider.PowerOff
+	}
+	return provider.PowerUnknown
+}
+
+// Reboot implements provider.Power. Dedicated servers know one reboot
+// (a hardware reset, started as a task); instances reboot soft or hard,
+// and a power cycle is stop then start.
+func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	if m.Kind != provider.KindCloud {
+		_, err := p.client.RebootDedicated(ctx, m.ID)
+		return err
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case provider.RebootSoft:
+		return p.client.RebootInstance(ctx, projectID, m.ID, "soft")
+	case provider.RebootPowerCycle:
+		if err := p.client.InstanceAction(ctx, projectID, m.ID, "stop"); err != nil {
+			return err
+		}
+		return p.client.InstanceAction(ctx, projectID, m.ID, "start")
+	}
+	return p.client.RebootInstance(ctx, projectID, m.ID, "hard")
+}
+
+// PowerOn implements provider.Power for instances.
+func (p *Provider) PowerOn(ctx context.Context, m provider.Machine) error {
+	if m.Kind != provider.KindCloud {
+		return errDedicatedPower
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return err
+	}
+	return p.client.InstanceAction(ctx, projectID, m.ID, "start")
+}
+
+// PowerOff implements provider.Power for instances (OVH knows one stop).
+func (p *Provider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	if m.Kind != provider.KindCloud {
+		return errDedicatedPower
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return err
+	}
+	return p.client.InstanceAction(ctx, projectID, m.ID, "stop")
+}
+
+// RescueEnabled implements provider.Rescue: a dedicated server whose boot
+// option is of type rescue, or an instance in a rescue status.
+func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	if m.Kind != provider.KindCloud {
+		s, err := p.client.GetDedicatedServer(ctx, m.ID)
+		if err != nil {
+			return false, err
+		}
+		if s.BootID == 0 {
+			return false, nil
+		}
+		b, err := p.client.GetBoot(ctx, m.ID, s.BootID)
+		if err != nil {
+			return false, err
+		}
+		return b.BootType == "rescue", nil
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return false, err
+	}
+	in, err := p.client.GetInstance(ctx, projectID, m.ID)
+	if err != nil {
+		return false, err
+	}
+	return strings.HasPrefix(strings.ToUpper(in.Status), "RESCU"), nil
+}
+
+// EnableRescue implements provider.Rescue. A dedicated server gets the
+// rescue boot option and the first key as rescue SSH key (OVH mails the
+// password to the rescue mail otherwise); the caller reboots it. An
+// instance is put into rescue mode by OVH itself, which reboots it.
+func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	if m.Kind != provider.KindCloud {
+		ids, err := p.client.ListBoots(ctx, m.ID, "rescue")
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, &provider.APIError{Provider: TypeName, Message: "server " + m.ID + " has no rescue boot option"}
+		}
+		update := map[string]any{"bootId": ids[0]}
+		info := &provider.RescueInfo{Address: m.IPv4, User: "root"}
+		if len(opts.Keys) > 0 {
+			update["rescueSshKey"] = opts.Keys[0].Data
+			if len(opts.Keys) > 1 {
+				info.Note = "OVHcloud takes one rescue SSH key; the first one was used"
+			}
+		} else {
+			info.Note = "OVHcloud mails the rescue password to the server's rescue mail address"
+		}
+		if err := p.client.UpdateDedicated(ctx, m.ID, update); err != nil {
+			return nil, err
+		}
+		return info, nil
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return nil, err
+	}
+	password, err := p.client.SetInstanceRescue(ctx, projectID, m.ID, true)
+	if err != nil {
+		return nil, err
+	}
+	return &provider.RescueInfo{Address: m.IPv4, User: "root", Password: password, Reboots: true,
+		Note: "OVHcloud reboots the instance into rescue mode itself; the SSH keys of the instance apply"}, nil
+}
+
+// DisableRescue implements provider.Rescue: the hard disk boot option
+// for a dedicated server, rescue mode off for an instance (which OVH
+// reboots).
+func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	if m.Kind != provider.KindCloud {
+		ids, err := p.client.ListBoots(ctx, m.ID, "harddisk")
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return &provider.APIError{Provider: TypeName, Message: "server " + m.ID + " has no hard disk boot option"}
+		}
+		return p.client.UpdateDedicated(ctx, m.ID, map[string]any{"bootId": ids[0]})
+	}
+	projectID, err := p.projectID(m)
+	if err != nil {
+		return err
+	}
+	_, err = p.client.SetInstanceRescue(ctx, projectID, m.ID, false)
+	return err
+}
 
 // blocks returns the IP blocks of a machine, the unit the OVH reverse DNS
 // API works with: a dedicated server's routed blocks, or /32 and /64
@@ -920,6 +1111,71 @@ func (c *Client) GetInstance(ctx context.Context, projectID, id string) (*Instan
 		return nil, err
 	}
 	return &in, nil
+}
+
+// Task is an asynchronous operation on a dedicated server.
+type Task struct {
+	TaskID   int64  `json:"taskId"`
+	Function string `json:"function"`
+	Status   string `json:"status"`
+	Comment  string `json:"comment"`
+}
+
+// RebootDedicated starts a hardware reboot of a dedicated server.
+func (c *Client) RebootDedicated(ctx context.Context, name string) (*Task, error) {
+	var t Task
+	if err := c.do(ctx, http.MethodPost, "/dedicated/server/"+url.PathEscape(name)+"/reboot", struct{}{}, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// ListBoots returns the boot option IDs of a dedicated server of one type
+// (harddisk, rescue, network, ...).
+func (c *Client) ListBoots(ctx context.Context, name, bootType string) ([]int, error) {
+	var ids []int
+	path := "/dedicated/server/" + url.PathEscape(name) + "/boot"
+	if bootType != "" {
+		path += "?bootType=" + url.QueryEscape(bootType)
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// UpdateDedicated changes properties of a dedicated server (bootId,
+// rescueSshKey, rescueMail, monitoring, ...).
+func (c *Client) UpdateDedicated(ctx context.Context, name string, fields map[string]any) error {
+	return c.do(ctx, http.MethodPut, "/dedicated/server/"+url.PathEscape(name), fields, nil)
+}
+
+// RebootInstance reboots a Public Cloud instance, type soft or hard.
+func (c *Client) RebootInstance(ctx context.Context, projectID, id, typ string) error {
+	body := struct {
+		Type string `json:"type"`
+	}{Type: typ}
+	return c.do(ctx, http.MethodPost, "/cloud/project/"+url.PathEscape(projectID)+"/instance/"+url.PathEscape(id)+"/reboot", body, nil)
+}
+
+// InstanceAction runs a body-less instance action: start, stop.
+func (c *Client) InstanceAction(ctx context.Context, projectID, id, action string) error {
+	return c.do(ctx, http.MethodPost, "/cloud/project/"+url.PathEscape(projectID)+"/instance/"+url.PathEscape(id)+"/"+action, struct{}{}, nil)
+}
+
+// SetInstanceRescue enables or disables rescue mode of an instance; OVH
+// reboots the instance and, when enabling, returns the root password.
+func (c *Client) SetInstanceRescue(ctx context.Context, projectID, id string, enable bool) (string, error) {
+	body := struct {
+		Rescue bool `json:"rescue"`
+	}{Rescue: enable}
+	var raw struct {
+		AdminPassword string `json:"adminPassword"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/cloud/project/"+url.PathEscape(projectID)+"/instance/"+url.PathEscape(id)+"/rescueMode", body, &raw); err != nil {
+		return "", err
+	}
+	return raw.AdminPassword, nil
 }
 
 // ReverseIP is one reverse DNS entry of an IP block.

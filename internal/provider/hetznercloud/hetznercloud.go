@@ -10,12 +10,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -52,7 +55,13 @@ var Type = provider.Type{
 	New: newProvider,
 }
 
-var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS, provider.CapPower, provider.CapRescue}
+
+// RescueType is the rescue system Hetzner Cloud boots.
+const RescueType = "linux64"
+
+// actionPoll is how often a running action is checked.
+var actionPoll = time.Second
 
 // Provider is a configured Hetzner Cloud project.
 type Provider struct {
@@ -84,6 +93,123 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability { return capabilities }
+
+func (p *Provider) serverID(m provider.Machine) (int64, error) {
+	id, err := strconv.ParseInt(m.ID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not a server ID", TypeName, m.ID)
+	}
+	return id, nil
+}
+
+// PowerState implements provider.Power from the server status.
+func (p *Provider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	id, err := p.serverID(m)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	s, err := p.client.GetServer(ctx, id)
+	if err != nil {
+		return provider.PowerUnknown, err
+	}
+	switch s.Status {
+	case "running":
+		return provider.PowerOn, nil
+	case "off":
+		return provider.PowerOff, nil
+	}
+	return provider.PowerUnknown, nil
+}
+
+// Reboot implements provider.Power with the reboot (ACPI), reset or
+// poweroff+poweron actions; it returns when the action completed.
+func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	id, err := p.serverID(m)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case provider.RebootSoft:
+		return p.client.RunServerAction(ctx, id, "reboot")
+	case provider.RebootPowerCycle:
+		if err := p.client.RunServerAction(ctx, id, "poweroff"); err != nil {
+			return err
+		}
+		return p.client.RunServerAction(ctx, id, "poweron")
+	}
+	return p.client.RunServerAction(ctx, id, "reset")
+}
+
+// PowerOn implements provider.Power.
+func (p *Provider) PowerOn(ctx context.Context, m provider.Machine) error {
+	id, err := p.serverID(m)
+	if err != nil {
+		return err
+	}
+	return p.client.RunServerAction(ctx, id, "poweron")
+}
+
+// PowerOff implements provider.Power: shutdown (ACPI) or poweroff.
+func (p *Provider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	id, err := p.serverID(m)
+	if err != nil {
+		return err
+	}
+	if hard {
+		return p.client.RunServerAction(ctx, id, "poweroff")
+	}
+	return p.client.RunServerAction(ctx, id, "shutdown")
+}
+
+// RescueEnabled implements provider.Rescue.
+func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	id, err := p.serverID(m)
+	if err != nil {
+		return false, err
+	}
+	s, err := p.client.GetServer(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return s.RescueEnabled, nil
+}
+
+// EnableRescue implements provider.Rescue: the keys are registered in
+// the project when their fingerprints are unknown, then the rescue
+// system is armed for the next boot. The root password Hetzner issues is
+// returned; the caller reboots the machine.
+func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	id, err := p.serverID(m)
+	if err != nil {
+		return nil, err
+	}
+	var keyIDs []int64
+	for _, k := range opts.Keys {
+		keyID, err := p.client.EnsureSSHKey(ctx, k)
+		if err != nil {
+			return nil, err
+		}
+		keyIDs = append(keyIDs, keyID)
+	}
+	password, err := p.client.EnableRescue(ctx, id, keyIDs)
+	if err != nil {
+		return nil, err
+	}
+	return &provider.RescueInfo{Address: m.IPv4, User: "root", Password: password}, nil
+}
+
+// DisableRescue implements provider.Rescue.
+func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	id, err := p.serverID(m)
+	if err != nil {
+		return err
+	}
+	enabled, err := p.RescueEnabled(ctx, m)
+	if err != nil || !enabled {
+		return err
+	}
+	return p.client.RunServerAction(ctx, id, "disable_rescue")
+}
 
 // PTRs implements provider.ReverseDNS. Hetzner Cloud always has an entry
 // for the IPv4 (its default points to clients.your-server.de).
@@ -195,10 +321,14 @@ func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.
 	}
 	image.Add("iso", iso)
 
+	loc := s.location()
 	location := provider.Section{Name: "Location"}
-	location.Add("datacenter", s.Datacenter.Name).Add("description", s.Datacenter.Description).
-		Add("city", s.Datacenter.Location.City).Add("country", s.Datacenter.Location.Country).
-		Add("network_zone", s.Datacenter.Location.NetworkZone)
+	var datacenter any
+	if s.Datacenter != nil && s.Datacenter.Name != "" {
+		datacenter = s.Datacenter.Name
+	}
+	location.Add("location", loc.Name).Add("datacenter", datacenter).Add("description", loc.Description).
+		Add("city", loc.City).Add("country", loc.Country).Add("network_zone", loc.NetworkZone)
 
 	network := provider.Section{Name: "Network"}
 	if v4 := s.PublicNet.IPv4; v4 != nil {
@@ -265,12 +395,12 @@ func (p *Provider) machine(s Server) provider.Machine {
 		ID:       strconv.FormatInt(s.ID, 10),
 		Name:     s.Name,
 		Kind:     provider.KindCloud,
-		Location: strings.ToLower(s.Datacenter.Name),
+		Location: strings.ToLower(s.location().Name),
 		Product:  s.ServerType.Name,
 		Status:   strings.ToLower(s.Status),
 	}
-	if m.Location == "" {
-		m.Location = strings.ToLower(s.Datacenter.Location.Name)
+	if s.Datacenter != nil && s.Datacenter.Name != "" {
+		m.Location = strings.ToLower(s.Datacenter.Name)
 	}
 	if s.PublicNet.IPv4 != nil {
 		m.IPv4 = s.PublicNet.IPv4.IP
@@ -316,17 +446,15 @@ type Server struct {
 		CPUType      string  `json:"cpu_type"`
 		Architecture string  `json:"architecture"`
 	} `json:"server_type"`
-	Datacenter struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Location    struct {
-			Name        string `json:"name"`
-			City        string `json:"city"`
-			Country     string `json:"country"`
-			NetworkZone string `json:"network_zone"`
-		} `json:"location"`
+	// Datacenter is null in current API responses; Location carries the
+	// place. Both are read so that older responses still work.
+	Datacenter *struct {
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Location    Location `json:"location"`
 	} `json:"datacenter"`
-	Image *struct {
+	Location Location `json:"location"`
+	Image    *struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		OSFlavor    string `json:"os_flavor"`
@@ -352,6 +480,24 @@ type Server struct {
 	IncludedTraffic *int64 `json:"included_traffic"`
 	OutgoingTraffic *int64 `json:"outgoing_traffic"`
 	IngoingTraffic  *int64 `json:"ingoing_traffic"`
+}
+
+// Location is a Hetzner Cloud location such as fsn1.
+type Location struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	City        string `json:"city"`
+	Country     string `json:"country"`
+	NetworkZone string `json:"network_zone"`
+}
+
+// location returns the server's location, from the datacenter when the
+// API still sends one.
+func (s *Server) location() Location {
+	if s.Datacenter != nil && s.Datacenter.Location.Name != "" {
+		return s.Datacenter.Location
+	}
+	return s.Location
 }
 
 // IPInfo is a public address assignment. DNSPtr is a string for IPv4
@@ -446,6 +592,125 @@ func (c *Client) UpdateServer(ctx context.Context, id int64, name string) (*Serv
 	return &raw.Server, nil
 }
 
+// Action is an asynchronous Hetzner Cloud operation.
+type Action struct {
+	ID       int64  `json:"id"`
+	Command  string `json:"command"`
+	Status   string `json:"status"`
+	Progress int    `json:"progress"`
+	Error    *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// SSHKey is a public key registered in the project.
+type SSHKey struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	PublicKey   string `json:"public_key"`
+}
+
+// RunServerAction starts a server action without body and waits for it.
+func (c *Client) RunServerAction(ctx context.Context, id int64, name string) error {
+	var raw struct {
+		Action Action `json:"action"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/servers/"+strconv.FormatInt(id, 10)+"/actions/"+name, struct{}{}, &raw); err != nil {
+		return err
+	}
+	return c.WaitAction(ctx, raw.Action)
+}
+
+// WaitAction polls an action until it succeeded or failed.
+func (c *Client) WaitAction(ctx context.Context, a Action) error {
+	for a.Status == "running" {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(actionPoll):
+		}
+		var raw struct {
+			Action Action `json:"action"`
+		}
+		if err := c.get(ctx, "/servers/actions/"+strconv.FormatInt(a.ID, 10), &raw); err != nil {
+			return err
+		}
+		a = raw.Action
+	}
+	if a.Status == "error" {
+		msg := "failed"
+		if a.Error != nil {
+			msg = a.Error.Message
+		}
+		return &provider.APIError{Provider: TypeName, Code: errorCode(a), Message: "action " + a.Command + " " + msg}
+	}
+	return nil
+}
+
+func errorCode(a Action) string {
+	if a.Error != nil {
+		return a.Error.Code
+	}
+	return ""
+}
+
+// EnableRescue arms the rescue system with the given project keys and
+// returns the root password.
+func (c *Client) EnableRescue(ctx context.Context, id int64, keyIDs []int64) (string, error) {
+	body := struct {
+		Type    string  `json:"type"`
+		SSHKeys []int64 `json:"ssh_keys,omitempty"`
+	}{Type: RescueType, SSHKeys: keyIDs}
+	var raw struct {
+		Action       Action `json:"action"`
+		RootPassword string `json:"root_password"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/servers/"+strconv.FormatInt(id, 10)+"/actions/enable_rescue", body, &raw); err != nil {
+		return "", err
+	}
+	if err := c.WaitAction(ctx, raw.Action); err != nil {
+		return "", err
+	}
+	return raw.RootPassword, nil
+}
+
+// EnsureSSHKey returns the ID of the project key with the given
+// fingerprint, registering the key when it is missing. A name clash is
+// resolved by appending part of the fingerprint.
+func (c *Client) EnsureSSHKey(ctx context.Context, k provider.PublicKey) (int64, error) {
+	var raw struct {
+		SSHKeys []SSHKey `json:"ssh_keys"`
+	}
+	if err := c.get(ctx, "/ssh_keys?fingerprint="+url.QueryEscape(k.Fingerprint), &raw); err != nil {
+		return 0, err
+	}
+	if len(raw.SSHKeys) > 0 {
+		return raw.SSHKeys[0].ID, nil
+	}
+	name := k.Name
+	for attempt := 0; ; attempt++ {
+		body := struct {
+			Name      string `json:"name"`
+			PublicKey string `json:"public_key"`
+		}{Name: name, PublicKey: k.Data}
+		var created struct {
+			SSHKey SSHKey `json:"ssh_key"`
+		}
+		err := c.do(ctx, http.MethodPost, "/ssh_keys", body, &created)
+		if err == nil {
+			return created.SSHKey.ID, nil
+		}
+		var apiErr *provider.APIError
+		if attempt == 0 && errors.As(err, &apiErr) && apiErr.Code == "uniqueness_error" {
+			name = k.Name + "-" + strings.ReplaceAll(k.Fingerprint, ":", "")[:8]
+			continue
+		}
+		return 0, err
+	}
+}
+
 // ChangeDNSPtr sets the reverse DNS entry of one of the server's
 // addresses (POST /servers/{id}/actions/change_dns_ptr); nil resets it.
 func (c *Client) ChangeDNSPtr(ctx context.Context, id int64, ip string, ptr *string) error {
@@ -526,6 +791,8 @@ func parseError(status int, body []byte) error {
 		apiErr.Message = "authentication failed (check the API token)"
 	case apiErr.Code == "uniqueness_error":
 		apiErr.Message = "the name is already used in this project"
+	case apiErr.Code == "locked":
+		apiErr.Message = "the server is locked by another action; try again later"
 	case apiErr.Code == "invalid_input" && e.Error.Message != "":
 		apiErr.Message = e.Error.Message
 	case status == http.StatusTooManyRequests:
