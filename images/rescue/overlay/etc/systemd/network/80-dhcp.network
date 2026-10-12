@@ -1,0 +1,11 @@
+# Every Ethernet interface without a static configuration from the kernel
+# command line (10-ump-static.network) uses DHCP and router advertisements.
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseHostname=no

@@ -49,7 +49,8 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 
 ### M4 — Cloud and kexec
 
-- staging image (kernel + initramfs) build
+- staging image (kernel + initramfs) build (done: `images/rescue/`, with
+  `kexec-into-rescue.sh` for the manual path)
 - `kexec` entry method
 - `hetzner-cloud` provider incl. `create`/`destroy`
 - Ubuntu family support
@@ -82,10 +83,11 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
   give full control and identical content everywhere; stock cloud images
   are less work and trusted. Possibly both: stock images as input,
   customised during `configure`.
-- **Staging environment: always our own?** Provider rescue systems differ
-  (Debian vs. other bases, tool versions). Using a provider rescue only to
-  kexec into UMP's own staging image would make step 4–10 fully identical
-  everywhere, at the cost of one more reboot-like step.
+- **Staging environment: always our own?** Decided: yes. Provider rescue
+  systems differ (Debian vs. other bases, tool versions), so they are
+  used only to get root once; UMP then kexecs into its own image
+  (`images/rescue/`), which makes steps 4–10 identical everywhere at the
+  cost of one more reboot-like step.
 - **Inventory for handoff.** Proposed answer in [the skill](skill.md#who-owns-what):
   UMP exports, Ansible consumes it as a dynamic inventory, nothing is
   copied by hand. Still open: whether an explicit "expected machines" list

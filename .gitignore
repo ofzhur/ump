@@ -5,3 +5,4 @@
 # test and coverage artifacts
 *.test
 *.out
+images/rescue/out/

@@ -1,0 +1,5 @@
+#!/bin/sh
+printf '  %s, kernel %s, ump-rescue %s\n' "$(hostname)" "$(uname -r)" "$(cat /etc/ump-rescue-version 2>/dev/null)"
+ip -br -4 addr show scope global 2>/dev/null | awk '{printf "  %s %s\n", $1, $3}'
+ip -br -6 addr show scope global 2>/dev/null | awk '{printf "  %s %s\n", $1, $3}'
+echo

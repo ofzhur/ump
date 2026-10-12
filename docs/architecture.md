@@ -101,7 +101,10 @@ What is not, by design, because it is data rather than tool: OS images
 and the staging kernel and initramfs (for `kexec`, the virtual-media ISO
 and PXE). Both are referenced by URL with a pinned checksum, cached under
 `~/.cache/ump/`, and can be pushed to the target over SSH when it has no
-outbound access.
+outbound access. The staging image is built by the scripts in
+[`images/rescue/`](../images/rescue/README.md): a Debian system that is
+one initramfs with systemd as `/init`, a generic kernel, server firmware
+and the tools below, configured from the kernel command line.
 
 ## Proposed code layout
 
@@ -265,7 +268,11 @@ The profile or a CLI flag can force one.
 connects to the running stock OS, uploads a staging kernel and initramfs
 and kexecs into it. The machine then runs entirely from RAM and the disk
 is free to be overwritten. This is the trick that makes "any cloud VM"
-installable without provider-specific image import.
+installable without provider-specific image import. The same kexec is
+the second step of the `rescue` entry method: provider rescue systems
+differ in base distribution, tools and quirks, so UMP uses them only to
+get root over SSH once and then kexecs into its own image, which is the
+same everywhere ([`images/rescue/`](../images/rescue/README.md)).
 
 ## The agent
 

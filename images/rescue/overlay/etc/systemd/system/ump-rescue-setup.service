@@ -1,0 +1,14 @@
+[Unit]
+Description=UMP rescue: configure from the kernel command line
+DefaultDependencies=no
+After=systemd-udevd.service systemd-udev-trigger.service local-fs.target
+Before=network-pre.target systemd-networkd.service ssh.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ump-rescue-setup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

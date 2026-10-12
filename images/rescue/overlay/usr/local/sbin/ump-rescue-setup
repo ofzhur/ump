@@ -1,0 +1,82 @@
+#!/bin/sh
+# Configure the UMP rescue system from the kernel command line. Runs once
+# early at boot, before systemd-networkd and sshd.
+#
+#   ump.hostname=NAME
+#   ump.authorized_keys=BASE64        authorized_keys for root, base64 (one line)
+#   ump.mac=aa:bb:cc:dd:ee:ff         the interface to configure (or ump.iface=NAME)
+#   ump.ip=203.0.113.10/26,203.0.113.1    IPv4 address/prefix and gateway (on-link)
+#   ump.ip6=2001:db8::2/64,fe80::1        IPv6 address/prefix and gateway
+#   ump.dns=1.1.1.1,9.9.9.9
+#
+# Without ump.ip/ump.ip6, every Ethernet interface uses DHCP and router
+# advertisements (80-dhcp.network).
+set -u
+
+cmdline="$(cat /proc/cmdline)"
+param() {
+	for w in $cmdline; do
+		case "$w" in
+		"$1="*) printf '%s' "${w#*=}"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+hostname="$(param ump.hostname || true)"
+if [ -n "$hostname" ]; then
+	echo "$hostname" > /etc/hostname
+	hostname "$hostname"
+	printf '127.0.0.1\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\t%s\n' "$hostname" > /etc/hosts
+fi
+
+keys="$(param ump.authorized_keys || true)"
+if [ -n "$keys" ]; then
+	mkdir -p /root/.ssh
+	chmod 700 /root/.ssh
+	if echo "$keys" | base64 -d > /root/.ssh/authorized_keys 2>/dev/null; then
+		chmod 600 /root/.ssh/authorized_keys
+	else
+		echo "ump-rescue-setup: ump.authorized_keys is not valid base64" >&2
+		rm -f /root/.ssh/authorized_keys
+	fi
+fi
+
+ip4="$(param ump.ip || true)"
+ip6="$(param ump.ip6 || true)"
+dns="$(param ump.dns || true)"
+mac="$(param ump.mac || true)"
+iface="$(param ump.iface || true)"
+if [ -n "$ip4$ip6" ]; then
+	if [ -z "$mac$iface" ]; then
+		# no interface named: the first Ethernet interface with a carrier
+		for d in /sys/class/net/*; do
+			n="$(basename "$d")"
+			[ "$n" = lo ] && continue
+			[ "$(cat "$d/type" 2>/dev/null)" = 1 ] || continue
+			ip link set "$n" up 2>/dev/null
+			sleep 1
+			if [ "$(cat "$d/carrier" 2>/dev/null)" = 1 ]; then iface="$n"; break; fi
+		done
+	fi
+	f=/etc/systemd/network/10-ump-static.network
+	{
+		echo "[Match]"
+		if [ -n "$mac" ]; then echo "MACAddress=$mac"; elif [ -n "$iface" ]; then echo "Name=$iface"; else echo "Type=ether"; fi
+		echo
+		echo "[Network]"
+		[ -n "$ip4" ] && echo "Address=${ip4%%,*}"
+		[ -n "$ip6" ] && echo "Address=${ip6%%,*}"
+		if [ -n "$ip6" ]; then echo "IPv6AcceptRA=no"; else echo "IPv6AcceptRA=yes"; fi
+		oldifs="$IFS"; IFS=,
+		for s in $dns; do [ -n "$s" ] && echo "DNS=$s"; done
+		IFS="$oldifs"
+		case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac
+		case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac
+	} > "$f"
+	chmod 644 "$f"
+fi
+
+# fresh host keys every boot: this system never keeps state
+ssh-keygen -A >/dev/null 2>&1 || true
+exit 0

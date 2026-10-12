@@ -1,0 +1,78 @@
+# Packages of the UMP rescue image, one per line. The kernel
+# (linux-image-<arch>) is added by build.sh. Recommends are not installed.
+
+# init and base system
+systemd
+systemd-sysv
+systemd-resolved
+systemd-timesyncd
+udev
+dbus
+kmod
+util-linux
+procps
+bash
+coreutils
+findutils
+grep
+sed
+gawk
+less
+tmux
+vim-tiny
+ca-certificates
+tzdata
+locales-all
+
+# network
+iproute2
+iputils-ping
+iputils-tracepath
+ethtool
+openssh-server
+openssh-client
+curl
+wget
+rsync
+netcat-openbsd
+
+# archives and images
+zstd
+xz-utils
+gzip
+bzip2
+tar
+cpio
+squashfs-tools
+kexec-tools
+
+# hardware and disks: what the UMP agent calls, plus what an operator wants
+pciutils
+usbutils
+dmidecode
+lshw
+nvme-cli
+smartmontools
+hdparm
+gdisk
+parted
+mdadm
+lvm2
+cryptsetup
+e2fsprogs
+xfsprogs
+btrfs-progs
+dosfstools
+efibootmgr
+ipmitool
+jq
+
+# firmware for server NICs and storage controllers (GPU, Wi-Fi, Bluetooth
+# and sound firmware is removed again by finish.sh)
+firmware-linux-free
+firmware-misc-nonfree
+firmware-realtek
+firmware-bnx2
+firmware-bnx2x
+firmware-qlogic
+firmware-cavium

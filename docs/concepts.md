@@ -77,7 +77,10 @@ image (used by `kexec`, `virtual-media` and `pxe`).
 
 UMP expects very little from it: a Linux kernel, SSH, and the usual block
 device tools (`sgdisk`, `mdadm`, `lvm2`, `mkfs.*`, `wipefs`). Missing tools
-are reported during inspection, before anything changes.
+are reported during inspection, before anything changes. In practice the
+provider's rescue system is only the first hop: UMP kexecs from it into
+its own image ([`images/rescue/`](../images/rescue/README.md)), so the
+environment the agent runs in is the same at every provider.
 
 ## Agent
 

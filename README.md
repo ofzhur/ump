@@ -162,6 +162,7 @@ apart. See [the skill](docs/skill.md).
 | [Disk layouts](docs/disk-layouts.md) | The declarative disk layout format |
 | [Providers](docs/providers.md) | Provider capabilities and planned integrations |
 | [Skill](docs/skill.md) | The UMP skill: operating a hybrid fleet and its Terraform/Ansible repository with an AI agent; reference repository layout; safety model |
+| [Rescue image](images/rescue/README.md) | UMP's own rescue system: one kernel and initramfs per architecture, built from Debian, entered with kexec from any provider's rescue system |
 | [Roadmap](docs/roadmap.md) | Milestones and open questions |
 
 ## Goals
