@@ -23,10 +23,10 @@
 
 ### M2 — Hetzner Robot
 
-- port of the earlier tool's integration
+- Robot API: inventory, rescue, reset, rename, rDNS, SSH key registration
 - `rescue` entry method
 - `ump machine list|show|reboot|rescue|rename`
-- listing cache with "added/removed since last time" (from the earlier tool)
+- listing cache with "added/removed since last time"
 - IPv6 from provider network info
 
 ### M3 — Handoff and fleet use

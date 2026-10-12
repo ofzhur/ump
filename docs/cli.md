@@ -178,7 +178,7 @@ $ ump install web-01 web-02 web-03 --profile base \
 # take over a cloud VM that terraform created, using kexec
 $ ump install hetzner-cloud/7654321 --profile base --entry kexec
 
-# install a box in the rack through its BMC
+# install a box in the rack through its Redfish controller
 $ ump install rack1-07 --profile storage --entry virtual-media
 
 # a machine that is not behind any API: boot something with SSH yourself

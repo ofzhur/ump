@@ -4,12 +4,11 @@ A disk layout describes *how* disks should be used, independent of the
 exact hardware. UMP resolves it against the machine's facts into concrete
 partitions during `plan`.
 
-## Lessons from the earlier tool
+## Design choices
 
-The earlier tool's layout format (`disklayouts.json`) already had the right
-building blocks — a dedicated boot area, LVM volume groups over sets of
-disks, partitions with RAID level, size and mount point. What UMP
-changes:
+The building blocks are the familiar ones — a dedicated boot area, RAID
+sets, LVM volume groups over sets of disks, filesystems with sizes and
+mount points. The choices that matter:
 
 - **Disks are selected by attributes, not by device-name regex.**
   `sd.*` matches SATA SSDs, HDDs and USB sticks alike, and names are not
@@ -17,7 +16,7 @@ changes:
   model or serial.
 - **RAID is explicit and has one model.** Either Linux md RAID underneath
   LVM, or LVM RAID — not a mix inside one layout.
-- **YAML instead of JSON**, with validation and helpful errors.
+- **YAML**, with validation and helpful errors.
 - **Resolution happens in the CLI**, so the result is visible in the plan
   before anything is touched.
 

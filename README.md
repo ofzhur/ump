@@ -19,15 +19,11 @@ or anything else).
 > documents capture the ideas and the intended architecture so that the
 > implementation can start from a shared picture.
 
-## Why
+## Principles
 
-UMP is a rethink of an earlier private tool ("bare metal
-cloud"), which grew into a CLI plus an API service with a database, a
-Hetzner-only integration and a ~1000 line bash installer. The lessons from it:
-
-- **The CLI was the valuable part.** The API service and database added
-  operational weight without adding capability. UMP is CLI only — no daemon,
-  no central state.
+- **A CLI is enough.** An API service and a database in front of a
+  provisioner add operational weight without adding capability. UMP is CLI
+  only — no daemon, no central state.
 - **"Rescue → partition → unpack image → configure → reboot" is universal.**
   Almost every provider can bring a machine into *some* Linux environment that
   we can SSH into. Once there, the work is identical everywhere.

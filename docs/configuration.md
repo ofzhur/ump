@@ -141,8 +141,7 @@ access to the machine and its facts:
 | `.Arch` | `amd64` | facts |
 | `.Hostname` | — | the rendered hostname (available after rendering) |
 
-Values used in hostnames are sanitised to `[a-z0-9-]`, as the earlier tool already
-did.
+Values used in hostnames are sanitised to `[a-z0-9-]`.
 
 ## User sets
 

@@ -41,7 +41,7 @@ images and the staging kernel and initramfs, by URL with pinned checksums.
 
 ## Language and dependencies
 
-Go, as in the earlier tool:
+Go, because:
 
 - static binaries; cross-compilation makes the embedded target payloads
   cheap
@@ -173,9 +173,9 @@ same for every machine — this is where the homogeneity comes from.
 Reboots into rescue or into the installed system can take anywhere from 30
 seconds (cloud VM) to 10+ minutes (bare metal with slow firmware and many
 disks). Each step has a configurable timeout; waiting is done by polling SSH
-and, where available, the provider's power/status API. The earlier tool's
-experience was a fixed `50 × 20s` loop — UMP should report what it is
-waiting for and why.
+and, where available, the provider's power/status API. UMP reports what
+it is waiting for and for how long, rather than silently counting down a
+fixed number of retries.
 
 ## Providers
 
@@ -234,8 +234,8 @@ the entry method and to show which commands are available for which
 machine. Provider-specific quirks stay inside the provider — for example,
 Hetzner Robot requires the SSH key to be registered at the account before
 it can be used for rescue, and needs a power reset instead of a hardware
-reset when the server is switched off. Both were handled in the earlier tool and move
-into the `hetznerrobot` package unchanged in spirit.
+reset when the server is switched off. Both belong in the `hetznerrobot`
+package and nowhere else.
 
 Adding a provider means implementing `Provider`, `Inventory` and at least
 one of `Rescue`, `VirtualMedia` or `Power` (to be usable with an entry
@@ -305,8 +305,8 @@ It does not depend on cloud-init or any first-boot agent for the basics:
   service
 - a broken network config is caught before the reboot, not after
 
-cloud-init is removed from stock cloud images by default (as the earlier tool already
-did), so that provider metadata cannot silently change what UMP configured.
+cloud-init is removed from stock cloud images by default, so that
+provider metadata cannot silently change what UMP configured.
 A profile may opt in to keep it.
 
 Only things that require a running system are deferred to an optional
@@ -332,7 +332,7 @@ NetworkManager (RHEL-like) can be added as alternative renderers. By
 default, the address configuration is static, taken from what was observed
 in the staging environment plus provider metadata — this is what
 works reliably on bare metal providers. IPv6 is a first-class citizen from
-the start (it was a TODO in the earlier tool).
+the start.
 
 ## Bootloader
 
@@ -348,8 +348,8 @@ layout uses RAID:
 - UEFI boot entries created for each disk; provider-specific boot order
   (e.g. PXE first at Hetzner, so rescue keeps working) is respected
 
-The earlier tool used GRUB for UEFI and extlinux for legacy. UMP standardises on GRUB
-for both, which means one configuration to generate.
+UMP uses GRUB for both firmware modes rather than a second loader for
+legacy boot, which means one configuration to generate.
 
 ## Safety
 
@@ -395,8 +395,8 @@ properties.
 
 ## Secrets and keys
 
-Provider credentials are never stored as plaintext in the main config
-(they were in the earlier tool). Config values reference secrets:
+Provider credentials are never stored as plaintext in the main config.
+Config values reference secrets:
 
 ```yaml
 password: { env: HROBOT_PASS }

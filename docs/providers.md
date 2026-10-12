@@ -32,8 +32,8 @@ SSH as root. It is also the provider used by the integration test suite.
 
 ## Priorities
 
-1. **`hetzner-robot`** — port of the earlier tool's integration (inventory, rescue,
-   reset, rename, rDNS, SSH key registration).
+1. **`hetzner-robot`** — inventory, rescue, reset, rename, rDNS, SSH key
+   registration.
 2. **`ssh` + `kexec`/`manual` entry** — needed for testing in QEMU and
    immediately useful on its own.
 3. **`hetzner-cloud`** — the first cloud, proves that bare metal and cloud
@@ -48,7 +48,7 @@ SSH as root. It is also the provider used by the integration test suite.
 - Rescue requires the SSH key to be registered at the account first; the
   provider registers UMP's staging key if its fingerprint is missing.
 - When the server is switched off, a hardware reset does nothing — a power
-  reset is needed (known from the earlier tool).
+  reset is needed.
 - Provider network info: main IPv4, additional single IPs, subnets and the
   IPv6 /64.
 - Boot order on Hetzner dedicated servers usually has PXE first; this
