@@ -51,7 +51,9 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 
 - staging image (kernel + initramfs) build (done: `images/rescue/`, with
   `kexec-into-rescue.sh` for the manual path)
-- `kexec` entry method
+- `kexec` entry method (done for the rescue: `ump rescue server` kexecs
+  from a running system that lets UMP in as root, or from the provider's
+  rescue system)
 - `hetzner-cloud` provider incl. `create`/`destroy`
 - Ubuntu family support
 

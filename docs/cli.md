@@ -49,7 +49,7 @@ ump
 ├── reboot       server <ref> [--hard|--power-cycle] [--wait] [--yes]
 ├── start        server <ref> [--wait]
 ├── stop         server <ref> [--hard] [--yes]
-├── rescue       server <ref> [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
+├── rescue       server <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
 ├── unrescue     server <ref> [--reboot] [--wait] [--yes]
 ├── ssh          server <ref> [--user <name>] [--staging] [-- command]
 ├── config                                         interactive wizard: add an account, test it, save it
@@ -310,32 +310,66 @@ hardware reset) and cannot be switched on or off through the API.
 ## Rescue: `ump rescue|unrescue server`
 
 ```
-ump rescue   server REF [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
+ump rescue   server REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
 ump unrescue server REF [--reboot] [--wait] [--yes]
 ```
 
-`rescue` enables the provider's rescue system with UMP's own SSH key
-(see [`ump config key`](#ump-config-key)) and any `--ssh-key` files,
-registering keys the provider does not know yet, resets the server into
-it, waits until SSH answers and hands the terminal over to `ssh`, so you
-land in a root shell of the rescue system; exiting it returns to your
-shell. With a command after `--`, the command runs in the rescue system
-instead and its exit status becomes ump's, which is the form for scripts
-and agents (`ump rescue server web-01 --yes -- lsblk`). `--no-connect`
-prints the `ssh` command instead, as does a terminal-less run without a
-command; `-o json` prints the details (address, password where the
-provider issues one, the `ssh` command) without connecting.
+`rescue` brings the server into UMP's own rescue system, the Debian image
+from [`images/rescue/`](../images/rescue/README.md) that runs from RAM
+with the disks untouched, waits until it answers and hands the terminal
+over to `ssh`, so you land in its root shell; exiting it returns to your
+shell. With a command after `--`, the command runs there instead and its
+exit status becomes ump's, which is the form for scripts and agents
+(`ump rescue server web-01 --yes -- lsblk`). `--no-connect` prints the
+`ssh` command instead, as does a terminal-less run without a command;
+`-o json` prints the details (address, the way the server got there and
+the image version, the provider's password where it issues one, the
+`ssh` command) without connecting.
 
-`--no-reboot` only arms the rescue system for the next boot, `--no-wait`
-returns right after the reset; both print the `ssh` command for later.
-Rescue systems have a fresh host key every boot, so the connection skips
-host key checks; providers that report the host key fingerprints (Hetzner
-Robot) have them printed for comparison. This is the `rescue` entry
-method of the install pipeline, available on its own for inspection and
-repair.
+How the server gets there depends on what answers, and ump says so on
+the way:
 
-`unrescue` disables the rescue system so that the next boot is from disk,
-and with `--reboot` resets the server now.
+1. The server already runs the UMP rescue system: ump connects as it is.
+2. The running system lets UMP in as root over SSH, with UMP's own key
+   (see [`ump config key`](#ump-config-key)) or your own keys: ump has
+   the server fetch the entry script from the image's base URL and run
+   it; the script downloads the image, carries the address, gateway,
+   DNS, hostname and keys over and kexecs into it, with no reboot
+   through the provider. The running system is not shut down; its file
+   systems are synced and remounted read-only first.
+3. Otherwise the provider's rescue system is enabled with UMP's key and
+   any `--ssh-key` files (registering keys the provider does not know
+   yet), the server is reset into it, and once it answers ump reports
+   it and loads the image from there the same way.
+
+The terminal is handed over only once the UMP rescue system answers with
+its version. `--via direct` or `--via provider` forces one way (the
+first fails when there is no root access instead of rebooting the
+server); `--no-image` stops in the provider's rescue system, for the
+provider's own tools such as `installimage`. The script and the image
+come from the base URL in the configuration (`staging.image`, default
+the image published for this project) or `--image`; the server must
+reach it, and [`images/rescue/README.md`](../images/rescue/README.md)
+says what to serve there for a storage of your own.
+
+`--no-reboot` only arms the provider's rescue system for the next boot,
+`--no-wait` returns right after the reset; both stop at the provider's
+rescue system and print the `ssh` command for later. Rescue systems have
+a fresh host key every boot, so the connections skip host key checks;
+providers that report the host key fingerprints (Hetzner Robot) have
+them printed for comparison. A provider rescue system that does not take
+UMP's key (one that only issues a password) is reported together with
+the commands to load the image by hand. Exit status 5 means the server
+did not answer in time: no root access with `--via direct`, or the
+rescue system never came up after the kexec (reset the server with
+`ump reboot --hard` and look at its console).
+
+`unrescue` disables the provider's rescue system so that the next boot
+is from disk, and with `--reboot` resets the server now. The UMP rescue
+system itself runs from RAM, so a reset leaves it; whether that boots
+from disk depends on the provider: Hetzner clears its rescue flag once
+its rescue system has booted, OVHcloud dedicated servers keep rescue as
+their boot option until `unrescue`.
 
 ## `ump ssh server`
 

@@ -197,6 +197,26 @@ type testEnv struct {
 	sshInteractive []bool
 	// sshExit is the exit status the fake ssh returns.
 	sshExit int
+
+	// The fake machine behind the non-interactive ssh runs (probes, the
+	// entry script, version checks); remoteCalls records the command lines.
+	remoteCalls [][]string
+	// directRoot: the running system lets UMP in as root; inImage: it runs
+	// the UMP rescue system already; rescueNoKey: the provider's rescue
+	// system does not take UMP's key; entryExit: the entry script fails
+	// with this status; entryNoMarker: the connection drops before the
+	// script reports the jump; entryNoScript: the server cannot fetch the
+	// entry script; versionAfter: how many version checks the kexec'd
+	// system needs before it answers.
+	directRoot    bool
+	inImage       bool
+	rescueNoKey   bool
+	entryExit     int
+	entryNoMarker bool
+	entryNoScript bool
+	versionAfter  int
+	kexeced       bool
+	versionPolls  int
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -242,12 +262,79 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 			return e.sshExit, nil
 		},
 		probe: func(ctx context.Context, addr string) bool { return true },
+		sshExec: func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+			e.remoteCalls = append(e.remoteCalls, argv)
+			out, errOut, code := e.remote(argv)
+			io.WriteString(stdout, out)
+			io.WriteString(stderr, errOut)
+			return code, nil
+		},
 	}
+	e.kexeced, e.versionPolls = false, 0
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
 	code = a.run(context.Background(), append([]string{"--config", e.cfgPath}, args...))
 	return out.String(), errb.String(), code
+}
+
+// remote plays the machine at the other end of a non-interactive ssh run.
+func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
+	cmd := argv[len(argv)-1]
+	inProviderRescue := fakePower.rescue["fake/1"]
+	switch {
+	case strings.HasPrefix(cmd, "id -u;"):
+		switch {
+		case e.kexeced || e.inImage:
+			return "0\n2026.10.12\nDebian GNU/Linux 13 (trixie)\n", "", 0
+		case inProviderRescue:
+			if e.rescueNoKey {
+				return "", "root@203.0.113.10: Permission denied (publickey,password).\n", 255
+			}
+			return "0\n-\nDebian GNU/Linux 12 (bookworm)\n", "", 0
+		case e.directRoot:
+			return "0\n-\nUbuntu 26.04 LTS\n", "", 0
+		}
+		return "", "root@203.0.113.10: Permission denied (publickey,password).\n", 255
+	case strings.Contains(cmd, "/kexec-into-rescue.sh"):
+		if e.entryNoScript {
+			return "", "curl: (22) The requested URL returned error: 403\n", 22
+		}
+		if e.entryExit != 0 {
+			return "==> downloading the rescue image for amd64 from https://nowhere.invalid\n", "download failed: https://nowhere.invalid/amd64/manifest.json (HTTP 403)\n", e.entryExit
+		}
+		if e.entryNoMarker {
+			return "==> downloading the rescue image for amd64\n", "Connection reset by peer\n", 255
+		}
+		e.kexeced = true
+		return "==> downloading the rescue image for amd64\n==> booting into the UMP rescue system; reconnect as root@203.0.113.10\n", "Connection reset by peer\n", 255
+	case cmd == "cat /etc/ump-rescue-version":
+		if e.kexeced || e.inImage {
+			e.versionPolls++
+			if e.versionPolls > e.versionAfter {
+				return "2026.10.12\n", "", 0
+			}
+		}
+		return "", "cat: /etc/ump-rescue-version: No such file or directory\n", 1
+	}
+	return "", "unexpected command: " + cmd + "\n", 127
+}
+
+// entryCommands returns the entry script runs among the remote calls.
+func (e *testEnv) entryCommands() []string {
+	var out []string
+	for _, argv := range e.remoteCalls {
+		if cmd := argv[len(argv)-1]; strings.Contains(cmd, "/kexec-into-rescue.sh") {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+// entryPrefix is how the entry command for a base URL starts: the server
+// fetches the published script and runs it with the URL.
+func entryPrefix(url string) string {
+	return `f=/tmp/kexec-into-rescue.sh; if command -v curl >/dev/null; then curl -fsSL ` + url + `/kexec-into-rescue.sh -o "$f"; else wget -q -O "$f" ` + url + `/kexec-into-rescue.sh; fi && bash "$f" -u ` + url + ` `
 }
 
 func fields(s string) [][]string {
@@ -1392,10 +1479,30 @@ func TestRescueCommands(t *testing.T) {
 	if len(e.sshCalls) != 0 {
 		t.Errorf("ssh must not run without a terminal: %v", e.sshCalls)
 	}
+	// ... and the provider's rescue system was only the first hop
+	for _, want := range []string{
+		"Checking root access to 203.0.113.10 over SSH ... no.\nGoing through the provider's rescue system.\n",
+		"Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/rescue.\n",
+		"==> booting into the UMP rescue system",
+		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("progress line missing: %q in\n%s", want, errOut)
+		}
+	}
+	entries := e.entryCommands()
+	wantEntry := entryPrefix("https://ump.zhurko.de/rescue") + "-H web-01 -K 'ssh-ed25519 "
+	if len(entries) != 1 || !strings.HasPrefix(entries[0], wantEntry) || !strings.HasSuffix(entries[0], "' -K 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 ops@example'") {
+		t.Errorf("entry script runs: %q", entries)
+	}
+	if argv := e.remoteCalls[len(e.remoteCalls)-2]; !strings.Contains(strings.Join(argv, " "), "-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR root@203.0.113.10") {
+		t.Errorf("entry ssh argv: %v", argv)
+	}
 
-	// on a terminal the terminal is handed over to ssh
+	// on a terminal the terminal is handed over to ssh, once the image answers
+	resetFakePower()
 	out, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one")
-	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || !strings.Contains(errOut, "Connecting to the rescue system of web-01 as root") {
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || !strings.Contains(errOut, "Connecting to the UMP rescue system of web-01 as root") {
 		t.Errorf("hand-over: code %d, calls %v, interactive %v, stderr %q", code, e.sshCalls, e.sshInteractive, errOut)
 	}
 	if argv := e.sshCalls[0]; argv[0] != "ssh" || argv[len(argv)-1] != "root@203.0.113.10" || !strings.Contains(strings.Join(argv, " "), "-i "+umpKey+" -o IdentitiesOnly=yes") {
@@ -1434,9 +1541,16 @@ func TestRescueCommands(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Connect once it is up: ssh -o ServerAliveInterval=5") || len(e.sshCalls) != 0 {
 		t.Errorf("--no-wait: code %d\n%s", code, out)
 	}
-	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
+	resetFakePower()
+	out, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
 	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"ssh": "ssh -o ServerAliveInterval=5`) || !strings.Contains(out, umpKey+".pub") {
 		t.Errorf("rescue json: code %d, calls %v\n%s", code, e.sshCalls, out)
+	}
+	if !strings.HasPrefix(out, "{") || !strings.Contains(out, `"image": {`) || !strings.Contains(out, `"version": "2026.10.12"`) || !strings.Contains(out, `"via": "provider"`) {
+		t.Errorf("rescue json image details:\n%s", out)
+	}
+	if !strings.Contains(errOut, "Rescue system enabled for fake/1") {
+		t.Errorf("with -o json the progress must go to stderr: %q", errOut)
 	}
 
 	// unrescue, with and without reboot
@@ -1579,5 +1693,195 @@ func TestWaitForSSH(t *testing.T) {
 	}
 	if err := a.waitForSSH(context.Background(), "", false); err == nil {
 		t.Error("empty address accepted")
+	}
+}
+
+func TestRescueDirectAndRunning(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+	umpKey := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
+
+	// the running system lets UMP in as root: the image is loaded over SSH
+	// and the provider is not touched
+	e.directRoot, e.versionAfter = true, 2
+	out, errOut, code := e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 {
+		t.Fatalf("direct: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	for _, want := range []string{
+		"Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n",
+		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.\n",
+		"==> booting into the UMP rescue system",
+		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+		"Connecting to the UMP rescue system of web-01 as root; exit the shell to return.\n",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("progress line missing: %q in\n%s", want, errOut)
+		}
+	}
+	if len(fakePower.actions) != 0 {
+		t.Errorf("the provider was used: %v", fakePower.actions)
+	}
+	if out != "" {
+		t.Errorf("stdout: %q", out)
+	}
+	entries := e.entryCommands()
+	if len(entries) != 1 || !strings.HasPrefix(entries[0], entryPrefix("https://ump.zhurko.de/rescue")+"-H web-01 -K 'ssh-ed25519 ") {
+		t.Errorf("entry: %q", entries)
+	}
+	// the probe and the entry offer UMP's key and the user's own, the
+	// version checks UMP's key alone
+	probe := strings.Join(e.remoteCalls[0], " ")
+	if !strings.Contains(probe, "-o BatchMode=yes -o ConnectTimeout=10") || !strings.Contains(probe, "-i "+umpKey+" ") || strings.Contains(probe, "IdentitiesOnly") {
+		t.Errorf("probe argv: %v", e.remoteCalls[0])
+	}
+	if e.versionPolls != 3 {
+		t.Errorf("version checks: %d", e.versionPolls)
+	}
+	last := strings.Join(e.remoteCalls[len(e.remoteCalls)-1], " ")
+	if !strings.Contains(last, "-i "+umpKey+" -o IdentitiesOnly=yes") || !strings.HasSuffix(last, "root@203.0.113.10 -- cat /etc/ump-rescue-version") {
+		t.Errorf("version check argv: %v", e.remoteCalls[len(e.remoteCalls)-1])
+	}
+	if len(e.sshCalls) != 1 || !e.sshInteractive[0] || e.sshCalls[0][len(e.sshCalls[0])-1] != "root@203.0.113.10" {
+		t.Errorf("hand-over: %v", e.sshCalls)
+	}
+
+	// the image URL from the configuration and from --image; -o json names
+	// the way the server got there
+	e.sshCalls, e.sshInteractive = nil, nil
+	e.write(testConfig + "staging:\n  image: https://files.example.net/ump/\n")
+	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"url": "https://files.example.net/ump"`) || !strings.Contains(out, `"via": "direct"`) || strings.Contains(out, `"rescue"`) {
+		t.Errorf("json after a direct entry: code %d\n%s", code, out)
+	}
+	if entries := e.entryCommands(); len(entries) != 2 || !strings.HasPrefix(entries[1], entryPrefix("https://files.example.net/ump")+"-H web-01 ") {
+		t.Errorf("entry with the configured image: %q", entries)
+	}
+	_, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "--image", "http://10.0.0.1/r/", "--", "lsblk")
+	if entries := e.entryCommands(); code != 0 || len(entries) != 3 || !strings.HasPrefix(entries[2], entryPrefix("http://10.0.0.1/r")+"-H web-01 ") {
+		t.Errorf("entry with --image: code %d, %q", code, entries)
+	}
+	if argv := e.sshCalls[len(e.sshCalls)-1]; strings.Join(argv[len(argv)-3:], " ") != "root@203.0.113.10 -- lsblk" {
+		t.Errorf("command after the direct entry: %v", argv)
+	}
+
+	// a server that runs the image already is connected to as it is
+	e.directRoot, e.inImage = false, true
+	e.sshCalls, e.sshInteractive, e.remoteCalls = nil, nil, nil
+	out, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "Checking root access to 203.0.113.10 over SSH ... web-01 already runs the UMP rescue system 2026.10.12.\n") || !strings.HasPrefix(out, "Connect: ssh ") {
+		t.Errorf("already running: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	if len(e.remoteCalls) != 1 || len(fakePower.actions) != 0 || len(e.entryCommands()) != 0 {
+		t.Errorf("already running must only probe: calls %d, actions %v", len(e.remoteCalls), fakePower.actions)
+	}
+	out, _, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "yaml")
+	if code != 0 || !strings.Contains(out, "via: running") {
+		t.Errorf("yaml when running: code %d\n%s", code, out)
+	}
+
+	// the direct way asks before it kexecs the running system
+	e.inImage, e.directRoot = false, true
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--account", "one")
+	if code != 3 || !strings.Contains(errOut, "needs confirmation") || len(e.entryCommands()) != 0 {
+		t.Errorf("confirmation: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("n\n", true, "rescue", "server", "web-01", "--account", "one")
+	if code != 3 || !strings.Contains(errOut, "aborted") || len(e.entryCommands()) != 0 {
+		t.Errorf("declined: code %d, %q", code, errOut)
+	}
+}
+
+func TestRescueWaysAndFailures(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+
+	// --via direct without root access does not touch the provider
+	_, errOut, code := e.run("", false, "rescue", "server", "web-01", "--yes", "--via", "direct", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH; --via provider") || len(fakePower.actions) != 0 {
+		t.Errorf("--via direct: code %d, %q, actions %v", code, errOut, fakePower.actions)
+	}
+
+	// --via provider skips the probe even when the system would let UMP in
+	e.directRoot = true
+	e.remoteCalls = nil
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--via", "provider", "--account", "one")
+	if code != 0 || strings.Contains(errOut, "Checking root access") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" || len(e.entryCommands()) != 1 {
+		t.Errorf("--via provider: code %d, %q, actions %v", code, errOut, fakePower.actions)
+	}
+	if cmd := e.remoteCalls[0][len(e.remoteCalls[0])-1]; !strings.HasPrefix(cmd, "id -u;") || !strings.Contains(strings.Join(e.remoteCalls[0], " "), "IdentitiesOnly=yes") {
+		t.Errorf("the first remote run must probe the provider's rescue system with UMP's key: %v", e.remoteCalls[0])
+	}
+	e.directRoot = false
+
+	// --no-image stops in the provider's rescue system, as before
+	resetFakePower()
+	e.remoteCalls, e.sshCalls, e.sshInteractive = nil, nil, nil
+	_, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--no-image", "--account", "one")
+	if code != 0 || len(e.remoteCalls) != 0 || !strings.Contains(errOut, "Connecting to the rescue system of web-01 as root") || len(e.sshCalls) != 1 {
+		t.Errorf("--no-image: code %d, remote %v, stderr %q", code, e.remoteCalls, errOut)
+	}
+
+	// the provider's rescue system does not take UMP's key: say how to go on by hand
+	resetFakePower()
+	e.rescueNoKey = true
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "did not accept UMP's key; connect by hand (ssh ") || !strings.Contains(errOut, "bash /tmp/kexec-into-rescue.sh -u https://ump.zhurko.de/rescue") {
+		t.Errorf("rescue without key: code %d, %q", code, errOut)
+	}
+	e.rescueNoKey = false
+
+	// the entry script fails: its output was shown, the status is ump's
+	resetFakePower()
+	e.entryExit = 1
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "download failed: https://nowhere.invalid") || !strings.Contains(errOut, "ump: loading the rescue image on 203.0.113.10 failed (exit status 1)") {
+		t.Errorf("entry failure: code %d, %q", code, errOut)
+	}
+	e.entryExit = 0
+
+	// the server cannot fetch the script: the base URL is the thing to look at
+	resetFakePower()
+	e.entryNoScript = true
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "curl: (22)") || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the entry script from https://ump.zhurko.de/rescue/kexec-into-rescue.sh (exit status 22); the server must reach the image's base URL") {
+		t.Errorf("no script: code %d, %q", code, errOut)
+	}
+	e.entryNoScript = false
+
+	// the connection drops before the script reported the jump
+	resetFakePower()
+	e.entryNoMarker = true
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "ended before the rescue image was loaded") {
+		t.Errorf("dropped entry: code %d, %q", code, errOut)
+	}
+	e.entryNoMarker = false
+
+	// the image never answers
+	resetFakePower()
+	oldTimeout := imageWaitTimeout
+	imageWaitTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { imageWaitTimeout = oldTimeout })
+	e.versionAfter = 1 << 30
+	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "did not answer within 30ms") {
+		t.Errorf("image timeout: code %d, %q", code, errOut)
+	}
+	e.versionAfter = 0
+
+	// usage
+	for _, c := range []struct {
+		args []string
+		msg  string
+	}{
+		{[]string{"rescue", "server", "web-01", "--yes", "--via", "magic", "--account", "one"}, `unknown --via "magic"`},
+		{[]string{"rescue", "server", "web-01", "--yes", "--via", "direct", "--no-image", "--account", "one"}, "--via direct cannot be combined"},
+	} {
+		if _, errOut, code := e.run("", false, c.args...); code != 2 || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d, %q", c.args, code, errOut)
+		}
 	}
 }

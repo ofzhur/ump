@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -36,6 +38,41 @@ func runSSH(argv []string, interactive bool) (int, error) {
 		return 0, err
 	}
 	return 0, nil
+}
+
+// sshExecer runs the local ssh client without a terminal, with the given
+// streams (a nil stdin means no input), and returns its exit status; the
+// context ends it. This is how ump talks to machines by itself: probes,
+// the entry script, version checks.
+type sshExecer func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
+
+// execSSH is the real sshExecer.
+func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	path, err := exec.LookPath("ssh")
+	if err != nil {
+		return 0, errors.New("no ssh client found in PATH")
+	}
+	cmd := exec.CommandContext(ctx, path, argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	err = cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, nil
+}
+
+// withSSHOptions adds -o options right after the program name.
+func withSSHOptions(argv []string, opts ...string) []string {
+	out := make([]string, 0, len(argv)+2*len(opts))
+	out = append(out, argv[0])
+	for _, o := range opts {
+		out = append(out, "-o", o)
+	}
+	return append(out, argv[1:]...)
 }
 
 // sshArgs builds the ssh command line. identities are key files offered

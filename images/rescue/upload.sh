@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Upload a built rescue image to an S3-compatible store (or any S3-compatible
-# store). The files go to <prefix>/<arch>/ (what kexec-into-rescue.sh and
-# ump fetch) and to <prefix>/v/<version>/<arch>/ (kept for rollbacks);
-# manifest.json is uploaded last, so a reader never sees a manifest that
-# points to files which are not there yet. kexec-into-rescue.sh itself is
-# published at <prefix>/kexec-into-rescue.sh, so that any rescue system
-# can fetch it with curl.
+# Publish the built rescue images and the entry script to an S3-compatible store
+# (or any S3-compatible store): everything ump and the manual path fetch
+# from the image's base URL. Per architecture, the files go to
+# <prefix>/<arch>/ (the current image) and to <prefix>/v/<version>/<arch>/
+# (kept for rollbacks); manifest.json is uploaded last, so a reader never
+# sees a manifest that points to files which are not there yet.
+# kexec-into-rescue.sh goes to <prefix>/kexec-into-rescue.sh.
 #
-# Usage: upload.sh [amd64|arm64]        (uploads out/<arch>, see build.sh)
+# Usage: upload.sh [amd64|arm64]...     (default: every architecture built in out/)
 #
 # Environment:
 #   STORE_ACCOUNT_ID         account ID (makes the endpoint
@@ -22,13 +22,21 @@
 # Needs the AWS CLI (aws) or rclone.
 set -euo pipefail
 
-ARCH="${1:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="${OUT:-$HERE/out/$ARCH}"
+OUT="${OUT:-$HERE/out}"
 PREFIX="${STORE_PREFIX:-rescue}"
 DRY_RUN="${DRY_RUN:-0}"
 
-[ -f "$OUT/manifest.json" ] || { echo "upload.sh: no image in $OUT; run build.sh $ARCH (or make rescue-image) first" >&2; exit 2; }
+arches=("$@")
+if [ ${#arches[@]} -eq 0 ]; then
+	for d in "$OUT"/*/; do
+		[ -f "$d/manifest.json" ] && arches+=("$(basename "$d")")
+	done
+fi
+[ ${#arches[@]} -gt 0 ] || { echo "upload.sh: no image built in $OUT; run make rescue-image RESCUE_ARCH=amd64|arm64 first" >&2; exit 2; }
+for arch in "${arches[@]}"; do
+	[ -f "$OUT/$arch/manifest.json" ] || { echo "upload.sh: no image in $OUT/$arch; run make rescue-image RESCUE_ARCH=$arch first" >&2; exit 2; }
+done
 for v in STORE_ACCESS_KEY_ID STORE_SECRET_ACCESS_KEY STORE_BUCKET; do
 	[ -n "${!v:-}" ] || { echo "upload.sh: $v is not set (see the environment section of images/rescue/README.md)" >&2; exit 2; }
 done
@@ -37,9 +45,6 @@ if [ -z "$endpoint" ]; then
 	[ -n "${STORE_ACCOUNT_ID:-}" ] || { echo "upload.sh: set STORE_ACCOUNT_ID or STORE_ENDPOINT" >&2; exit 2; }
 	endpoint="https://${STORE_ACCOUNT_ID}.storage.example.net"
 fi
-version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$OUT/manifest.json" | head -n 1)"
-[ -n "$version" ] || { echo "upload.sh: no version in $OUT/manifest.json" >&2; exit 2; }
-
 if command -v aws >/dev/null; then
 	tool=aws
 elif command -v rclone >/dev/null; then
@@ -78,14 +83,20 @@ put() { # put FILE KEY
 	echo "uploaded s3://$STORE_BUCKET/$key"
 }
 
-files=(vmlinuz initrd.zst SHA256SUMS packages.txt)
-[ -f "$OUT/kexec" ] && files+=(kexec)
-echo "==> uploading the $ARCH image, version $version, to $endpoint bucket $STORE_BUCKET"
-for dest in "$PREFIX/v/$version/$ARCH" "$PREFIX/$ARCH"; do
-	for f in "${files[@]}"; do
-		put "$OUT/$f" "$dest/$f"
+for arch in "${arches[@]}"; do
+	dir="$OUT/$arch"
+	version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$dir/manifest.json" | head -n 1)"
+	[ -n "$version" ] || { echo "upload.sh: no version in $dir/manifest.json" >&2; exit 2; }
+	files=(vmlinuz initrd.zst SHA256SUMS packages.txt)
+	[ -f "$dir/kexec" ] && files+=(kexec)
+	echo "==> uploading the $arch image, version $version, to $endpoint bucket $STORE_BUCKET"
+	for dest in "$PREFIX/v/$version/$arch" "$PREFIX/$arch"; do
+		for f in "${files[@]}"; do
+			put "$dir/$f" "$dest/$f"
+		done
+		put "$dir/manifest.json" "$dest/manifest.json"
 	done
-	put "$OUT/manifest.json" "$dest/manifest.json"
 done
+echo "==> uploading the entry script"
 put "$HERE/kexec-into-rescue.sh" "$PREFIX/kexec-into-rescue.sh"
-echo "==> done: <public base URL>/$PREFIX/$ARCH/manifest.json is the current $ARCH image"
+echo "==> done: <public base URL>/$PREFIX is the base URL (staging.image); the current images are ${arches[*]}"

@@ -64,6 +64,9 @@ type app struct {
 	// probe reports whether SSH answers at an address; nil means a TCP
 	// connect to the SSH port.
 	probe func(ctx context.Context, addr string) bool
+	// sshExec runs the local ssh client without a terminal, for what ump
+	// does on machines by itself; nil means the real one.
+	sshExec sshExecer
 
 	// global flags
 	configFlag string
@@ -110,6 +113,9 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	if a.probe == nil {
 		a.probe = sshAnswers
+	}
+	if a.sshExec == nil {
+		a.sshExec = execSSH
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)

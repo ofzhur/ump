@@ -71,9 +71,9 @@ accounts:
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key; this is the default, generated
                                         # on first use (`ump config key` shows the public key)
-  kexec_image: release                  # (planned) the staging kernel+initramfs published for
-                                        # this ump version, fetched once, checksum pinned;
-                                        # or a URL / local path
+  image: https://ump.zhurko.de/rescue   # base URL of the UMP rescue image and entry script; this is
+                                        # the default; images/rescue/README.md says what a storage
+                                        # of your own must serve there
 ```
 
 ### Secret references

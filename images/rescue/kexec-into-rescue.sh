@@ -9,13 +9,14 @@
 # until then it is the manual way.
 #
 # Usage: kexec-into-rescue.sh -u https://example.net/ump/rescue [-a amd64|arm64]
-#            [-k AUTHORIZED_KEYS_FILE] [-H HOSTNAME] [-i IFACE] [-c EXTRA_CMDLINE]
-#            [--no-exec] [--dry-run]
+#            [-k AUTHORIZED_KEYS_FILE] [-K PUBLIC_KEY]... [-H HOSTNAME] [-i IFACE]
+#            [-c EXTRA_CMDLINE] [--no-exec] [--dry-run]
 set -euo pipefail
 
 url="${UMP_RESCUE_URL:-}"
 arch=""
 keys="/root/.ssh/authorized_keys"
+extra_keys=()
 host=""
 iface=""
 extra=""
@@ -26,12 +27,13 @@ while [ $# -gt 0 ]; do
 	-u|--url) url="$2"; shift 2 ;;
 	-a|--arch) arch="$2"; shift 2 ;;
 	-k|--keys) keys="$2"; shift 2 ;;
+	-K|--key) extra_keys+=("$2"); shift 2 ;;
 	-H|--hostname) host="$2"; shift 2 ;;
 	-i|--iface) iface="$2"; shift 2 ;;
 	-c|--cmdline) extra="$2"; shift 2 ;;
 	--no-exec) exec_it=0; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+	-h|--help) sed -n '2,/^set -euo/{/^set -euo/!p;}' "$0"; exit 0 ;;
 	*) echo "unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -110,10 +112,13 @@ cmdline="$consoles ump.hostname=$host ump.mac=$mac"
 [ -n "$ip4" ] && cmdline="$cmdline ump.ip=$ip4${gw4:+,$gw4}"
 [ -n "$ip6" ] && cmdline="$cmdline ump.ip6=$ip6${gw6:+,$gw6}"
 cmdline="$cmdline ump.dns=$dns"
-if [ -f "$keys" ]; then
-	cmdline="$cmdline ump.authorized_keys=$(base64 < "$keys" | tr -d '\n')"
+# root's keys of the current system (the provider's rescue system has UMP's
+# there) plus the -K keys, without comments, blanks and duplicates
+keylist="$( { [ -f "$keys" ] && cat "$keys"; printf '%s\n' ${extra_keys[@]+"${extra_keys[@]}"}; } 2>/dev/null | grep -v '^[[:space:]]*#' | grep '[^[:space:]]' | awk '!seen[$0]++' || true)"
+if [ -n "$keylist" ]; then
+	cmdline="$cmdline ump.authorized_keys=$(printf '%s\n' "$keylist" | base64 | tr -d '\n')"
 else
-	echo "warning: $keys does not exist; the rescue system will only be reachable on the console" >&2
+	echo "warning: no authorized keys ($keys does not exist and no -K given); the rescue system will only be reachable on the console" >&2
 fi
 [ -n "$extra" ] && cmdline="$cmdline $extra"
 
@@ -143,6 +148,22 @@ if [ "$exec_it" = 0 ]; then
 	echo "loaded; run '$kexec_bin -e' to boot it"
 	exit 0
 fi
+# The jump does not shut the running system down. On a system that runs
+# from disk the file systems are made consistent first, the way the
+# kernel's own emergency path does it (sync, then an emergency read-only
+# remount of every block-device file system, which commits the journals
+# and needs no cooperation from the processes that keep writing); a rescue
+# system in RAM has no such file systems and is left as it is.
+quiesce() {
+	sync
+	[ -w /proc/sysrq-trigger ] || return 0
+	echo s > /proc/sysrq-trigger
+	echo u > /proc/sysrq-trigger
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		awk '$1 ~ /^\/dev\// && $4 ~ /^rw/ {found = 1} END {exit !found}' /proc/mounts 2>/dev/null || return 0
+		sleep 1
+	done
+}
 echo "==> booting into the UMP rescue system; reconnect as root@${ip4%%/*}"
-sync
+quiesce
 "$kexec_bin" -e

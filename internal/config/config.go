@@ -50,10 +50,26 @@ type Staging struct {
 	// next to it with ".pub". Default: staging_ed25519 in the user's
 	// configuration directory. The key is generated on first use.
 	Key string `yaml:"key,omitempty"`
+	// Image is the base URL of the UMP rescue image (the staging system):
+	// <arch>/manifest.json and the files it names live below it. Default:
+	// DefaultStagingImage, the image published for this project.
+	Image string `yaml:"image,omitempty"`
 }
 
 // StagingKeyFile is the default name of UMP's SSH key.
 const StagingKeyFile = "staging_ed25519"
+
+// DefaultStagingImage is where the rescue image is published.
+const DefaultStagingImage = "https://ump.zhurko.de/rescue"
+
+// StagingImage returns the base URL of the rescue image, without a
+// trailing slash.
+func (c *Config) StagingImage() string {
+	if c.Staging.Image != "" {
+		return strings.TrimRight(c.Staging.Image, "/")
+	}
+	return DefaultStagingImage
+}
 
 // StagingKeyPath returns the path of UMP's SSH private key.
 func (c *Config) StagingKeyPath() string {

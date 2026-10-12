@@ -49,10 +49,11 @@ The result is in `images/rescue/out/<arch>/`:
 other files. Publish the directory as is (`<base-url>/<arch>/...`);
 `kexec-into-rescue.sh` and later `ump` take the base URL.
 
-## Uploading to R2
+## Publishing
 
 ```console
-$ make rescue-upload RESCUE_ARCH=arm64     # builds the image first when out/arm64 is missing
+$ make upload                              # every image built in out/, and the entry script
+$ images/rescue/upload.sh arm64            # one architecture
 ```
 
 [`upload.sh`](upload.sh) puts the files into an S3-compatible bucket
@@ -74,7 +75,7 @@ with mode 0600, or in `pass`/`op` and export them for the command:
 
 ```console
 $ set -a; . ~/.config/ump/r2.env; set +a
-$ make rescue-upload RESCUE_ARCH=amd64
+$ make upload
 ```
 
 The layout in the bucket is `<prefix>/<arch>/` for the current image
@@ -83,9 +84,31 @@ for every version uploaded, kept for rollbacks, and
 `<prefix>/kexec-into-rescue.sh`; `manifest.json` goes up last, so a
 reader never sees a manifest whose files are not there yet.
 Give the bucket a public hostname (an R2 custom domain or `r2.dev`) and
-that hostname plus the prefix is the base URL:
-`UMP_RESCUE_URL=https://files.example.net/rescue`. This project's images
-are published at `https://ump.zhurko.de/rescue`.
+that hostname plus the prefix is the base URL, `staging.image` in the
+ump configuration and `-u` of the script. This project's images are
+published at `https://ump.zhurko.de/rescue`, which is ump's default.
+
+### Your own storage
+
+Nothing ties ump to that hostname: any web server or object store that
+answers plain `GET` requests, without authentication, redirects to login
+pages or bot challenges, and that the servers can reach, does. Set
+`staging.image: https://files.example.net/ump` in the configuration (or
+`--image` on `ump rescue`) and serve this below the base URL:
+
+| Path | What it is |
+|---|---|
+| `kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
+| `<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
+| `<arch>/vmlinuz` | the kernel |
+| `<arch>/initrd.zst` | the system, as a zstd-compressed initramfs |
+| `<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
+| `<arch>/SHA256SUMS`, `<arch>/packages.txt` | for people; nothing fetches them |
+| `v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
+
+`<arch>` is `amd64` or `arm64`. `make upload` produces exactly this
+layout from `out/`, and `upload.sh` is a short script to adapt for a
+store that is not S3-compatible.
 
 The clients of that hostname are rescue systems with `curl`, not
 browsers, and they come from datacenter address space. A bot protection in
@@ -144,21 +167,41 @@ so one line is enough):
 # curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue
 ```
 
-With ump, from your own machine, that is one command, which puts the
-server into the provider's rescue system, runs the line there and
-returns when the connection drops with the old kernel:
+With ump, from your own machine, that is `ump rescue server web-01`. It
+checks whether the server lets UMP in as root over SSH and, if so, runs
+the script there right away (no reboot through the provider); otherwise
+it puts the server into the provider's rescue system, runs the script
+there, and connects once the UMP rescue system answers with its version:
 
 ```console
-$ ump rescue server web-01 --yes -- 'curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue'
-$ ump ssh server web-01 --staging          # a minute later: the UMP rescue system
+$ ump rescue server web-01
+Checking root access to 203.0.113.10 over SSH ... no.
+Going through the provider's rescue system.
+Rescue system enabled for hetzner-cloud/123 (web-01, 203.0.113.10); rebooting into it.
+...
+Waiting for SSH on 203.0.113.10 ..... up after 35s.
+Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/rescue.
+==> downloading the rescue image for amd64 from https://ump.zhurko.de/rescue
+...
+==> booting into the UMP rescue system; reconnect as root@203.0.113.10
+Waiting for the UMP rescue system on 203.0.113.10 ... up after 14s (ump-rescue 2026.10.12).
+Connecting to the UMP rescue system of web-01 as root; exit the shell to return.
 ```
+
+ump has the server fetch the script from the base URL, the same place
+the image comes from, so the published copy is the one that runs and the
+server must reach the base URL (ump says so when it cannot). `--image`
+or `staging.image` in the configuration names the base URL, `--no-image`
+stops in the provider's rescue system, and `--via direct|provider`
+forces one of the two ways.
 
 [`kexec-into-rescue.sh`](kexec-into-rescue.sh) downloads the image for
 the machine's architecture, verifies the checksums, takes the current
 address, gateway, DNS, hostname, `console=` settings and `root`'s
-`authorized_keys` (which is where `ump rescue` put UMP's key), loads the
-image with `kexec` (the published static one, or the system's) and boots
-it. Reconnect as root
+`authorized_keys` (which is where `ump rescue` put UMP's key) plus any
+`-K` keys, loads the image with `kexec` (the published static one, or the
+system's), syncs and remounts the file systems of a system that runs
+from disk read-only, and boots it. Reconnect as root
 to the same address; the host key is new. `--dry-run` prints what would
 be loaded, `--no-exec` loads without booting. When the script runs over
 an SSH session, that session dies with the kernel without a proper

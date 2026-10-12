@@ -22,7 +22,7 @@ export CGO_ENABLED := 0
 RESCUE_ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help rescue-image rescue-test rescue-upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help rescue-image rescue-test upload
 
 all: build
 
@@ -70,8 +70,8 @@ rescue-image: ## build the rescue image for RESCUE_ARCH (amd64|arm64) in a privi
 rescue-test: ## boot the built rescue image for RESCUE_ARCH in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(RESCUE_ARCH)
 
-rescue-upload: images/rescue/out/$(RESCUE_ARCH)/manifest.json ## upload the rescue image for RESCUE_ARCH to R2 (builds it first if missing; STORE_* from the environment)
-	images/rescue/upload.sh $(RESCUE_ARCH)
+upload: ## publish every built rescue image (images/rescue/out/*) and the entry script to R2 (STORE_* from the environment)
+	images/rescue/upload.sh
 
 images/rescue/out/%/manifest.json:
 	$(MAKE) rescue-image RESCUE_ARCH=$*
