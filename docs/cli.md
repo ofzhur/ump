@@ -1,13 +1,17 @@
-# CLI (draft)
+# CLI
 
-This is the intended command structure. It will change during
-implementation; the point is to agree on the shape.
+The command structure follows kubectl. `ump get servers` and `ump config`
+are implemented; the rest of this document is the intended shape and will
+be converted to the same style as commands are built.
 
 ## Conventions
 
-- Commands are `ump <noun> <verb>`, except for the central workflow verbs
-  (`plan`, `install`, `ssh`), which are top-level because they are used
-  most.
+- Commands follow the kubectl shape, `ump <verb> <resource>`: `ump get
+  servers` lists, `ump config` configures. The central workflow verbs
+  (`plan`, `install`, `ssh`) are top-level because they are used most.
+  Resource-first forms in the draft below (`machine reboot`, `profile
+  show`, ...) will become `ump reboot server`, `ump describe profile` and
+  so on when they are implemented.
 - Machines are addressed by a **machine reference**: `provider/id`, a
   name or an IP address (see [concepts](concepts.md#machine)). Several
   references or `--selector` can be given where it makes sense.
@@ -22,6 +26,25 @@ implementation; the point is to agree on the shape.
 
 ## Overview
 
+Implemented today:
+
+```
+ump
+├── get
+│   └── servers  [ref...] [-o table|wide|json|yaml|name] [--no-headers]
+│                                                  all servers of all accounts (--account to restrict)
+├── config                                         interactive wizard: add an account, test it, save it
+│   ├── view                                       the configuration, secrets redacted
+│   ├── path                                       where the configuration lives
+│   ├── types                                      provider types and their settings
+│   ├── add      <type> <name> --set k=v ...       non-interactive form (CI, agents)
+│   ├── remove   <name>
+│   └── test     [<name>...]                       check credentials and API access
+└── version
+```
+
+Draft of the rest:
+
 ```
 ump
 ├── plan       <machine> --profile <name>          show what install would do
@@ -31,7 +54,6 @@ ump
 ├── facts      <machine>                           inspect hardware (enters staging env if needed)
 │
 ├── machine
-│   ├── list                                       all machines of all accounts
 │   ├── show     <machine>
 │   ├── reboot   <machine> [--hard|--power-cycle]
 │   ├── power    <machine> on|off
@@ -40,13 +62,6 @@ ump
 │   ├── import   --from terraform [file]           names and labels of machines Terraform created
 │   ├── create   --account <name> --type <type> --location <loc>   (clouds)
 │   └── destroy  <machine>                                          (clouds)
-│
-├── provider
-│   ├── types                                      supported provider types and capabilities
-│   ├── list                                       configured accounts
-│   ├── add      <type> <name> [flags]
-│   ├── remove   <name>
-│   └── test     <name>                            check credentials and API access
 │
 ├── profile
 │   ├── list
@@ -78,11 +93,6 @@ ump
 │   ├── show     <run-id>                          plan, steps, result
 │   └── logs     <run-id> [-f]
 │
-├── config
-│   ├── init                                       create a starter config
-│   ├── path                                       show config locations
-│   └── edit
-│
 ├── skill
 │   ├── install  [--user|--project] [--with-permissions]
 │   └── path
@@ -91,6 +101,65 @@ ump
 ├── agent                                          (internal) the target-side role, started over SSH by install
 └── version
 ```
+
+## `ump get servers`
+
+```
+ump get servers [NAME|ID|IP|PROVIDER/ID ...] [--account <name>...]
+                [-o table|wide|json|yaml|name] [--no-headers]
+```
+
+Lists dedicated servers and cloud instances from every configured account
+(`--account` restricts it), queried in parallel. Positional arguments
+select single servers by name, provider ID, IP address (an address inside
+the machine's IPv6 prefix matches too) or `provider/id`. An account whose
+API fails is reported on stderr, the others are still listed, and the exit
+code is 4. A reference that matches nothing gives exit code 1.
+
+`-o json` is a plain array of machines with stable field names:
+
+```json
+[
+  {
+    "provider": "hetzner-robot",
+    "account": "hrobot",
+    "id": "1234567",
+    "name": "web-01",
+    "kind": "bare-metal",
+    "ipv4": "203.0.113.10",
+    "ipv6": "2001:db8:1:2::/64",
+    "location": "fsn1-dc7",
+    "product": "AX41-NVMe",
+    "status": "ready",
+    "labels": {"env": "prod"}
+  }
+]
+```
+
+`status` is the provider's own status, lower-cased (`ready`, `running`,
+`off`, `cancelled`, ...); `location` is the datacenter or region,
+lower-cased; `labels` are present where the provider has them. `-o wide`
+adds the IPv6, product and kind columns; `-o name` prints `provider/id`
+per line. `defaults.output` in the configuration sets the default format.
+
+## `ump config`
+
+Without a subcommand, `ump config` is an interactive wizard: it asks for
+the provider type, an account name and the credentials, asks where the
+secrets should be kept (files under `~/.config/ump/secrets/` readable only
+by you, environment variables, or a command such as `pass show ...`),
+tests the credentials with one API call and writes the account to the
+configuration. For OVHcloud it can request a consumer key for you and hand
+you the validation URL. Without a terminal it refuses with exit code 3.
+
+`ump config add <type> <name> --set KEY=VALUE ...` is the non-interactive
+form. A value is plain text or a secret reference: `env:NAME`,
+`file:PATH`, `command:CMD`. The credentials are tested before saving
+unless `--no-test` is given; `ump config types` lists the settings of
+every provider type. `view` shows the configuration with plaintext
+secrets redacted (references are shown as they are), `test` checks every
+account, `remove` deletes an account together with the secret files the
+wizard created for it.
 
 ## Workflow commands
 
@@ -158,14 +227,15 @@ Shows the hardware facts. Uses the cache from the last run unless
 ## Examples
 
 ```console
-# set up a provider account; secrets are read from the environment
-$ ump provider add hetzner-robot main \
-      --login-env HROBOT_USER --password-env HROBOT_PASS
-$ ump provider test main
+# set up provider accounts interactively, or without a terminal:
+$ ump config
+$ ump config add hetzner-robot main --set login=env:HROBOT_USER --set password=env:HROBOT_PASS
+$ ump config test main
 
-# what do I have, and what changed since last time?
-$ ump machine list
-$ ump machine list -o json | jq '.[] | select(.status=="ready")'
+# what do I have?
+$ ump get servers
+$ ump get servers -o wide --account main
+$ ump get servers -o json | jq '.[] | select(.status=="ready")'
 
 # reinstall one server
 $ ump plan web-01 --profile base
@@ -192,6 +262,8 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 # Ansible inventory straight from the providers
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
+
+Everything after `ump get servers` in the examples is draft.
 
 ## Exit codes
 

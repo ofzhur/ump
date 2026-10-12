@@ -16,7 +16,12 @@ never needs interactive input except for confirmations.
 
 `--config <dir|file>` or `UMP_CONFIG` overrides the location. A project
 can keep its UMP configuration in a repository next to its Ansible code
-and point UMP at it — that is the recommended setup for teams.
+and point UMP at it — that is the recommended setup for teams. Secret
+files written by `ump config` always go to `~/.config/ump/secrets/`
+(mode 0600), never next to a project configuration.
+
+`ump config` (the wizard) and `ump config add` write the `accounts`
+section; `ump config view` shows it with plaintext secrets redacted.
 
 Built-in defaults (a `base` profile, common layouts, official Debian and
 Ubuntu images) ship inside the binary and can be overridden by files with
@@ -34,12 +39,19 @@ defaults:
 accounts:
   hetzner-main:
     type: hetzner-robot
-    login: { env: HROBOT_USER }
+    login: "#ws+AbCdEfGh"
     password: { command: "pass show robot/password" }
 
   hcloud:
     type: hetzner-cloud
     token: { env: HCLOUD_TOKEN }
+
+  ovh:
+    type: ovh
+    endpoint: ovh-eu                     # ovh-eu | ovh-ca | ovh-us | URL
+    application_key: AbCdEfGh
+    application_secret: { file: ~/.config/ump/secrets/ovh.application_secret }
+    consumer_key: { file: ~/.config/ump/secrets/ovh.consumer_key }
 
   rack1:
     type: redfish
@@ -73,7 +85,8 @@ Any string value that holds a secret can be a reference instead:
 | `{ file: path }` | contents of a file (trailing newline stripped) |
 | `{ command: "..." }` | stdout of a command (`pass`, `op read`, `sops -d`, `vault kv get`, ...) |
 
-Plaintext values are accepted but produce a warning.
+Plaintext values are accepted; `ump config view` redacts them. `ump config
+types` lists which settings each provider type has and which are secret.
 
 ## Profiles
 

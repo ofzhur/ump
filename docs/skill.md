@@ -126,7 +126,7 @@ one owner; everything else is derived.
 |---|---|---|---|
 | Cloud resources: instances, volumes, networks, firewalls, load balancers, DNS | Terraform | `terraform/` + remote state | UMP (import), Ansible (inventory) |
 | Bare metal contracts, rescue, power, rDNS | the provider | provider API, driven by `ump` | UMP |
-| Which machines exist, their addresses, location, product, state | provider APIs | — | `ump machine list`, `ump inventory export` |
+| Which machines exist, their addresses, location, product, state | provider APIs | — | `ump get servers`, `ump inventory export` |
 | Per-machine intent: profile, environment, role, overrides | the machine overlay | `ump/machines.yaml` (+ provider labels where they exist) | UMP, Ansible groups |
 | OS, disks, boot, base network, base packages | UMP profiles | `ump/` | the agent on the target |
 | Users and SSH keys | user sets | `ump/users/*.yaml` | UMP at install time; the Ansible `users` role afterwards — the same file |
@@ -265,13 +265,13 @@ does not reinvent the order.
 | Workflow | Sequence | Human gates |
 |---|---|---|
 | **Add a cloud machine** | Terraform module call → PR with plan → merge, apply → `ump machine import` → `ump plan` → approve → `ump install` → handoff to Ansible → verify → update README and runbooks | PR review; `ump approve` |
-| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump machine list` → rename to convention (`ump machine rename --rdns`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
+| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump get servers` → rename to convention (`ump machine rename --rdns`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
 | **Reinstall / rebuild** | drain (Ansible: remove from LB, stop writers) → `ump plan` → approve → `ump install` → Ansible → undrain → verify | `ump approve` |
 | **OS upgrade across a fleet** | new image in `ump/images/` → bump profile → PR → canary rebuild → soak → remaining machines one at a time | PR; one approval per machine, or one for a named batch |
 | **Change a disk layout** | new layout → data migration runbook → rebuild as above | PR; approval |
 | **Add or rotate users and keys** | edit `ump/users/*.yaml` → PR → Ansible `users` role on existing machines (`--check` first) → new installs pick it up automatically | PR; production run approval |
 | **Decommission** | Ansible: drain, remove from monitoring and DNS → Terraform destroy (cloud) or contract cancellation at the provider (bare metal, human only) → remove overlay entry → verify inventory | PR; a destroy apply; cancellation |
-| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump machine list --diff` (added or removed since last time) → `ump inventory check` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
+| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump get servers --diff` (added or removed since last time) → `ump inventory check` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
 | **Health report** | reachability, machines in no inventory, contracts cancelled or expiring (`paid_until`), traffic, failed runs, expired approvals, pin freshness | none |
 | **Host down** | `ump machine show`, provider status and console, `ump ssh` diagnostics → propose: hard reset, rescue and inspect, or rebuild → execute the approved option → post-mortem note | every action beyond reading |
 | **Dependency bumps** | providers, collections, images, tools → one PR per bump with plan output | PR review |
@@ -345,7 +345,7 @@ when wrong. Three tiers:
 
 | Tier | Examples | The agent may |
 |---|---|---|
-| **Observe** | `ump machine list/show/facts`, `terraform plan`, `ansible --check --diff`, reading state, `ump ssh` with diagnostic commands | act freely and repeatedly |
+| **Observe** | `ump get servers`, `ump machine show/facts`, `terraform plan`, `ansible --check --diff`, reading state, `ump ssh` with diagnostic commands | act freely and repeatedly |
 | **Change** | editing repository files, `terraform apply` of an additive plan, `ansible-playbook` against staging or an additive role, `ump machine rename` | act after showing the plan or diff, through a PR or an explicit go from the human |
 | **Destroy** | `ump install`, `terraform apply` with destroys, Ansible against production data paths, power actions, DNS changes in production, contract cancellation | act only with an approval it could not have produced itself |
 

@@ -15,9 +15,11 @@ base OS, identical users and SSH access, a network configuration in the
 same format, and a clean handoff to your configuration management (Ansible
 or anything else).
 
-> **Status:** concept / design phase. Nothing here is implemented yet. These
-> documents capture the ideas and the intended architecture so that the
-> implementation can start from a shared picture.
+> **Status:** early implementation. The CLI skeleton, the configuration
+> wizard and server listing for Hetzner Robot, Hetzner Cloud and OVHcloud
+> exist (see [Getting started](#getting-started)). Everything else in
+> these documents is design: it captures the ideas and the intended
+> architecture so that the implementation starts from a shared picture.
 
 ## Principles
 
@@ -76,14 +78,15 @@ Hetzner Robot  Hetzner Cloud     OVH / ...     Redfish/IPMI    plain SSH
 
 ## A first impression
 
-The CLI is not implemented yet; this is the intended user experience.
+The first two commands work today; `plan` and `install` are the intended
+user experience.
 
 ```console
-$ ump provider add hetzner-robot main --login-env HROBOT_USER --password-env HROBOT_PASS
-$ ump machine list
-PROVIDER       ID       NAME     IPV4            DC        STATUS
-hetzner-robot  1234567  web-01   203.0.113.10    FSN1-DC7  ready
-hetzner-cloud  7654321  edge-01  198.51.100.22   hel1      running
+$ ump config                     # wizard: provider type, credentials, connection test
+$ ump get servers
+ACCOUNT   PROVIDER        ID        NAME      IPV4            LOCATION    STATUS
+hrobot    hetzner-robot   1234567   web-01    203.0.113.10    fsn1-dc7    ready
+hcloud    hetzner-cloud   7654321   edge-01   198.51.100.22   hel1-dc2    running
 
 $ ump plan web-01 --profile base
 machine   hetzner-robot/1234567 (web-01, 203.0.113.10)
@@ -105,6 +108,25 @@ ALL DATA ON nvme0n1, nvme1n1 WILL BE DESTROYED.
 
 $ ump install web-01 --profile base
 ```
+
+## Getting started
+
+```console
+$ git clone git@github.com:ofzhur/ump.git && cd ump && go build ./cmd/ump
+$ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
+$ ./ump get servers     # every server of every account; -o wide|json|yaml|name
+$ ./ump config test     # re-check credentials any time
+```
+
+Go 1.26 or newer builds it; an older `go` downloads the pinned toolchain
+automatically.
+
+Credentials never land in `config.yaml` as plaintext: the wizard stores
+them in files only you can read, or references environment variables or
+a command such as `pass show …`. Without a terminal (CI, agents), use
+`ump config add TYPE NAME --set KEY=VALUE …` — `ump config types` lists
+the settings of each provider. See [CLI](docs/cli.md) and
+[Configuration](docs/configuration.md).
 
 ## Two parts: the tool and the skill
 
