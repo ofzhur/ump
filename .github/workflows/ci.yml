@@ -9,13 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, for the version stamped into the binary
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: |
-          out="$(gofmt -l .)"
-          if [ -n "$out" ]; then echo "files need gofmt:"; echo "$out"; exit 1; fi
-      - run: go vet ./...
-      - run: go test ./...
-      - run: go build ./cmd/ump
+      - run: make check
+      - run: make build
+      - run: ./ump version
+      - run: make dist

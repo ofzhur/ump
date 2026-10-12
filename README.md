@@ -112,14 +112,17 @@ $ ump install web-01 --profile base
 ## Getting started
 
 ```console
-$ git clone git@github.com:ofzhur/ump.git && cd ump && go build ./cmd/ump
+$ git clone git@github.com:ofzhur/ump.git && cd ump
+$ make                  # builds ./ump; `make install` puts it into your Go bin directory
 $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
 $ ./ump get servers     # every server of every account; -o wide|json|yaml|name
 $ ./ump config test     # re-check credentials any time
 ```
 
 Go 1.26 or newer builds it; an older `go` downloads the pinned toolchain
-automatically.
+automatically. `make check` runs gofmt, vet and the tests, `make dist`
+cross-compiles for Linux, macOS and Windows into `dist/`, and `make help`
+lists the targets.
 
 Credentials never land in `config.yaml` as plaintext: the wizard stores
 them in files only you can read, or references environment variables or
