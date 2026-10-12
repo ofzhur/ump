@@ -187,3 +187,22 @@ func DefaultComment() string {
 	}
 	return "ump"
 }
+
+// DefaultIdentityFiles returns the user's standard private key files that
+// exist, the ones ssh would try on its own. They are passed explicitly
+// when another identity is added, because an explicit identity replaces
+// ssh's defaults.
+func DefaultIdentityFiles() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, n := range []string{"id_ed25519", "id_ecdsa", "id_rsa", "id_ed25519_sk", "id_ecdsa_sk"} {
+		p := filepath.Join(home, ".ssh", n)
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}

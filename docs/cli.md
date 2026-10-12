@@ -345,9 +345,13 @@ ump ssh server REF [--user <name>] [--staging] [-- COMMAND...]
 
 Resolves the server and starts the local `ssh` client against its primary
 address: an interactive session, or the command after `--`, whose exit
-status becomes ump's. Your own SSH configuration and keys apply.
+status becomes ump's. UMP's own key is offered together with your own
+keys (the agent's and the usual `~/.ssh/id_*` files), so a machine that
+knows only UMP's key is reachable too; your SSH configuration applies.
 `--staging` connects the way UMP does to rescue and staging systems: with
-UMP's own key and without host key checks.
+UMP's key alone and without host key checks, because those systems have
+a fresh host key every boot (a rescue system seen through a known address
+needs `--staging` for that reason).
 
 Provider differences: Hetzner Robot takes the fingerprints of keys
 registered at the account and issues a password only without keys;

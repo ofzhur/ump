@@ -202,6 +202,8 @@ type testEnv struct {
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	os.MkdirAll(filepath.Join(dir, "home"), 0o700)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("UMP_CONFIG", "")
@@ -1495,13 +1497,17 @@ func TestSSHCommandAndKey(t *testing.T) {
 		t.Errorf("json lacks the public key line:\n%s", out)
 	}
 
-	// ssh server: a command without a terminal, the user's own keys
+	// ssh server: a command without a terminal; UMP's key is offered next to
+	// the user's existing default keys, without excluding the agent's
+	home, _ := os.UserHomeDir()
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	os.WriteFile(filepath.Join(home, ".ssh", "id_ed25519"), []byte("private"), 0o600)
 	e.sshExit = 3
 	_, errOut, code = e.run("", false, "ssh", "server", "web-01", "--account", "one", "--", "uname", "-a")
 	if code != 3 || errOut != "" || len(e.sshCalls) != 1 || e.sshInteractive[0] {
 		t.Errorf("ssh command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
 	}
-	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh root@203.0.113.10 -- uname -a" {
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10 -- uname -a" {
 		t.Errorf("ssh argv: %q", argv)
 	}
 	e.sshExit = 0
@@ -1521,8 +1527,11 @@ func TestSSHCommandAndKey(t *testing.T) {
 		t.Errorf("interactive without terminal: code %d, %q, calls %v", code, errOut, e.sshCalls)
 	}
 	_, _, code = e.run("", true, "ssh", "server", "web-01", "--account", "one")
-	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh root@203.0.113.10" {
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10" {
 		t.Errorf("interactive: code %d, calls %v %v", code, e.sshCalls, e.sshInteractive)
+	}
+	if strings.Contains(strings.Join(e.sshCalls[0], " "), "IdentitiesOnly") {
+		t.Error("the default session must not exclude agent keys")
 	}
 	_, errOut, code = e.run("", false, "ssh", "server", "nope", "--account", "one", "--", "id")
 	if code != 1 || !strings.Contains(errOut, `server "nope" not found`) {

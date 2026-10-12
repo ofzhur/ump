@@ -98,3 +98,18 @@ func TestGenerateAndEnsure(t *testing.T) {
 		t.Errorf("DefaultComment = %q", c)
 	}
 }
+
+func TestDefaultIdentityFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := DefaultIdentityFiles(); len(got) != 0 {
+		t.Errorf("no keys: %v", got)
+	}
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	os.WriteFile(filepath.Join(home, ".ssh", "id_rsa"), []byte("k"), 0o600)
+	os.WriteFile(filepath.Join(home, ".ssh", "id_ed25519"), []byte("k"), 0o600)
+	got := DefaultIdentityFiles()
+	if len(got) != 2 || !strings.HasSuffix(got[0], "id_ed25519") || !strings.HasSuffix(got[1], "id_rsa") {
+		t.Errorf("DefaultIdentityFiles = %v", got)
+	}
+}

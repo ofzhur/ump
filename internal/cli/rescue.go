@@ -193,7 +193,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if user == "" {
 		user = "root"
 	}
-	argv := sshArgs(user, info.Address, keyPath, true, command)
+	argv := sshArgs(user, info.Address, []string{keyPath}, true, true, command)
 	if format != "" {
 		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: *info, Keys: keyPaths, SSH: shellJoin(argv)}, format)
 	}

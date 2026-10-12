@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ofzhur/ump/internal/sshkey"
 )
 
 func (a *app) newSSHCmd() *cobra.Command {
@@ -17,11 +19,14 @@ func (a *app) newSSHCmd() *cobra.Command {
 		Short: "Open an SSH session on a server, or run a command there",
 		Long: `Resolve the server and start the local ssh client against its primary
 address: an interactive session, or the command given after "--", whose
-exit status becomes ump's. Your own SSH configuration and keys apply.
+exit status becomes ump's. UMP's own key (see ump config key) is offered
+together with your own keys (the agent's and the usual ~/.ssh/id_* files),
+so a machine that knows only UMP's key is reachable too; your SSH
+configuration applies.
 
 --staging connects the way UMP does to rescue and staging systems: with
-UMP's own key (see ump config key) and without host key checks, because
-those systems have a fresh host key every boot.`,
+UMP's key alone and without host key checks, because those systems have
+a fresh host key every boot.`,
 		Example: `  ump ssh server web-01
   ump ssh server web-01 -- uptime
   ump ssh server web-01 --staging -- lsblk`,
@@ -35,7 +40,7 @@ those systems have a fresh host key every boot.`,
 		},
 	}
 	sub.Flags().StringVar(&user, "user", "root", "the login name")
-	sub.Flags().BoolVar(&staging, "staging", false, "use UMP's own key and no host key checks (rescue and staging systems)")
+	sub.Flags().BoolVar(&staging, "staging", false, "use UMP's key alone and no host key checks (rescue and staging systems)")
 	return a.serverVerbCmd("ssh", "Open an SSH session on a server", "Open an SSH session on a server, or run a command there.",
 		"  ump ssh server web-01\n  ump ssh server web-01 -- uptime", sub)
 }
@@ -56,11 +61,15 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 	if addr == "" {
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}
-	keyPath := ""
-	if staging {
-		keyPath = cfg.StagingKeyPath()
+	_, umpKey, err := a.stagingKey(cfg)
+	if err != nil {
+		return err
 	}
-	argv := sshArgs(user, addr, keyPath, staging, command)
+	identities := []string{umpKey}
+	if !staging {
+		identities = append(identities, sshkey.DefaultIdentityFiles()...)
+	}
+	argv := sshArgs(user, addr, identities, staging, staging, command)
 	interactive := len(command) == 0
 	if interactive && (a.isTTY == nil || !a.isTTY()) {
 		return withExit(exitAborted, errors.New("an interactive session needs a terminal; give a command after --"))

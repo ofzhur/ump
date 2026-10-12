@@ -38,14 +38,18 @@ func runSSH(argv []string, interactive bool) (int, error) {
 	return 0, nil
 }
 
-// sshArgs builds the ssh command line. A key file is used exclusively
-// (IdentitiesOnly), so that agent keys do not exhaust the server's
-// authentication attempts first. Rescue and staging systems have a fresh
-// host key every boot, so insecureHostKey skips host key checks for them.
-func sshArgs(user, addr, keyPath string, insecureHostKey bool, command []string) []string {
+// sshArgs builds the ssh command line. identities are key files offered
+// in order; with identitiesOnly the agent's other keys are not, so that
+// they cannot exhaust the server's authentication attempts first. Rescue
+// and staging systems have a fresh host key every boot, so
+// insecureHostKey skips host key checks for them.
+func sshArgs(user, addr string, identities []string, identitiesOnly, insecureHostKey bool, command []string) []string {
 	argv := []string{"ssh"}
-	if keyPath != "" {
-		argv = append(argv, "-i", keyPath, "-o", "IdentitiesOnly=yes")
+	for _, id := range identities {
+		argv = append(argv, "-i", id)
+	}
+	if identitiesOnly && len(identities) > 0 {
+		argv = append(argv, "-o", "IdentitiesOnly=yes")
 	}
 	if insecureHostKey {
 		argv = append(argv, "-o", "UserKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=no", "-o", "LogLevel=ERROR")
