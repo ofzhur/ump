@@ -77,9 +77,15 @@ if [ ! -f /etc/ump-rescue-version ] && [ "$force" = 0 ]; then
 	echo "install.sh: this is not the UMP rescue system. The installer erases every disk of the machine it runs on; run it from the rescue system (ump install), or pass --force if that is what you want." >&2
 	exit 2
 fi
-for t in sgdisk wipefs partprobe udevadm pvcreate vgcreate lvcreate mkfs.ext4 mkfs.vfat blkid zstd tar curl chroot lsblk; do
-	command -v "$t" >/dev/null || { echo "install.sh: $t is missing" >&2; exit 2; }
+# Every command this script relies on, checked up front: the rescue system
+# is minimal, and a missing tool must fail here, not halfway through the
+# disks. mdadm is only needed to stop old arrays and is optional.
+for t in lsblk sgdisk wipefs partprobe udevadm pvcreate vgcreate lvcreate pvscan vgchange swapoff mount umount mountpoint \
+	mkfs.ext4 mkfs.vfat blkid zstd tar curl chroot dd sha256sum mktemp nproc awk sed grep sort head tail cut tr seq date \
+	ln chmod mkdir rm cat basename ip sync sleep touch wc uname id tee; do
+	command -v "$t" >/dev/null || { echo "install.sh: $t is missing in this rescue system; the UMP rescue image has it (images/rescue/packages.txt)" >&2; exit 2; }
 done
+command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old md arrays on the disks cannot be stopped first" >&2
 
 log() { printf '==> %s\n' "$*"; }
 die() { echo "install.sh: $*" >&2; exit 1; }

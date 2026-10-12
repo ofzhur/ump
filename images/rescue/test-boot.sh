@@ -68,7 +68,9 @@ ssh "${ssh_opts[@]}" 'set -e
 echo "hostname: $(hostname)   kernel: $(uname -r)   ump-rescue: $(cat /etc/ump-rescue-version)"
 echo "root fs: $(findmnt -n -o FSTYPE /)   memory: $(free -m | awk "/Mem:/ {print \$2}") MB   mounted disks: $(lsblk -n -o MOUNTPOINTS /dev/vda | grep -c . || true)"
 missing=""
-for t in sgdisk parted mdadm lvm cryptsetup wipefs mkfs.ext4 mkfs.xfs mkfs.vfat mkfs.btrfs nvme smartctl unsquashfs zstd tar curl rsync kexec efibootmgr ipmitool jq dmidecode lshw ip ssh-keygen; do
+# what the operator wants, and every command install/install.sh relies on
+for t in sgdisk parted mdadm lvm cryptsetup wipefs mkfs.ext4 mkfs.xfs mkfs.vfat mkfs.btrfs nvme smartctl unsquashfs zstd tar curl rsync kexec efibootmgr ipmitool jq dmidecode lshw ip ssh-keygen \
+	lsblk partprobe udevadm pvcreate vgcreate lvcreate pvscan vgchange swapoff mount umount mountpoint blkid chroot dd sha256sum mktemp nproc base64 findmnt resolvectl; do
 	command -v "$t" >/dev/null || missing="$missing $t"
 done
 [ -z "$missing" ] && echo "tools: all present" || { echo "missing tools:$missing"; exit 1; }
