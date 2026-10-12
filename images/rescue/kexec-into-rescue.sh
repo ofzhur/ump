@@ -47,8 +47,19 @@ fi
 
 dir="/tmp/ump-rescue-$arch"
 mkdir -p "$dir"
-fetch() {
-	if command -v curl >/dev/null; then curl -fsSL -o "$2" "$1"; else wget -q -O "$2" "$1"; fi
+fetch() { # fetch URL FILE: download, and say what went wrong when it did not
+	if command -v curl >/dev/null; then
+		curl -fsSL -o "$2" "$1" && return 0
+		status="$(curl -sL -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)"
+		echo "download failed: $1 (HTTP ${status:-?})" >&2
+		if curl -sIL "$1" 2>/dev/null | grep -qi '^content-type: text/html'; then
+			echo "the storage answered with a web page instead of the file: a bot protection or a login page in front of it must let scripted clients through (see the README)" >&2
+		fi
+	else
+		wget -q -O "$2" "$1" && return 0
+		echo "download failed: $1" >&2
+	fi
+	return 1
 }
 echo "==> downloading the rescue image for $arch from $url"
 fetch "$url/$arch/manifest.json" "$dir/manifest.json"

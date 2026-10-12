@@ -92,7 +92,11 @@ browsers, and they come from datacenter address space. A bot protection in
 front of the storage (a JavaScript challenge, a login page) answers
 such requests with a web page that no script can pass, so the hostname
 needs a rule that lets scripted clients through, and a test from a
-server, not from a laptop, before relying on it.
+server, not from a laptop, before relying on it. Blocked, the entry
+script stops at its first download with HTTP 403 and boots nothing, so
+a later `ump ssh --staging` lands in the provider's rescue system, not
+in UMP's; the `-o file &&` form of the one-liner below fails the same
+way instead of feeding an empty download to `bash`.
 
 ## What is in it
 
@@ -137,7 +141,7 @@ any running Linux, as root (the script is published next to the images,
 so one line is enough):
 
 ```console
-# curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh | bash -s -- -u https://files.example.net/rescue
+# curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue
 ```
 
 With ump, from your own machine, that is one command, which puts the
@@ -145,7 +149,7 @@ server into the provider's rescue system, runs the line there and
 returns when the connection drops with the old kernel:
 
 ```console
-$ ump rescue server web-01 --yes -- 'curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh | bash -s -- -u https://files.example.net/rescue'
+$ ump rescue server web-01 --yes -- 'curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue'
 $ ump ssh server web-01 --staging          # a minute later: the UMP rescue system
 ```
 
