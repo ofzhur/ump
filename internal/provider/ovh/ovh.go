@@ -166,7 +166,163 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+}
+
+// Describe implements provider.Describer. A dedicated server is described
+// from its service name (the machine ID); a Public Cloud instance needs
+// the project, which the listing put into the "project_id" label.
+func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	if m.Kind == provider.KindCloud {
+		projectID := m.Labels["project_id"]
+		if projectID == "" {
+			return nil, fmt.Errorf("%s: instance %s has no project_id label", TypeName, m.ID)
+		}
+		return p.describeInstance(ctx, projectID, m.Labels["project"], m.ID)
+	}
+	return p.describeDedicated(ctx, m.ID)
+}
+
+func (p *Provider) describeDedicated(ctx context.Context, name string) (*provider.Details, error) {
+	s, err := p.client.GetDedicatedServer(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	blocks, err := p.client.DedicatedServerIPs(ctx, name)
+	if err != nil && !isNotGranted(err) {
+		return nil, err
+	}
+	d := &provider.Details{Machine: p.dedicatedMachine(*s, blocks)}
+
+	server := provider.Section{Name: "Server"}
+	var display any
+	if s.IAM != nil && s.IAM.DisplayName != "" {
+		display = s.IAM.DisplayName
+	}
+	server.Add("service_name", s.Name).Add("display_name", display).Add("server_id", s.ServerID).
+		Add("commercial_range", s.CommercialRange).Add("os", s.OS).Add("state", s.State).Add("power_state", s.PowerState).
+		Add("monitoring", s.Monitoring).Add("support_level", s.SupportLevel).Add("link_speed_mbps", s.LinkSpeed).
+		Add("reverse", s.Reverse).Add("professional_use", s.ProfessionalUse).Add("no_intervention", s.NoIntervention)
+
+	location := provider.Section{Name: "Location"}
+	location.Add("datacenter", s.Datacenter).Add("region", s.Region).Add("availability_zone", s.AvailabilityZone).Add("rack", s.Rack)
+
+	boot := provider.Section{Name: "Boot"}
+	boot.Add("boot_id", s.BootID)
+	if s.BootID != 0 {
+		if b, err := p.client.GetBoot(ctx, name, s.BootID); err == nil {
+			boot.Add("boot_type", b.BootType).Add("description", b.Description).Add("kernel", b.Kernel)
+		} else {
+			boot.Add("error", err.Error())
+		}
+	}
+	boot.Add("root_device", s.RootDevice).Add("rescue_mail", s.RescueMail)
+
+	addresses := provider.Section{Name: "Addresses"}
+	if blocks == nil {
+		blocks = []string{}
+	}
+	addresses.Add("ip", s.IP).AddLabeled("ip_blocks", "IP blocks", blocks)
+	d.Sections = append(d.Sections, server, location, boot, addresses)
+
+	if si, err := p.client.GetServiceInfos(ctx, name); err == nil {
+		renewal := "manual"
+		if si.Renew != nil && si.Renew.Automatic {
+			renewal = "automatic"
+		}
+		service := provider.Section{Name: "Service"}
+		service.Add("creation", si.Creation).Add("expiration", si.Expiration).Add("renewal", renewal).
+			Add("renewal_type", si.RenewalType).Add("status", si.Status)
+		d.Sections = append(d.Sections, service)
+	} else {
+		d.Sections = append(d.Sections, provider.ErrorSection("Service", err))
+	}
+
+	if hw, err := p.client.GetHardware(ctx, name); err == nil {
+		disks := []string{}
+		for _, g := range hw.DiskGroups {
+			desc := g.Description
+			if desc == "" && g.DiskSize != nil {
+				desc = fmt.Sprintf("%d x %s %s", g.NumberOfDisks, g.DiskSize.Bytes(), g.DiskType)
+			}
+			if g.RaidController != "" {
+				desc += " (" + g.RaidController + ")"
+			}
+			disks = append(disks, desc)
+		}
+		var memory any
+		if hw.MemorySize != nil {
+			memory = hw.MemorySize.Bytes()
+		}
+		hardware := provider.Section{Name: "Hardware"}
+		hardware.Add("description", hw.Description).Add("memory", memory).
+			Add("processor", fmt.Sprintf("%d x %s", hw.NumberOfProcessors, hw.ProcessorName)).
+			Add("cores", hw.NumberOfProcessors*hw.CoresPerProcessor).Add("threads", hw.NumberOfProcessors*hw.ThreadsPerProcessor).
+			Add("disks", disks).Add("boot_mode", hw.BootMode).Add("form_factor", hw.FormFactor)
+		d.Sections = append(d.Sections, hardware)
+	} else {
+		d.Sections = append(d.Sections, provider.ErrorSection("Hardware", err))
+	}
+	return d, nil
+}
+
+func (p *Provider) describeInstance(ctx context.Context, projectID, projectName, id string) (*provider.Details, error) {
+	in, err := p.client.GetInstance(ctx, projectID, id)
+	if err != nil {
+		return nil, err
+	}
+	project := CloudProject{ProjectID: projectID, Description: projectName}
+	d := &provider.Details{Machine: p.instanceMachine(project, in.Instance)}
+
+	billing := "hourly"
+	if in.MonthlyBilling != nil {
+		billing = "monthly (" + in.MonthlyBilling.Status + ")"
+	}
+	instance := provider.Section{Name: "Instance"}
+	instance.Add("id", in.ID).Add("name", in.Name).Add("status", in.Status).Add("region", in.Region).
+		Add("created", in.Created).Add("plan_code", in.PlanCode).Add("billing", billing)
+
+	flavor := provider.Section{Name: "Flavor"}
+	if in.Flavor != nil {
+		flavor.Add("name", in.Flavor.Name).Add("type", in.Flavor.Type).Add("vcpus", in.Flavor.VCPUs).
+			Add("ram", provider.Bytes(in.Flavor.RAM)<<20).Add("disk", provider.Bytes(in.Flavor.Disk)<<30).Add("os_type", in.Flavor.OSType)
+	} else {
+		flavor.Add("id", in.FlavorID)
+	}
+
+	image := provider.Section{Name: "Image"}
+	if in.Image != nil {
+		image.Add("name", in.Image.Name).Add("type", in.Image.Type).Add("user", in.Image.User).Add("visibility", in.Image.Visibility)
+	} else {
+		image.Add("id", in.ImageID)
+	}
+
+	public4, public6, private := []string{}, []string{}, []string{}
+	for _, ip := range in.IPAddresses {
+		switch {
+		case ip.Type == "private":
+			private = append(private, fmt.Sprintf("%s (network %s)", ip.IP, ip.NetworkID))
+		case ip.Version == 6:
+			public6 = append(public6, ip.IP)
+		default:
+			public4 = append(public4, ip.IP)
+		}
+	}
+	addresses := provider.Section{Name: "Addresses"}
+	addresses.AddLabeled("public_ipv4", "Public IPv4", public4).AddLabeled("public_ipv6", "Public IPv6", public6).Add("private", private)
+
+	var key any
+	if in.SSHKey != nil {
+		key = in.SSHKey.Name
+	}
+	access := provider.Section{Name: "Access"}
+	access.AddLabeled("ssh_key", "SSH key", key)
+
+	proj := provider.Section{Name: "Project"}
+	proj.Add("name", projectName).Add("id", projectID)
+
+	d.Sections = append(d.Sections, instance, flavor, image, addresses, access, proj)
+	return d, nil
 }
 
 // List implements provider.Inventory. Dedicated servers and Public Cloud
@@ -368,20 +524,112 @@ func (p *Provider) instanceMachine(project CloudProject, in Instance) provider.M
 
 // DedicatedServer is GET /dedicated/server/{serviceName}.
 type DedicatedServer struct {
-	Name            string `json:"name"`
-	IP              string `json:"ip"`
-	Datacenter      string `json:"datacenter"`
-	Region          string `json:"region"`
-	State           string `json:"state"`
-	PowerState      string `json:"powerState"`
-	CommercialRange string `json:"commercialRange"`
-	OS              string `json:"os"`
-	Reverse         string `json:"reverse"`
-	ServerID        int64  `json:"serverId"`
-	IAM             *struct {
+	Name             string `json:"name"`
+	IP               string `json:"ip"`
+	Datacenter       string `json:"datacenter"`
+	Region           string `json:"region"`
+	AvailabilityZone string `json:"availabilityZone"`
+	Rack             string `json:"rack"`
+	State            string `json:"state"`
+	PowerState       string `json:"powerState"`
+	CommercialRange  string `json:"commercialRange"`
+	OS               string `json:"os"`
+	Reverse          string `json:"reverse"`
+	ServerID         int64  `json:"serverId"`
+	BootID           int    `json:"bootId"`
+	RootDevice       string `json:"rootDevice"`
+	RescueMail       string `json:"rescueMail"`
+	Monitoring       bool   `json:"monitoring"`
+	SupportLevel     string `json:"supportLevel"`
+	LinkSpeed        int    `json:"linkSpeed"`
+	ProfessionalUse  bool   `json:"professionalUse"`
+	NoIntervention   bool   `json:"noIntervention"`
+	IAM              *struct {
 		DisplayName string `json:"displayName"`
 		ID          string `json:"id"`
 	} `json:"iam"`
+}
+
+// ServiceInfos is GET /dedicated/server/{serviceName}/serviceInfos.
+type ServiceInfos struct {
+	Creation    string `json:"creation"`
+	Expiration  string `json:"expiration"`
+	Status      string `json:"status"`
+	RenewalType string `json:"renewalType"`
+	Renew       *struct {
+		Automatic          bool `json:"automatic"`
+		DeleteAtExpiration bool `json:"deleteAtExpiration"`
+		Forced             bool `json:"forced"`
+	} `json:"renew"`
+}
+
+// Boot is GET /dedicated/server/{serviceName}/boot/{bootId}.
+type Boot struct {
+	BootID      int    `json:"bootId"`
+	BootType    string `json:"bootType"`
+	Description string `json:"description"`
+	Kernel      string `json:"kernel"`
+}
+
+// UnitValue is OVH's {unit, value} size.
+type UnitValue struct {
+	Unit  string  `json:"unit"`
+	Value float64 `json:"value"`
+}
+
+// Bytes converts the size to bytes (1024-based units).
+func (u UnitValue) Bytes() provider.Bytes {
+	mult := map[string]float64{"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30, "TB": 1 << 40}[strings.ToUpper(u.Unit)]
+	if mult == 0 {
+		mult = 1
+	}
+	return provider.Bytes(u.Value * mult)
+}
+
+// Hardware is GET /dedicated/server/{serviceName}/specifications/hardware.
+type Hardware struct {
+	Description         string     `json:"description"`
+	MemorySize          *UnitValue `json:"memorySize"`
+	NumberOfProcessors  int        `json:"numberOfProcessors"`
+	ProcessorName       string     `json:"processorName"`
+	CoresPerProcessor   int        `json:"coresPerProcessor"`
+	ThreadsPerProcessor int        `json:"threadsPerProcessor"`
+	DiskGroups          []struct {
+		Description    string     `json:"description"`
+		NumberOfDisks  int        `json:"numberOfDisks"`
+		DiskSize       *UnitValue `json:"diskSize"`
+		DiskType       string     `json:"diskType"`
+		RaidController string     `json:"raidController"`
+	} `json:"diskGroups"`
+	BootMode   string `json:"bootMode"`
+	FormFactor string `json:"formFactor"`
+}
+
+// InstanceDetail is GET /cloud/project/{serviceName}/instance/{instanceId}:
+// the listing fields with the flavor and image resolved.
+type InstanceDetail struct {
+	Instance
+	Flavor *struct {
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		VCPUs  int    `json:"vcpus"`
+		RAM    int    `json:"ram"`
+		Disk   int    `json:"disk"`
+		OSType string `json:"osType"`
+	} `json:"flavor"`
+	Image *struct {
+		Name       string `json:"name"`
+		Type       string `json:"type"`
+		User       string `json:"user"`
+		Visibility string `json:"visibility"`
+	} `json:"image"`
+	SSHKey *struct {
+		Name string `json:"name"`
+	} `json:"sshKey"`
+	MonthlyBilling *struct {
+		Status string `json:"status"`
+		Since  string `json:"since"`
+	} `json:"monthlyBilling"`
 }
 
 // CloudProject is GET /cloud/project/{serviceName}.
@@ -406,6 +654,7 @@ type Instance struct {
 		Type      string `json:"type"`
 		Version   int    `json:"version"`
 		GatewayIP string `json:"gatewayIp"`
+		NetworkID string `json:"networkId"`
 	} `json:"ipAddresses"`
 }
 
@@ -488,6 +737,42 @@ func (c *Client) ListInstances(ctx context.Context, projectID string) ([]Instanc
 		return nil, err
 	}
 	return list, nil
+}
+
+// GetServiceInfos returns the contract information of a dedicated server.
+func (c *Client) GetServiceInfos(ctx context.Context, name string) (*ServiceInfos, error) {
+	var si ServiceInfos
+	if err := c.do(ctx, http.MethodGet, "/dedicated/server/"+url.PathEscape(name)+"/serviceInfos", nil, &si); err != nil {
+		return nil, err
+	}
+	return &si, nil
+}
+
+// GetBoot returns one boot option of a dedicated server.
+func (c *Client) GetBoot(ctx context.Context, name string, bootID int) (*Boot, error) {
+	var b Boot
+	if err := c.do(ctx, http.MethodGet, "/dedicated/server/"+url.PathEscape(name)+"/boot/"+strconv.Itoa(bootID), nil, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// GetHardware returns the hardware specification of a dedicated server.
+func (c *Client) GetHardware(ctx context.Context, name string) (*Hardware, error) {
+	var hw Hardware
+	if err := c.do(ctx, http.MethodGet, "/dedicated/server/"+url.PathEscape(name)+"/specifications/hardware", nil, &hw); err != nil {
+		return nil, err
+	}
+	return &hw, nil
+}
+
+// GetInstance returns one Public Cloud instance with flavor and image.
+func (c *Client) GetInstance(ctx context.Context, projectID, id string) (*InstanceDetail, error) {
+	var in InstanceDetail
+	if err := c.do(ctx, http.MethodGet, "/cloud/project/"+url.PathEscape(projectID)+"/instance/"+url.PathEscape(id), nil, &in); err != nil {
+		return nil, err
+	}
+	return &in, nil
 }
 
 // RequestConsumerKey asks OVH for a new consumer key with the given access

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -83,7 +84,83 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+}
+
+// Describe implements provider.Describer: the server's contract, its
+// addresses and features, and when the server supports them its power
+// state (GET /reset) and rescue system state (GET /boot/rescue).
+func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	number, err := strconv.Atoi(m.ID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %q is not a server number", TypeName, m.ID)
+	}
+	s, err := p.client.GetServer(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	d := &provider.Details{Machine: p.machine(s.Server)}
+
+	contract := provider.Section{Name: "Contract"}
+	contract.Add("product", s.Product).Add("datacenter", s.DC).Add("traffic", s.Traffic).
+		Add("paid_until", s.PaidUntil).Add("cancelled", s.Cancelled).Add("status", s.Status)
+	var storagebox any
+	if s.LinkedStoragebox != nil {
+		storagebox = *s.LinkedStoragebox
+	}
+	contract.Add("linked_storagebox", storagebox)
+
+	extra, subnets := []string{}, []string{}
+	for _, ip := range s.IP {
+		if ip != s.ServerIP {
+			extra = append(extra, ip)
+		}
+	}
+	for _, sn := range s.Subnet {
+		subnets = append(subnets, sn.IP+"/"+sn.Mask)
+	}
+	addresses := provider.Section{Name: "Addresses"}
+	addresses.AddLabeled("primary_ip", "Primary IP", s.ServerIP).AddLabeled("additional_ips", "Additional IPs", extra).Add("subnets", subnets)
+
+	features := provider.Section{Name: "Features"}
+	features.Add("reset", s.Reset).Add("rescue", s.Rescue).Add("vnc", s.VNC).Add("windows", s.Windows).
+		Add("plesk", s.Plesk).Add("cpanel", s.CPanel).Add("wol", s.WOL).Add("hot_swap", s.HotSwap)
+	d.Sections = append(d.Sections, contract, addresses, features)
+
+	if r, err := p.client.GetReset(ctx, number); err == nil {
+		power := provider.Section{Name: "Power"}
+		power.Add("state", r.OperatingStatus).Add("reset_types", nonNil(r.Type))
+		d.Sections = append(d.Sections, power)
+	} else if !isNotFound(err) {
+		d.Sections = append(d.Sections, provider.ErrorSection("Power", err))
+	}
+	if r, err := p.client.GetRescue(ctx, number); err == nil {
+		keys, archs := []string{}, []string{}
+		for _, k := range r.AuthorizedKey {
+			keys = append(keys, k.Key.Name+" ("+k.Key.Fingerprint+")")
+		}
+		for _, a := range r.Arch {
+			archs = append(archs, fmt.Sprint(a))
+		}
+		rescue := provider.Section{Name: "Rescue"}
+		rescue.Add("active", r.Active).Add("systems", nonNil(r.OS)).Add("architectures", archs).Add("authorized_keys", keys)
+		d.Sections = append(d.Sections, rescue)
+	} else if !isNotFound(err) {
+		d.Sections = append(d.Sections, provider.ErrorSection("Rescue", err))
+	}
+	return d, nil
+}
+
+func isNotFound(err error) bool {
+	var apiErr *provider.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
+}
+
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 // List implements provider.Inventory.
@@ -149,6 +226,43 @@ type Server struct {
 	Subnet        []Subnet `json:"subnet"`
 }
 
+// ServerDetail is GET /server/{server-number}: the listing fields plus
+// which features the server supports.
+type ServerDetail struct {
+	Server
+	Reset            bool `json:"reset"`
+	Rescue           bool `json:"rescue"`
+	VNC              bool `json:"vnc"`
+	Windows          bool `json:"windows"`
+	Plesk            bool `json:"plesk"`
+	CPanel           bool `json:"cpanel"`
+	WOL              bool `json:"wol"`
+	HotSwap          bool `json:"hot_swap"`
+	LinkedStoragebox *int `json:"linked_storagebox"`
+}
+
+// ResetInfo is GET /reset/{server-number}: the reset types the server
+// supports and its power state ("running", "shut off", "not supported").
+type ResetInfo struct {
+	Type            []string `json:"type"`
+	OperatingStatus string   `json:"operating_status"`
+}
+
+// RescueInfo is GET /boot/{server-number}/rescue.
+type RescueInfo struct {
+	OS            []string `json:"os"`
+	Arch          []any    `json:"arch"`
+	Active        bool     `json:"active"`
+	AuthorizedKey []struct {
+		Key struct {
+			Name        string `json:"name"`
+			Fingerprint string `json:"fingerprint"`
+			Type        string `json:"type"`
+			Size        int    `json:"size"`
+		} `json:"key"`
+	} `json:"authorized_key"`
+}
+
 // Subnet is an address block assigned to a server.
 type Subnet struct {
 	IP   string `json:"ip"`
@@ -182,6 +296,39 @@ func (c *Client) ListServers(ctx context.Context) ([]Server, error) {
 		out = append(out, r.Server)
 	}
 	return out, nil
+}
+
+// GetServer returns one server with its feature flags.
+func (c *Client) GetServer(ctx context.Context, number int) (*ServerDetail, error) {
+	var raw struct {
+		Server ServerDetail `json:"server"`
+	}
+	if err := c.get(ctx, "/server/"+strconv.Itoa(number), &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Server, nil
+}
+
+// GetReset returns the reset options and power state of a server.
+func (c *Client) GetReset(ctx context.Context, number int) (*ResetInfo, error) {
+	var raw struct {
+		Reset ResetInfo `json:"reset"`
+	}
+	if err := c.get(ctx, "/reset/"+strconv.Itoa(number), &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Reset, nil
+}
+
+// GetRescue returns the rescue system state of a server.
+func (c *Client) GetRescue(ctx context.Context, number int) (*RescueInfo, error) {
+	var raw struct {
+		Rescue RescueInfo `json:"rescue"`
+	}
+	if err := c.get(ctx, "/boot/"+strconv.Itoa(number)+"/rescue", &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Rescue, nil
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {

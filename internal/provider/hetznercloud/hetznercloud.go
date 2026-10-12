@@ -9,6 +9,7 @@ package hetznercloud
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -78,7 +79,102 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+}
+
+// Describe implements provider.Describer from GET /servers/{id}.
+func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	id, err := strconv.ParseInt(m.ID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %q is not a server ID", TypeName, m.ID)
+	}
+	s, err := p.client.GetServer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	d := &provider.Details{Machine: p.machine(*s)}
+
+	server := provider.Section{Name: "Server"}
+	var backup, placement any
+	if s.BackupWindow != nil && *s.BackupWindow != "" {
+		backup = *s.BackupWindow
+	}
+	if s.PlacementGroup != nil {
+		placement = s.PlacementGroup.Name
+	}
+	server.Add("created", s.Created).Add("locked", s.Locked).Add("rescue_enabled", s.RescueEnabled).
+		Add("backup_window", backup).Add("placement_group", placement).Add("volumes", ids(s.Volumes)).
+		Add("primary_disk", provider.Bytes(s.PrimaryDiskSize)<<30)
+
+	typ := provider.Section{Name: "Type"}
+	typ.Add("name", s.ServerType.Name).Add("description", s.ServerType.Description).Add("cores", s.ServerType.Cores).
+		Add("memory", provider.Bytes(s.ServerType.Memory*float64(1<<30))).Add("disk", provider.Bytes(s.ServerType.Disk)<<30).
+		Add("cpu_type", s.ServerType.CPUType).Add("architecture", s.ServerType.Architecture)
+
+	image := provider.Section{Name: "Image"}
+	if s.Image != nil {
+		name := s.Image.Description
+		if name == "" {
+			name = s.Image.Name
+		}
+		image.Add("name", name).Add("os_flavor", s.Image.OSFlavor).Add("os_version", s.Image.OSVersion).Add("type", s.Image.Type)
+	} else {
+		image.Add("name", nil)
+	}
+	var iso any
+	if s.ISO != nil {
+		iso = s.ISO.Name
+	}
+	image.Add("iso", iso)
+
+	location := provider.Section{Name: "Location"}
+	location.Add("datacenter", s.Datacenter.Name).Add("description", s.Datacenter.Description).
+		Add("city", s.Datacenter.Location.City).Add("country", s.Datacenter.Location.Country).
+		Add("network_zone", s.Datacenter.Location.NetworkZone)
+
+	network := provider.Section{Name: "Network"}
+	if v4 := s.PublicNet.IPv4; v4 != nil {
+		network.Add("ipv4", v4.IP).AddLabeled("ipv4_dns_ptr", "IPv4 DNS PTR", v4.ptrV4()).AddLabeled("ipv4_blocked", "IPv4 blocked", v4.Blocked)
+	} else {
+		network.Add("ipv4", nil)
+	}
+	if v6 := s.PublicNet.IPv6; v6 != nil {
+		network.Add("ipv6", v6.IP).AddLabeled("ipv6_dns_ptr", "IPv6 DNS PTR", v6.ptrV6()).AddLabeled("ipv6_blocked", "IPv6 blocked", v6.Blocked)
+	} else {
+		network.Add("ipv6", nil)
+	}
+	private, firewalls := []string{}, []string{}
+	for _, n := range s.PrivateNet {
+		private = append(private, fmt.Sprintf("%s on network %d (%s)", n.IP, n.Network, n.MACAddress))
+	}
+	for _, f := range s.PublicNet.Firewalls {
+		firewalls = append(firewalls, fmt.Sprintf("%d (%s)", f.ID, f.Status))
+	}
+	network.AddLabeled("floating_ips", "Floating IPs", ids(s.PublicNet.FloatingIPs)).Add("private_networks", private).Add("firewalls", firewalls)
+
+	traffic := provider.Section{Name: "Traffic"}
+	traffic.Add("included", bytesOrNil(s.IncludedTraffic)).Add("outgoing", bytesOrNil(s.OutgoingTraffic)).Add("ingoing", bytesOrNil(s.IngoingTraffic))
+
+	protection := provider.Section{Name: "Protection"}
+	protection.Add("delete", s.Protection.Delete).Add("rebuild", s.Protection.Rebuild)
+
+	d.Sections = append(d.Sections, server, typ, image, location, network, traffic, protection)
+	return d, nil
+}
+
+func ids(list []int64) []string {
+	out := make([]string, 0, len(list))
+	for _, id := range list {
+		out = append(out, strconv.FormatInt(id, 10))
+	}
+	return out
+}
+
+func bytesOrNil(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return provider.Bytes(*v)
 }
 
 // List implements provider.Inventory.
@@ -123,32 +219,98 @@ func (p *Provider) machine(s Server) provider.Machine {
 	return m
 }
 
-// Server is a cloud server as returned by GET /servers.
+// Server is a cloud server as returned by GET /servers and GET /servers/{id}.
 type Server struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Status    string `json:"status"`
+	Created   string `json:"created"`
 	PublicNet struct {
-		IPv4 *IPInfo `json:"ipv4"`
-		IPv6 *IPInfo `json:"ipv6"`
+		IPv4        *IPInfo `json:"ipv4"`
+		IPv6        *IPInfo `json:"ipv6"`
+		FloatingIPs []int64 `json:"floating_ips"`
+		Firewalls   []struct {
+			ID     int64  `json:"id"`
+			Status string `json:"status"`
+		} `json:"firewalls"`
 	} `json:"public_net"`
+	PrivateNet []struct {
+		Network    int64  `json:"network"`
+		IP         string `json:"ip"`
+		MACAddress string `json:"mac_address"`
+	} `json:"private_net"`
 	ServerType struct {
-		Name         string `json:"name"`
-		Architecture string `json:"architecture"`
+		Name         string  `json:"name"`
+		Description  string  `json:"description"`
+		Cores        int     `json:"cores"`
+		Memory       float64 `json:"memory"`
+		Disk         int     `json:"disk"`
+		CPUType      string  `json:"cpu_type"`
+		Architecture string  `json:"architecture"`
 	} `json:"server_type"`
 	Datacenter struct {
-		Name     string `json:"name"`
-		Location struct {
-			Name string `json:"name"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Location    struct {
+			Name        string `json:"name"`
+			City        string `json:"city"`
+			Country     string `json:"country"`
+			NetworkZone string `json:"network_zone"`
 		} `json:"location"`
 	} `json:"datacenter"`
-	Labels        map[string]string `json:"labels"`
-	RescueEnabled bool              `json:"rescue_enabled"`
+	Image *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		OSFlavor    string `json:"os_flavor"`
+		OSVersion   string `json:"os_version"`
+		Type        string `json:"type"`
+	} `json:"image"`
+	ISO *struct {
+		Name string `json:"name"`
+	} `json:"iso"`
+	Volumes    []int64 `json:"volumes"`
+	Protection struct {
+		Delete  bool `json:"delete"`
+		Rebuild bool `json:"rebuild"`
+	} `json:"protection"`
+	Labels         map[string]string `json:"labels"`
+	RescueEnabled  bool              `json:"rescue_enabled"`
+	Locked         bool              `json:"locked"`
+	BackupWindow   *string           `json:"backup_window"`
+	PlacementGroup *struct {
+		Name string `json:"name"`
+	} `json:"placement_group"`
+	PrimaryDiskSize int    `json:"primary_disk_size"`
+	IncludedTraffic *int64 `json:"included_traffic"`
+	OutgoingTraffic *int64 `json:"outgoing_traffic"`
+	IngoingTraffic  *int64 `json:"ingoing_traffic"`
 }
 
-// IPInfo is a public address assignment.
+// IPInfo is a public address assignment. DNSPtr is a string for IPv4
+// and a list of {ip, dns_ptr} for IPv6.
 type IPInfo struct {
-	IP string `json:"ip"`
+	IP      string          `json:"ip"`
+	Blocked bool            `json:"blocked"`
+	DNSPtr  json.RawMessage `json:"dns_ptr"`
+}
+
+func (i *IPInfo) ptrV4() string {
+	var s string
+	_ = json.Unmarshal(i.DNSPtr, &s)
+	return s
+}
+
+func (i *IPInfo) ptrV6() []string {
+	var entries []struct {
+		IP     string `json:"ip"`
+		DNSPtr string `json:"dns_ptr"`
+	}
+	_ = json.Unmarshal(i.DNSPtr, &entries)
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.IP+" "+e.DNSPtr)
+	}
+	return out
 }
 
 // Client is a minimal Hetzner Cloud API client.
@@ -182,6 +344,17 @@ func (c *Client) ListServers(ctx context.Context) ([]Server, error) {
 		page = *resp.Meta.Pagination.NextPage
 	}
 	return out, nil
+}
+
+// GetServer returns one server.
+func (c *Client) GetServer(ctx context.Context, id int64) (*Server, error) {
+	var raw struct {
+		Server Server `json:"server"`
+	}
+	if err := c.get(ctx, "/servers/"+strconv.FormatInt(id, 10), &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Server, nil
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {

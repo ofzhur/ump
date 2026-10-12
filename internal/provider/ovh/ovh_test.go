@@ -95,7 +95,24 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`["ns1.ip-203-0-113.eu","ns2.ip-203-0-113.eu"]`))
 	case "/dedicated/server/ns1.ip-203-0-113.eu":
 		w.Write([]byte(`{"name":"ns1.ip-203-0-113.eu","ip":"203.0.113.20","datacenter":"gra2","region":"eu-west-gra","state":"ok",
-		  "powerState":"poweredOn","commercialRange":"rise-1","os":"debian12_64","serverId":1001,"iam":{"displayName":"db-01","id":"x"}}`))
+		  "powerState":"poweredOn","commercialRange":"rise-1","os":"debian12_64","serverId":1001,"iam":{"displayName":"db-01","id":"x"},
+		  "bootId":1,"rootDevice":"/dev/sda","rescueMail":"ops@example.net","monitoring":true,"supportLevel":"pro","linkSpeed":1000,
+		  "availabilityZone":"eu-west-gra-a","rack":"R42"}`))
+	case "/dedicated/server/ns1.ip-203-0-113.eu/serviceInfos":
+		w.Write([]byte(`{"creation":"2025-01-15","expiration":"2026-11-15","status":"ok","renewalType":"automaticV2016",
+		  "renew":{"automatic":true,"deleteAtExpiration":false,"forced":false}}`))
+	case "/dedicated/server/ns1.ip-203-0-113.eu/boot/1":
+		w.Write([]byte(`{"bootId":1,"bootType":"harddisk","description":"Boot on disk","kernel":"hd"}`))
+	case "/dedicated/server/ns1.ip-203-0-113.eu/specifications/hardware":
+		w.Write([]byte(`{"description":"RISE-1","memorySize":{"unit":"MB","value":32768},"numberOfProcessors":1,
+		  "processorName":"Intel Xeon E-2386G","coresPerProcessor":6,"threadsPerProcessor":12,
+		  "diskGroups":[{"description":"","numberOfDisks":2,"diskSize":{"unit":"GB","value":512},"diskType":"NVME","raidController":"soft"}],
+		  "bootMode":"uefi","formFactor":"1u"}`))
+	case "/cloud/project/p1/instance/uuid-1":
+		w.Write([]byte(`{"id":"uuid-1","name":"vm-01","status":"ACTIVE","region":"GRA11","created":"2026-03-01T10:00:00Z","planCode":"b3-8.consumption",
+		  "flavor":{"name":"b3-8","type":"ovh.b3","vcpus":2,"ram":8192,"disk":50,"osType":"linux"},
+		  "image":{"name":"Debian 12","type":"linux","user":"debian","visibility":"public"},"sshKey":{"name":"laptop"},"monthlyBilling":null,
+		  "ipAddresses":[{"ip":"10.0.0.5","type":"private","version":4,"networkId":"net-1"},{"ip":"198.51.100.7","type":"public","version":4},{"ip":"2001:db8:7::1","type":"public","version":6}]}`))
 	case "/dedicated/server/ns1.ip-203-0-113.eu/ips":
 		w.Write([]byte(`["203.0.113.20/32","2001:db8:5:600::/64"]`))
 	case "/dedicated/server/ns2.ip-203-0-113.eu":
@@ -271,5 +288,86 @@ func TestTimestampUsesServerTime(t *testing.T) {
 	}
 	if f.calls.Load() != 1 {
 		t.Errorf("server time fetched %d times, want once", f.calls.Load())
+	}
+}
+
+func field(d *provider.Details, path string) any {
+	section, key, _ := strings.Cut(path, "/")
+	for _, s := range d.Sections {
+		if s.Name != section {
+			continue
+		}
+		for _, it := range s.Items {
+			if it.Key == key {
+				return it.Value
+			}
+		}
+	}
+	return nil
+}
+
+func sectionNames(d *provider.Details) string {
+	names := []string{}
+	for _, s := range d.Sections {
+		names = append(names, s.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestDescribeDedicated(t *testing.T) {
+	f := newFakeAPI(t)
+	d, err := f.provider(t).(provider.Describer).Describe(context.Background(), provider.Machine{ID: "ns1.ip-203-0-113.eu", Kind: provider.KindBareMetal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Name != "db-01" || d.IPv6 != "2001:db8:5:600::/64" {
+		t.Errorf("machine: %+v", d.Machine)
+	}
+	if got := sectionNames(d); got != "Server,Location,Boot,Addresses,Service,Hardware" {
+		t.Fatalf("sections: %s", got)
+	}
+	want := map[string]any{
+		"Server/display_name": "db-01", "Server/server_id": int64(1001), "Server/monitoring": true, "Server/link_speed_mbps": 1000,
+		"Location/rack": "R42", "Boot/boot_type": "harddisk", "Boot/root_device": "/dev/sda",
+		"Addresses/ip_blocks": []string{"203.0.113.20/32", "2001:db8:5:600::/64"},
+		"Service/renewal":     "automatic", "Service/expiration": "2026-11-15",
+		"Hardware/memory": provider.Bytes(32 << 30), "Hardware/cores": 6, "Hardware/threads": 12,
+		"Hardware/disks": []string{"2 x 512 GB NVME (soft)"}, "Hardware/boot_mode": "uefi",
+	}
+	for path, w := range want {
+		if got := field(d, path); !reflect.DeepEqual(got, w) {
+			t.Errorf("%s: got %#v (%T), want %#v", path, got, got, w)
+		}
+	}
+}
+
+func TestDescribeInstance(t *testing.T) {
+	f := newFakeAPI(t)
+	m := provider.Machine{ID: "uuid-1", Kind: provider.KindCloud, Labels: map[string]string{"project": "Production", "project_id": "p1"}}
+	d, err := f.provider(t).(provider.Describer).Describe(context.Background(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Name != "vm-01" || d.Product != "b3-8" || d.Labels["project"] != "Production" {
+		t.Errorf("machine: %+v", d.Machine)
+	}
+	if got := sectionNames(d); got != "Instance,Flavor,Image,Addresses,Access,Project" {
+		t.Fatalf("sections: %s", got)
+	}
+	want := map[string]any{
+		"Instance/billing": "hourly", "Instance/created": "2026-03-01T10:00:00Z",
+		"Flavor/vcpus": 2, "Flavor/ram": provider.Bytes(8 << 30), "Flavor/disk": provider.Bytes(50 << 30),
+		"Image/name": "Debian 12", "Image/user": "debian",
+		"Addresses/public_ipv4": []string{"198.51.100.7"}, "Addresses/public_ipv6": []string{"2001:db8:7::1"},
+		"Addresses/private": []string{"10.0.0.5 (network net-1)"},
+		"Access/ssh_key":    "laptop", "Project/id": "p1",
+	}
+	for path, w := range want {
+		if got := field(d, path); !reflect.DeepEqual(got, w) {
+			t.Errorf("%s: got %#v (%T), want %#v", path, got, got, w)
+		}
+	}
+	if _, err := f.provider(t).(provider.Describer).Describe(context.Background(), provider.Machine{ID: "uuid-1", Kind: provider.KindCloud}); err == nil {
+		t.Error("instance without project_id label accepted")
 	}
 }
