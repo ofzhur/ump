@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -29,9 +30,10 @@ const perPage = 50
 
 // Type is the provider type description, registered by provider/all.
 var Type = provider.Type{
-	Name:        TypeName,
-	Kind:        provider.KindCloud,
-	Description: "Hetzner Cloud servers",
+	Name:         TypeName,
+	Kind:         provider.KindCloud,
+	Description:  "Hetzner Cloud servers",
+	Capabilities: capabilities,
 	Fields: []provider.Field{
 		{
 			Key:      "token",
@@ -49,6 +51,8 @@ var Type = provider.Type{
 	},
 	New: newProvider,
 }
+
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
 
 // Provider is a configured Hetzner Cloud project.
 type Provider struct {
@@ -79,8 +83,57 @@ func (p *Provider) Type() string { return TypeName }
 func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
-func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+func (p *Provider) Capabilities() []provider.Capability { return capabilities }
+
+// PTRs implements provider.ReverseDNS. Hetzner Cloud always has an entry
+// for the IPv4 (its default points to clients.your-server.de).
+func (p *Provider) PTRs(ctx context.Context, m provider.Machine) ([]provider.PTR, error) {
+	id, err := strconv.ParseInt(m.ID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %q is not a server ID", TypeName, m.ID)
+	}
+	s, err := p.client.GetServer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []provider.PTR
+	if s.PublicNet.IPv4 != nil {
+		out = append(out, provider.PTR{IP: s.PublicNet.IPv4.IP, Name: s.PublicNet.IPv4.ptrV4()})
+	}
+	if s.PublicNet.IPv6 != nil {
+		for _, e := range s.PublicNet.IPv6.ptrV6Entries() {
+			out = append(out, provider.PTR{IP: e.IP, Name: e.DNSPtr})
+		}
+	}
+	return out, nil
+}
+
+// SetPTR implements provider.ReverseDNS with the change_dns_ptr action.
+// An empty name resets the entry to Hetzner's default.
+func (p *Provider) SetPTR(ctx context.Context, m provider.Machine, ip netip.Addr, name string) error {
+	id, err := strconv.ParseInt(m.ID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("%s: %q is not a server ID", TypeName, m.ID)
+	}
+	s, err := p.client.GetServer(ctx, id)
+	if err != nil {
+		return err
+	}
+	var singles, prefixes []string
+	if s.PublicNet.IPv4 != nil {
+		singles = append(singles, s.PublicNet.IPv4.IP)
+	}
+	if s.PublicNet.IPv6 != nil {
+		prefixes = append(prefixes, s.PublicNet.IPv6.IP)
+	}
+	if !provider.Contains(ip, singles, prefixes) {
+		return fmt.Errorf("%s: address %s does not belong to server %s", TypeName, ip, m.ID)
+	}
+	var ptr *string
+	if name != "" {
+		ptr = &name
+	}
+	return p.client.ChangeDNSPtr(ctx, id, ip.String(), ptr)
 }
 
 // Rename implements provider.Renamer. Hetzner Cloud requires names to be
@@ -315,12 +368,19 @@ func (i *IPInfo) ptrV4() string {
 	return s
 }
 
-func (i *IPInfo) ptrV6() []string {
-	var entries []struct {
-		IP     string `json:"ip"`
-		DNSPtr string `json:"dns_ptr"`
-	}
+type ptrEntry struct {
+	IP     string `json:"ip"`
+	DNSPtr string `json:"dns_ptr"`
+}
+
+func (i *IPInfo) ptrV6Entries() []ptrEntry {
+	var entries []ptrEntry
 	_ = json.Unmarshal(i.DNSPtr, &entries)
+	return entries
+}
+
+func (i *IPInfo) ptrV6() []string {
+	entries := i.ptrV6Entries()
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, e.IP+" "+e.DNSPtr)
@@ -384,6 +444,22 @@ func (c *Client) UpdateServer(ctx context.Context, id int64, name string) (*Serv
 		return nil, err
 	}
 	return &raw.Server, nil
+}
+
+// ChangeDNSPtr sets the reverse DNS entry of one of the server's
+// addresses (POST /servers/{id}/actions/change_dns_ptr); nil resets it.
+func (c *Client) ChangeDNSPtr(ctx context.Context, id int64, ip string, ptr *string) error {
+	body := struct {
+		IP     string  `json:"ip"`
+		DNSPtr *string `json:"dns_ptr"`
+	}{IP: ip, DNSPtr: ptr}
+	var raw struct {
+		Action struct {
+			ID     int64  `json:"id"`
+			Status string `json:"status"`
+		} `json:"action"`
+	}
+	return c.do(ctx, http.MethodPost, "/servers/"+strconv.FormatInt(id, 10)+"/actions/change_dns_ptr", body, &raw)
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {

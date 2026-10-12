@@ -7,15 +7,19 @@
 package hetznerrobot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -28,9 +32,10 @@ const DefaultBaseURL = "https://robot-ws.your-server.de"
 
 // Type is the provider type description, registered by provider/all.
 var Type = provider.Type{
-	Name:        TypeName,
-	Kind:        provider.KindBareMetal,
-	Description: "Hetzner dedicated servers (Robot web service)",
+	Name:         TypeName,
+	Kind:         provider.KindBareMetal,
+	Description:  "Hetzner dedicated servers (Robot web service)",
+	Capabilities: capabilities,
 	Fields: []provider.Field{
 		{
 			Key:      "login",
@@ -54,10 +59,17 @@ var Type = provider.Type{
 	New: newProvider,
 }
 
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
+
 // Provider is a configured Hetzner Robot account.
 type Provider struct {
 	account string
 	client  *Client
+
+	mu      sync.Mutex
+	servers map[int]Server // from the last listing, so PTRs needs no second lookup
+	rdns    []RDNS         // the account's entries, fetched once per process
+	rdnsOK  bool
 }
 
 func newProvider(account string, settings map[string]string, opts provider.Options) (provider.Provider, error) {
@@ -84,8 +96,100 @@ func (p *Provider) Type() string { return TypeName }
 func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
-func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+func (p *Provider) Capabilities() []provider.Capability { return capabilities }
+
+// server returns the listing data of a server, from the last listing or
+// by looking it up.
+func (p *Provider) server(ctx context.Context, m provider.Machine) (Server, error) {
+	number, err := strconv.Atoi(m.ID)
+	if err != nil {
+		return Server{}, fmt.Errorf("%s: %q is not a server number", TypeName, m.ID)
+	}
+	p.mu.Lock()
+	s, ok := p.servers[number]
+	p.mu.Unlock()
+	if ok {
+		return s, nil
+	}
+	d, err := p.client.GetServer(ctx, number)
+	if err != nil {
+		return Server{}, err
+	}
+	return d.Server, nil
+}
+
+// addresses returns the single addresses and the prefixes of a server.
+func addresses(s Server) (singles, prefixes []string) {
+	singles = append(singles, s.ServerIP)
+	singles = append(singles, s.IP...)
+	for _, sn := range s.Subnet {
+		prefixes = append(prefixes, sn.IP+"/"+sn.Mask)
+	}
+	if s.ServerIPv6Net != "" {
+		prefixes = append(prefixes, s.ServerIPv6Net+"/64")
+	}
+	return singles, prefixes
+}
+
+// PTRs implements provider.ReverseDNS from the account-wide entry list.
+func (p *Provider) PTRs(ctx context.Context, m provider.Machine) ([]provider.PTR, error) {
+	s, err := p.server(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := p.allRDNS(ctx)
+	if err != nil {
+		return nil, err
+	}
+	singles, prefixes := addresses(s)
+	byIP := map[string]string{}
+	for _, e := range entries {
+		if a, err := netip.ParseAddr(e.IP); err == nil && provider.Contains(a, singles, prefixes) {
+			byIP[a.String()] = e.PTR
+		}
+	}
+	out := []provider.PTR{{IP: s.ServerIP, Name: byIP[s.ServerIP]}}
+	delete(byIP, s.ServerIP)
+	others := make([]string, 0, len(byIP))
+	for ip := range byIP {
+		others = append(others, ip)
+	}
+	sort.Strings(others)
+	for _, ip := range others {
+		out = append(out, provider.PTR{IP: ip, Name: byIP[ip]})
+	}
+	return out, nil
+}
+
+// SetPTR implements provider.ReverseDNS.
+func (p *Provider) SetPTR(ctx context.Context, m provider.Machine, ip netip.Addr, name string) error {
+	s, err := p.server(ctx, m)
+	if err != nil {
+		return err
+	}
+	if singles, prefixes := addresses(s); !provider.Contains(ip, singles, prefixes) {
+		return fmt.Errorf("%s: address %s does not belong to server %s", TypeName, ip, m.ID)
+	}
+	p.mu.Lock()
+	p.rdnsOK = false
+	p.mu.Unlock()
+	if name == "" {
+		return p.client.DeleteRDNS(ctx, ip.String())
+	}
+	return p.client.SetRDNS(ctx, ip.String(), name)
+}
+
+func (p *Provider) allRDNS(ctx context.Context) ([]RDNS, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.rdnsOK {
+		entries, err := p.client.ListRDNS(ctx)
+		if err != nil {
+			return nil, err
+		}
+		p.rdns, p.rdnsOK = entries, true
+	}
+	return p.rdns, nil
 }
 
 // Rename implements provider.Renamer by setting the Robot server name.
@@ -184,6 +288,12 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 		return nil, err
 	}
 	out := make([]provider.Machine, 0, len(servers))
+	p.mu.Lock()
+	p.servers = make(map[int]Server, len(servers))
+	for _, s := range servers {
+		p.servers[s.ServerNumber] = s
+	}
+	p.mu.Unlock()
 	for _, s := range servers {
 		out = append(out, p.machine(s))
 	}
@@ -277,6 +387,12 @@ type RescueInfo struct {
 	} `json:"authorized_key"`
 }
 
+// RDNS is one reverse DNS entry of the account (GET /rdns).
+type RDNS struct {
+	IP  string `json:"ip"`
+	PTR string `json:"ptr"`
+}
+
 // Subnet is an address block assigned to a server.
 type Subnet struct {
 	IP   string `json:"ip"`
@@ -356,6 +472,50 @@ func (c *Client) RenameServer(ctx context.Context, number int, name string) (*Se
 	return &raw.Server, nil
 }
 
+// ListRDNS returns every reverse DNS entry of the account.
+func (c *Client) ListRDNS(ctx context.Context) ([]RDNS, error) {
+	var raw []struct {
+		RDNS RDNS `json:"rdns"`
+	}
+	if err := c.get(ctx, "/rdns", &raw); err != nil {
+		if isCode(err, http.StatusNotFound, "RDNS_NOT_FOUND") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]RDNS, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, r.RDNS)
+	}
+	return out, nil
+}
+
+// SetRDNS creates or updates the reverse DNS entry of an address.
+func (c *Client) SetRDNS(ctx context.Context, ip, ptr string) error {
+	form := url.Values{"ptr": {ptr}}
+	err := c.postForm(ctx, "/rdns/"+url.PathEscape(ip), form, nil)
+	if isCode(err, http.StatusNotFound, "RDNS_NOT_FOUND") {
+		// no entry yet: the Robot wants PUT for creation
+		return c.do(ctx, http.MethodPut, "/rdns/"+url.PathEscape(ip), "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), nil)
+	}
+	return err
+}
+
+// DeleteRDNS removes the reverse DNS entry of an address; a missing entry
+// is not an error.
+func (c *Client) DeleteRDNS(ctx context.Context, ip string) error {
+	err := c.do(ctx, http.MethodDelete, "/rdns/"+url.PathEscape(ip), "", nil, nil)
+	if isCode(err, http.StatusNotFound, "RDNS_NOT_FOUND") {
+		return nil
+	}
+	return err
+}
+
+func isCode(err error, status int, code string) bool {
+	var apiErr *provider.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == status && apiErr.Code == code
+}
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	return c.do(ctx, http.MethodGet, path, "", nil, out)
 }
@@ -395,6 +555,9 @@ func (c *Client) do(ctx context.Context, method, path, contentType string, body 
 	if resp.StatusCode/100 != 2 {
 		return parseError(resp.StatusCode, data)
 	}
+	if out == nil || len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return &provider.APIError{Provider: TypeName, Status: resp.StatusCode, Message: "unexpected response: " + err.Error()}
 	}
@@ -422,6 +585,8 @@ func parseError(status int, body []byte) error {
 		if e.Error.Message != "" {
 			apiErr.Message += ": " + e.Error.Message
 		}
+	case apiErr.Code == "IP_NOT_FOUND":
+		apiErr.Message = "the address is not assigned to this account"
 	case apiErr.Code == "RATE_LIMIT_EXCEEDED":
 		apiErr.Message = "rate limit exceeded (the Robot API allows 200 requests per hour)"
 	case apiErr.Message == "":

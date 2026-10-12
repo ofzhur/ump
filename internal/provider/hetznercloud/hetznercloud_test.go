@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -206,5 +207,55 @@ func TestRenameConflict(t *testing.T) {
 	_, err := p.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "42"}, "taken")
 	if err == nil || err.Error() != "hetzner-cloud: the name is already used in this project (uniqueness_error, HTTP 409)" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestReverseDNS(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/servers/42":
+			w.Write([]byte(serverDetailJSON))
+		case r.Method == http.MethodPost && r.URL.Path == "/servers/42/actions/change_dns_ptr":
+			var body struct {
+				IP     string  `json:"ip"`
+				DNSPtr *string `json:"dns_ptr"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			ptr := "<null>"
+			if body.DNSPtr != nil {
+				ptr = *body.DNSPtr
+			}
+			got = append(got, body.IP+"="+ptr)
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"action":{"id":1,"status":"success"}}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	p, _ := Type.New("hc", map[string]string{"token": "tok", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+	rd := p.(provider.ReverseDNS)
+	m := provider.Machine{ID: "42"}
+	ptrs, err := rd.PTRs(context.Background(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []provider.PTR{{IP: "198.51.100.1", Name: "edge-01.example.net"}, {IP: "2001:db8:c0ff:ee1::1", Name: "edge-01.example.net"}}
+	if !reflect.DeepEqual(ptrs, want) {
+		t.Errorf("PTRs: got %+v, want %+v", ptrs, want)
+	}
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("198.51.100.1"), "new.example.net"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("2001:db8:c0ff:ee1::5"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "198.51.100.1=new.example.net,2001:db8:c0ff:ee1::5=<null>" {
+		t.Errorf("actions: %v", got)
+	}
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("203.0.113.9"), "x"); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Errorf("foreign address: %v", err)
 	}
 }

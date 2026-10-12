@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -49,15 +50,19 @@ var DefaultAccessRules = []AccessRule{
 	{Method: "GET", Path: "/cloud/project"},
 	{Method: "GET", Path: "/cloud/project/*"},
 	{Method: "PUT", Path: "/cloud/project/*/instance/*"},
+	{Method: "GET", Path: "/ip/*"},
+	{Method: "POST", Path: "/ip/*/reverse"},
+	{Method: "DELETE", Path: "/ip/*/reverse/*"},
 }
 
 const listParallelism = 8
 
 // Type is the provider type description, registered by provider/all.
 var Type = provider.Type{
-	Name:        TypeName,
-	Kind:        provider.KindMixed,
-	Description: "OVHcloud dedicated servers and Public Cloud instances",
+	Name:         TypeName,
+	Kind:         provider.KindMixed,
+	Description:  "OVHcloud dedicated servers and Public Cloud instances",
+	Capabilities: capabilities,
 	Fields: []provider.Field{
 		{
 			Key:     "endpoint",
@@ -90,6 +95,8 @@ var Type = provider.Type{
 	New:      newProvider,
 	Complete: complete,
 }
+
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS}
 
 // Provider is a configured OVHcloud account.
 type Provider struct {
@@ -167,8 +174,123 @@ func (p *Provider) Type() string { return TypeName }
 func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
-func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+func (p *Provider) Capabilities() []provider.Capability { return capabilities }
+
+// blocks returns the IP blocks of a machine, the unit the OVH reverse DNS
+// API works with: a dedicated server's routed blocks, or /32 and /64
+// blocks around an instance's addresses.
+func (p *Provider) blocks(ctx context.Context, m provider.Machine) (primary string, blocks []string, err error) {
+	if m.Kind != provider.KindCloud {
+		s, err := p.client.GetDedicatedServer(ctx, m.ID)
+		if err != nil {
+			return "", nil, err
+		}
+		blocks, err := p.client.DedicatedServerIPs(ctx, m.ID)
+		if err != nil {
+			return "", nil, err
+		}
+		return s.IP, blocks, nil
+	}
+	projectID := m.Labels["project_id"]
+	if projectID == "" {
+		return "", nil, fmt.Errorf("%s: instance %s has no project_id label", TypeName, m.ID)
+	}
+	in, err := p.client.GetInstance(ctx, projectID, m.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, ip := range in.IPAddresses {
+		if ip.Type != "" && ip.Type != "public" {
+			continue
+		}
+		addr, err := netip.ParseAddr(ip.IP)
+		if err != nil {
+			continue
+		}
+		switch {
+		case addr.Is4():
+			if primary == "" {
+				primary = addr.String()
+			}
+			blocks = append(blocks, addr.String()+"/32")
+		default:
+			if pfx, err := addr.Prefix(64); err == nil {
+				blocks = append(blocks, pfx.String())
+			}
+		}
+	}
+	return primary, blocks, nil
+}
+
+// PTRs implements provider.ReverseDNS.
+func (p *Provider) PTRs(ctx context.Context, m provider.Machine) ([]provider.PTR, error) {
+	primary, blocks, err := p.blocks(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	byIP := map[string]string{}
+	for _, block := range blocks {
+		ips, err := p.client.ListReverse(ctx, block)
+		if err != nil {
+			if isStatus(err, http.StatusNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		for _, ip := range ips {
+			r, err := p.client.GetReverse(ctx, block, ip)
+			if err != nil {
+				return nil, err
+			}
+			byIP[ip] = strings.TrimSuffix(r.Reverse, ".")
+		}
+	}
+	var out []provider.PTR
+	if primary != "" {
+		out = append(out, provider.PTR{IP: primary, Name: byIP[primary]})
+		delete(byIP, primary)
+	}
+	others := make([]string, 0, len(byIP))
+	for ip := range byIP {
+		others = append(others, ip)
+	}
+	sort.Strings(others)
+	for _, ip := range others {
+		out = append(out, provider.PTR{IP: ip, Name: byIP[ip]})
+	}
+	return out, nil
+}
+
+// SetPTR implements provider.ReverseDNS. OVH checks that the name
+// resolves back to the address before it accepts the entry.
+func (p *Provider) SetPTR(ctx context.Context, m provider.Machine, ip netip.Addr, name string) error {
+	_, blocks, err := p.blocks(ctx, m)
+	if err != nil {
+		return err
+	}
+	var block string
+	for _, b := range blocks {
+		if pfx, err := netip.ParsePrefix(b); err == nil && pfx.Contains(ip) {
+			block = b
+			break
+		}
+	}
+	if block == "" {
+		return fmt.Errorf("%s: address %s does not belong to %s", TypeName, ip, m.ID)
+	}
+	if name == "" {
+		err := p.client.DeleteReverse(ctx, block, ip.String())
+		if isStatus(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return p.client.SetReverse(ctx, block, ip.String(), name)
+}
+
+func isStatus(err error, status int) bool {
+	var apiErr *provider.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == status
 }
 
 // Rename implements provider.Renamer for Public Cloud instances. Dedicated
@@ -798,6 +920,44 @@ func (c *Client) GetInstance(ctx context.Context, projectID, id string) (*Instan
 		return nil, err
 	}
 	return &in, nil
+}
+
+// ReverseIP is one reverse DNS entry of an IP block.
+type ReverseIP struct {
+	IPReverse string `json:"ipReverse"`
+	Reverse   string `json:"reverse"`
+}
+
+// ListReverse returns the addresses of a block that have a reverse DNS
+// entry (GET /ip/{block}/reverse).
+func (c *Client) ListReverse(ctx context.Context, block string) ([]string, error) {
+	var ips []string
+	if err := c.do(ctx, http.MethodGet, "/ip/"+url.PathEscape(block)+"/reverse", nil, &ips); err != nil {
+		return nil, err
+	}
+	return ips, nil
+}
+
+// GetReverse returns the reverse DNS entry of one address.
+func (c *Client) GetReverse(ctx context.Context, block, ip string) (*ReverseIP, error) {
+	var r ReverseIP
+	if err := c.do(ctx, http.MethodGet, "/ip/"+url.PathEscape(block)+"/reverse/"+url.PathEscape(ip), nil, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// SetReverse creates or replaces the reverse DNS entry of one address.
+// OVH expects a fully qualified name with a trailing dot.
+func (c *Client) SetReverse(ctx context.Context, block, ip, name string) error {
+	body := ReverseIP{IPReverse: ip, Reverse: strings.TrimSuffix(name, ".") + "."}
+	var r ReverseIP
+	return c.do(ctx, http.MethodPost, "/ip/"+url.PathEscape(block)+"/reverse", body, &r)
+}
+
+// DeleteReverse removes the reverse DNS entry of one address.
+func (c *Client) DeleteReverse(ctx context.Context, block, ip string) error {
+	return c.do(ctx, http.MethodDelete, "/ip/"+url.PathEscape(block)+"/reverse/"+url.PathEscape(ip), nil, nil)
 }
 
 // UpdateInstanceName renames a Public Cloud instance

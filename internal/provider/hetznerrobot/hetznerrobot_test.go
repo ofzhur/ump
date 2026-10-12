@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -230,5 +231,99 @@ func TestRenameRejected(t *testing.T) {
 	_, err := inv.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "321"}, "bad name")
 	if err == nil || err.Error() != "hetzner-robot: the Robot API rejected the input: invalid input (INVALID_INPUT, HTTP 400)" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestReverseDNS(t *testing.T) {
+	entries := map[string]string{"203.0.113.10": "web-01.example.net", "2001:db8:111:4221::2": "web-01-v6.example.net", "198.51.100.9": "other.example.net"}
+	var log []string
+	_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		log = append(log, r.Method+" "+r.URL.Path)
+		switch {
+		case r.URL.Path == "/server/321":
+			w.Write([]byte(serverDetailJSON))
+		case r.Method == http.MethodGet && r.URL.Path == "/rdns":
+			var items []string
+			for ip, ptr := range entries {
+				items = append(items, `{"rdns":{"ip":"`+ip+`","ptr":"`+ptr+`"}}`)
+			}
+			w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/rdns/"):
+			ip := strings.TrimPrefix(r.URL.Path, "/rdns/")
+			if _, ok := entries[ip]; !ok {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error":{"status":404,"code":"RDNS_NOT_FOUND","message":"rdns not found"}}`))
+				return
+			}
+			r.ParseForm()
+			entries[ip] = r.PostForm.Get("ptr")
+			w.Write([]byte(`{"rdns":{"ip":"` + ip + `","ptr":"` + entries[ip] + `"}}`))
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/rdns/"):
+			ip := strings.TrimPrefix(r.URL.Path, "/rdns/")
+			r.ParseForm()
+			entries[ip] = r.PostForm.Get("ptr")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"rdns":{"ip":"` + ip + `","ptr":"` + entries[ip] + `"}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/rdns/"):
+			ip := strings.TrimPrefix(r.URL.Path, "/rdns/")
+			if _, ok := entries[ip]; !ok {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error":{"status":404,"code":"RDNS_NOT_FOUND","message":"rdns not found"}}`))
+				return
+			}
+			delete(entries, ip)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	rd := inv.(provider.ReverseDNS)
+	m := provider.Machine{ID: "321", IPv4: "203.0.113.10"}
+	ptrs, err := rd.PTRs(context.Background(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []provider.PTR{{IP: "203.0.113.10", Name: "web-01.example.net"}, {IP: "2001:db8:111:4221::2", Name: "web-01-v6.example.net"}}
+	if !reflect.DeepEqual(ptrs, want) {
+		t.Errorf("PTRs: got %+v, want %+v", ptrs, want)
+	}
+
+	// a new entry on an additional IP goes through POST, then PUT
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("203.0.113.50"), "extra.example.net"); err != nil {
+		t.Fatal(err)
+	}
+	if entries["203.0.113.50"] != "extra.example.net" {
+		t.Errorf("entry not created: %v", entries)
+	}
+	// an existing entry is updated with POST alone
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("203.0.113.10"), "new.example.net"); err != nil {
+		t.Fatal(err)
+	}
+	// removal, and removal of a missing entry
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("2001:db8:111:4221::2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("2001:db8:111:4221::7"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if entries["203.0.113.10"] != "new.example.net" || entries["2001:db8:111:4221::2"] != "" {
+		t.Errorf("entries after updates: %v", entries)
+	}
+	// a foreign address is refused before any call
+	if err := rd.SetPTR(context.Background(), m, netip.MustParseAddr("198.51.100.9"), "x.example.net"); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Errorf("foreign address: %v", err)
+	}
+	// the entry list is fetched again after a change
+	ptrs, _ = rd.PTRs(context.Background(), m)
+	if ptrs[0].Name != "new.example.net" || len(ptrs) != 2 || ptrs[1].IP != "203.0.113.50" {
+		t.Errorf("PTRs after changes: %+v", ptrs)
+	}
+	count := map[string]int{}
+	for _, l := range log {
+		count[l]++
+	}
+	if count["GET /rdns"] != 2 || count["PUT /rdns/203.0.113.50"] != 1 || count["POST /rdns/203.0.113.50"] != 1 || count["POST /rdns/203.0.113.10"] != 1 {
+		t.Errorf("requests: %v", log)
 	}
 }

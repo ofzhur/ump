@@ -10,7 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +36,7 @@ type fakeAPI struct {
 	denyCloud    bool
 	denyDedicate bool
 	renamed      string
+	reverse      map[string]map[string]string
 	calls        atomic.Int32
 }
 
@@ -86,6 +90,10 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if ts != "1700000000" && ts != "1700000001" {
 		f.t.Errorf("timestamp %s not derived from /auth/time", ts)
+	}
+	if strings.HasPrefix(r.URL.Path, "/ip/") {
+		f.handleIP(w, r, body)
+		return
 	}
 	switch r.URL.Path {
 	case "/dedicated/server":
@@ -148,6 +156,58 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		  "ipAddresses":[{"ip":"10.0.0.5","type":"private","version":4},{"ip":"198.51.100.7","type":"public","version":4},{"ip":"2001:db8:7::1","type":"public","version":6}]}]`))
 	default:
 		f.t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}
+}
+
+// handleIP serves /ip/{block}/reverse for the blocks of ns1 and vm-01.
+func (f *fakeAPI) handleIP(w http.ResponseWriter, r *http.Request, body []byte) {
+	if f.reverse == nil {
+		f.reverse = map[string]map[string]string{
+			"203.0.113.20/32":     {"203.0.113.20": "db-01.example.net."},
+			"2001:db8:5:600::/64": {"2001:db8:5:600::1": "db-01-v6.example.net."},
+			"198.51.100.7/32":     {},
+			"2001:db8:7::/64":     {},
+		}
+	}
+	// path: /ip/<escaped block>/reverse[/<ip>]
+	rest := strings.TrimPrefix(r.URL.EscapedPath(), "/ip/")
+	blockEsc, tail, _ := strings.Cut(rest, "/reverse")
+	block, _ := url.PathUnescape(blockEsc)
+	entries, ok := f.reverse[block]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"The requested object (ip = ` + block + `) does not exist","errorCode":"NOT_FOUND"}`))
+		return
+	}
+	ip, _ := url.PathUnescape(strings.TrimPrefix(tail, "/"))
+	switch {
+	case r.Method == http.MethodGet && ip == "":
+		ips := []string{}
+		for k := range entries {
+			ips = append(ips, k)
+		}
+		sort.Strings(ips)
+		json.NewEncoder(w).Encode(ips)
+	case r.Method == http.MethodGet:
+		json.NewEncoder(w).Encode(ReverseIP{IPReverse: ip, Reverse: entries[ip]})
+	case r.Method == http.MethodPost:
+		var req ReverseIP
+		json.Unmarshal(body, &req)
+		if !strings.HasSuffix(req.Reverse, ".") {
+			f.t.Errorf("reverse without trailing dot: %q", req.Reverse)
+		}
+		entries[req.IPReverse] = req.Reverse
+		json.NewEncoder(w).Encode(req)
+	case r.Method == http.MethodDelete:
+		if _, ok := entries[ip]; !ok {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"not found","errorCode":"NOT_FOUND"}`))
+			return
+		}
+		delete(entries, ip)
+		w.WriteHeader(http.StatusOK)
+	default:
 		http.NotFound(w, r)
 	}
 }
@@ -421,5 +481,53 @@ func TestDefaultAccessRulesCoverRename(t *testing.T) {
 	}
 	if !found {
 		t.Error("the wizard's consumer key must allow renaming instances")
+	}
+}
+
+func TestReverseDNS(t *testing.T) {
+	f := newFakeAPI(t)
+	rd := f.provider(t).(provider.ReverseDNS)
+	ded := provider.Machine{ID: "ns1.ip-203-0-113.eu", Kind: provider.KindBareMetal}
+	ptrs, err := rd.PTRs(context.Background(), ded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []provider.PTR{{IP: "203.0.113.20", Name: "db-01.example.net"}, {IP: "2001:db8:5:600::1", Name: "db-01-v6.example.net"}}
+	if !reflect.DeepEqual(ptrs, want) {
+		t.Errorf("dedicated PTRs: got %+v, want %+v", ptrs, want)
+	}
+	if err := rd.SetPTR(context.Background(), ded, netip.MustParseAddr("2001:db8:5:600::2"), "second.example.net"); err != nil {
+		t.Fatal(err)
+	}
+	if f.reverse["2001:db8:5:600::/64"]["2001:db8:5:600::2"] != "second.example.net." {
+		t.Errorf("entry not set: %v", f.reverse)
+	}
+	if err := rd.SetPTR(context.Background(), ded, netip.MustParseAddr("203.0.113.20"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := rd.SetPTR(context.Background(), ded, netip.MustParseAddr("203.0.113.20"), ""); err != nil {
+		t.Errorf("deleting a missing entry: %v", err)
+	}
+	if _, ok := f.reverse["203.0.113.20/32"]["203.0.113.20"]; ok {
+		t.Error("entry not deleted")
+	}
+	if err := rd.SetPTR(context.Background(), ded, netip.MustParseAddr("203.0.113.99"), "x.example.net"); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Errorf("foreign address: %v", err)
+	}
+
+	vm := provider.Machine{ID: "uuid-1", Kind: provider.KindCloud, Labels: map[string]string{"project_id": "p1"}}
+	ptrs, err = rd.PTRs(context.Background(), vm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ptrs, []provider.PTR{{IP: "198.51.100.7"}}) {
+		t.Errorf("instance PTRs: %+v", ptrs)
+	}
+	if err := rd.SetPTR(context.Background(), vm, netip.MustParseAddr("198.51.100.7"), "vm-01.example.net."); err != nil {
+		t.Fatal(err)
+	}
+	ptrs, _ = rd.PTRs(context.Background(), vm)
+	if len(ptrs) != 1 || ptrs[0].Name != "vm-01.example.net" {
+		t.Errorf("instance PTRs after set: %+v", ptrs)
 	}
 }

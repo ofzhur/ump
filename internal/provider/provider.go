@@ -238,6 +238,9 @@ type Type struct {
 	Kind Kind
 	// Description is one line for menus and `ump config view`.
 	Description string
+	// Capabilities documents what instances of this type can do; the
+	// instances report the same through Provider.Capabilities.
+	Capabilities []Capability
 	// Fields are the settings, in prompting order.
 	Fields []Field
 	// New builds a provider for an account. settings holds every field
