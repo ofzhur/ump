@@ -1380,7 +1380,7 @@ func TestRescueCommands(t *testing.T) {
 	if !strings.HasPrefix(out, wantPrefix) {
 		t.Errorf("rescue output:\n got %q\nwant prefix %q", out, wantPrefix)
 	}
-	if !strings.Contains(out, "Connect: ssh -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR root@203.0.113.10\n") {
+	if !strings.Contains(out, "Connect: ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR root@203.0.113.10\n") {
 		t.Errorf("connect line missing:\n%s", out)
 	}
 	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard" {
@@ -1422,20 +1422,20 @@ func TestRescueCommands(t *testing.T) {
 	// --no-connect, --no-reboot, --no-wait print the command for later; -o json carries it
 	e.sshCalls, e.sshInteractive = nil, nil
 	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--no-connect", "--account", "one")
-	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, "Connect: ssh -i ") {
+	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, "Connect: ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i ") {
 		t.Errorf("--no-connect: code %d, calls %v\n%s", code, e.sshCalls, out)
 	}
 	resetFakePower()
 	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-reboot", "--yes", "--account", "one")
-	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || !strings.Contains(out, "Connect once it is up: ssh -i ") || strings.Join(fakePower.actions, ",") != "rescue" || len(e.sshCalls) != 0 {
+	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || !strings.Contains(out, "Connect once it is up: ssh -o ServerAliveInterval=5") || strings.Join(fakePower.actions, ",") != "rescue" || len(e.sshCalls) != 0 {
 		t.Errorf("--no-reboot: code %d, actions %v, calls %v\n%s", code, fakePower.actions, e.sshCalls, out)
 	}
 	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-wait", "--yes", "--account", "one")
-	if code != 0 || !strings.Contains(out, "Connect once it is up: ssh -i ") || len(e.sshCalls) != 0 {
+	if code != 0 || !strings.Contains(out, "Connect once it is up: ssh -o ServerAliveInterval=5") || len(e.sshCalls) != 0 {
 		t.Errorf("--no-wait: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
-	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"ssh": "ssh -i `) || !strings.Contains(out, umpKey+".pub") {
+	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"ssh": "ssh -o ServerAliveInterval=5`) || !strings.Contains(out, umpKey+".pub") {
 		t.Errorf("rescue json: code %d, calls %v\n%s", code, e.sshCalls, out)
 	}
 
@@ -1507,7 +1507,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 	if code != 3 || errOut != "" || len(e.sshCalls) != 1 || e.sshInteractive[0] {
 		t.Errorf("ssh command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
 	}
-	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10 -- uname -a" {
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10 -- uname -a" {
 		t.Errorf("ssh argv: %q", argv)
 	}
 	e.sshExit = 0
@@ -1517,7 +1517,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 	if code != 0 || len(e.sshCalls) != 1 {
 		t.Fatalf("ssh --staging: code %d, calls %v", code, e.sshCalls)
 	}
-	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR deploy@203.0.113.10 -- id" {
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR deploy@203.0.113.10 -- id" {
 		t.Errorf("ssh --staging argv: %q", argv)
 	}
 	// interactive needs a terminal
@@ -1527,7 +1527,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 		t.Errorf("interactive without terminal: code %d, %q, calls %v", code, errOut, e.sshCalls)
 	}
 	_, _, code = e.run("", true, "ssh", "server", "web-01", "--account", "one")
-	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10" {
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10" {
 		t.Errorf("interactive: code %d, calls %v %v", code, e.sshCalls, e.sshInteractive)
 	}
 	if strings.Contains(strings.Join(e.sshCalls[0], " "), "IdentitiesOnly") {

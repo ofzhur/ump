@@ -91,6 +91,12 @@ mkdir -p "$OUT"
 vmlinuz="$(ls "$ROOTFS"/boot/vmlinuz-* | head -n 1)"
 kver="$(basename "$vmlinuz")"; kver="${kver#vmlinuz-}"
 cp "$vmlinuz" "$OUT/vmlinuz"
+if [ "$ARCH" = arm64 ]; then
+	# Debian ships the arm64 kernel as a raw Image (37 MB); kexec_load,
+	# QEMU and firmware loaders all take it gzip-compressed, which is a
+	# quarter of the size to download and to hold in RAM.
+	gzip -9 -n -f "$OUT/vmlinuz" && mv "$OUT/vmlinuz.gz" "$OUT/vmlinuz"
+fi
 rm -f "$ROOTFS"/boot/vmlinuz-* "$ROOTFS"/boot/initrd.img-* "$ROOTFS"/boot/System.map-* "$ROOTFS"/boot/config-*
 # The kernel starts /init from the initramfs; the initramfs is the whole
 # system, so /init is systemd and no root is ever switched to.

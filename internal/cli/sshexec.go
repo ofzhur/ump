@@ -44,7 +44,10 @@ func runSSH(argv []string, interactive bool) (int, error) {
 // and staging systems have a fresh host key every boot, so
 // insecureHostKey skips host key checks for them.
 func sshArgs(user, addr string, identities []string, identitiesOnly, insecureHostKey bool, command []string) []string {
-	argv := []string{"ssh"}
+	// Keepalives: a command that kexecs or reboots the machine ends the
+	// connection without a close, and the client must notice in seconds
+	// rather than wait for the TCP timeout.
+	argv := []string{"ssh", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
 	for _, id := range identities {
 		argv = append(argv, "-i", id)
 	}

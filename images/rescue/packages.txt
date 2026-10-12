@@ -22,7 +22,6 @@ tmux
 vim-tiny
 ca-certificates
 tzdata
-locales-all
 
 # network
 iproute2

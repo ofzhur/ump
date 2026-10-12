@@ -3,7 +3,9 @@
 # store). The files go to <prefix>/<arch>/ (what kexec-into-rescue.sh and
 # ump fetch) and to <prefix>/v/<version>/<arch>/ (kept for rollbacks);
 # manifest.json is uploaded last, so a reader never sees a manifest that
-# points to files which are not there yet.
+# points to files which are not there yet. kexec-into-rescue.sh itself is
+# published at <prefix>/kexec-into-rescue.sh, so that any rescue system
+# can fetch it with curl.
 #
 # Usage: upload.sh [amd64|arm64]        (uploads out/<arch>, see build.sh)
 #
@@ -50,7 +52,7 @@ fi
 content_type() {
 	case "$1" in
 	*.json) echo application/json ;;
-	*.txt|SHA256SUMS) echo text/plain ;;
+	*.txt|*.sh|SHA256SUMS) echo text/plain ;;
 	*) echo application/octet-stream ;;
 	esac
 }
@@ -85,4 +87,5 @@ for dest in "$PREFIX/v/$version/$ARCH" "$PREFIX/$ARCH"; do
 	done
 	put "$OUT/manifest.json" "$dest/manifest.json"
 done
+put "$HERE/kexec-into-rescue.sh" "$PREFIX/kexec-into-rescue.sh"
 echo "==> done: <public base URL>/$PREFIX/$ARCH/manifest.json is the current $ARCH image"

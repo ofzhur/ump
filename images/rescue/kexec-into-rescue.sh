@@ -113,7 +113,16 @@ kexec_bin="$dir/kexec"
 [ -x "$kexec_bin" ] || kexec_bin="$(command -v kexec || true)"
 [ -n "$kexec_bin" ] || { echo "no kexec available: install kexec-tools or publish the static kexec with the image" >&2; exit 1; }
 echo "==> loading the rescue image"
-"$kexec_bin" -l "$dir/vmlinuz" --initrd="$dir/initrd.zst" --command-line="$cmdline"
+# kexec_file_load (-s) lets the kernel read the files itself, which is one
+# copy less in memory than the classic kexec_load; that matters on a
+# rescue system that runs from RAM and holds the download too. Older
+# kernels and some firmware setups only take the classic call.
+if ! err="$("$kexec_bin" -s -l "$dir/vmlinuz" --initrd="$dir/initrd.zst" --command-line="$cmdline" 2>&1)"; then
+	echo "kexec_file_load not usable (${err:-no details}); using kexec_load" >&2
+	"$kexec_bin" -l "$dir/vmlinuz" --initrd="$dir/initrd.zst" --command-line="$cmdline"
+fi
+# the kernel holds its own copy now; the downloads only cost memory
+rm -f "$dir/vmlinuz" "$dir/initrd.zst"
 if [ "$exec_it" = 0 ]; then
 	echo "loaded; run '$kexec_bin -e' to boot it"
 	exit 0

@@ -38,7 +38,7 @@ The result is in `images/rescue/out/<arch>/`:
 
 | File | What |
 |---|---|
-| `vmlinuz` | Debian's generic kernel (`linux-image-<arch>`) |
+| `vmlinuz` | Debian's generic kernel (`linux-image-<arch>`): a bzImage on amd64, a gzip-compressed Image on arm64 |
 | `initrd.zst` | the whole system as a zstd-compressed cpio archive |
 | `kexec` | a static `kexec` (kexec-tools), for rescue systems without one |
 | `manifest.json` | version, kernel, SHA-256 and size of each file; uploaded last |
@@ -78,9 +78,10 @@ $ make rescue-upload RESCUE_ARCH=amd64
 ```
 
 The layout in the bucket is `<prefix>/<arch>/` for the current image
-(what the kexec script and `ump` fetch) and `<prefix>/v/<version>/<arch>/`
-for every version uploaded, kept for rollbacks; `manifest.json` goes up
-last, so a reader never sees a manifest whose files are not there yet.
+(what the kexec script and `ump` fetch), `<prefix>/v/<version>/<arch>/`
+for every version uploaded, kept for rollbacks, and
+`<prefix>/kexec-into-rescue.sh`; `manifest.json` goes up last, so a
+reader never sees a manifest whose files are not there yet.
 Give the bucket a public hostname (an R2 custom domain or `r2.dev`) and
 that hostname plus the prefix is the base URL:
 `UMP_RESCUE_URL=https://files.example.net/rescue`.
@@ -124,10 +125,20 @@ serial console) gives a root shell on the out-of-band console.
 ## Entering it by hand
 
 Until `ump install` does this itself, from a provider's rescue system or
-any running Linux, as root:
+any running Linux, as root (the script is published next to the images,
+so one line is enough):
 
 ```console
-# kexec-into-rescue.sh -u https://files.example.net/ump/rescue
+# curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh | bash -s -- -u https://files.example.net/rescue
+```
+
+With ump, from your own machine, that is one command, which puts the
+server into the provider's rescue system, runs the line there and
+returns when the connection drops with the old kernel:
+
+```console
+$ ump rescue server web-01 --yes -- 'curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh | bash -s -- -u https://files.example.net/rescue'
+$ ump ssh server web-01 --staging          # a minute later: the UMP rescue system
 ```
 
 [`kexec-into-rescue.sh`](kexec-into-rescue.sh) downloads the image for
@@ -161,6 +172,29 @@ the new system came up with that address, gateway and DNS, the same
 key and a new boot ID (`KEXEC_TEST=0` skips this). It uses HVF on macOS
 and KVM on Linux where the architectures match, and plain emulation
 otherwise.
+
+## Memory
+
+Everything lives in RAM, so size is the one thing that limits where the
+image boots. A kexec from a RAM-based rescue system holds the running
+system, the downloaded files and the kernel's copy of them at the same
+time, and the new kernel then unpacks the whole initramfs into memory.
+That is why [`finish.sh`](finish.sh) is so strict about what stays:
+no locales (the C.UTF-8 locale is built into glibc), no Python (which
+`xfsprogs` would pull in for `xfs_scrub`), no ICU, no device-tree
+blobs, no udev hardware database, no sound, media, wireless, InfiniBand,
+netfilter or exotic file system modules. Debian's arm64 kernel lacks
+`kexec_file_load`, so `kexec-into-rescue.sh` falls back to the classic
+`kexec_load`, which keeps one more copy in user space while loading; the
+image is sized so that this still works with 1 GB of RAM, the smallest
+cloud instance class. Measured on the 2026.10.12 build:
+
+| | amd64 | arm64 |
+|---|---|---|
+| `vmlinuz` | 12 MB (bzImage) | 14 MB (gzip Image) |
+| `initrd.zst` | 96 MB | 91 MB |
+| unpacked in RAM | 236 MB | 266 MB |
+| boot, checks and kexec entry with 1 GB | passes (QEMU) | passes (QEMU) |
 
 ## Limitations and next steps
 
