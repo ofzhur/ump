@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -84,7 +85,20 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+}
+
+// Rename implements provider.Renamer by setting the Robot server name.
+func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
+	number, err := strconv.Atoi(m.ID)
+	if err != nil {
+		return provider.Machine{}, fmt.Errorf("%s: %q is not a server number", TypeName, m.ID)
+	}
+	s, err := p.client.RenameServer(ctx, number, name)
+	if err != nil {
+		return provider.Machine{}, err
+	}
+	return p.machine(s.Server), nil
 }
 
 // Describe implements provider.Describer: the server's contract, its
@@ -331,13 +345,37 @@ func (c *Client) GetRescue(ctx context.Context, number int) (*RescueInfo, error)
 	return &raw.Rescue, nil
 }
 
+// RenameServer sets the server name (POST /server/{server-number}).
+func (c *Client) RenameServer(ctx context.Context, number int, name string) (*ServerDetail, error) {
+	var raw struct {
+		Server ServerDetail `json:"server"`
+	}
+	if err := c.postForm(ctx, "/server/"+strconv.Itoa(number), url.Values{"server_name": {name}}, &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Server, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.BaseURL, "/")+path, nil)
+	return c.do(ctx, http.MethodGet, path, "", nil, out)
+}
+
+// postForm sends form-encoded data, which is what the Robot API expects
+// for writes.
+func (c *Client) postForm(ctx context.Context, path string, form url.Values, out any) error {
+	return c.do(ctx, http.MethodPost, path, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), out)
+}
+
+func (c *Client) do(ctx context.Context, method, path, contentType string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.BaseURL, "/")+path, body)
 	if err != nil {
 		return &provider.APIError{Provider: TypeName, Message: err.Error()}
 	}
 	req.SetBasicAuth(c.Login, c.Password)
 	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
@@ -350,14 +388,14 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		return &provider.APIError{Provider: TypeName, Message: err.Error()}
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return &provider.APIError{Provider: TypeName, Status: resp.StatusCode, Message: "reading response: " + err.Error()}
 	}
 	if resp.StatusCode/100 != 2 {
-		return parseError(resp.StatusCode, body)
+		return parseError(resp.StatusCode, data)
 	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if err := json.Unmarshal(data, out); err != nil {
 		return &provider.APIError{Provider: TypeName, Status: resp.StatusCode, Message: "unexpected response: " + err.Error()}
 	}
 	return nil
@@ -379,6 +417,11 @@ func parseError(status int, body []byte) error {
 	switch {
 	case status == http.StatusUnauthorized:
 		apiErr.Message = "authentication failed (check the web service login and password)"
+	case apiErr.Code == "INVALID_INPUT":
+		apiErr.Message = "the Robot API rejected the input"
+		if e.Error.Message != "" {
+			apiErr.Message += ": " + e.Error.Message
+		}
 	case apiErr.Code == "RATE_LIMIT_EXCEEDED":
 		apiErr.Message = "rate limit exceeded (the Robot API allows 200 requests per hour)"
 	case apiErr.Message == "":

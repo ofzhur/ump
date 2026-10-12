@@ -2,6 +2,7 @@ package hetznercloud
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -164,4 +165,46 @@ func field(d *provider.Details, path string) any {
 		}
 	}
 	return nil
+}
+
+func TestRename(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/servers/42" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name != "prod-edge-01" {
+			t.Errorf("body: %+v %v", body, err)
+		}
+		if body.Name == "prod-edge-01" && r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("content type %q", r.Header.Get("Content-Type"))
+		}
+		w.Write([]byte(strings.Replace(serverDetailJSON, `"name":"edge-01"`, `"name":"prod-edge-01"`, 1)))
+	}))
+	defer srv.Close()
+	p, _ := Type.New("hc", map[string]string{"token": "tok", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+	m, err := p.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "42"}, "prod-edge-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != "prod-edge-01" || m.ID != "42" || m.Labels["env"] != "prod" {
+		t.Errorf("renamed machine: %+v", m)
+	}
+}
+
+func TestRenameConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":{"code":"uniqueness_error","message":"server name is already used"}}`))
+	}))
+	defer srv.Close()
+	p, _ := Type.New("hc", map[string]string{"token": "tok", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+	_, err := p.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "42"}, "taken")
+	if err == nil || err.Error() != "hetzner-cloud: the name is already used in this project (uniqueness_error, HTTP 409)" {
+		t.Errorf("unexpected error: %v", err)
+	}
 }

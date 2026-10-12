@@ -32,6 +32,7 @@ type fakeAPI struct {
 	srv          *httptest.Server
 	denyCloud    bool
 	denyDedicate bool
+	renamed      string
 	calls        atomic.Int32
 }
 
@@ -109,7 +110,22 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		  "diskGroups":[{"description":"","numberOfDisks":2,"diskSize":{"unit":"GB","value":512},"diskType":"NVME","raidController":"soft"}],
 		  "bootMode":"uefi","formFactor":"1u"}`))
 	case "/cloud/project/p1/instance/uuid-1":
-		w.Write([]byte(`{"id":"uuid-1","name":"vm-01","status":"ACTIVE","region":"GRA11","created":"2026-03-01T10:00:00Z","planCode":"b3-8.consumption",
+		if r.Method == http.MethodPut {
+			var req struct {
+				InstanceName string `json:"instanceName"`
+			}
+			if err := json.Unmarshal(body, &req); err != nil || req.InstanceName == "" {
+				f.t.Errorf("bad instance update: %s", body)
+			}
+			f.renamed = req.InstanceName
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		name := "vm-01"
+		if f.renamed != "" {
+			name = f.renamed
+		}
+		w.Write([]byte(`{"id":"uuid-1","name":"` + name + `","status":"ACTIVE","region":"GRA11","created":"2026-03-01T10:00:00Z","planCode":"b3-8.consumption",
 		  "flavor":{"name":"b3-8","type":"ovh.b3","vcpus":2,"ram":8192,"disk":50,"osType":"linux"},
 		  "image":{"name":"Debian 12","type":"linux","user":"debian","visibility":"public"},"sshKey":{"name":"laptop"},"monthlyBilling":null,
 		  "ipAddresses":[{"ip":"10.0.0.5","type":"private","version":4,"networkId":"net-1"},{"ip":"198.51.100.7","type":"public","version":4},{"ip":"2001:db8:7::1","type":"public","version":6}]}`))
@@ -369,5 +385,41 @@ func TestDescribeInstance(t *testing.T) {
 	}
 	if _, err := f.provider(t).(provider.Describer).Describe(context.Background(), provider.Machine{ID: "uuid-1", Kind: provider.KindCloud}); err == nil {
 		t.Error("instance without project_id label accepted")
+	}
+}
+
+func TestRenameInstance(t *testing.T) {
+	f := newFakeAPI(t)
+	renamer := f.provider(t).(provider.Renamer)
+	m := provider.Machine{ID: "uuid-1", Kind: provider.KindCloud, Labels: map[string]string{"project": "Production", "project_id": "p1"}}
+	got, err := renamer.Rename(context.Background(), m, "prod-vm-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.renamed != "prod-vm-01" || got.Name != "prod-vm-01" || got.ID != "uuid-1" || got.Labels["project"] != "Production" {
+		t.Errorf("renamed: sent %q, got %+v", f.renamed, got)
+	}
+	if _, err := renamer.Rename(context.Background(), provider.Machine{ID: "uuid-1", Kind: provider.KindCloud}, "x"); err == nil {
+		t.Error("instance without project_id accepted")
+	}
+	_, err = renamer.Rename(context.Background(), provider.Machine{ID: "ns1.ip-203-0-113.eu", Kind: provider.KindBareMetal}, "db-02")
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) || !strings.Contains(err.Error(), "dedicated servers cannot be renamed through the OVHcloud API") {
+		t.Errorf("dedicated rename: %v", err)
+	}
+	if f.calls.Load() != 3 {
+		t.Errorf("%d API calls, want 3 (time, update, get); the dedicated rename must not call the API", f.calls.Load())
+	}
+}
+
+func TestDefaultAccessRulesCoverRename(t *testing.T) {
+	found := false
+	for _, r := range DefaultAccessRules {
+		if r.Method == "PUT" && r.Path == "/cloud/project/*/instance/*" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the wizard's consumer key must allow renaming instances")
 	}
 }

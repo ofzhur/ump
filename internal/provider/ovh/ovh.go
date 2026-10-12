@@ -40,13 +40,15 @@ var Endpoints = map[string]string{
 }
 
 // DefaultAccessRules are the API permissions the wizard requests for a new
-// consumer key: everything `ump get servers` needs, read-only.
+// consumer key: reading dedicated servers and Public Cloud projects for
+// get and describe, and updating instances for rename.
 var DefaultAccessRules = []AccessRule{
 	{Method: "GET", Path: "/me"},
 	{Method: "GET", Path: "/dedicated/server"},
 	{Method: "GET", Path: "/dedicated/server/*"},
 	{Method: "GET", Path: "/cloud/project"},
 	{Method: "GET", Path: "/cloud/project/*"},
+	{Method: "PUT", Path: "/cloud/project/*/instance/*"},
 }
 
 const listParallelism = 8
@@ -166,7 +168,30 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+}
+
+// Rename implements provider.Renamer for Public Cloud instances. Dedicated
+// servers cannot be renamed through the API: their display name is
+// read-only in every public API model (the IAM resource included), so a
+// clear error is better than a call that changes nothing.
+func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
+	if m.Kind != provider.KindCloud {
+		return provider.Machine{}, &provider.APIError{Provider: TypeName,
+			Message: "dedicated servers cannot be renamed through the OVHcloud API (the display name is read-only there); set it in the OVHcloud control panel"}
+	}
+	projectID := m.Labels["project_id"]
+	if projectID == "" {
+		return provider.Machine{}, fmt.Errorf("%s: instance %s has no project_id label", TypeName, m.ID)
+	}
+	if err := p.client.UpdateInstanceName(ctx, projectID, m.ID, name); err != nil {
+		return provider.Machine{}, err
+	}
+	in, err := p.client.GetInstance(ctx, projectID, m.ID)
+	if err != nil {
+		return provider.Machine{}, err
+	}
+	return p.instanceMachine(CloudProject{ProjectID: projectID, Description: m.Labels["project"]}, in.Instance), nil
 }
 
 // Describe implements provider.Describer. A dedicated server is described
@@ -773,6 +798,15 @@ func (c *Client) GetInstance(ctx context.Context, projectID, id string) (*Instan
 		return nil, err
 	}
 	return &in, nil
+}
+
+// UpdateInstanceName renames a Public Cloud instance
+// (PUT /cloud/project/{serviceName}/instance/{instanceId}).
+func (c *Client) UpdateInstanceName(ctx context.Context, projectID, id, name string) error {
+	body := struct {
+		InstanceName string `json:"instanceName"`
+	}{InstanceName: name}
+	return c.do(ctx, http.MethodPut, "/cloud/project/"+url.PathEscape(projectID)+"/instance/"+url.PathEscape(id), body, nil)
 }
 
 // RequestConsumerKey asks OVH for a new consumer key with the given access

@@ -7,6 +7,7 @@
 package hetznercloud
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,21 @@ func (p *Provider) Account() string { return p.account }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapInventory, provider.CapDescribe}
+	return []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename}
+}
+
+// Rename implements provider.Renamer. Hetzner Cloud requires names to be
+// unique within the project and valid hostnames.
+func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
+	id, err := strconv.ParseInt(m.ID, 10, 64)
+	if err != nil {
+		return provider.Machine{}, fmt.Errorf("%s: %q is not a server ID", TypeName, m.ID)
+	}
+	s, err := p.client.UpdateServer(ctx, id, name)
+	if err != nil {
+		return provider.Machine{}, err
+	}
+	return p.machine(*s), nil
 }
 
 // Describe implements provider.Describer from GET /servers/{id}.
@@ -357,13 +372,42 @@ func (c *Client) GetServer(ctx context.Context, id int64) (*Server, error) {
 	return &raw.Server, nil
 }
 
+// UpdateServer sets the server name (PUT /servers/{id}).
+func (c *Client) UpdateServer(ctx context.Context, id int64, name string) (*Server, error) {
+	var raw struct {
+		Server Server `json:"server"`
+	}
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	if err := c.do(ctx, http.MethodPut, "/servers/"+strconv.FormatInt(id, 10), body, &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Server, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.BaseURL, "/")+path, nil)
+	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	var body io.Reader
+	if in != nil {
+		data, err := json.Marshal(in)
+		if err != nil {
+			return &provider.APIError{Provider: TypeName, Message: "encoding request: " + err.Error()}
+		}
+		body = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.BaseURL, "/")+path, body)
 	if err != nil {
 		return &provider.APIError{Provider: TypeName, Message: err.Error()}
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
@@ -376,14 +420,14 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		return &provider.APIError{Provider: TypeName, Message: err.Error()}
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return &provider.APIError{Provider: TypeName, Status: resp.StatusCode, Message: "reading response: " + err.Error()}
 	}
 	if resp.StatusCode/100 != 2 {
-		return parseError(resp.StatusCode, body)
+		return parseError(resp.StatusCode, data)
 	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if err := json.Unmarshal(data, out); err != nil {
 		return &provider.APIError{Provider: TypeName, Status: resp.StatusCode, Message: "unexpected response: " + err.Error()}
 	}
 	return nil
@@ -404,6 +448,10 @@ func parseError(status int, body []byte) error {
 	switch {
 	case status == http.StatusUnauthorized:
 		apiErr.Message = "authentication failed (check the API token)"
+	case apiErr.Code == "uniqueness_error":
+		apiErr.Message = "the name is already used in this project"
+	case apiErr.Code == "invalid_input" && e.Error.Message != "":
+		apiErr.Message = e.Error.Message
 	case status == http.StatusTooManyRequests:
 		apiErr.Message = "rate limit exceeded"
 	case apiErr.Message == "":

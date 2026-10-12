@@ -15,6 +15,18 @@ import (
 // machine (see Describer).
 const CapDescribe Capability = "describe"
 
+// CapRename is implemented by providers that can set a machine's name
+// (see Renamer).
+const CapRename Capability = "rename"
+
+// Renamer is implemented by providers that can set the name a machine is
+// known by at the provider. The name is only a label there; UMP uses it
+// as the machine's hostname when it installs the machine.
+type Renamer interface {
+	Provider
+	Rename(ctx context.Context, m Machine, name string) (Machine, error)
+}
+
 // Describer is implemented by providers that can report everything they
 // know about one machine, for `ump describe server`.
 type Describer interface {

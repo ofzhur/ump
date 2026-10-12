@@ -194,3 +194,41 @@ func field(d *provider.Details, path string) any {
 	}
 	return nil
 }
+
+func TestRename(t *testing.T) {
+	_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/server/321" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+			t.Errorf("content type %q", ct)
+		}
+		if err := r.ParseForm(); err != nil || r.PostForm.Get("server_name") != "prod-web-01" {
+			t.Errorf("form: %v %v", r.PostForm, err)
+		}
+		w.Write([]byte(strings.Replace(serverDetailJSON, `"server_name": "web-01"`, `"server_name": "prod-web-01"`, 1)))
+	})
+	m, err := inv.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "321"}, "prod-web-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != "prod-web-01" || m.ID != "321" || m.Account != "main" {
+		t.Errorf("renamed machine: %+v", m)
+	}
+	if _, err := inv.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "x"}, "n"); err == nil {
+		t.Error("non-numeric ID accepted")
+	}
+}
+
+func TestRenameRejected(t *testing.T) {
+	_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"status":400,"code":"INVALID_INPUT","message":"invalid input","invalid":["server_name"]}}`))
+	})
+	_, err := inv.(provider.Renamer).Rename(context.Background(), provider.Machine{ID: "321"}, "bad name")
+	if err == nil || err.Error() != "hetzner-robot: the Robot API rejected the input: invalid input (INVALID_INPUT, HTTP 400)" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
