@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,7 +153,20 @@ func (f *fakeProvider) Account() string { return f.account }
 func (f *fakeProvider) Capabilities() []provider.Capability {
 	return []provider.Capability{provider.CapInventory}
 }
+
+// listGate, when set, is told when a listing of a type starts and ends, so
+// that a test can see what runs at the same time.
+var listGate func(typ string, start bool)
+
 func (f *fakeProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	if listGate != nil {
+		listGate(f.Type(), true)
+		defer listGate(f.Type(), false)
+	}
+	return f.listMachines()
+}
+
+func (f *fakeProvider) listMachines() ([]provider.Machine, error) {
 	if f.settings["password"] != "s3cret" {
 		return nil, &provider.APIError{Provider: "fake", Status: 401, Code: "UNAUTHORIZED", Message: "authentication failed"}
 	}
@@ -907,7 +921,11 @@ func (l *listOnlyProvider) Type() string                        { return "liston
 func (l *listOnlyProvider) Account() string                     { return l.inner.account }
 func (l *listOnlyProvider) Capabilities() []provider.Capability { return l.inner.Capabilities() }
 func (l *listOnlyProvider) List(ctx context.Context) ([]provider.Machine, error) {
-	ms, err := l.inner.List(ctx)
+	if listGate != nil {
+		listGate("listonly", true)
+		defer listGate("listonly", false)
+	}
+	ms, err := l.inner.listMachines()
 	for i := range ms {
 		ms[i].Provider = "listonly"
 	}
@@ -2462,5 +2480,52 @@ func TestConfigDiskLayout(t *testing.T) {
 	}
 	if _, errOut, code := e.run("", false, "config", "dl"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
 		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	}
+}
+
+func TestListAccountsSameTypeInSequence(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  a:\n    type: fake\n    login: a\n    password: s3cret\n  b:\n    type: fake\n    login: b\n    password: s3cret\n  c:\n    type: fake\n    login: c\n    password: s3cret\n  lo:\n    type: listonly\n    password: s3cret\n")
+	var (
+		mu       sync.Mutex
+		running  = map[string]int{}
+		maxSame  = map[string]int{}
+		overlap  bool
+		fakeSeen bool
+	)
+	listGate = func(typ string, start bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if start {
+			running[typ]++
+			if running[typ] > maxSame[typ] {
+				maxSame[typ] = running[typ]
+			}
+			for other, n := range running {
+				if other != typ && n > 0 {
+					overlap = true
+				}
+			}
+			if typ == "fake" {
+				fakeSeen = true
+			}
+			// hold the listing for a moment, so that overlaps would show
+			mu.Unlock()
+			time.Sleep(15 * time.Millisecond)
+			mu.Lock()
+		} else {
+			running[typ]--
+		}
+	}
+	defer func() { listGate = nil }()
+	out, _, code := e.run("", false, "server", "list", "-o", "name")
+	if code != 0 || strings.Count(out, "\n") != 8 {
+		t.Fatalf("list: code %d\n%s", code, out)
+	}
+	if maxSame["fake"] != 1 || !fakeSeen {
+		t.Errorf("accounts of one type must run one after the other, saw %d at once", maxSame["fake"])
+	}
+	if !overlap {
+		t.Error("different types should run at the same time, but did not overlap")
 	}
 }

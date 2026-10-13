@@ -38,7 +38,8 @@ func (a *app) newServerListCmd() *cobra.Command {
 configured provider account, or from the accounts given with --account.
 
 Positional arguments select single servers by name, provider ID, IP
-address or "provider/id". Accounts are queried in parallel; an account
+address or "provider/id". Accounts of different provider types are
+queried in parallel, accounts of one type one after the other; an account
 whose API fails is reported on stderr and the others are still listed.
 
 Every listing is recorded in the cache under ~/.cache/ump, as a new
@@ -380,15 +381,30 @@ type listResult struct {
 
 // listAccounts queries the named accounts in parallel and records each
 // successful listing in the store (when one is given).
+// listAccounts queries the accounts: different provider types in parallel,
+// accounts of the same type one after the other, so that one provider's
+// API never sees several of our accounts at once (rate limits are per
+// API, and some count every account against the same client).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store) []listResult {
 	results := make([]listResult, len(names))
-	var wg sync.WaitGroup
+	byType := map[string][]int{}
+	var types []string
 	for i, name := range names {
+		t := cfg.Accounts[name].Type
+		if _, seen := byType[t]; !seen {
+			types = append(types, t)
+		}
+		byType[t] = append(byType[t], i)
+	}
+	var wg sync.WaitGroup
+	for _, t := range types {
 		wg.Add(1)
-		go func(i int, name string) {
+		go func(indexes []int) {
 			defer wg.Done()
-			results[i] = a.listAccount(ctx, name, cfg.Accounts[name], store)
-		}(i, name)
+			for _, i := range indexes {
+				results[i] = a.listAccount(ctx, names[i], cfg.Accounts[names[i]], store)
+			}
+		}(byType[t])
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(i, j int) bool { return results[i].account < results[j].account })
