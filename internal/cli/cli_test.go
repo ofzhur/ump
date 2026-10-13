@@ -2381,3 +2381,86 @@ func TestConfigOSAndServerSet(t *testing.T) {
 		t.Errorf("config help: code %d\n%s", code, out)
 	}
 }
+
+func TestConfigDiskLayout(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+
+	out, _, code := e.run("", false, "config", "dl", "list")
+	if code != 0 || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "lvm-linear 5 (slice,slice,slice,slice,lvm) ok") || !strings.Contains(out, "lvm-raid1") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "config", "disk-layout", "get", "lvm-raid1")
+	if code != 0 || !strings.HasPrefix(out, "lvm-raid1:\n") || !strings.Contains(out, "raid: 1") {
+		t.Errorf("get: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "dl", "get", "nope"); code != 1 || !strings.Contains(errOut, `no layout "nope"`) {
+		t.Errorf("get missing: code %d, %q", code, errOut)
+	}
+
+	// create copies an entry; the comments of the file survive
+	out, _, code = e.run("", false, "config", "dl", "create", "nvme-raid1", "--from", "lvm-raid1")
+	if code != 0 || !strings.Contains(out, "Created the layout nvme-raid1 from lvm-raid1") {
+		t.Errorf("create: code %d\n%s", code, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "layouts.yaml"))
+	if !strings.Contains(string(data), "# Named disk layouts") || !strings.Contains(string(data), "\n  nvme-raid1:\n") {
+		t.Errorf("file after create:\n%s", data)
+	}
+	if _, errOut, code := e.run("", false, "config", "dl", "create", "nvme-raid1"); code != 1 || !strings.Contains(errOut, "exists already") {
+		t.Errorf("create twice: code %d, %q", code, errOut)
+	}
+	out, _, code = e.run("", false, "config", "dl", "list", "--no-headers")
+	if code != 0 || !strings.Contains(out, "nvme-raid1") {
+		t.Errorf("list after create:\n%s", out)
+	}
+
+	// the new layout is usable by a profile
+	os.WriteFile(filepath.Join(dir, "p.yaml"), []byte("os: ubuntu-26.04\ndisks: nvme-raid1\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--account", "one"); code != 0 || !strings.Contains(errOut, "layout nvme-raid1)") {
+		t.Errorf("reinstall with the new layout: code %d, %q", code, errOut)
+	}
+
+	// edit opens the file and checks it; a broken file is kept and named
+	edited := 0
+	e.editorHook = func(path string) error {
+		edited++
+		if path != filepath.Join(dir, "layouts.yaml") {
+			t.Errorf("edited %s", path)
+		}
+		return nil
+	}
+	out, _, code = e.run("", true, "config", "dl", "edit")
+	if code != 0 || edited != 1 || !strings.Contains(out, "5 layouts, all valid: lvm-example, lvm-linear, lvm-raid1, lvm-striped, nvme-raid1.") {
+		t.Errorf("edit: code %d, edited %d\n%s", code, edited, out)
+	}
+	e.editorHook = func(path string) error {
+		return os.WriteFile(path, []byte("layouts:\n  bad:\n    parts:\n      - {type: slice, target: [first], size: rest, filesystem: ext4}\n"), 0o600)
+	}
+	if _, errOut, code := e.run("", true, "config", "dl", "edit"); code != 1 || !strings.Contains(errOut, "the file is kept, but it is not valid") || !strings.Contains(errOut, "no part is mounted at /") {
+		t.Errorf("broken edit: code %d, %q", code, errOut)
+	}
+	if out, _, code := e.run("", false, "config", "dl", "list"); code != 0 || !strings.Contains(out, "bad") || !strings.Contains(out, "invalid") {
+		t.Errorf("list of the broken file:\n%s", out)
+	}
+	e.editorHook = nil
+
+	// delete
+	e.writeProfiles()
+	if _, errOut, code := e.run("", false, "config", "dl", "delete", "lvm-example"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("delete without --yes: code %d, %q", code, errOut)
+	}
+	if out, _, code := e.run("", false, "config", "dl", "delete", "lvm-example", "--yes"); code != 0 || !strings.Contains(out, "Deleted the layout lvm-example.") {
+		t.Errorf("delete: code %d\n%s", code, out)
+	}
+	if out, _, _ := e.run("", false, "config", "dl", "list", "--no-headers"); strings.Contains(out, "lvm-example") {
+		t.Errorf("still listed:\n%s", out)
+	}
+	if _, errOut, code := e.run("", false, "config", "dl"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
+		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	}
+}

@@ -60,6 +60,12 @@ ump
 │   │   ├── create   <name> [--from <name>]            copy one and open it in your editor
 │   │   ├── edit     <name>                            your editor, then a check
 │   │   └── delete   <name> [--yes]
+│   ├── disk-layout (dl)                               interactive wizard over the named layouts of layouts.yaml
+│   │   ├── list                                       the layouts, with their parts and whether they are valid
+│   │   ├── get      <name>                            print one
+│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── edit     [<name>]                          your editor on layouts.yaml, then a check of every layout
+│   │   └── delete   <name> [--yes]
 │   ├── path                                           where the configuration lives
 │   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
 ├── completion
@@ -481,8 +487,9 @@ keys and a returned password.
 ## `ump config`
 
 ```
-ump config isp [view|types|add|remove|test]
-ump config os  [list|get|create|edit|delete]
+ump config isp         [view|types|add|remove|test]
+ump config os          [list|get|create|edit|delete]
+ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
 ump config path | key
 ```
 
@@ -497,6 +504,12 @@ profile is kept, with the problem named), `delete NAME` removes it, and
 without a subcommand it is a small wizard over these. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with
 (`servers:` in the configuration file), `--clear` forgets it.
+`ump config disk-layout` (`dl`) is the same for the named layouts in
+`layouts.yaml` that profiles refer to: `list` shows each with its parts
+and whether it is valid, `get` prints one, `create NAME --from NAME`
+copies an entry (the file's comments survive) and opens the file in your
+editor, `edit` opens it and checks every layout afterwards, `delete`
+removes one.
 
 
 Without a subcommand, `ump config isp` is an interactive wizard: it asks for

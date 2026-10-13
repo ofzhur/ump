@@ -19,13 +19,14 @@ import (
 func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Set up provider accounts (isp) and OS profiles (os)",
+		Short: "Provider accounts (isp), OS profiles (os) and disk layouts (disk-layout)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
 what a server becomes under os, UMP's own SSH key, and where it all lives.`,
 		Example: `  ump config isp                  # the account wizard
   ump config isp view             # the accounts, secrets redacted
   ump config os                   # the profile wizard
   ump config os edit default      # a profile in your editor
+  ump config disk-layout list     # the named disk layouts (alias: dl)
   ump config key                  # UMP's SSH key
   ump config path`,
 		Args: usageArgs(cobra.NoArgs),
@@ -33,7 +34,7 @@ what a server becomes under os, UMP's own SSH key, and where it all lives.`,
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 

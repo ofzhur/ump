@@ -68,8 +68,9 @@ A key reference is one of:
 
 ## Layouts
 
-[`layouts.yaml`](layouts.yaml) holds named layouts; a profile may hold
-its own under `disks:` with the same shape. A layout is a list of
+[`layouts.yaml`](layouts.yaml) holds named layouts (`ump config
+disk-layout` lists, prints, creates, edits and deletes them); a profile
+may hold its own under `disks:` with the same shape. A layout is a list of
 parts, applied in order:
 
 ```yaml
