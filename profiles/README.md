@@ -12,11 +12,13 @@ takes that file; else `~/.config/ump/profiles/NAME.yaml` (the profiles
 directory next to the configuration); else `profiles/NAME.yaml` on the
 storage, where `make upload` publishes this directory. So copy
 `default.yaml` to `~/.config/ump/profiles/default.yaml` and make it
-yours; the layouts work the same with `layouts.yaml`.
+yours; the layouts and the firewalls work the same with `layouts.yaml`
+and `firewalls.yaml`.
 
 The flags of `ump server reinstall` override a profile for one installation:
-`--layout`, `--os`, `--timezone`, `--ipv6`, `--mitigations`, `--disks`,
-`--ssh-key` (keys added to the administrator).
+`--layout`, `--firewall`, `--os`, `--timezone`, `--ipv6`,
+`--mitigations`, `--disks`, `--ssh-key` (keys added to the
+administrator).
 
 ## Fields
 
@@ -41,9 +43,10 @@ users:
   - name: root                # only when listed does root log in over SSH (keys only)
     keys: [ump]
 packages: [htop]              # optional; Ubuntu packages, installed from the archive at installation
-firewall:                     # optional; no firewall without it
-  policy: drop                # drop: only what is allowed gets in; accept: no firewall
-  allow: [icmp, ssh, tcp/80, udp/53, "tcp/8000-8100", {proto: tcp, port: 443, from: 10.0.0.0/8}]
+firewall: default             # a firewall name from firewalls.yaml, or an inline one:
+#  policy: drop               # drop: only what is allowed gets in; accept: no firewall
+#  allow: [icmp, ssh, tcp/80, udp/53, "tcp/8000-8100", {proto: tcp, port: 443, from: 10.0.0.0/8}]
+                              # no firewall without the field
 provision:                    # optional; the step after the first boot
   type: none                  # none | ansible-pull | ansible-bootstrap
   repo: ...                   # whatever the step needs; kept with the type in /etc/ump/install
@@ -62,7 +65,11 @@ the user of the rescue system. The default profile's administrator is
 `ump` with zsh (oh-my-zsh, theme crunch): rename it, give it bash, or
 add your own users. The firewall (nftables) always lets the loopback
 interface and the answers to the server's own connections through;
-`policy: drop` with `icmp` and `ssh` is what the default profile does.
+`policy: drop` with `icmp` and `ssh` is what `default` in
+[`firewalls.yaml`](firewalls.yaml) does, and the default profile names
+it; `web` adds HTTP and HTTPS, `open` is no firewall. `ump config
+firewall` (`fw`) lists, prints, creates, edits and deletes them, like
+`ump config disk-layout` for the layouts.
 The list also holds for connections forwarded in from the external
 interfaces, matched on the port they were addressed to: a port a
 container publishes (`docker run -p 8080:80`) is reachable only with

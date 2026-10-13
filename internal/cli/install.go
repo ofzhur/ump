@@ -24,6 +24,7 @@ import (
 type installOptions struct {
 	profile     string
 	layout      string
+	firewall    string
 	os          string
 	hostname    string
 	storage     string
@@ -77,6 +78,7 @@ terminal; without one, --yes is required.`,
 	}
 	sub.Flags().StringVar(&o.profile, "profile", "", "the profile: a name (profiles/NAME.yaml in the configuration directory, else published) or a file (default: the one set for the server with ump server set, else default)")
 	sub.Flags().StringVar(&o.layout, "layout", "", "the disk layout, by name from layouts.yaml (default: the profile's)")
+	sub.Flags().StringVar(&o.firewall, "firewall", "", "the firewall, by name from firewalls.yaml (default: the profile's)")
 	sub.Flags().StringVar(&o.os, "os", "", "the operating system image (default: the profile's)")
 	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name)")
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
@@ -193,6 +195,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if o.layout != "" {
 		prof.Disks = profile.Disks{Name: o.layout}
 	}
+	if o.firewall != "" {
+		prof.Firewall = profile.FirewallRef{Name: o.firewall}
+	}
 	if o.os != "" {
 		prof.OS = o.os
 	}
@@ -216,7 +221,13 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return err
 		}
 	}
-	spec, err := prof.Resolve(layouts, a.keyResolver(cfg))
+	var firewalls map[string]*profile.Firewall
+	if prof.Firewall.Name != "" {
+		if firewalls, err = a.loadFirewalls(ctx, storage); err != nil {
+			return err
+		}
+	}
+	spec, err := prof.Resolve(layouts, firewalls, a.keyResolver(cfg))
 	if err != nil {
 		return err
 	}
@@ -372,25 +383,6 @@ func (a *app) loadProfile(ctx context.Context, name, storage string) (*profile.P
 		p.Name = name
 	}
 	return p, "the storage", nil
-}
-
-// loadLayouts reads layouts.yaml: the user's own in the profiles
-// directory, else the published one.
-func (a *app) loadLayouts(ctx context.Context, storage string) (map[string]*profile.Layout, error) {
-	local := filepath.Join(config.ProfilesDir(), "layouts.yaml")
-	data, err := os.ReadFile(local)
-	if err != nil {
-		url := storage + "/profiles/layouts.yaml"
-		if data, err = a.fetch(ctx, url); err != nil {
-			return nil, fmt.Errorf("layouts: not in %s, and %w", config.AbbreviateHome(config.ProfilesDir()), err)
-		}
-		local = url
-	}
-	layouts, err := profile.ParseLayouts(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", local, err)
-	}
-	return layouts, nil
 }
 
 // fetch gets a small text file from the storage.

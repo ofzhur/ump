@@ -38,6 +38,7 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	layouts, err := ParseLayouts(repoFile(t, "layouts.yaml"))
+	firewalls, err := ParseFirewalls(repoFile(t, "firewalls.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 			t.Errorf("layout %s: %v", name, err)
 		}
 	}
-	spec, err := p.Resolve(layouts, fakeResolver)
+	spec, err := p.Resolve(layouts, firewalls, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +123,7 @@ provision:
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := p.Resolve(nil, fakeResolver)
+	spec, err := p.Resolve(nil, nil, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +146,7 @@ provision:
 
 func TestProfileErrors(t *testing.T) {
 	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
+	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
 	base := "name: t\nos: ubuntu-26.04\nusers:\n  - {name: root, keys: [ump]}\n"
 	cases := []struct {
 		name, src, want string
@@ -158,6 +160,7 @@ func TestProfileErrors(t *testing.T) {
 		{"bad firewall", base + "disks: lvm-linear\nfirewall: {policy: drop, allow: [tcp/99999]}\n", "port 99999 is out of range"},
 		{"bad firewall entry", base + "disks: lvm-linear\nfirewall: {policy: drop, allow: [smtp]}\n", `"smtp" is not icmp, ssh, tcp/PORT or udp/PORT`},
 		{"bad policy", base + "disks: lvm-linear\nfirewall: {policy: deny}\n", `policy "deny" is not accept or drop`},
+		{"unknown firewall", base + "disks: lvm-linear\nfirewall: nope\n", `firewall "nope" is not in firewalls.yaml`},
 		{"no admin", "os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, keys: [ump]}\n", "no user has sudo and root is not listed"},
 		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
 		{"bad package", base + "disks: lvm-linear\npackages: [\"rm -rf\"]\n", "is not a package name"},
@@ -172,7 +175,7 @@ func TestProfileErrors(t *testing.T) {
 	for _, c := range cases {
 		p, err := Parse([]byte(c.src))
 		if err == nil {
-			_, err = p.Resolve(layouts, fakeResolver)
+			_, err = p.Resolve(layouts, firewalls, fakeResolver)
 		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.want)

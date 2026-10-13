@@ -36,9 +36,8 @@ users:
 
 packages: []            # more Ubuntu packages, installed from the archive at installation
 
-firewall:
-  policy: drop          # drop: only what is allowed gets in (plus what the server asked for); accept: no firewall
-  allow: [icmp, ssh]    # icmp, ssh, tcp/80, udp/53, or {proto: tcp, port: 443, from: 10.0.0.0/8}
+# a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
+firewall: default
 
 provision:
   type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;

@@ -66,6 +66,12 @@ ump
 │   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
 │   │   ├── edit     [<name>]                          your editor on layouts.yaml, then a check of every layout
 │   │   └── delete   <name> [--yes]
+│   ├── firewall (fw)                                  interactive wizard over the named firewalls of firewalls.yaml
+│   │   ├── list                                       the firewalls, with their policy and what they allow
+│   │   ├── get      <name>                            print one
+│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── edit     [<name>]                          your editor on firewalls.yaml, then a check of every firewall
+│   │   └── delete   <name> [--yes]
 │   ├── path                                           where the configuration lives
 │   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
 ├── completion
@@ -499,13 +505,14 @@ keys and a returned password.
 ump config isp         [view|types|add|remove|test]
 ump config os          [list|get|create|edit|delete]
 ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
+ump config firewall    [list|get|create|edit|delete]      (alias: fw)
 ump config path | key
 ```
 
 `ump config isp` is the provider accounts: the wizard without a
 subcommand, and the subcommands for the non-interactive forms. `ump
 config os` is the [profiles](../profiles/README.md): the first run
-downloads the published default profile and layouts into
+downloads the published default profile, layouts and firewalls into
 `~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
 `create NAME` copies one (`--from`, default `default`) and opens it in
 your editor, `edit NAME` opens it and checks it afterwards (an invalid
@@ -518,7 +525,11 @@ REF --profile NAME` remembers which profile a server is reinstalled with
 and whether it is valid, `get` prints one, `create NAME --from NAME`
 copies an entry (the file's comments survive) and opens the file in your
 editor, `edit` opens it and checks every layout afterwards, `delete`
-removes one.
+removes one. `ump config firewall` (`fw`) is the same for the named
+firewalls in `firewalls.yaml` (`default`: ICMP and SSH; `web`: plus
+HTTP and HTTPS; `open`: none), which a profile names in its `firewall`
+field; `ump server reinstall --firewall NAME` picks one for an
+installation.
 
 
 Without a subcommand, `ump config isp` is an interactive wizard: it asks for

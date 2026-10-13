@@ -73,7 +73,7 @@ storage: https://ump.zhurko.de          # base URL of what UMP fetches onto mach
                                         # (profiles/) and the OS images (os/); this is the default,
                                         # images/rescue/README.md says what a storage of your own
                                         # must serve. Profiles of your own go to ~/.config/ump/profiles/
-                                        # (NAME.yaml, layouts.yaml), see profiles/README.md
+                                        # (NAME.yaml, layouts.yaml, firewalls.yaml), see profiles/README.md
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key; this is the default, generated
                                         # on first use (`ump config key` shows the public key)

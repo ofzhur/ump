@@ -8,7 +8,7 @@
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh
-#   profiles/default.yaml, profiles/layouts.yaml
+#   profiles/default.yaml, profiles/layouts.yaml, profiles/firewalls.yaml
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)
 #

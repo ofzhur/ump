@@ -1,0 +1,24 @@
+# Named firewalls for the profiles' firewall field; profiles/README.md
+# describes the fields. A firewall is the input policy and what it lets
+# in; the loopback interface and the answers to the server's own
+# connections always pass. The same list holds for connections forwarded
+# in from the external interfaces, so a port a container publishes is
+# reachable only when it is allowed here.
+#
+#   policy  drop: only what is allowed gets in; accept: no firewall
+#   allow   icmp, ssh, tcp/PORT, udp/PORT, tcp/FROM-TO, or
+#           {proto: tcp, port: 443, from: 10.0.0.0/8}
+#
+# ump config firewall (fw) lists, prints, creates, edits and deletes them.
+firewalls:
+  default:
+    description: ICMP and SSH, nothing else
+    policy: drop
+    allow: [icmp, ssh]
+  web:
+    description: ICMP, SSH, HTTP and HTTPS
+    policy: drop
+    allow: [icmp, ssh, tcp/80, tcp/443]
+  open:
+    description: no firewall
+    policy: accept

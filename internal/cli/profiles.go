@@ -17,7 +17,7 @@ import (
 )
 
 // profileFiles are what a profiles directory starts with.
-var profileFiles = []string{"default.yaml", "layouts.yaml"}
+var profileFiles = []string{"default.yaml", "layouts.yaml", "firewalls.yaml"}
 
 // ensureProfiles makes sure the profiles directory exists with the
 // published default profile and layouts in it: the first run downloads
@@ -41,7 +41,7 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 			return err
 		}
 	}
-	fmt.Fprintf(a.stderr, "Downloaded the default profile and the layouts into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
+	fmt.Fprintf(a.stderr, "Downloaded the default profile, the layouts and the firewalls into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
 	return nil
 }
 
@@ -89,7 +89,7 @@ func localProfiles() ([]string, error) {
 	var names []string
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || n == "layouts.yaml" {
+		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || n == "layouts.yaml" || n == "firewalls.yaml" {
 			continue
 		}
 		names = append(names, strings.TrimSuffix(n, ".yaml"))
@@ -139,9 +139,12 @@ func (a *app) newOSListCmd() *cobra.Command {
 				for _, u := range p.Users {
 					users = append(users, u.Name)
 				}
-				fw := p.Firewall.Policy
-				if fw == "" {
-					fw = "accept"
+				fw := p.Firewall.Name
+				switch {
+				case p.Firewall.Rules != nil:
+					fw = "(inline)"
+				case fw == "":
+					fw = "none"
 				}
 				rows = append(rows, []string{n, p.OS, disks, strings.Join(users, ","), fw, p.Description})
 			}
@@ -287,7 +290,13 @@ func (a *app) checkProfile(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if _, err := p.Resolve(layouts, func(ref string) ([]string, error) {
+	var firewalls map[string]*profile.Firewall
+	if p.Firewall.Name != "" {
+		if firewalls, err = a.loadFirewalls(ctx, cfg.StorageURL()); err != nil {
+			return err
+		}
+	}
+	if _, err := p.Resolve(layouts, firewalls, func(ref string) ([]string, error) {
 		return []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN check"}, nil
 	}); err != nil {
 		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)

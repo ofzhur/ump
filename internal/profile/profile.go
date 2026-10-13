@@ -18,18 +18,46 @@ import (
 
 // Profile is a server profile as written in YAML.
 type Profile struct {
-	Name        string    `yaml:"name"`
-	Description string    `yaml:"description,omitempty"`
-	OS          string    `yaml:"os"`
-	Timezone    string    `yaml:"timezone,omitempty"`
-	Kernel      Kernel    `yaml:"kernel,omitempty"`
-	Disks       Disks     `yaml:"disks"`
-	Users       []User    `yaml:"users"`
-	Packages    []string  `yaml:"packages,omitempty"`
-	Firewall    Firewall  `yaml:"firewall,omitempty"`
-	Provision   Provision `yaml:"provision,omitempty"`
-	Network     Network   `yaml:"network,omitempty"`
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description,omitempty"`
+	OS          string      `yaml:"os"`
+	Timezone    string      `yaml:"timezone,omitempty"`
+	Kernel      Kernel      `yaml:"kernel,omitempty"`
+	Disks       Disks       `yaml:"disks"`
+	Users       []User      `yaml:"users"`
+	Packages    []string    `yaml:"packages,omitempty"`
+	Firewall    FirewallRef `yaml:"firewall,omitempty"`
+	Provision   Provision   `yaml:"provision,omitempty"`
+	Network     Network     `yaml:"network,omitempty"`
 }
+
+// FirewallRef is either the name of a firewall from firewalls.yaml or an
+// inline one; neither means no firewall.
+type FirewallRef struct {
+	Name  string
+	Rules *Firewall
+}
+
+func (f *FirewallRef) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Decode(&f.Name)
+	case yaml.MappingNode:
+		f.Rules = &Firewall{}
+		return n.Decode(f.Rules)
+	}
+	return fmt.Errorf("firewall: a firewall name or a firewall, not a %s", kindName(n.Kind))
+}
+
+func (f FirewallRef) MarshalYAML() (any, error) {
+	if f.Rules != nil {
+		return f.Rules, nil
+	}
+	return f.Name, nil
+}
+
+// IsZero makes an absent firewall stay absent when a profile is written.
+func (f FirewallRef) IsZero() bool { return f.Name == "" && f.Rules == nil }
 
 // Network holds the network choices. Rename (unset: on) gives the
 // interfaces uniform names: ext01, ext02, ... for the ones with a public
@@ -102,10 +130,75 @@ type User struct {
 	Keys   []string `yaml:"keys" json:"keys"`
 }
 
-// Firewall is the input policy and what it lets in.
+// Firewall is the input policy and what it lets in, on the host and
+// forwarded in from outside (containers' published ports) alike.
 type Firewall struct {
-	Policy string  `yaml:"policy,omitempty" json:"policy"`
-	Allow  []Allow `yaml:"allow,omitempty" json:"allow,omitempty"`
+	Name        string  `yaml:"-" json:"name,omitempty"`
+	Description string  `yaml:"description,omitempty" json:"-"`
+	Policy      string  `yaml:"policy,omitempty" json:"policy"`
+	Allow       []Allow `yaml:"allow,omitempty" json:"allow"`
+}
+
+// Validate checks the policy and the allowed entries.
+func (f *Firewall) Validate() error {
+	at := "firewall"
+	if f.Name != "" {
+		at = "firewall " + f.Name
+	}
+	switch f.Policy {
+	case "accept", "drop":
+	default:
+		return fmt.Errorf("%s: policy %q is not accept or drop", at, f.Policy)
+	}
+	for _, a := range f.Allow {
+		switch a.Proto {
+		case "icmp":
+			if a.Port != "" {
+				return fmt.Errorf("%s: icmp has no port", at)
+			}
+		case "tcp", "udp":
+			m := portSpec.FindStringSubmatch(a.Port)
+			if m == nil {
+				return fmt.Errorf("%s: %s needs a port or a range like 8000-8100, not %q", at, a.Proto, a.Port)
+			}
+			for _, s := range []string{m[1], m[3]} {
+				if s == "" {
+					continue
+				}
+				if n, _ := strconv.Atoi(s); n < 1 || n > 65535 {
+					return fmt.Errorf("%s: port %s is out of range", at, s)
+				}
+			}
+		default:
+			return fmt.Errorf("%s: protocol %q is not icmp, tcp or udp", at, a.Proto)
+		}
+		if a.From != "" && !regexp.MustCompile(`^[0-9a-fA-F.:]+(/[0-9]+)?$`).MatchString(a.From) {
+			return fmt.Errorf("%s: from %q is not an address or a network", at, a.From)
+		}
+	}
+	return nil
+}
+
+// ParseFirewalls reads firewalls.yaml: named firewalls.
+func ParseFirewalls(data []byte) (map[string]*Firewall, error) {
+	var file struct {
+		Firewalls map[string]*Firewall `yaml:"firewalls"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&file); err != nil {
+		return nil, err
+	}
+	for name, f := range file.Firewalls {
+		if f == nil {
+			return nil, fmt.Errorf("firewall %s is empty", name)
+		}
+		f.Name = name
+		if f.Policy == "" {
+			f.Policy = "drop"
+		}
+	}
+	return file.Firewalls, nil
 }
 
 // Allow is one rule: a protocol, a port or range for tcp and udp, and
@@ -164,8 +257,8 @@ func Parse(data []byte) (*Profile, error) {
 	if p.Timezone == "" {
 		p.Timezone = "UTC"
 	}
-	if p.Firewall.Policy == "" {
-		p.Firewall.Policy = "accept"
+	if p.Firewall.Rules != nil && p.Firewall.Rules.Policy == "" {
+		p.Firewall.Rules.Policy = "drop"
 	}
 	if p.Provision.Type == "" {
 		p.Provision.Type = "none"
@@ -367,35 +460,9 @@ func (p *Profile) Validate() error {
 			return fmt.Errorf("profile %s: %q is not a package name", p.Name, pkg)
 		}
 	}
-	switch p.Firewall.Policy {
-	case "accept", "drop":
-	default:
-		return fmt.Errorf("profile %s: firewall policy %q is not accept or drop", p.Name, p.Firewall.Policy)
-	}
-	for _, a := range p.Firewall.Allow {
-		switch a.Proto {
-		case "icmp":
-			if a.Port != "" {
-				return fmt.Errorf("profile %s: firewall: icmp has no port", p.Name)
-			}
-		case "tcp", "udp":
-			m := portSpec.FindStringSubmatch(a.Port)
-			if m == nil {
-				return fmt.Errorf("profile %s: firewall: %s needs a port or a range like 8000-8100, not %q", p.Name, a.Proto, a.Port)
-			}
-			for _, s := range []string{m[1], m[3]} {
-				if s == "" {
-					continue
-				}
-				if n, _ := strconv.Atoi(s); n < 1 || n > 65535 {
-					return fmt.Errorf("profile %s: firewall: port %s is out of range", p.Name, s)
-				}
-			}
-		default:
-			return fmt.Errorf("profile %s: firewall: protocol %q is not icmp, tcp or udp", p.Name, a.Proto)
-		}
-		if a.From != "" && !regexp.MustCompile(`^[0-9a-fA-F.:]+(/[0-9]+)?$`).MatchString(a.From) {
-			return fmt.Errorf("profile %s: firewall: from %q is not an address or a network", p.Name, a.From)
+	if p.Firewall.Rules != nil {
+		if err := p.Firewall.Rules.Validate(); err != nil {
+			return fmt.Errorf("profile %s: %w", p.Name, err)
 		}
 	}
 	switch p.Provision.Type {
@@ -470,11 +537,11 @@ type ProfileInfo struct {
 	Description string `json:"description,omitempty"`
 }
 
-// Resolve validates the profile, picks the layout (the profile's inline
-// one, or by name from layouts) and resolves the key references, and
-// returns the specification. The caller fills in the hostname, storage
-// and disks.
-func (p *Profile) Resolve(layouts map[string]*Layout, resolve KeyResolver) (*Spec, error) {
+// Resolve validates the profile, picks the layout and the firewall (the
+// profile's inline ones, or by name from layouts and firewalls) and
+// resolves the key references, and returns the specification. The
+// caller fills in the hostname, storage and disks.
+func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, resolve KeyResolver) (*Spec, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -482,17 +549,29 @@ func (p *Profile) Resolve(layouts map[string]*Layout, resolve KeyResolver) (*Spe
 	if layout == nil {
 		l, ok := layouts[p.Disks.Name]
 		if !ok {
-			names := make([]string, 0, len(layouts))
-			for n := range layouts {
-				names = append(names, n)
-			}
-			sort.Strings(names)
-			return nil, fmt.Errorf("profile %s: layout %q is not in layouts.yaml (known: %s)", p.Name, p.Disks.Name, strings.Join(names, ", "))
+			return nil, fmt.Errorf("profile %s: layout %q is not in layouts.yaml (known: %s)", p.Name, p.Disks.Name, strings.Join(sortedKeys(layouts), ", "))
 		}
 		if err := l.Validate(); err != nil {
 			return nil, err
 		}
 		layout = l
+	}
+	firewall := Firewall{Policy: "accept", Allow: []Allow{}}
+	switch {
+	case p.Firewall.Rules != nil:
+		firewall = *p.Firewall.Rules
+	case p.Firewall.Name != "":
+		f, ok := firewalls[p.Firewall.Name]
+		if !ok {
+			return nil, fmt.Errorf("profile %s: firewall %q is not in firewalls.yaml (known: %s)", p.Name, p.Firewall.Name, strings.Join(sortedKeys(firewalls), ", "))
+		}
+		if err := f.Validate(); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", p.Name, err)
+		}
+		firewall = *f
+	}
+	if firewall.Allow == nil {
+		firewall.Allow = []Allow{}
 	}
 	spec := &Spec{
 		OS:       p.OS,
@@ -504,16 +583,13 @@ func (p *Profile) Resolve(layouts map[string]*Layout, resolve KeyResolver) (*Spe
 		},
 		Layout:    layout,
 		Packages:  append([]string{}, p.Packages...),
-		Firewall:  p.Firewall,
+		Firewall:  firewall,
 		Provision: p.Provision,
 		Network:   NetworkSpec{Rename: p.Network.Rename == nil || *p.Network.Rename},
 		Profile:   ProfileInfo{Name: p.Name, Description: p.Description},
 	}
 	if spec.Packages == nil {
 		spec.Packages = []string{}
-	}
-	if spec.Firewall.Allow == nil {
-		spec.Firewall.Allow = []Allow{}
 	}
 	for _, u := range p.Users {
 		var keys []string
@@ -554,6 +630,15 @@ func (p *Profile) Resolve(layouts map[string]*Layout, resolve KeyResolver) (*Spe
 // JSON renders the specification for the installer.
 func (s *Spec) JSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func truncate(s string) string {

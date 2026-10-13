@@ -448,7 +448,7 @@ func (e *testEnv) writeProfiles() {
 	e.t.Helper()
 	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.MkdirAll(dir, 0o700)
-	for _, name := range []string{"default.yaml", "layouts.yaml"} {
+	for _, name := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "profiles", name))
 		if err != nil {
 			e.t.Fatal(err)
@@ -2368,7 +2368,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/default.yaml", "/profiles/layouts.yaml":
+		case "/profiles/default.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2380,10 +2380,10 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	profilesDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.RemoveAll(profilesDir)
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile, the layouts and the firewalls into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
 		t.Errorf("published profile: code %d, %q", code, errOut)
 	}
-	for _, f := range []string{"default.yaml", "layouts.yaml"} {
+	for _, f := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
 		if _, err := os.Stat(filepath.Join(profilesDir, f)); err != nil {
 			t.Errorf("first run did not download %s: %v", f, err)
 		}
@@ -2422,10 +2422,10 @@ func TestConfigOSAndServerSet(t *testing.T) {
 
 	// the first run downloads the published profile and layouts
 	out, errOut, code := e.run("", false, "config", "os", "list")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   ump") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile, the layouts and the firewalls into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   ump") {
 		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	for _, f := range []string{"default.yaml", "layouts.yaml"} {
+	for _, f := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s not downloaded: %v", f, err)
 		}
@@ -2707,5 +2707,75 @@ func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 	_, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--no-image", "--account", "one")
 	if code != 0 || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
 		t.Errorf("--no-image: code %d, actions %v", code, fakePower.actions)
+	}
+}
+
+func TestConfigFirewall(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+
+	out, _, code := e.run("", false, "config", "fw", "list")
+	if code != 0 || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "default drop icmp, ssh ok ICMP and SSH") || !strings.Contains(strings.Join(strings.Fields(out), " "), "open accept everything ok") || !strings.Contains(out, "tcp/80, tcp/443") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "config", "firewall", "get", "web")
+	if code != 0 || !strings.HasPrefix(out, "web:\n") || !strings.Contains(out, "tcp/443") {
+		t.Errorf("get: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "fw", "get", "nope"); code != 1 || !strings.Contains(errOut, `no firewall "nope"`) || !strings.Contains(errOut, "ump config firewall list") {
+		t.Errorf("get missing: code %d, %q", code, errOut)
+	}
+
+	// create copies an entry; the comments of the file survive
+	out, _, code = e.run("", false, "config", "fw", "create", "mail")
+	if code != 0 || !strings.Contains(out, "Created the firewall mail from default") {
+		t.Errorf("create: code %d\n%s", code, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "firewalls.yaml"))
+	if !strings.Contains(string(data), "# Named firewalls") || !strings.Contains(string(data), "\n  mail:\n") {
+		t.Errorf("file after create:\n%s", data)
+	}
+
+	// a profile names the new firewall; --firewall picks another
+	os.WriteFile(filepath.Join(dir, "p.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nfirewall: mail\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--account", "one"); code != 0 {
+		t.Errorf("reinstall with the new firewall: code %d, %q", code, errOut)
+	}
+	if fw := e.lastSpec()["firewall"].(map[string]any); fw["name"] != "mail" || fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
+		t.Errorf("spec firewall: %v", fw)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--firewall", "open", "--account", "one"); code != 0 {
+		t.Errorf("reinstall --firewall: code %d, %q", code, errOut)
+	}
+	if fw := e.lastSpec()["firewall"].(map[string]any); fw["name"] != "open" || fw["policy"] != "accept" {
+		t.Errorf("spec firewall with --firewall open: %v", fw)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--firewall", "nope", "--account", "one"); code != 1 || !strings.Contains(errOut, `firewall "nope" is not in firewalls.yaml (known: default, mail, open, web)`) {
+		t.Errorf("reinstall with an unknown firewall: code %d, %q", code, errOut)
+	}
+
+	// edit checks the file; a broken one is kept and named
+	e.editorHook = func(path string) error {
+		return os.WriteFile(path, []byte("firewalls:\n  bad:\n    allow: [tcp/70000]\n"), 0o600)
+	}
+	if _, errOut, code := e.run("", true, "config", "fw", "edit"); code != 1 || !strings.Contains(errOut, "the file is kept, but it is not valid") || !strings.Contains(errOut, "firewall bad: port 70000 is out of range") {
+		t.Errorf("broken edit: code %d, %q", code, errOut)
+	}
+	if out, _, code := e.run("", false, "config", "fw", "list"); code != 0 || !strings.Contains(out, "invalid") {
+		t.Errorf("list of the broken file:\n%s", out)
+	}
+	e.editorHook = nil
+
+	// delete
+	e.writeProfiles()
+	if out, _, code := e.run("", false, "config", "fw", "delete", "web", "--yes"); code != 0 || !strings.Contains(out, "Deleted the firewall web.") {
+		t.Errorf("delete: code %d\n%s", code, out)
+	}
+	if out, _, _ := e.run("", false, "config", "fw", "list", "--no-headers"); strings.Contains(out, "web") {
+		t.Errorf("still listed:\n%s", out)
 	}
 }

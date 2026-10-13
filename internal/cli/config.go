@@ -19,7 +19,7 @@ import (
 func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Provider accounts (isp), OS profiles (os) and disk layouts (disk-layout)",
+		Short: "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout) and firewalls (firewall)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
 what a server becomes under os, UMP's own SSH key, and where it all lives.`,
 		Example: `  ump config isp                  # the account wizard
@@ -27,6 +27,7 @@ what a server becomes under os, UMP's own SSH key, and where it all lives.`,
   ump config os                   # the profile wizard
   ump config os edit default      # a profile in your editor
   ump config disk-layout list     # the named disk layouts (alias: dl)
+  ump config firewall list        # the named firewalls (alias: fw)
   ump config key                  # UMP's SSH key
   ump config path`,
 		Args: usageArgs(cobra.NoArgs),
@@ -34,7 +35,7 @@ what a server becomes under os, UMP's own SSH key, and where it all lives.`,
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 
