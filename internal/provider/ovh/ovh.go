@@ -932,6 +932,15 @@ func (p *Provider) listVPS(ctx context.Context) ([]provider.Machine, error) {
 	return out, nil
 }
 
+// vpsZone shortens OVH's zone sentence ("Region OpenStack: os-de2") to
+// the zone itself.
+func vpsZone(zone string) string {
+	if _, after, ok := strings.Cut(zone, ":"); ok {
+		zone = after
+	}
+	return strings.ToLower(strings.TrimSpace(zone))
+}
+
 func (p *Provider) vpsMachine(v VPS, ips []VPSIP) provider.Machine {
 	m := provider.Machine{
 		Provider: TypeName,
@@ -939,7 +948,7 @@ func (p *Provider) vpsMachine(v VPS, ips []VPSIP) provider.Machine {
 		ID:       v.Name,
 		Name:     v.Name,
 		Kind:     provider.KindCloud,
-		Location: strings.ToLower(v.Zone),
+		Location: vpsZone(v.Zone),
 		Product:  v.Model.Name,
 		Status:   strings.ToLower(v.State),
 		Labels:   map[string]string{"family": "vps"},

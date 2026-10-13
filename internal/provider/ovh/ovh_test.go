@@ -231,7 +231,7 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		if name == "" {
 			name = "edge-01"
 		}
-		w.Write([]byte(`{"name":"vps-00000000.vps.ovh.net","displayName":"` + name + `","state":"running","zone":"gra","cluster":"c-42","netbootMode":"` + netboot + `","offerType":"ssd","vcore":2,"memoryLimit":4096,
+		w.Write([]byte(`{"name":"vps-00000000.vps.ovh.net","displayName":"` + name + `","state":"running","zone":"Region OpenStack: gra","cluster":"c-42","netbootMode":"` + netboot + `","offerType":"ssd","vcore":2,"memoryLimit":4096,
 		  "model":{"name":"vps-2024-le-2","offer":"VPS Le-2","version":"2024v1","vcore":2,"memory":4096,"disk":80},"iam":{"displayName":"ignored"}}`))
 	case "/vps/vps-00000000.vps.ovh.net/ips":
 		w.Write([]byte(`["2001:db8:9::1","203.0.113.99"]`))
