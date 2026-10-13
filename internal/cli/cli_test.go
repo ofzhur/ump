@@ -3114,3 +3114,34 @@ func TestConfigKeyNamed(t *testing.T) {
 		t.Errorf("plain key: %q", out)
 	}
 }
+
+func TestConfigKeyWizard(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN oleg@laptop"
+	// add a line under a name, then remove it; the wizard shows UMP's key first
+	script := "2\nlaptop\n" + line + "\ny\n4\n1\nn\n"
+	out, errOut, code := e.run(script, true, "config", "key")
+	if code != 0 {
+		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
+	}
+	for _, want := range []string{"Public key:   ssh-ed25519", "No named keys yet", "1) add a key from a file", "Name for the key:", "Public key line", "Added the key laptop (ssh-ed25519 oleg@laptop).", "Named keys in", "laptop       ssh-ed25519 oleg@laptop", "Which key?", "Removed the key laptop."} {
+		if !strings.Contains(out+errOut, want) {
+			t.Errorf("wizard output lacks %q:\n%s%s", want, out, errOut)
+		}
+	}
+	// a reserved name is refused and the wizard goes on
+	if out, errOut, code := e.run("2\nump\nn\n", true, "config", "key"); code != 0 || !strings.Contains(out+errOut, `key name "ump"`) {
+		t.Errorf("reserved name: code %d\n%s%s", code, out, errOut)
+	}
+	// without a terminal: UMP's key, as show does
+	if out, _, code := e.run("", false, "config", "key"); code != 0 || !strings.HasPrefix(out, "Path:") {
+		t.Errorf("without a terminal: code %d, %q", code, out)
+	}
+	if out, _, code := e.run("", true, "config", "key", "show", "-o", "json"); code != 0 || !strings.Contains(out, `"public_key": "ssh-ed25519`) {
+		t.Errorf("show -o json: code %d, %q", code, out)
+	}
+	if out, _, code := e.run("", true, "config", "key", "-o", "yaml"); code != 0 || !strings.Contains(out, "public_key: ssh-ed25519") {
+		t.Errorf("-o yaml on a terminal: code %d, %q", code, out)
+	}
+}

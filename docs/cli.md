@@ -82,7 +82,8 @@ ump
 │   │   ├── edit     [<name>]                          your editor on users.yaml, then a check of every user
 │   │   └── delete   <name> [--yes]
 │   ├── path                                           where the configuration lives
-│   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
+│   └── key      [-o json|yaml]                        interactive wizard over the keys; prints UMP's own key without a terminal or with -o
+│       ├── show     [-o json|yaml]                    UMP's own SSH public key (generated on first use)
 │       ├── list                                       ump and the named keys, with fingerprints
 │       ├── add      <name> (--file <f>|--line <l>|--agent)   keep a public key under a name
 │       └── remove   <name>
@@ -468,7 +469,7 @@ ump config os          [list|get|create|edit|delete|update|default]
 ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
 ump config firewall    [list|get|create|edit|delete]      (alias: fw)
 ump config user        [list|get|create|edit|delete]      (alias: u)
-ump config key         [list|add|remove]
+ump config key         [show|list|add|remove]
 ump config path
 ```
 
@@ -533,9 +534,11 @@ UMP has its own SSH key pair, generated on first use (by `ump config key`
 or the first `ump server rescue`) at `~/.config/ump/staging_ed25519`, or at the
 path set as `staging.key` in the configuration. It is what rescue
 systems and installed systems are reached with, so it works whatever
-personal keys are around. `ump config key` prints the public key and its
-fingerprints (`-o json` for scripts); put the public key wherever UMP
-should be able to log in. The subcommands keep more public keys under
+personal keys are around. `ump config key show` prints the public key and
+its fingerprints (`-o json` for scripts; `ump config key` alone does the
+same without a terminal, and is a small wizard over the subcommands on
+one); put the public key wherever UMP should be able to log in. The
+subcommands keep more public keys under
 names in `~/.config/ump/keys.yaml`, for the `keys` of
 [users](profiles.md#keys): `add NAME --file FILE` (every key line of the
 file; a second one becomes `NAME-2`), `add NAME --line 'ssh-... AAAA...'`,
