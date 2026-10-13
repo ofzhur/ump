@@ -16,7 +16,7 @@ yours; the layouts work the same with `layouts.yaml`.
 
 The flags of `ump server reinstall` override a profile for one installation:
 `--layout`, `--os`, `--timezone`, `--ipv6`, `--mitigations`, `--disks`,
-`--ssh-key` (keys added to root).
+`--ssh-key` (keys added to the administrator).
 
 ## Fields
 
@@ -31,13 +31,15 @@ kernel:                       # optional; everything off unless said
   extra: ""                   # anything else for the kernel command line
 disks: lvm-linear             # a layout name from layouts.yaml, or an inline layout (below)
 users:
-  - name: root
+  - name: ump                 # the administrator: the first sudo user (see below)
+    sudo: true                # member of sudo without a password (no passwords are set)
+    shell: /bin/zsh           # optional; /bin/bash by default
     keys: [ump, local]        # see Keys
   - name: ops
-    sudo: true                # member of sudo without a password (no passwords are set)
     groups: [adm]             # optional, created when missing
-    shell: /bin/bash          # optional
     keys: [agent, ~/.ssh/ops.pub]
+  - name: root                # only when listed does root log in over SSH (keys only)
+    keys: [ump]
 packages: [htop]              # optional; Ubuntu packages, installed from the archive at installation
 firewall:                     # optional; no firewall without it
   policy: drop                # drop: only what is allowed gets in; accept: no firewall
@@ -45,14 +47,39 @@ firewall:                     # optional; no firewall without it
 provision:                    # optional; the step after the first boot
   type: none                  # none | ansible-pull | ansible-bootstrap
   repo: ...                   # whatever the step needs; kept with the type in /etc/ump/install
+network:                      # optional
+  rename: true                # uniform interface names (ext01, int01, ...); false keeps the kernel's
 ```
 
 Every user needs at least one key: no passwords are set, so a user
-without keys could not log in. The firewall always lets the loopback
+without keys could not log in. One user must be able to administer the
+system: the first user with `sudo: true` is the **administrator**, the
+user ump logs in as afterwards (to re-enter its rescue system, to check
+an installation, and `ump ssh` by default) and the one you use; `root`
+counts when it is listed. Root cannot log in over SSH unless the profile
+lists it with keys (then with keys only, never a password); it is still
+the user of the rescue system. The default profile's administrator is
+`ump` with zsh (oh-my-zsh, theme crunch): rename it, give it bash, or
+add your own users. The firewall always lets the loopback
 interface and the answers to the server's own connections through;
 `policy: drop` with `icmp` and `ssh` is what the default profile does.
 The provision step is recorded on the installed system and reported by
 `ump server reinstall`; running it is not implemented yet.
+
+### Interface names
+
+With `network.rename` on (the default), the installer names the wired
+interfaces of the machine uniformly instead of leaving the kernel's
+`enp0s3`, `eno1` or `eth0`: `ext01`, `ext02`, ... for the ones with a
+public address (the uplink the rescue system uses first, then the others
+in the kernel's order), `int01`, `int02`, ... for the rest, whether they
+carry a private address or nothing. The names are bound to the MAC
+addresses in `/etc/netplan/10-ump.yaml` (`set-name`), so they survive
+reboots and kernel upgrades, and `/etc/ump/install` lists them
+(`interfaces=ext01=aa:bb:... int01=...`). Only the uplink is configured;
+the others are up without an address, ready for your netplan. `rename:
+false` keeps the kernel's names, with the uplink matched by MAC as
+before.
 
 ### Keys
 

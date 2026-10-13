@@ -28,6 +28,14 @@ type Profile struct {
 	Packages    []string  `yaml:"packages,omitempty"`
 	Firewall    Firewall  `yaml:"firewall,omitempty"`
 	Provision   Provision `yaml:"provision,omitempty"`
+	Network     Network   `yaml:"network,omitempty"`
+}
+
+// Network holds the network choices. Rename (unset: on) gives the
+// interfaces uniform names: ext01, ext02, ... for the ones with a public
+// address and int01, ... for the others, instead of the kernel's.
+type Network struct {
+	Rename *bool `yaml:"rename,omitempty"`
 }
 
 // Kernel holds the kernel command line choices; unset means off for the
@@ -328,7 +336,7 @@ func (p *Profile) Validate() error {
 		}
 	}
 	if len(p.Users) == 0 {
-		return fmt.Errorf("profile %s: no users; at least root with a key is needed to reach the new system", p.Name)
+		return fmt.Errorf("profile %s: no users; a sudo user (or root) with a key is needed to reach the new system", p.Name)
 	}
 	seen := map[string]bool{}
 	for _, u := range p.Users {
@@ -350,6 +358,9 @@ func (p *Profile) Validate() error {
 		if len(u.Keys) == 0 {
 			return fmt.Errorf("profile %s: user %s has no keys (and no passwords are set)", p.Name, u.Name)
 		}
+	}
+	if p.Admin() == "" {
+		return fmt.Errorf("profile %s: no user has sudo and root is not listed; ump could not administer the new system", p.Name)
 	}
 	for _, pkg := range p.Packages {
 		if !regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`).MatchString(pkg) {
@@ -395,6 +406,26 @@ func (p *Profile) Validate() error {
 	return nil
 }
 
+// Admin is the user ump logs in as on the installed system: the first
+// user with sudo, else root when it is listed, else nothing.
+func (p *Profile) Admin() string {
+	return admin(p.Users)
+}
+
+func admin(users []User) string {
+	for _, u := range users {
+		if u.Sudo && u.Name != "root" {
+			return u.Name
+		}
+	}
+	for _, u := range users {
+		if u.Name == "root" {
+			return "root"
+		}
+	}
+	return ""
+}
+
 // KeyResolver turns a key reference of a profile (ump, local, agent, a
 // file path, or a key line) into key lines.
 type KeyResolver func(ref string) ([]string, error)
@@ -416,8 +447,17 @@ type Spec struct {
 	Packages  []string    `json:"packages"`
 	Firewall  Firewall    `json:"firewall"`
 	Provision Provision   `json:"provision"`
+	Network   NetworkSpec `json:"network"`
 	Profile   ProfileInfo `json:"profile"`
 }
+
+// NetworkSpec is Network with the default filled in.
+type NetworkSpec struct {
+	Rename bool `json:"rename"`
+}
+
+// Admin is the user ump logs in as on the installed system.
+func (s *Spec) Admin() string { return admin(s.Users) }
 
 type KernelSpec struct {
 	Mitigations bool   `json:"mitigations"`
@@ -466,6 +506,7 @@ func (p *Profile) Resolve(layouts map[string]*Layout, resolve KeyResolver) (*Spe
 		Packages:  append([]string{}, p.Packages...),
 		Firewall:  p.Firewall,
 		Provision: p.Provision,
+		Network:   NetworkSpec{Rename: p.Network.Rename == nil || *p.Network.Rename},
 		Profile:   ProfileInfo{Name: p.Name, Description: p.Description},
 	}
 	if spec.Packages == nil {

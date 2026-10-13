@@ -248,7 +248,10 @@ type testEnv struct {
 	// script reports the jump; entryNoScript: the server cannot fetch the
 	// entry script; versionAfter: how many version checks the kexec'd
 	// system needs before it answers.
-	directRoot    bool
+	directRoot bool
+	// directSudo: the running system refuses root, but lets UMP in as
+	// ump, who has sudo without a password
+	directSudo    bool
 	stockRoot     bool
 	inImage       bool
 	rescueNoKey   bool
@@ -365,6 +368,8 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 			return "0\n-\nDebian GNU/Linux 12 (bookworm)\n", "", 0
 		case e.directRoot:
 			return "0\n-\nUbuntu 26.04 LTS\n", "", 0
+		case e.directSudo && strings.Contains(strings.Join(argv, " "), " ump@"):
+			return "1000\n-\nUbuntu 26.04 LTS\nsudo\n", "", 0
 		case e.stockRoot && strings.Contains(strings.Join(fakePower.actions, ","), "stock:"):
 			return "0\n-\nDebian GNU/Linux 13 (trixie)\n", "", 0
 		}
@@ -1662,7 +1667,7 @@ func TestRescueCommands(t *testing.T) {
 	}
 	// ... and the provider's rescue system was only the first hop
 	for _, want := range []string{
-		"Checking root access to 203.0.113.10 over SSH ... no.\nGoing through the provider's rescue system.\n",
+		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\nGoing through the provider's rescue system.\n",
 		"Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/rescue.\n",
 		"==> booting into the UMP rescue system",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
@@ -1802,7 +1807,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 	if code != 3 || errOut != "" || len(e.sshCalls) != 1 || e.sshInteractive[0] {
 		t.Errorf("ssh command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
 	}
-	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10 -- uname -a" {
+	if argv := strings.Join(e.sshCalls[0], " "); argv != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" ump@203.0.113.10 -- uname -a" {
 		t.Errorf("ssh argv: %q", argv)
 	}
 	e.sshExit = 0
@@ -1822,7 +1827,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 		t.Errorf("interactive without terminal: code %d, %q, calls %v", code, errOut, e.sshCalls)
 	}
 	_, _, code = e.run("", true, "ssh", "web-01", "--account", "one")
-	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10" {
+	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" ump@203.0.113.10" {
 		t.Errorf("interactive: code %d, calls %v %v", code, e.sshCalls, e.sshInteractive)
 	}
 	if strings.Contains(strings.Join(e.sshCalls[0], " "), "IdentitiesOnly") {
@@ -1974,6 +1979,60 @@ func TestRescueDirectAndRunning(t *testing.T) {
 	}
 }
 
+func TestRescueDirectWithSudo(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+
+	// root cannot log in (a UMP-installed system), but ump can and has
+	// sudo: the entry script runs through sudo, and the provider is not
+	// touched
+	e.directSudo = true
+	out, errOut, code := e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one")
+	if code != 0 {
+		t.Fatalf("direct with sudo: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	for _, want := range []string{
+		"Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS, as ump with sudo).\n",
+		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.\n",
+		"Connecting to the UMP rescue system of web-01 as root; exit the shell to return.\n",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("progress line missing: %q in\n%s", want, errOut)
+		}
+	}
+	if len(fakePower.actions) != 0 {
+		t.Errorf("the provider was used: %v", fakePower.actions)
+	}
+	entries := e.entryCommands()
+	if len(entries) != 1 || !strings.HasPrefix(entries[0], "sudo -n sh -c '"+entryPrefix("https://ump.zhurko.de/rescue")+"-H web-01 -K '\\''ssh-ed25519 ") {
+		t.Errorf("entry: %q", entries)
+	}
+	users := []string{}
+	for _, call := range e.remoteCalls {
+		if strings.HasPrefix(call[len(call)-1], "id -u;") {
+			for _, a := range call {
+				if strings.HasSuffix(a, "@203.0.113.10") {
+					users = append(users, strings.TrimSuffix(a, "@203.0.113.10"))
+				}
+			}
+		}
+	}
+	if strings.Join(users, ",") != "root,ump" {
+		t.Errorf("probed as %v, want root then ump", users)
+	}
+
+	// a user without sudo is not root access
+	e.directSudo = false
+	e.remoteCalls = nil
+	e.inImage = false
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--via", "direct", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "no (tried root, ump)") {
+		t.Errorf("without sudo: code %d, %q", code, errOut)
+	}
+}
+
 func TestRescueWaysAndFailures(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
@@ -1981,7 +2040,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 
 	// --via direct without root access does not touch the provider
 	_, errOut, code := e.run("", false, "server", "rescue", "web-01", "--yes", "--via", "direct", "--account", "one")
-	if code != 5 || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH; --via provider") || len(fakePower.actions) != 0 {
+	if code != 5 || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH (as root, or a sudo user with UMP's key); --via provider") || len(fakePower.actions) != 0 {
 		t.Errorf("--via direct: code %d, %q, actions %v", code, errOut, fakePower.actions)
 	}
 
@@ -2084,13 +2143,13 @@ func TestInstallServer(t *testing.T) {
 		t.Fatalf("install: code %d, stderr %q\n%s", code, errOut, out)
 	}
 	for _, want := range []string{
-		"Checking root access to 203.0.113.10 over SSH ... no.\n",
+		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\n",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
 		"Installing ubuntu-26.04 (profile default from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "default.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
 		"==> installed: ubuntu-26.04 2026.10.12",
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
 		"Waiting for SSH on 203.0.113.10 to go down ...",
-		"web-01 is up: Ubuntu 26.04.1 LTS, hostname web-01, root on /dev/mapper/vg0-root.\n",
+		"web-01 is up: Ubuntu 26.04.1 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).\n",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("progress line missing: %q in\n%s", want, errOut)
@@ -2113,7 +2172,7 @@ func TestInstallServer(t *testing.T) {
 		t.Errorf("spec layout: %v", l)
 	}
 	users := spec["users"].([]any)
-	if len(users) != 1 || users[0].(map[string]any)["name"] != "root" || len(users[0].(map[string]any)["keys"].([]any)) != 1 || !strings.HasPrefix(users[0].(map[string]any)["keys"].([]any)[0].(string), "ssh-ed25519 ") {
+	if len(users) != 1 || users[0].(map[string]any)["name"] != "ump" || users[0].(map[string]any)["sudo"] != true || users[0].(map[string]any)["shell"] != "/bin/zsh" || len(users[0].(map[string]any)["keys"].([]any)) != 1 || !strings.HasPrefix(users[0].(map[string]any)["keys"].([]any)[0].(string), "ssh-ed25519 ") {
 		t.Errorf("spec users: %v", users)
 	}
 	if fw := spec["firewall"].(map[string]any); fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
@@ -2220,7 +2279,7 @@ func TestInstallServer(t *testing.T) {
 	resetFakePower()
 	e.bootFails = true
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
-	if code != 5 || !strings.Contains(errOut, "SSH answers on 203.0.113.10, but not with UMP's key; the new system may not have booted") {
+	if code != 5 || !strings.Contains(errOut, "SSH answers on 203.0.113.10, but not as ump with UMP's key; the new system may not have booted") {
 		t.Errorf("boot failure: code %d, %q", code, errOut)
 	}
 	e.bootFails = false
@@ -2363,7 +2422,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 
 	// the first run downloads the published profile and layouts
 	out, errOut, code := e.run("", false, "config", "os", "list")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   root") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   ump") {
 		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
 	}
 	for _, f := range []string{"default.yaml", "layouts.yaml"} {

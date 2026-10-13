@@ -38,9 +38,10 @@ on amd64, for BIOS (`grub-efi-*-bin`, `grub-pc-bin`, `grub2-common`),
 `lvm2`, `mdadm`, the file system tools, `netplan.io` rendering to
 systemd-networkd, `systemd-resolved`, OpenSSH, `tuned`, `cpufrequtils`,
 `numactl`, `smartmontools`, `nvme-cli`, the hardware tools (`pciutils`,
-`dmidecode`, `lshw`), and `vim`, `tmux`, `htop`, `git`, `jq` and the
-usual shell tools. No cloud-init, no snaps, no recommends. The full list
-is in `packages.txt` of a build.
+`dmidecode`, `lshw`), `bash` with completion, `zsh` with
+[oh-my-zsh](https://ohmyz.sh) in `/usr/share/oh-my-zsh`, and `vim`,
+`tmux`, `htop`, `git`, `jq` and the usual shell tools. No cloud-init, no
+snaps, no recommends. The full list is in `packages.txt` of a build.
 
 ## Defaults
 
@@ -60,7 +61,24 @@ is in `packages.txt` of a build.
   `update-grub`, for IPv6 add the address and route to
   `/etc/netplan/10-ump.yaml` (`netplan apply`), and reboot.
   `ump install --mitigations` and `--ipv6` keep them on from the start.
-- **SSH:** root logs in with keys only; no passwords.
+- **SSH:** no passwords, and no root login (`PermitRootLogin no` in
+  `/etc/ssh/sshd_config.d/50-ump.conf`); the installer opens root with
+  keys only (`10-ump-root.conf`) when the profile lists it. The
+  administrator is the profile's sudo user, `ump` by default.
+- **Shells:** `/etc/skel/.bashrc` gives bash a colored prompt (red for
+  root), completion and the color aliases; `/etc/skel/.zshrc` gives zsh
+  oh-my-zsh with the `crunch` theme and the `git`, `sudo` and `systemd`
+  plugins, from the shared copy in `/usr/share/oh-my-zsh` (no
+  self-update; `git -C /usr/share/oh-my-zsh pull` as root updates it).
+  Both are in `/root` too; the profile picks each user's shell.
+- **Message of the day:** `/etc/update-motd.d/00-ump` alone: the UMP
+  banner, the host, when and from which profile it was installed,
+  uptime and load, memory, the root disk and the addresses. No help
+  text, no news from the network (`/etc/default/motd-news`).
+- **Interface names:** `ext01`, `ext02`, ... for the interfaces with a
+  public address and `int01`, ... for the rest, bound to the MAC
+  addresses by the netplan file the installer writes; `network:
+  {rename: false}` in the profile keeps the kernel's names.
 - **Boot loader:** a 2 s menu on the console, no OS prober; the kernel
   command line file above is read by `update-grub`.
 - Time zone UTC (`ump install --timezone`), locale `C.UTF-8`, no swap.

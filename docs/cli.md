@@ -339,8 +339,11 @@ How the server gets there depends on what answers, and ump says so on
 the way:
 
 1. The server already runs the UMP rescue system: ump connects as it is.
-2. The running system lets UMP in as root over SSH, with UMP's own key
-   (see [`ump config key`](#ump-config-key)) or your own keys: ump has
+2. The running system lets UMP in over SSH as root, or as a sudo user
+   where root cannot log in (ump tries root, then the administrator of
+   the profile set for the server, then `ump`, the default profile's),
+   with UMP's own key (see [`ump config key`](#ump-config-key)) or your
+   own keys: ump has
    the server fetch the entry script from the image's base URL and run
    it; the script downloads the image, carries the address, gateway,
    DNS, hostname and keys over and kexecs into it, with no reboot
@@ -431,10 +434,13 @@ the other published layouts, and a profile can carry its own (`--disks`
 limits the disks). The new system gets the server's name as hostname
 (`--hostname` for another; it must be a valid one), the address, gateway
 and interface of the rescue system (which `rescue` carried over from the
-running system), resolvers 1.1.1.1 and 8.8.8.8, the profile's users with
-their keys (the default: root with UMP's key and your `~/.ssh/id_*.pub`
-keys; `--ssh-key` adds files to root; `agent` in a profile takes what
-`ssh-add -L` lists), the time zone (`--timezone`), and a kernel command
+running system), uniform interface names (`ext01`, `int01`, ...; see
+[the profiles](../profiles/README.md#interface-names)), resolvers
+1.1.1.1 and 8.8.8.8, the profile's users with their keys (the default:
+the sudo user `ump` with UMP's key and your `~/.ssh/id_*.pub` keys, and
+no root login over SSH; `--ssh-key` adds files to the administrator;
+`agent` in a profile takes what `ssh-add -L` lists), the time zone
+(`--timezone`), and a kernel command
 line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the kernel's
 kexec handover reserves memory for live updates and gets in the way of
 ump's own re-entry). The first two cost performance and most servers
@@ -596,7 +602,10 @@ ump ssh <machine> [--user <name>] [--staging] [-- command...]
 ```
 
 Resolves the machine to an address and opens an SSH session, or runs a
-command. `--staging` uses UMP's staging key and `root`, for when the
+command. The login is `--user`, else the administrator of the profile
+set for the server (`ump server set --profile`) or of the default
+profile: `ump`, since root cannot log in over SSH on a UMP-installed
+system. `--staging` uses UMP's staging key and `root`, for when the
 machine is in rescue.
 
 ### `ump facts`

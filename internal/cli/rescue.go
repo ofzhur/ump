@@ -206,7 +206,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if imageURL == "" {
 		imageURL = cfg.StagingImage()
 	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != ""})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != "", users: a.loginUsers(cfg, m)})
 	if err != nil {
 		return err
 	}

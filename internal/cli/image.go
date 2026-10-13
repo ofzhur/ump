@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
 )
@@ -25,13 +28,54 @@ const bootMarker = "==> booting into the UMP rescue system"
 
 // probeCommand asks a machine who it is: the uid we got, the UMP rescue
 // version when it runs the image, and the name of the operating system.
-const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'`
+const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; echo; } | head -n 1; sudo -n true 2>/dev/null && echo sudo; true`
 
 // hostProbe is a machine's answer to probeCommand.
 type hostProbe struct {
 	root    bool
+	sudo    bool
 	version string
 	os      string
+}
+
+// admin reports whether the login can do what root can: it is root, or
+// sudo asks it no password.
+func (p hostProbe) admin() bool { return p.root || p.sudo }
+
+// defaultAdmin is the administrator of the default profile, and the
+// user ump tries after root on a system it does not know.
+const defaultAdmin = "ump"
+
+// loginUsers are the users ump tries, in order, to reach the running
+// system of m: root, the administrator of the profile set for the server
+// (a sudo user, where root cannot log in), and the default one.
+func (a *app) loginUsers(cfg *config.Config, m provider.Machine) []string {
+	users := []string{"root"}
+	if u := a.profileAdmin(cfg, cfg.Servers[m.Ref()].Profile); u != "" && u != "root" {
+		users = append(users, u)
+	}
+	if users[len(users)-1] != defaultAdmin {
+		users = append(users, defaultAdmin)
+	}
+	return users
+}
+
+// profileAdmin is the administrator of the named profile when it is in
+// the profiles directory (no storage is asked), else of the default one.
+func (a *app) profileAdmin(cfg *config.Config, name string) string {
+	if name == "" {
+		name = "default"
+	}
+	if strings.ContainsAny(name, "/\\") {
+		name = expandHome(name)
+	} else {
+		name = filepath.Join(config.ProfilesDir(), name+".yaml")
+	}
+	p, err := profile.Load(name)
+	if err != nil {
+		return defaultAdmin
+	}
+	return p.Admin()
 }
 
 // batchOptions make a non-interactive ssh run fail instead of asking.
@@ -64,13 +108,33 @@ func (a *app) probeHost(ctx context.Context, user, addr string, identities []str
 	if len(lines) > 2 {
 		p.os = lines[2]
 	}
+	if len(lines) > 3 {
+		p.sudo = lines[3] == "sudo"
+	}
 	return p, true
+}
+
+// probeAdmin tries the users in turn and returns the first that gets in,
+// with its answer; ok is false when none did. notAdmin is the last user
+// that got in without being root or sudo, for the message.
+func (a *app) probeAdmin(ctx context.Context, users []string, addr string, identities []string, identitiesOnly bool) (user string, p hostProbe, ok bool, notAdmin string) {
+	for _, u := range users {
+		p, ok := a.probeHost(ctx, u, addr, identities, identitiesOnly)
+		if !ok {
+			continue
+		}
+		if p.admin() || p.version != "" {
+			return u, p, true, notAdmin
+		}
+		notAdmin = u
+	}
+	return "", hostProbe{}, false, notAdmin
 }
 
 // entryCommand is what runs on the machine to load the image: the entry
 // script, fetched from the base URL, with the base URL, the hostname and
 // the keys to carry over.
-func entryCommand(url, hostname string, keys []provider.PublicKey) string {
+func entryCommand(url, hostname string, keys []provider.PublicKey, sudo bool) string {
 	args := []string{"-u", url}
 	if hostname != "" {
 		args = append(args, "-H", hostname)
@@ -78,16 +142,20 @@ func entryCommand(url, hostname string, keys []provider.PublicKey) string {
 	for _, k := range keys {
 		args = append(args, "-K", k.Data)
 	}
-	return fetchAndRun(url+"/kexec-into-rescue.sh", "/tmp/kexec-into-rescue.sh", args)
+	cmd := fetchAndRun(url+"/kexec-into-rescue.sh", "/tmp/kexec-into-rescue.sh", args)
+	if sudo {
+		return "sudo -n sh -c " + shellJoin([]string{cmd})
+	}
+	return cmd
 }
 
-// enterImage loads the image on the machine as user: the entry script
-// downloads it from url, carries the network configuration, the hostname
-// and the keys over and kexecs. It returns once the script reported the
-// jump; the connection then drops with the old kernel. The script's
-// output goes to stderr as it comes.
+// enterImage loads the image on the machine as user (through sudo when
+// it is not root): the entry script downloads it from url, carries the
+// network configuration, the hostname and the keys over and kexecs. It
+// returns once the script reported the jump; the connection then drops
+// with the old kernel. The script's output goes to stderr as it comes.
 func (a *app) enterImage(ctx context.Context, user, addr string, identities []string, identitiesOnly bool, url, hostname string, keys []provider.PublicKey) error {
-	argv := withSSHOptions(sshArgs(user, addr, identities, identitiesOnly, true, []string{entryCommand(url, hostname, keys)}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(sshArgs(user, addr, identities, identitiesOnly, true, []string{entryCommand(url, hostname, keys, user != "root")}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
 	w := io.MultiWriter(a.stderr, &buf)
 	code, err := a.sshExec(ctx, argv, nil, w, w)
@@ -235,6 +303,10 @@ type entryOptions struct {
 	// machine) as the way in when its rescue system takes no key; only a
 	// reinstall, which erases the machine anyway, sets it.
 	stock bool
+	// users are tried in turn for the direct way: root, and the sudo
+	// users where root cannot log in (loginUsers); root and ump when
+	// empty.
+	users []string
 }
 
 // imageEntry is how a server was brought into the UMP rescue system and
@@ -311,18 +383,26 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if o.via != "provider" && addr != "" {
 		fmt.Fprintf(a.stderr, "Checking root access to %s over SSH ...", addr)
 		identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
-		p, ok := a.probeHost(ctx, "root", addr, identities, false)
+		users := o.users
+		if len(users) == 0 {
+			users = []string{"root", defaultAdmin}
+		}
+		user, p, ok, notAdmin := a.probeAdmin(ctx, users, addr, identities, false)
 		switch {
 		case ok && p.version != "":
 			fmt.Fprintf(a.stderr, " %s already runs the UMP rescue system %s.\n", m.Name, p.version)
-			return &imageEntry{addr: addr, user: "root", version: p.version, via: "running"}, nil
-		case ok && p.root:
-			fmt.Fprintf(a.stderr, " yes (%s).\n", nonEmpty(p.os, "unknown system"))
+			return &imageEntry{addr: addr, user: user, version: p.version, via: "running"}, nil
+		case ok:
+			how := ""
+			if !p.root {
+				how = fmt.Sprintf(", as %s with sudo", user)
+			}
+			fmt.Fprintf(a.stderr, " yes (%s%s).\n", nonEmpty(p.os, "unknown system"), how)
 			if err := ask(fmt.Sprintf("Load the UMP rescue image on %s over SSH and kexec into it? The running system ends without a shutdown.", describeRef(m))); err != nil {
 				return nil, err
 			}
 			fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s, without the provider's rescue system.\n", imageURL, m.Name)
-			if err := a.enterImage(ctx, "root", addr, identities, false, imageURL, hostname, keys); err != nil {
+			if err := a.enterImage(ctx, user, addr, identities, false, imageURL, hostname, keys); err != nil {
 				return nil, err
 			}
 			version, err := a.waitForImage(ctx, addr, keyPath)
@@ -330,13 +410,13 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 				return nil, err
 			}
 			return &imageEntry{addr: addr, user: "root", version: version, via: "direct"}, nil
-		case ok:
-			fmt.Fprintln(a.stderr, " no (not root).")
+		case notAdmin != "":
+			fmt.Fprintf(a.stderr, " no (%s gets in, but is not root and has no sudo).\n", notAdmin)
 		default:
-			fmt.Fprintln(a.stderr, " no.")
+			fmt.Fprintf(a.stderr, " no (tried %s).\n", strings.Join(users, ", "))
 		}
 		if o.via == "direct" {
-			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH; --via provider goes through the provider's rescue system", addr))
+			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH (as root, or a sudo user with UMP's key); --via provider goes through the provider's rescue system", addr))
 		}
 		if !hasRescue {
 			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system", addr, m.Provider)

@@ -41,8 +41,21 @@ printf 'LANG=C.UTF-8\n' > /etc/default/locale
 systemctl enable systemd-networkd.service systemd-resolved.service systemd-timesyncd.service ssh.service tuned.service >/dev/null
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# root: keys only (install.sh puts them in place); no password
+# root: no password, and no login over SSH unless the profile lists it
+# (install.sh); the administrator is the profile's sudo user
 passwd -l root >/dev/null 2>&1 || true
+
+# shells: the colored bash of /etc/skel and zsh with oh-my-zsh (the crunch
+# theme), shared from /usr/share/oh-my-zsh; root gets the same files
+git clone -q --depth 1 https://github.com/ohmyzsh/ohmyzsh.git /usr/share/oh-my-zsh
+rm -rf /usr/share/oh-my-zsh/.git /usr/share/oh-my-zsh/.github
+chmod -R go-w /usr/share/oh-my-zsh
+cp /etc/skel/.bashrc /root/.bashrc
+cp /etc/skel/.zshrc /root/.zshrc
+
+# the message of the day: UMP's own script alone (no help text, no news)
+chmod 755 /etc/update-motd.d/00-ump
+for f in /etc/update-motd.d/*; do [ "$f" = /etc/update-motd.d/00-ump ] || rm -f "$f"; done
 
 # the boot loader configuration file that grub-mkconfig reads; the
 # settings are in /etc/default/grub.d/

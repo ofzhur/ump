@@ -79,3 +79,6 @@ unzip
 xz-utils
 bzip2
 git
+
+# shells
+zsh

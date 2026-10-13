@@ -57,8 +57,11 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if spec.OS != "ubuntu-26.04" || spec.Timezone != "UTC" || spec.Kernel.Mitigations || spec.Kernel.IPv6 || spec.Layout.Name != "lvm-linear" || len(spec.Layout.Parts) != 5 {
 		t.Errorf("spec: %+v", spec)
 	}
-	if len(spec.Users) != 1 || spec.Users[0].Name != "root" || len(spec.Users[0].Keys) != 1 || !strings.HasPrefix(spec.Users[0].Keys[0], "ssh-ed25519 ") || spec.Users[0].Shell != "/bin/bash" {
+	if len(spec.Users) != 1 || spec.Users[0].Name != "ump" || !spec.Users[0].Sudo || len(spec.Users[0].Keys) != 1 || !strings.HasPrefix(spec.Users[0].Keys[0], "ssh-ed25519 ") || spec.Users[0].Shell != "/bin/zsh" {
 		t.Errorf("users: %+v", spec.Users)
+	}
+	if spec.Admin() != "ump" || !spec.Network.Rename {
+		t.Errorf("admin %q, network %+v", spec.Admin(), spec.Network)
 	}
 	if spec.Firewall.Policy != "drop" || len(spec.Firewall.Allow) != 2 || spec.Firewall.Allow[0].Proto != "icmp" || spec.Firewall.Allow[1] != (Allow{Proto: "tcp", Port: "22"}) {
 		t.Errorf("firewall: %+v", spec.Firewall)
@@ -155,6 +158,7 @@ func TestProfileErrors(t *testing.T) {
 		{"bad firewall", base + "disks: lvm-linear\nfirewall: {policy: drop, allow: [tcp/99999]}\n", "port 99999 is out of range"},
 		{"bad firewall entry", base + "disks: lvm-linear\nfirewall: {policy: drop, allow: [smtp]}\n", `"smtp" is not icmp, ssh, tcp/PORT or udp/PORT`},
 		{"bad policy", base + "disks: lvm-linear\nfirewall: {policy: deny}\n", `policy "deny" is not accept or drop`},
+		{"no admin", "os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, keys: [ump]}\n", "no user has sudo and root is not listed"},
 		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
 		{"bad package", base + "disks: lvm-linear\npackages: [\"rm -rf\"]\n", "is not a package name"},
 		{"two roots", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: ext4, mountpoint: /}\n    - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /}\n", "mountpoint / is used twice"},

@@ -5,7 +5,7 @@
 # one, so copy this file there and make it yours. Every field is described
 # in profiles/README.md.
 name: default
-description: Ubuntu 26.04 on every disk as one linear volume group; root with your keys; ICMP and SSH open, nothing else.
+description: Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
 
 os: ubuntu-26.04
 timezone: UTC
@@ -19,13 +19,20 @@ kernel:
 disks: lvm-linear
 
 users:
-  - name: root
+  # The administrator: ump logs in as this user afterwards (ump ssh), and
+  # so do you. Rename it or add yours; root keeps no SSH login unless it is
+  # listed here with keys (it stays the user of the rescue system).
+  - name: ump
+    sudo: true          # member of sudo, without a password (no passwords are set)
+    shell: /bin/zsh     # zsh with oh-my-zsh (theme crunch); /bin/bash is there too, with colors
     keys: [ump, local]  # ump: UMP's own key; local: the public keys next to your ~/.ssh/id_* files;
                         # agent: every key your ssh-agent holds; a file path; or a key line itself
   # - name: ops
-  #   sudo: true        # member of sudo, without a password (no passwords are set)
+  #   sudo: true
   #   groups: [adm]
   #   keys: [local, ~/.ssh/ops.pub]
+  # - name: root        # root over SSH, with keys only
+  #   keys: [ump, local]
 
 packages: []            # more Ubuntu packages, installed from the archive at installation
 
@@ -36,3 +43,7 @@ firewall:
 provision:
   type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
                         # recorded in /etc/ump/install, not run yet
+
+network:
+  rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
+                        # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)

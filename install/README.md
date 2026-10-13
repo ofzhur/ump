@@ -45,18 +45,26 @@ root and the keys of a file).
    the image** straight from the download into them, checking the
    archive's SHA-256 against the manifest.
 7. **Configures the machine:** hostname, `/etc/fstab` by UUID (swap
-   included), a netplan file for the interface (matched by MAC) with the
+   included), a netplan file with every wired interface matched by MAC
+   and, unless the profile says `network: {rename: false}`, renamed
+   uniformly (`ext01`, ... for the uplink and the interfaces with a
+   public address, `int01`, ... for the rest), the uplink with the
    static address and on-link gateway, or DHCP when nothing is known,
+   the others up without an address,
    IPv6 only when the profile keeps it, resolvers 1.1.1.1 and 8.8.8.8,
    the kernel command line (`mitigations=off ipv6.disable=1` unless the
    profile keeps them, the profile's extra, and `kho=off`: the kernel's
    kexec handover would reserve up to half the memory of a small machine
    for live updates, and stop ump from re-entering its rescue system),
    time zone, a fresh machine id and SSH host keys.
-8. **Users:** root gets its keys; every other user is created with its
-   shell, groups (created when missing) and keys, and `sudo: true` makes
-   it a member of `sudo` with a `NOPASSWD` drop-in, since no passwords
-   are set.
+8. **Users:** every user is created with its shell, groups (created
+   when missing) and keys, and `sudo: true` makes it a member of `sudo`
+   with a `NOPASSWD` drop-in, since no passwords are set. Root logs in
+   over SSH only when the profile lists it (`PermitRootLogin
+   prohibit-password` in `/etc/ssh/sshd_config.d/10-ump-root.conf`);
+   otherwise the image's `PermitRootLogin no` stands, and the
+   administrator (the first sudo user, `ump` in the default profile) is
+   the way in, for ump as well.
 9. **Packages:** the profile's packages are installed from the Ubuntu
    archive inside the new system (through the rescue system's resolver,
    with no service started), as is `nftables` when the firewall needs
@@ -74,7 +82,8 @@ root and the keys of a file).
     either way. With md arrays or raid volumes, `mdadm.conf` is written
     and the initramfs rebuilt first. Then `update-grub`.
 12. Writes `/etc/ump/install` (what was installed, when, on which disks,
-    which profile and layout, the provision step) and
+    which profile and layout, the administrator, the interfaces with
+    their MAC addresses, the provision step) and
     `/etc/ump/spec.json` (the specification), unmounts everything and
     reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
@@ -89,10 +98,12 @@ install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/
 
 The specification is JSON with the fields of a resolved profile (`os`,
 `hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
-`disks`, `users` with key lines, `packages`, `firewall`, `provision`);
+`disks`, `users` with key lines, `packages`, `firewall`, `provision`,
+`network`);
 `ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`
-layout with root alone: `--storage` is the base URL that serves
+layout with root alone (which then logs in over SSH, since it is the
+only user): `--storage` is the base URL that serves
 `os/<os>/<arch>/manifest.json` and `rootfs.tar.zst` (see [the storage
 layout](../images/rescue/README.md#your-own-storage)), `--keys` defaults
 to `/root/.ssh/authorized_keys`, which is where `ump server rescue` put UMP's

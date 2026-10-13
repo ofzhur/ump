@@ -12,7 +12,8 @@
 #                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
 #
 #   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
-#                    kernel, layout, disks, users, packages, firewall, provision
+#                    kernel, layout, disks, users, packages, firewall, provision,
+#                    network (rename: false keeps the kernel's interface names)
 #   without --spec   the lvm-linear layout with root alone; the flags are:
 #   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
 #                    manifest.json and rootfs.tar.zst (or UMP_STORAGE)
@@ -297,6 +298,44 @@ fi
 [ -n "$mac" ] || die "no network interface with a default route; the new system would be unreachable"
 dns="1.1.1.1 8.8.8.8"
 
+# the interfaces: every wired one, by MAC. The uplink and those with a
+# public address are external (ext01, ext02, ...), the rest internal
+# (int01, ...), unless the profile keeps the kernel's names.
+rename="$(jq -r 'if .network.rename == false then "no" else "yes" end' <<< "$spec")"
+IF_MAC=(); IF_NAME=(); IF_KIND=(); IF_OLD=()
+next_ext=1; next_int=1
+private='^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|169\.254\.)'
+for d in $(ls /sys/class/net | sort -V); do
+	[ "$d" = lo ] && continue
+	[ -e "/sys/class/net/$d/device" ] || continue         # a device, not a bond, vlan or bridge
+	[ "$(cat "/sys/class/net/$d/type" 2>/dev/null)" = 1 ] || continue   # ethernet
+	[ -d "/sys/class/net/$d/wireless" ] && continue
+	m="$(cat "/sys/class/net/$d/address" 2>/dev/null || true)"
+	case "$m" in ""|00:00:00:00:00:00) continue ;; esac
+	kind=int
+	if [ "$m" = "$mac" ]; then
+		kind=ext
+	elif ip -o -4 addr show dev "$d" scope global 2>/dev/null | awk '{print $4}' | grep -qvE "$private"; then
+		kind=ext
+	elif ip -o -6 addr show dev "$d" scope global 2>/dev/null | awk '{print $4}' | grep -qviE '^f[cd]'; then
+		kind=ext
+	fi
+	IF_MAC+=("$m"); IF_KIND+=("$kind"); IF_OLD+=("$d")
+	if [ "$rename" = yes ]; then
+		if [ "$kind" = ext ]; then IF_NAME+=("$(printf 'ext%02d' "$next_ext")"); next_ext=$((next_ext + 1))
+		else IF_NAME+=("$(printf 'int%02d' "$next_int")"); next_int=$((next_int + 1)); fi
+	else
+		IF_NAME+=("$d")
+	fi
+done
+uplink=""
+for i in "${!IF_MAC[@]}"; do [ "${IF_MAC[$i]}" = "$mac" ] && uplink="${IF_NAME[$i]}"; done
+if [ -z "$uplink" ]; then
+	# the uplink's MAC was given, but no such interface is up here: keep it
+	uplink=uplink; [ "$rename" = yes ] && uplink=ext01
+	IF_MAC=("$mac" "${IF_MAC[@]}"); IF_KIND=(ext "${IF_KIND[@]}"); IF_OLD=("?" "${IF_OLD[@]}"); IF_NAME=("$uplink" "${IF_NAME[@]}")
+fi
+
 # --- the plan, printed ---------------------------------------------------
 
 log "machine: $arch, $([ "$efi" = 1 ] && echo UEFI || echo BIOS) firmware, $(nproc) CPUs, $(awk '/^MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo) MB RAM"
@@ -322,7 +361,9 @@ for k in "${!L_VG[@]}"; do
 	r="linear"; [ "${L_RAID[$k]}" != none ] && r="raid ${L_RAID[$k]}"
 	log "  ${L_VG[$k]}/${L_NAME[$k]}: ${L_SIZE[$k]} $r ${L_FS[$k]}${L_MOUNT[$k]:+ at ${L_MOUNT[$k]}}"
 done
-log "network: $mac $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS $dns; hostname $hostname; time zone $timezone"
+log "network: $uplink ($mac) $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS $dns; hostname $hostname; time zone $timezone"
+ifs=""; for i in "${!IF_MAC[@]}"; do ifs="${ifs:+$ifs, }${IF_NAME[$i]} (${IF_KIND[$i]}, ${IF_MAC[$i]}$([ "${IF_OLD[$i]}" != "${IF_NAME[$i]}" ] && printf ', now %s' "${IF_OLD[$i]}"))"; done
+log "interfaces: $ifs$([ "$rename" = yes ] || printf '; kernel names kept')"
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
 log "packages: $(jq -r '.packages | if length == 0 then "none" else join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
 log "kernel command line: $kernel_cmdline"
@@ -540,9 +581,20 @@ mkdir -p "$TARGET/etc/netplan"
 	echo "  version: 2"
 	echo "  renderer: networkd"
 	echo "  ethernets:"
-	echo "    uplink:"
+	for i in "${!IF_MAC[@]}"; do
+		[ "${IF_NAME[$i]}" = "$uplink" ] && continue
+		echo "    ${IF_NAME[$i]}:"
+		echo "      match:"
+		echo "        macaddress: \"${IF_MAC[$i]}\""
+		[ "$rename" = yes ] && echo "      set-name: ${IF_NAME[$i]}"
+		echo "      dhcp4: false"
+		echo "      optional: true"
+		[ "$ipv6" = true ] || echo "      link-local: []"
+	done
+	echo "    $uplink:"
 	echo "      match:"
 	echo "        macaddress: \"$mac\""
+	[ "$rename" = yes ] && echo "      set-name: $uplink"
 	if [ -z "$ip4$ip6" ]; then
 		echo "      dhcp4: true"
 	else
@@ -618,6 +670,17 @@ for ((n = 0; n < nusers; n++)); do
 	chmod 600 "$TARGET$home/.ssh/authorized_keys"
 	[ "$name" = root ] || in_target chown -R "$name:$name" "$home/.ssh"
 done
+# root over SSH only when the profile lists it with keys (the image says
+# no); the administrator is the first sudo user, else root
+admin="$(jq -r '[.users[] | select(.name == "root" or .sudo == true)][0].name // .users[0].name' <<< "$spec")"
+mkdir -p "$TARGET/etc/ssh/sshd_config.d"
+rm -f "$TARGET/etc/ssh/sshd_config.d/10-ump-root.conf"
+if jq -e '[.users[] | select(.name == "root")] | length > 0' >/dev/null <<< "$spec"; then
+	printf '# UMP: the profile lists root with keys.\nPermitRootLogin prohibit-password\n' > "$TARGET/etc/ssh/sshd_config.d/10-ump-root.conf"
+	log "ssh: root logs in with keys; administrator $admin"
+else
+	log "ssh: root cannot log in; administrator $admin (sudo)"
+fi
 
 # --- packages -----------------------------------------------------------
 
@@ -712,12 +775,16 @@ disks=${disks[*]}
 boot_disk=$boot_disk
 root=$root_dev
 hostname=$hostname
+admin=$admin
+interfaces=$(for i in "${!IF_MAC[@]}"; do printf '%s=%s ' "${IF_NAME[$i]}" "${IF_MAC[$i]}"; done | sed 's/ $//')
+uplink=$uplink
 ipv6=$([ "$ipv6" = true ] && echo on || echo off)
 mitigations=$([ "$mitigations" = true ] && echo on || echo off)
 firewall=$(jq -r '.firewall.policy' <<< "$spec")
 provision=$(jq -r '.provision.type' <<< "$spec")
 $(jq -r '.provision.options // {} | to_entries[] | "provision_\(.key)=\(.value)"' <<< "$spec")
 META
+chmod 644 "$TARGET/etc/ump/install"
 
 sync
 cleanup

@@ -24,6 +24,11 @@ together with your own keys (the agent's and the usual ~/.ssh/id_* files),
 so a machine that knows only UMP's key is reachable too; your SSH
 configuration applies.
 
+The login name is --user, else the administrator of the profile set for
+the server (ump server set --profile), else of the default profile: the
+sudo user of a UMP-installed system, where root cannot log in over SSH
+(ump by default). Rescue and staging systems take root.
+
 --staging connects the way UMP does to rescue and staging systems: with
 UMP's key alone and without host key checks, because those systems have
 a fresh host key every boot.`,
@@ -39,7 +44,7 @@ a fresh host key every boot.`,
 			return a.sshServer(cmd, refs[0], user, staging, command)
 		},
 	}
-	sub.Flags().StringVar(&user, "user", "root", "the login name")
+	sub.Flags().StringVar(&user, "user", "", "the login name (default: the profile's administrator, ump; root with --staging)")
 	sub.Flags().BoolVar(&staging, "staging", false, "use UMP's key alone and no host key checks (rescue and staging systems)")
 	return sub
 }
@@ -67,6 +72,12 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 	identities := []string{umpKey}
 	if !staging {
 		identities = append(identities, sshkey.DefaultIdentityFiles()...)
+	}
+	if user == "" {
+		user = "root"
+		if !staging {
+			user = a.profileAdmin(cfg, cfg.Servers[m.Ref()].Profile)
+		}
 	}
 	argv := sshArgs(user, addr, identities, staging, staging, command)
 	interactive := len(command) == 0

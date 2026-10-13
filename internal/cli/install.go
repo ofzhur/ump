@@ -103,6 +103,8 @@ type installResult struct {
 	Via              string `json:"via" yaml:"via"`
 	DryRun           bool   `json:"dry_run,omitempty" yaml:"dry_run,omitempty"`
 	Rebooted         bool   `json:"rebooted" yaml:"rebooted"`
+	// Admin is the user ump (and you) log in as.
+	Admin string `json:"admin,omitempty" yaml:"admin,omitempty"`
 	// System is what answered after the reboot.
 	System *installedSystem `json:"system,omitempty" yaml:"system,omitempty"`
 }
@@ -139,8 +141,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err != nil {
 		return err
 	}
-	// root of the new system gets UMP's key, the user's own public keys
-	// (next to the usual ~/.ssh/id_* files) and the --ssh-key files
+	// the administrator of the new system gets UMP's key, the user's own
+	// public keys (next to the usual ~/.ssh/id_* files) and the --ssh-key
+	// files
 	keyFiles := append([]string{}, o.keyFiles...)
 	for _, id := range sshkey.DefaultIdentityFiles() {
 		if _, err := os.Stat(id + ".pub"); err == nil {
@@ -205,7 +208,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		prof.Kernel.Mitigations = &t
 	}
 	if len(o.keyFiles) > 0 {
-		addRootKeys(prof, o.keyFiles)
+		addAdminKeys(prof, o.keyFiles)
 	}
 	var layouts map[string]*profile.Layout
 	if prof.Disks.Layout == nil {
@@ -235,7 +238,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return err
 	}
 	// everything on the way is progress (stderr); stdout is for the result
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true})
+	users := a.loginUsers(cfg, m)
+	if u := prof.Admin(); u != "" && u != "root" {
+		users = append([]string{"root", u}, users[1:]...)
+	}
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, users: dedupe(users)})
 	if err != nil {
 		return err
 	}
@@ -311,12 +318,14 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err := a.waitForSSH(ctx, entry.addr, true); err != nil {
 		return err
 	}
-	sys, ok := a.installedSystem(ctx, entry.addr, keyPath)
+	admin := spec.Admin()
+	sys, ok := a.installedSystem(ctx, entry.addr, keyPath, admin)
 	if !ok {
-		return withExit(exitUnreachable, fmt.Errorf("SSH answers on %s, but not with UMP's key; the new system may not have booted, look at the server's console", entry.addr))
+		return withExit(exitUnreachable, fmt.Errorf("SSH answers on %s, but not as %s with UMP's key; the new system may not have booted, look at the server's console", entry.addr, admin))
 	}
 	result.System = sys
-	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s.\n", m.Name, sys.Name, hostname, sys.Root)
+	result.Admin = admin
+	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, hostname, sys.Root, admin, m.Name)
 	if spec.Provision.Type != "none" {
 		fmt.Fprintf(a.stderr, "The provision step %s is recorded in /etc/ump/install on the server; running it is not implemented yet.\n", spec.Provision.Type)
 	}
@@ -446,16 +455,31 @@ func (a *app) keyResolver(cfg *config.Config) profile.KeyResolver {
 	}
 }
 
-// addRootKeys adds --ssh-key files to root's keys, or a root user with
-// them when the profile has none.
-func addRootKeys(p *profile.Profile, files []string) {
+// addAdminKeys adds --ssh-key files to the administrator's keys (the
+// first sudo user, else root), or a root user with them when the profile
+// has neither.
+func addAdminKeys(p *profile.Profile, files []string) {
+	admin := p.Admin()
 	for i := range p.Users {
-		if p.Users[i].Name == "root" {
+		if p.Users[i].Name == admin {
 			p.Users[i].Keys = append(p.Users[i].Keys, files...)
 			return
 		}
 	}
 	p.Users = append(p.Users, profile.User{Name: "root", Keys: append([]string{"ump"}, files...)})
+}
+
+// dedupe keeps the first of every repeated string.
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	out := in[:0]
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // sshAgentKeys lists the public keys of the running ssh-agent.
@@ -474,10 +498,11 @@ func (a *app) installReport(r installResult, format outputFormat) error {
 	return printEncoded(a.stdout, r, format)
 }
 
-// installedSystem asks the machine, with UMP's key, what it runs now.
-func (a *app) installedSystem(ctx context.Context, addr, keyPath string) (*installedSystem, bool) {
+// installedSystem asks the machine, as user with UMP's key, what it runs
+// now.
+func (a *app) installedSystem(ctx context.Context, addr, keyPath, user string) (*installedSystem, bool) {
 	const query = `sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'; findmnt -no SOURCE / ; cat /etc/ump/install 2>/dev/null | tr '\n' ' '`
-	argv := withSSHOptions(sshArgs("root", addr, []string{keyPath}, true, true, []string{query}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(sshArgs(user, addr, []string{keyPath}, true, true, []string{query}), batchOptions(10*time.Second)...)
 	var out bytes.Buffer
 	code, err := a.sshExec(ctx, argv, nil, &out, io.Discard)
 	if err != nil || code != 0 {
