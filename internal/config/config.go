@@ -37,6 +37,10 @@ type Config struct {
 	// layout). Default: DefaultStorage, the project's own.
 	Storage string  `yaml:"storage,omitempty"`
 	Staging Staging `yaml:"staging,omitempty"`
+	// Updates, when false, stops the daily check of bin/latest/VERSION
+	// on the storage that says when a newer ump is published
+	// (UMP_NO_UPDATE_CHECK=1 does the same for one run).
+	Updates *bool `yaml:"updates,omitempty"`
 	// Servers holds what the user set for single servers (ump server set),
 	// keyed by the server's reference (provider/id).
 	Servers map[string]ServerSettings `yaml:"servers,omitempty"`

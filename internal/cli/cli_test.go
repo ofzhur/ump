@@ -2779,3 +2779,134 @@ func TestConfigFirewall(t *testing.T) {
 		t.Errorf("still listed:\n%s", out)
 	}
 }
+
+func TestUpdateHint(t *testing.T) {
+	e := newTestEnv(t)
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/bin/latest/VERSION" {
+			hits++
+			io.WriteString(w, "v0.2.0\n")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	was := Version
+	Version = "v0.1.0"
+	defer func() { Version = was }()
+
+	// a successful command checks once and says what is new
+	_, errOut, code := e.run("", false, "config", "path")
+	if code != 0 || !strings.Contains(errOut, "ump v0.2.0 is available (this is v0.1.0): curl -fsSL "+srv.URL+"/get.sh | sh") || hits != 1 {
+		t.Errorf("first run: code %d, hits %d, %q", code, hits, errOut)
+	}
+	// not again the same day; again the next day
+	if _, errOut, _ := e.run("", false, "config", "path"); strings.Contains(errOut, "available") || hits != 1 {
+		t.Errorf("second run: hits %d, %q", hits, errOut)
+	}
+	e.now = e.now.Add(25 * time.Hour)
+	if _, errOut, _ := e.run("", false, "config", "path"); !strings.Contains(errOut, "available") || hits != 2 {
+		t.Errorf("next day: hits %d, %q", hits, errOut)
+	}
+	// nothing when up to date, off, for version, or for a development build
+	e.now = e.now.Add(25 * time.Hour)
+	Version = "v0.2.0"
+	if _, errOut, _ := e.run("", false, "config", "path"); strings.Contains(errOut, "available") || hits != 3 {
+		t.Errorf("up to date: hits %d, %q", hits, errOut)
+	}
+	e.now = e.now.Add(25 * time.Hour)
+	Version = "v0.1.0"
+	t.Setenv("UMP_NO_UPDATE_CHECK", "1")
+	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+		t.Errorf("env off: hits %d, %q", hits, errOut)
+	}
+	t.Setenv("UMP_NO_UPDATE_CHECK", "")
+	if _, errOut, _ := e.run("", false, "version"); errOut != "" || hits != 3 {
+		t.Errorf("version: hits %d, %q", hits, errOut)
+	}
+	e.write(testConfig + "storage: " + srv.URL + "\nupdates: false\n")
+	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+		t.Errorf("config off: hits %d, %q", hits, errOut)
+	}
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	Version = "dev"
+	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+		t.Errorf("dev: hits %d, %q", hits, errOut)
+	}
+	// a failed command does not check
+	Version = "v0.1.0"
+	if _, _, code := e.run("", false, "config", "os", "get", "nope"); code == 0 || hits != 3 {
+		t.Errorf("failed command: code %d, hits %d", code, hits)
+	}
+
+	for _, c := range []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v0.2.0", "v0.1.0", true}, {"v0.1.0", "v0.2.0", false}, {"v1.0.0", "v0.9.9", true}, {"v0.1.0", "v0.1.0", false},
+		{"v0.1.0", "v0.1.0-rc1", true}, {"v0.1.0-rc1", "v0.1.0", false}, {"v0.1.0-rc2", "v0.1.0-rc1", true}, {"v0.1.10", "v0.1.9", true},
+	} {
+		if got := newerVersion(c.latest, c.current); got != c.want {
+			t.Errorf("newerVersion(%s, %s) = %v", c.latest, c.current, got)
+		}
+	}
+}
+
+func TestConfigOSUpdate(t *testing.T) {
+	e := newTestEnv(t)
+	published := map[string]string{}
+	for _, name := range profileFiles {
+		data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", name))
+		published[name] = string(data)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if data, ok := published[strings.TrimPrefix(r.URL.Path, "/profiles/")]; ok && strings.HasPrefix(r.URL.Path, "/profiles/") {
+			io.WriteString(w, data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+
+	// the first run downloads and keeps the published copies
+	if _, _, code := e.run("", false, "config", "os", "list"); code != 0 {
+		t.Fatal("first list failed")
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, ".published", "layouts.yaml")); err != nil || string(data) != published["layouts.yaml"] {
+		t.Errorf("published copy: %v", err)
+	}
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "default.yaml: up to date\nlayouts.yaml: up to date\nfirewalls.yaml: up to date\n") {
+		t.Errorf("update when current: code %d\n%s", code, out)
+	}
+
+	// the user edits the default profile; new versions of everything are
+	// published: the edited file is kept, the others replaced
+	os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(published["default.yaml"]+"packages: [htop]\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "mine.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	for name := range published {
+		published[name] += "# newer\n"
+	}
+	out, _, code := e.run("", false, "config", "os", "update")
+	if code != 0 || !strings.Contains(out, "default.yaml: you changed it, so it is kept; the new published version is "+filepath.Join(dir, ".published", "default.yaml")) || !strings.Contains(out, "layouts.yaml: updated\nfirewalls.yaml: updated\n") {
+		t.Errorf("update: code %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "default.yaml")); !strings.HasSuffix(string(data), "packages: [htop]\n") {
+		t.Errorf("the edited profile was replaced:\n%s", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "layouts.yaml")); string(data) != published["layouts.yaml"] {
+		t.Error("layouts.yaml was not replaced")
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, ".published", "default.yaml")); string(data) != published["default.yaml"] {
+		t.Error("the new published default.yaml was not kept aside")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mine.yaml")); err != nil {
+		t.Error("mine.yaml was touched")
+	}
+	if out, _, _ := e.run("", false, "config", "os", "list"); !strings.Contains(out, "mine") || strings.Contains(out, ".published") {
+		t.Errorf("list after update:\n%s", out)
+	}
+}

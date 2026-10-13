@@ -59,7 +59,8 @@ ump
 │   │   ├── get      <name>                            print one
 │   │   ├── create   <name> [--from <name>]            copy one and open it in your editor
 │   │   ├── edit     <name>                            your editor, then a check
-│   │   └── delete   <name> [--yes]
+│   │   ├── delete   <name> [--yes]
+│   │   └── update                                     refresh the published files; edited ones are kept
 │   ├── disk-layout (dl)                               interactive wizard over the named layouts of layouts.yaml
 │   │   ├── list                                       the layouts, with their parts and whether they are valid
 │   │   ├── get      <name>                            print one
@@ -503,7 +504,7 @@ keys and a returned password.
 
 ```
 ump config isp         [view|types|add|remove|test]
-ump config os          [list|get|create|edit|delete]
+ump config os          [list|get|create|edit|delete|update]
 ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
 ump config firewall    [list|get|create|edit|delete]      (alias: fw)
 ump config path | key
@@ -516,7 +517,10 @@ downloads the published default profile, layouts and firewalls into
 `~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
 `create NAME` copies one (`--from`, default `default`) and opens it in
 your editor, `edit NAME` opens it and checks it afterwards (an invalid
-profile is kept, with the problem named), `delete NAME` removes it, and
+profile is kept, with the problem named), `delete NAME` removes it,
+`update` fetches the published `default.yaml`, `layouts.yaml` and
+`firewalls.yaml` again (a file still as published is replaced, one you
+edited is kept with the new version next to it in `.published/`), and
 without a subcommand it is a small wizard over these. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with
 (`servers:` in the configuration file), `--clear` forgets it.

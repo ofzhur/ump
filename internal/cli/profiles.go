@@ -37,12 +37,72 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 			os.Remove(dir)
 			return fmt.Errorf("the profiles directory %s is new and the published %s could not be fetched: %w", config.AbbreviateHome(dir), name, err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+		if err := writePublished(dir, name, data); err != nil {
 			return err
 		}
 	}
 	fmt.Fprintf(a.stderr, "Downloaded the default profile, the layouts and the firewalls into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
 	return nil
+}
+
+// publishedDir keeps a copy of each file as it was published, so that
+// an update can tell a file the user edited from one left as it was.
+const publishedDir = ".published"
+
+func writePublished(dir, name string, data []byte) error {
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(dir, publishedDir), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600)
+}
+
+func (a *app) newOSUpdateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "update",
+		Short: "Refresh the published profile, layouts and firewalls from the storage",
+		Long: `Fetch default.yaml, layouts.yaml and firewalls.yaml from the storage
+again. A local file that is still as it was published is replaced; one
+you edited is kept, and the new published version is put next to it in
+` + publishedDir + `/ for you to compare. Your own profiles (other names) are
+never touched.`,
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.prepareProfiles(cmd)
+			if err != nil {
+				return err
+			}
+			dir := config.ProfilesDir()
+			for _, name := range profileFiles {
+				data, err := a.fetch(cmd.Context(), cfg.StorageURL()+"/profiles/"+name)
+				if err != nil {
+					return fmt.Errorf("the published %s could not be fetched: %w", name, err)
+				}
+				local, _ := os.ReadFile(filepath.Join(dir, name))
+				published, _ := os.ReadFile(filepath.Join(dir, publishedDir, name))
+				switch {
+				case string(local) == string(data):
+					fmt.Fprintf(a.stdout, "%s: up to date\n", name)
+					os.MkdirAll(filepath.Join(dir, publishedDir), 0o700)
+					os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600)
+				case local == nil || string(local) == string(published):
+					if err := writePublished(dir, name, data); err != nil {
+						return err
+					}
+					fmt.Fprintf(a.stdout, "%s: updated\n", name)
+				default:
+					os.MkdirAll(filepath.Join(dir, publishedDir), 0o700)
+					if err := os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600); err != nil {
+						return err
+					}
+					fmt.Fprintf(a.stdout, "%s: you changed it, so it is kept; the new published version is %s\n", name, config.AbbreviateHome(filepath.Join(dir, publishedDir, name)))
+				}
+			}
+			return nil
+		},
+	}
 }
 
 func (a *app) newConfigOSCmd() *cobra.Command {
@@ -71,7 +131,7 @@ over the subcommands below.`,
 			return a.profilesWizard(cmd)
 		},
 	}
-	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd())
+	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd(), a.newOSUpdateCmd())
 	return cmd
 }
 

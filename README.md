@@ -140,6 +140,11 @@ $ ./ump server rescue prod-web-01 --yes -- lsblk   # or run one command there
 $ ./ump config isp test     # re-check credentials any time
 ```
 
+Once a day ump tells you when a newer release is published (`updates:
+false` in the configuration turns that off); the same one-liner updates
+it. The scripts, images and profiles it uses come from the storage at
+every use, so they are current without a new binary (`ump config os
+update` refreshes your local copies of the published profiles).
 The install script checks the binary against the published `SHA256SUMS`;
 `UMP_VERSION=v1.2.3` picks a release, `UMP_INSTALL_DIR` another
 directory, and Windows users take `ump-windows-amd64.exe` from

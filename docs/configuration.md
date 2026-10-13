@@ -68,6 +68,9 @@ accounts:
       - name: lab-01
         address: 192.0.2.50
 
+updates: true                           # once a day, after a command, ump reads bin/latest/VERSION
+                                        # on the storage and says when a newer release is published;
+                                        # false (or UMP_NO_UPDATE_CHECK=1) turns it off
 storage: https://ump.zhurko.de          # base URL of what UMP fetches onto machines: the rescue
                                         # image (rescue/), the installer (install/), the profiles
                                         # (profiles/) and the OS images (os/); this is the default,

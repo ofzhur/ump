@@ -166,6 +166,9 @@ logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` 
 		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			a.updateHint(cmd)
+		},
 	}
 	root.SetIn(a.stdin)
 	root.SetOut(a.stdout)
