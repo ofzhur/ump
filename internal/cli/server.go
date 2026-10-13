@@ -80,7 +80,7 @@ forgets it. The profile is checked to exist, locally or on the storage.`,
 				if err := config.Save(path, cfg); err != nil {
 					return err
 				}
-				fmt.Fprintf(a.stdout, "%s: no profile set; reinstall uses default.\n", describeRef(m))
+				fmt.Fprintf(a.stdout, "%s: no profile set; reinstall uses the default profile (%s).\n", describeRef(m), cfg.DefaultProfileName())
 				return nil
 			}
 			if _, _, err := a.loadProfile(cmd.Context(), profile, cfg.StorageURL()); err != nil {

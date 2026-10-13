@@ -2502,7 +2502,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 		t.Errorf("--profile wins: code %d, %q", code, errOut)
 	}
 	out, _, code = e.run("", false, "server", "set", "web-01", "--clear", "--account", "one")
-	if code != 0 || !strings.Contains(out, "no profile set; reinstall uses default.") || strings.Contains(e.read(), "profile: db") {
+	if code != 0 || !strings.Contains(out, "no profile set; reinstall uses the default profile (ubuntu-26.04).") || strings.Contains(e.read(), "profile: db") {
 		t.Errorf("clear: code %d\n%s\n%s", code, out, e.read())
 	}
 
