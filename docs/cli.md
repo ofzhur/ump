@@ -388,7 +388,10 @@ ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--os NAME] [--ho
 
 Puts an operating system on the server's disks from a [UMP base
 image](../images/ubuntu/README.md) the way a [profile](../profiles/README.md)
-says, and boots it. The profile (`--profile`, default `default`: a file
+says, and boots it. A server whose provider rescue system takes no SSH
+key (an OVHcloud VPS) is first reinstalled by the provider with its
+stock Linux and UMP's key, which `reinstall` may do since it erases the
+server anyway; `rescue` never does. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
 its own), the users with their keys, extra packages, what the firewall

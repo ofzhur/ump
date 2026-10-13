@@ -38,6 +38,7 @@ type fakeAPI struct {
 	denyVPS       bool
 	taskLooks     int
 	taskBusyUntil int
+	rebuild       map[string]any
 	vpsActions    []string
 	vpsNetboot    string
 	vpsName       string
@@ -236,6 +237,24 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write([]byte(`{"name":"vps-00000000.vps.ovh.net","displayName":"` + name + `","state":"running","zone":"Region OpenStack: gra","cluster":"c-42","netbootMode":"` + netboot + `","offerType":"ssd","vcore":2,"memoryLimit":4096,
 		  "model":{"name":"vps-2024-le-2","offer":"VPS Le-2","version":"2024v1","vcore":2,"memory":4096,"disk":80},"iam":{"displayName":"ignored"}}`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available":
+		w.Write([]byte(`["u24","d12","plesk","d13","u26"]`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available/u24":
+		w.Write([]byte(`{"id":"u24","name":"Ubuntu 24.04"}`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available/d12":
+		w.Write([]byte(`{"id":"d12","name":"Debian 12"}`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available/plesk":
+		w.Write([]byte(`{"id":"plesk","name":"Debian 12 - Plesk"}`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available/d13":
+		w.Write([]byte(`{"id":"d13","name":"Debian 13"}`))
+	case "/vps/vps-00000000.vps.ovh.net/images/available/u26":
+		w.Write([]byte(`{"id":"u26","name":"Ubuntu 26.04"}`))
+	case "/vps/vps-00000000.vps.ovh.net/rebuild":
+		var req map[string]any
+		json.Unmarshal(body, &req)
+		f.rebuild = req
+		f.taskBusyUntil = f.taskLooks + 2
+		w.Write([]byte(`{"id":9,"type":"reinstallVm","state":"todo","progress":0}`))
 	case "/vps/vps-00000000.vps.ovh.net/tasks":
 		// one task runs for the first two looks after a netboot change
 		f.taskLooks++
@@ -449,6 +468,15 @@ func TestVPS(t *testing.T) {
 	}
 	if on, _ := rs.RescueEnabled(context.Background(), vps); on || strings.Join(f.vpsActions, ",") != "netboot:rescue,netboot:local" {
 		t.Errorf("rescue off: on=%v actions %v", on, f.vpsActions)
+	}
+
+	// a reinstall with the newest plain Debian and UMP's key for root
+	stock, err := p.(provider.StockInstaller).InstallStock(context.Background(), vps, []provider.PublicKey{{Data: "ssh-ed25519 AAAA ump"}})
+	if err != nil || stock.Image != "Debian 13" || stock.Address != "203.0.113.99" {
+		t.Errorf("stock install: %+v %v", stock, err)
+	}
+	if f.rebuild["imageId"] != "d13" || f.rebuild["publicSshKey"] != "ssh-ed25519 AAAA ump" || f.rebuild["doNotSendPassword"] != true || !strings.Contains(f.rebuild["postInstallScript"].(string), "PermitRootLogin prohibit-password") {
+		t.Errorf("rebuild request: %v", f.rebuild)
 	}
 
 	got, err := p.(provider.Renamer).Rename(context.Background(), vps, "edge-02")

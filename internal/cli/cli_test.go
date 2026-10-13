@@ -88,6 +88,18 @@ var fakeKeyless bool
 
 func (f *fakeProvider) RescueTakesNoKey(m provider.Machine) bool { return fakeKeyless }
 
+// fakeStock makes the fake provider able to reinstall a machine with a
+// stock image; the machine then lets UMP in as root.
+var fakeStock bool
+
+func (f *fakeProvider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
+	if !fakeStock {
+		return nil, &provider.APIError{Provider: "fake", Message: "no stock images"}
+	}
+	fakePower.actions = append(fakePower.actions, "stock:"+keys[0].Name)
+	return &provider.StockInstall{Image: "Debian 13", Address: m.IPv4}, nil
+}
+
 func (f *fakeProvider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
 	fakePower.rescue[m.Ref()] = true
 	fakePower.keys = nil
@@ -237,6 +249,7 @@ type testEnv struct {
 	// entry script; versionAfter: how many version checks the kexec'd
 	// system needs before it answers.
 	directRoot    bool
+	stockRoot     bool
 	inImage       bool
 	rescueNoKey   bool
 	entryExit     int
@@ -352,6 +365,8 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 			return "0\n-\nDebian GNU/Linux 12 (bookworm)\n", "", 0
 		case e.directRoot:
 			return "0\n-\nUbuntu 26.04 LTS\n", "", 0
+		case e.stockRoot && strings.Contains(strings.Join(fakePower.actions, ","), "stock:"):
+			return "0\n-\nDebian GNU/Linux 13 (trixie)\n", "", 0
 		}
 		return "", "root@203.0.113.10: Permission denied (publickey,password).\n", 255
 	case strings.Contains(cmd, "/kexec-into-rescue.sh"):
@@ -943,6 +958,53 @@ func init() {
 		Fields: []provider.Field{{Key: "password", Secret: true, Required: true}},
 		New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
 			return &listOnlyProvider{inner: &fakeProvider{account: account, settings: s}}, nil
+		},
+	})
+}
+
+// keylessProvider is a fake whose rescue system takes no key and that
+// cannot install a stock image either: nothing but the refusal is left.
+type keylessProvider struct{ inner *fakeProvider }
+
+func (k *keylessProvider) Type() string                        { return "keyless" }
+func (k *keylessProvider) Account() string                     { return k.inner.account }
+func (k *keylessProvider) Capabilities() []provider.Capability { return k.inner.Capabilities() }
+func (k *keylessProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	ms, err := k.inner.List(ctx)
+	for i := range ms {
+		ms[i].Provider = "keyless"
+	}
+	return ms, err
+}
+func (k *keylessProvider) RescueTakesNoKey(m provider.Machine) bool { return true }
+func (k *keylessProvider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	return k.inner.RescueEnabled(ctx, m)
+}
+func (k *keylessProvider) EnableRescue(ctx context.Context, m provider.Machine, o provider.RescueOptions) (*provider.RescueInfo, error) {
+	return k.inner.EnableRescue(ctx, m, o)
+}
+func (k *keylessProvider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	return k.inner.DisableRescue(ctx, m)
+}
+func (k *keylessProvider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	return k.inner.PowerState(ctx, m)
+}
+func (k *keylessProvider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	return k.inner.Reboot(ctx, m, mode)
+}
+func (k *keylessProvider) PowerOn(ctx context.Context, m provider.Machine) error {
+	return k.inner.PowerOn(ctx, m)
+}
+func (k *keylessProvider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	return k.inner.PowerOff(ctx, m, hard)
+}
+
+func init() {
+	provider.Register(provider.Type{
+		Name: "keyless", Kind: provider.KindCloud, Description: "Fake provider whose rescue takes no key",
+		Fields: []provider.Field{{Key: "password", Secret: true, Required: true}},
+		New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
+			return &keylessProvider{inner: &fakeProvider{account: account, settings: s}}, nil
 		},
 	})
 }
@@ -2537,18 +2599,51 @@ func TestListAccountsSameTypeInSequence(t *testing.T) {
 
 func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 	e := newTestEnv(t)
-	e.write(testConfig)
+	e.write("accounts:\n  kl:\n    type: keyless\n    password: s3cret\n")
 	e.writeProfiles()
 	resetFakePower()
-	fakeKeyless = true
-	defer func() { fakeKeyless = false }()
-	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes")
 	if code != 5 || !strings.Contains(errOut, "the provider's rescue system of web-01 takes no SSH key (the password goes by mail)") || !strings.Contains(errOut, "ump server rescue --no-image") {
 		t.Errorf("keyless: code %d, %q", code, errOut)
 	}
 	if len(fakePower.actions) != 0 {
 		t.Errorf("nothing may be enabled or rebooted: %v", fakePower.actions)
 	}
+	e.write(testConfig)
+	fakeKeyless = true
+	defer func() { fakeKeyless = false }()
+
+	// with a provider that can install its stock image, the reinstall takes
+	// that way: stock image with UMP's key, root over SSH, then the direct way
+	fakeStock = true
+	defer func() { fakeStock = false }()
+	resetFakePower()
+	e.stockRoot = true
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
+	if code != 0 {
+		t.Fatalf("stock way: code %d, %q", code, errOut)
+	}
+	for _, want := range []string{
+		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls it with a stock Linux and UMP's key first",
+		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
+		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01.",
+		"web-01 is up: Ubuntu 26.04.1 LTS",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stock way lacks %q in\n%s", want, errOut)
+		}
+	}
+	if got := strings.Join(fakePower.actions, ","); !strings.HasPrefix(got, "stock:ump") || strings.Contains(got, "rescue") {
+		t.Errorf("actions: %s", got)
+	}
+	// rescue itself never takes that way
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "takes no SSH key") || len(fakePower.actions) != 0 {
+		t.Errorf("rescue must not reinstall: code %d, actions %v, %q", code, fakePower.actions, errOut)
+	}
+	e.stockRoot = false
+
 	// --no-image still works, it is the way in with the mailed password
 	_, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--no-image", "--account", "one")
 	if code != 0 || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {

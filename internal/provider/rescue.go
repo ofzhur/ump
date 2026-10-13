@@ -51,6 +51,23 @@ type Rescue interface {
 	DisableRescue(ctx context.Context, m Machine) error
 }
 
+// StockInstall is the result of StockInstaller.InstallStock.
+type StockInstall struct {
+	// Image is the provider's image that was installed.
+	Image string
+	// Address is where SSH answers once the machine runs it.
+	Address string
+}
+
+// StockInstaller is implemented by providers that can put one of their
+// own stock Linux images on a machine with UMP's key for root, which
+// erases the machine. It is the way in for machines whose rescue system
+// takes no key: ump server reinstall, which erases the machine anyway,
+// may use it; nothing else may.
+type StockInstaller interface {
+	InstallStock(ctx context.Context, m Machine, keys []PublicKey) (*StockInstall, error)
+}
+
 // KeylessRescue is implemented by providers whose rescue system, for some
 // machines, cannot be given an SSH key (the password goes by mail), so
 // that the caller can say so before enabling it.

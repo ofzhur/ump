@@ -125,11 +125,17 @@ SSH as root. It is also the provider used by the integration test suite.
   and rescue through the netboot mode (`rescue` until `unrescue`, the
   machine boots it at the next reboot). The VPS API takes no rescue SSH
   key and OVH mails the password, so UMP cannot log into a VPS rescue
-  system by itself: `ump server reinstall` and `ump server rescue` refuse
-  the provider's way for a VPS before enabling anything, and say so.
-  The direct way works when the running system lets UMP in as root
-  (UMP's key in root's `authorized_keys`); `ump server rescue --no-image`
-  with the mailed password is the way into the provider's rescue system.
+  system by itself. `ump server reinstall` takes another way in: OVH
+  rebuilds the VPS with its newest plain Debian image (Ubuntu when there
+  is none) and UMP's key, a script of the first boot opens root to that
+  key, and from there the direct way kexecs into the UMP rescue system;
+  the whole reinstall is unattended, the provider's rebuild just takes a
+  few minutes more. `ump server rescue` never does that (it would erase
+  the machine): it refuses the provider's way for a VPS before enabling
+  anything, and says so. The direct way works for both when the running
+  system lets UMP in as root (UMP's key in root's `authorized_keys`);
+  `ump server rescue --no-image` with the mailed password is the way
+  into the provider's rescue system.
   Every change to a VPS is a task at OVH, and OVH refuses the next action
   while one runs, so ump waits for the tasks before it reboots or
   changes the netboot mode. A consumer key made before VPS support lacks

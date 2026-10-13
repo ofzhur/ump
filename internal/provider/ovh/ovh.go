@@ -67,6 +67,7 @@ var DefaultAccessRules = []AccessRule{
 	{Method: "POST", Path: "/vps/*/stop"},
 	{Method: "GET", Path: "/vps/*/tasks"},
 	{Method: "GET", Path: "/vps/*/tasks/*"},
+	{Method: "POST", Path: "/vps/*/rebuild"},
 }
 
 const listParallelism = 8
@@ -206,15 +207,101 @@ func isVPS(m provider.Machine) bool { return m.Labels["family"] == "vps" }
 func (p *Provider) RescueTakesNoKey(m provider.Machine) bool { return isVPS(m) }
 
 // vpsTaskWait is how long a VPS gets to finish its running tasks before
-// an action; OVH refuses actions while a task runs.
-var vpsTaskWait = 3 * time.Minute
+// an action; OVH refuses actions while a task runs. A rebuild takes
+// longer, vpsRebuildWait.
+var (
+	vpsTaskWait    = 3 * time.Minute
+	vpsRebuildWait = 30 * time.Minute
+)
+
+// vpsPostInstall runs once on the first boot of a rebuilt VPS: OVH puts
+// the key into its default user's authorized_keys and keeps root closed,
+// UMP needs root over SSH.
+const vpsPostInstall = `#!/bin/bash
+mkdir -p -m 700 /root/.ssh
+cat /home/*/.ssh/authorized_keys >> /root/.ssh/authorized_keys 2>/dev/null
+chmod 600 /root/.ssh/authorized_keys
+mkdir -p /etc/ssh/sshd_config.d
+printf 'PermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/00-ump-root.conf
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+`
+
+// InstallStock implements provider.StockInstaller for a VPS: OVH
+// rebuilds it with its newest Debian image (Ubuntu when there is none)
+// and UMP's key, and a script of the first boot opens root to that key.
+func (p *Provider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
+	if !isVPS(m) {
+		return nil, &provider.APIError{Provider: TypeName, Message: "only a VPS can be reinstalled with a stock image through the OVHcloud API"}
+	}
+	if len(keys) == 0 {
+		return nil, &provider.APIError{Provider: TypeName, Message: "a stock installation needs a key for root"}
+	}
+	img, err := p.stockImage(ctx, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
+		return nil, err
+	}
+	if _, err := p.client.RebuildVPS(ctx, m.ID, map[string]any{
+		"imageId": img.ID, "publicSshKey": keys[0].Data, "doNotSendPassword": true, "postInstallScript": vpsPostInstall,
+	}); err != nil {
+		return nil, err
+	}
+	if err := p.waitVPSIdle(ctx, m.ID, vpsRebuildWait); err != nil {
+		return nil, err
+	}
+	return &provider.StockInstall{Image: img.Name, Address: m.IPv4}, nil
+}
+
+// stockImage picks the image a VPS is rebuilt with: the newest Debian,
+// else the newest Ubuntu, among the plain ones (no Plesk, Docker, ...).
+func (p *Provider) stockImage(ctx context.Context, name string) (*VPSImage, error) {
+	ids, err := p.client.VPSImages(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	var best *VPSImage
+	bestRank := -1.0
+	for _, id := range ids {
+		img, err := p.client.GetVPSImage(ctx, name, id)
+		if err != nil {
+			return nil, err
+		}
+		fields := strings.Fields(img.Name)
+		if len(fields) != 2 {
+			continue
+		}
+		var rank float64
+		switch fields[0] {
+		case "Debian":
+			rank = 1000
+		case "Ubuntu":
+			rank = 0
+		default:
+			continue
+		}
+		v, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		rank += v
+		if rank > bestRank {
+			bestRank, best = rank, img
+		}
+	}
+	if best == nil {
+		return nil, &provider.APIError{Provider: TypeName, Message: "no plain Debian or Ubuntu image is available for VPS " + name}
+	}
+	return best, nil
+}
 
 // vpsTaskPoll is how often the tasks are looked at while waiting.
 var vpsTaskPoll = 3 * time.Second
 
 // waitVPSIdle waits until the VPS has no task in progress.
-func (p *Provider) waitVPSIdle(ctx context.Context, name string) error {
-	deadline := time.Now().Add(vpsTaskWait)
+func (p *Provider) waitVPSIdle(ctx context.Context, name string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
 	for {
 		ids, err := p.client.VPSTasks(ctx, name)
 		if err != nil {
@@ -235,7 +322,7 @@ func (p *Provider) waitVPSIdle(ctx context.Context, name string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return &provider.APIError{Provider: TypeName, Message: "VPS " + name + " still has tasks running after " + vpsTaskWait.String()}
+			return &provider.APIError{Provider: TypeName, Message: "VPS " + name + " still has tasks running after " + wait.String()}
 		}
 		select {
 		case <-ctx.Done():
@@ -306,14 +393,14 @@ func instancePower(status string) provider.PowerState {
 // and a power cycle is stop then start.
 func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
 	if isVPS(m) {
-		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+		if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
 			return err
 		}
 		if mode == provider.RebootPowerCycle {
 			if _, err := p.client.VPSAction(ctx, m.ID, "stop"); err != nil {
 				return err
 			}
-			if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+			if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
 				return err
 			}
 			_, err := p.client.VPSAction(ctx, m.ID, "start")
@@ -418,13 +505,13 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 		// a VPS boots its rescue system when its netboot mode says so; the
 		// change is a task, and nothing else is accepted until it is done;
 		// the API takes no key, OVH mails the password
-		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+		if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
 			return nil, err
 		}
 		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "rescue"}); err != nil {
 			return nil, err
 		}
-		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+		if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
 			return nil, err
 		}
 		return &provider.RescueInfo{Address: m.IPv4, User: "root",
@@ -470,13 +557,13 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 // reboots).
 func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
 	if isVPS(m) {
-		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+		if err := p.waitVPSIdle(ctx, m.ID, vpsTaskWait); err != nil {
 			return err
 		}
 		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "local"}); err != nil {
 			return err
 		}
-		return p.waitVPSIdle(ctx, m.ID)
+		return p.waitVPSIdle(ctx, m.ID, vpsTaskWait)
 	}
 	if m.Kind != provider.KindCloud {
 		ids, err := p.client.ListBoots(ctx, m.ID, "harddisk")
@@ -1489,6 +1576,39 @@ func (c *Client) GetVPSServiceInfos(ctx context.Context, name string) (*ServiceI
 		return nil, err
 	}
 	return &si, nil
+}
+
+// VPSImage is GET /vps/{serviceName}/images/available/{id}.
+type VPSImage struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// VPSImages returns the ids of the images a VPS can be rebuilt with.
+func (c *Client) VPSImages(ctx context.Context, name string) ([]string, error) {
+	var ids []string
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/images/available", nil, &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// GetVPSImage returns one image.
+func (c *Client) GetVPSImage(ctx context.Context, name, id string) (*VPSImage, error) {
+	var img VPSImage
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/images/available/"+url.PathEscape(id), nil, &img); err != nil {
+		return nil, err
+	}
+	return &img, nil
+}
+
+// RebuildVPS reinstalls a VPS with an image (POST /vps/{serviceName}/rebuild).
+func (c *Client) RebuildVPS(ctx context.Context, name string, body map[string]any) (*VPSTask, error) {
+	var t VPSTask
+	if err := c.do(ctx, http.MethodPost, "/vps/"+url.PathEscape(name)+"/rebuild", body, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // VPSTask is GET /vps/{serviceName}/tasks/{id}.
