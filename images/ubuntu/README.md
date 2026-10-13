@@ -38,7 +38,10 @@ on amd64, for BIOS (`grub-efi-*-bin`, `grub-pc-bin`, `grub2-common`),
 `lvm2`, `mdadm`, the file system tools, `netplan.io` rendering to
 systemd-networkd, `systemd-resolved`, OpenSSH, `tuned`, `cpufrequtils`,
 `numactl`, `smartmontools`, `nvme-cli`, the hardware tools (`pciutils`,
-`dmidecode`, `lshw`), `bash` with completion, `zsh` with
+`dmidecode`, `lshw`), the analysis tools (`last` from `wtmpdb`, `sar`
+and friends from `sysstat`, `atop`, `iotop`, `lsof`, `strace`, `ltrace`,
+`pstree`, `ncdu`, `dig`, `traceroute`, `iftop`, `nethogs`, `socat`,
+`ipcalc`, `whois`, `tree`), `bash` with completion, `zsh` with
 [oh-my-zsh](https://ohmyz.sh) in `/usr/share/oh-my-zsh`, and `vim`,
 `tmux`, `htop`, `git`, `jq` and the usual shell tools. No cloud-init, no
 snaps, no recommends. The full list is in `packages.txt` of a build.
@@ -71,6 +74,11 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   plugins, from the shared copy in `/usr/share/oh-my-zsh` (no
   self-update; `git -C /usr/share/oh-my-zsh pull` as root updates it).
   Both are in `/root` too; the profile picks each user's shell.
+- **History:** `last` and `last reboot` work from the first boot
+  (`wtmpdb`, with its PAM module recording logins); `sar` has the load,
+  memory, disk and network history every 10 minutes (`sysstat`, enabled),
+  and `atop -r` the per-process history (`atop`, logging to
+  `/var/log/atop`).
 - **Message of the day:** `/etc/update-motd.d/00-ump` alone: the UMP
   banner, the host, when and from which profile it was installed,
   uptime and load, memory, the root disk and the addresses. No help

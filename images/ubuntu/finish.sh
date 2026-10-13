@@ -37,8 +37,12 @@ ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 echo UTC > /etc/timezone
 printf 'LANG=C.UTF-8\n' > /etc/default/locale
 
-# services: netplan renders to networkd; resolved; time; ssh; tuned
+# services: netplan renders to networkd; resolved; time; ssh; tuned;
+# the boot and login records of last (wtmpdb); the activity history of
+# sar (sysstat, every 10 minutes) and atop (every 10 minutes, /var/log/atop)
 systemctl enable systemd-networkd.service systemd-resolved.service systemd-timesyncd.service ssh.service tuned.service >/dev/null
+systemctl enable wtmpdb-update-boot.service sysstat.service sysstat-collect.timer sysstat-summary.timer atop.service atop-rotate.timer >/dev/null
+sed -i 's/^ENABLED=.*/ENABLED="true"/' /etc/default/sysstat
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 # root: no password, and no login over SSH unless the profile lists it
