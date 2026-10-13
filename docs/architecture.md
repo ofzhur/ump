@@ -148,9 +148,9 @@ docs/
 
 ## The install pipeline
 
-`ump install <machine> --profile <name>` is a sequence of steps. Each step is
+`ump server reinstall <machine> --profile <name>` is a sequence of steps. Each step is
 idempotent where possible and records its result in the run log, so a run
-can be resumed with `ump install --resume <run-id>`.
+can be resumed with `ump server reinstall --resume <run-id>`.
 
 | # | Step | Runs on | What happens |
 |---|---|---|---|
@@ -363,7 +363,7 @@ legacy boot, which means one configuration to generate.
 Installing an OS destroys data. UMP should make it hard to do on the wrong
 machine:
 
-- `ump plan` never changes anything; `ump install` always prints the plan
+- `ump plan` never changes anything; `ump server reinstall` always prints the plan
 - interactive confirmation requires typing the machine name
 - non-interactive runs need `--yes` **and** a guard, e.g.
   `--confirm-machine hetzner-robot/123456` or
@@ -376,7 +376,7 @@ machine:
 - every run leaves a log with the plan and all commands executed
 - approval can be separated from execution: `ump approve <run-id>` records
   a TTY-only, plan-hash-bound, expiring approval that
-  `ump install --approved` consumes — the basis of the agent workflow in
+  `ump server reinstall --approved` consumes — the basis of the agent workflow in
   [the skill](skill.md)
 - UMP never prompts without a TTY; it fails with exit code 3 and names the
   missing approval
@@ -435,7 +435,7 @@ Deleting the cache and state is always safe.
 
 ## Concurrency
 
-`ump install` accepts several machines (`ump install web-01 web-02 web-03`)
+`ump server reinstall` accepts several machines (`ump server reinstall web-01 web-02 web-03`)
 or a selector, and runs pipelines in parallel with a configurable limit.
 Output switches to a per-machine progress view; per-machine details are in
 the run logs.

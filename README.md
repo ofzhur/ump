@@ -18,7 +18,7 @@ or anything else).
 > **Status:** early implementation. The CLI, the configuration wizard,
 > server listing, details, renaming, reverse DNS, power and rescue for
 > Hetzner Robot, Hetzner Cloud and OVHcloud exist, as do UMP's own rescue
-> system and the first installation: `ump install server` puts Ubuntu
+> system and the first installation: `ump server reinstall` puts Ubuntu
 > 26.04 on every disk of a server as one linear volume group (see
 > [Getting started](#getting-started)). The rest of these documents is
 > design: it captures the ideas and the intended architecture so that the
@@ -47,7 +47,7 @@ or anything else).
               │ hostname template · handoff             │
               └────────────────────┬────────────────────┘
                                    │
-   ump install web-01 --profile base
+   ump server reinstall web-01 --profile base
                                    │
    ┌───────────────┬───────────────┼───────────────┬───────────────┐
    ▼               ▼               ▼               ▼               ▼
@@ -86,7 +86,7 @@ user experience.
 
 ```console
 $ ump config                     # wizard: provider type, credentials, connection test
-$ ump get servers
+$ ump server list
 ACCOUNT   PROVIDER        ID        NAME      IPV4            LOCATION    STATUS
 hrobot    hetzner-robot   123456    web-01    203.0.113.10    fsn1-dc7    ready
 hcloud    hetzner-cloud   234567    edge-01   198.51.100.22   hel1-dc2    running
@@ -109,7 +109,7 @@ handoff   ansible-playbook site.yml --limit web-01
 
 ALL DATA ON nvme0n1, nvme1n1 WILL BE DESTROYED.
 
-$ ump install web-01 --profile base
+$ ump server reinstall web-01 --profile base
 ```
 
 ## Getting started
@@ -118,15 +118,15 @@ $ ump install web-01 --profile base
 $ git clone git@github.com:ofzhur/ump.git && cd ump
 $ make                  # builds ./ump; `make install` puts it into your Go bin directory
 $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
-$ ./ump get servers     # every server of every account; -o wide|json|yaml|name
-$ ./ump describe server web-01   # everything the provider knows about one server
-$ ./ump get servers --diff       # what was added, removed or changed since the last listing
-$ ./ump rename server web-01 prod-web-01   # the name at the provider; the hostname follows at the next install
-$ ./ump set rdns prod-web-01     # reverse DNS of the primary IPv4 = the server name
-$ ./ump reboot server prod-web-01 --wait
-$ ./ump rescue server prod-web-01          # boot the rescue system and land in its root shell
-$ ./ump rescue server prod-web-01 --yes -- lsblk   # or run one command there
-$ ./ump config test     # re-check credentials any time
+$ ./ump server list     # every server of every account; -o wide|json|yaml|name
+$ ./ump server show web-01   # everything the provider knows about one server
+$ ./ump server list --diff       # what was added, removed or changed since the last listing
+$ ./ump server rename web-01 prod-web-01   # the name at the provider; the hostname follows at the next install
+$ ./ump server rdns set prod-web-01     # reverse DNS of the primary IPv4 = the server name
+$ ./ump server reboot prod-web-01 --wait
+$ ./ump server rescue prod-web-01          # boot the rescue system and land in its root shell
+$ ./ump server rescue prod-web-01 --yes -- lsblk   # or run one command there
+$ ./ump config isp test     # re-check credentials any time
 ```
 
 Go 1.26 or newer builds it; an older `go` downloads the pinned toolchain
@@ -137,7 +137,7 @@ lists the targets.
 Credentials never land in `config.yaml` as plaintext: the wizard stores
 them in files only you can read, or references environment variables or
 a command such as `pass show …`. Without a terminal (CI, agents), use
-`ump config add TYPE NAME --set KEY=VALUE …` — `ump config types` lists
+`ump config isp add TYPE NAME --set KEY=VALUE …` — `ump config isp types` lists
 the settings of each provider. See [CLI](docs/cli.md) and
 [Configuration](docs/configuration.md).
 
@@ -166,9 +166,9 @@ apart. See [the skill](docs/skill.md).
 | [Providers](docs/providers.md) | Provider capabilities and planned integrations |
 | [Skill](docs/skill.md) | The UMP skill: operating a hybrid fleet and its Terraform/Ansible repository with an AI agent; reference repository layout; safety model |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system: one kernel and initramfs per architecture, built from Debian, entered with kexec from any provider's rescue system or running system; also the layout of the storage that serves it |
-| [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu 26.04 system `ump install` puts on disks, and its defaults |
+| [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu 26.04 system `ump server reinstall` puts on disks, and its defaults |
 | [Profiles](profiles/README.md) | what a server becomes: image, disk layout, users and keys, packages, firewall, provision step; the default profile and the named layouts |
-| [Installer](install/README.md) | what `ump install` runs in the rescue system: disks, md and LVM, the image, users, packages, firewall, the boot loader |
+| [Installer](install/README.md) | what `ump server reinstall` runs in the rescue system: disks, md and LVM, the image, users, packages, firewall, the boot loader |
 | [Roadmap](docs/roadmap.md) | Milestones and open questions |
 
 ## Goals

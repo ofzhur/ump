@@ -208,6 +208,8 @@ type testEnv struct {
 	remoteStdin []string
 	// agentKeys is what the fake ssh-agent lists.
 	agentKeys []string
+	// editorHook plays the user's editor; nil edits nothing.
+	editorHook func(path string) error
 	// directRoot: the running system lets UMP in as root; inImage: it runs
 	// the UMP rescue system already; rescueNoKey: the provider's rescue
 	// system does not take UMP's key; entryExit: the entry script fails
@@ -280,6 +282,12 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 			return e.sshExit, nil
 		},
 		probe: func(ctx context.Context, addr string) bool { return true },
+		editor: func(path string) error {
+			if e.editorHook == nil {
+				return nil
+			}
+			return e.editorHook(path)
+		},
 		agentKeys: func() ([]string, error) {
 			if e.agentKeys == nil {
 				return nil, errors.New("ssh-add -L lists no keys")
@@ -450,7 +458,7 @@ func expectRows(t *testing.T, got string, want [][]string) {
 func TestGetServersTable(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, errOut, code := e.run("", false, "get", "servers", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "list", "--account", "one")
 	if code != 0 || errOut != "" {
 		t.Fatalf("code %d, stderr %q", code, errOut)
 	}
@@ -463,12 +471,12 @@ func TestGetServersTable(t *testing.T) {
 		t.Errorf("unexpected column alignment:\n%s", out)
 	}
 
-	out, _, _ = e.run("", false, "list", "srv", "--account", "one", "--no-headers")
+	out, _, _ = e.run("", false, "server", "ls", "--account", "one", "--no-headers")
 	if len(fields(out)) != 2 {
 		t.Errorf("aliases or --no-headers broken:\n%s", out)
 	}
 
-	out, _, code = e.run("", false, "get", "servers", "--account", "one", "-o", "wide")
+	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
 	if code != 0 {
 		t.Fatal(out)
 	}
@@ -482,7 +490,7 @@ func TestGetServersTable(t *testing.T) {
 func TestGetServersFormats(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, _, code := e.run("", false, "get", "servers", "--account", "one", "-o", "json")
+	out, _, code := e.run("", false, "server", "list", "--account", "one", "-o", "json")
 	if code != 0 {
 		t.Fatal(out)
 	}
@@ -494,23 +502,23 @@ func TestGetServersFormats(t *testing.T) {
 		t.Errorf("unexpected JSON: %+v", ms)
 	}
 
-	out, _, _ = e.run("", false, "get", "servers", "--account", "one", "-o", "yaml")
+	out, _, _ = e.run("", false, "server", "list", "--account", "one", "-o", "yaml")
 	if !strings.HasPrefix(out, "- provider: fake\n  account: one\n  id: \"2\"\n") {
 		t.Errorf("unexpected YAML:\n%s", out)
 	}
 
-	out, _, _ = e.run("", false, "get", "servers", "--account", "one", "-o", "name")
+	out, _, _ = e.run("", false, "server", "list", "--account", "one", "-o", "name")
 	if out != "fake/2\nfake/1\n" {
 		t.Errorf("unexpected names: %q", out)
 	}
 
-	_, errOut, code := e.run("", false, "get", "servers", "-o", "xml")
+	_, errOut, code := e.run("", false, "server", "list", "-o", "xml")
 	if code != 2 || !strings.Contains(errOut, "unknown output format") {
 		t.Errorf("bad format: code %d, %q", code, errOut)
 	}
 
 	e.write("defaults:\n  output: name\n" + testConfig)
-	out, _, _ = e.run("", false, "get", "servers", "--account", "one")
+	out, _, _ = e.run("", false, "server", "list", "--account", "one")
 	if out != "fake/2\nfake/1\n" {
 		t.Errorf("defaults.output ignored: %q", out)
 	}
@@ -519,7 +527,7 @@ func TestGetServersFormats(t *testing.T) {
 func TestGetServersRefs(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, errOut, code := e.run("", false, "get", "servers", "--account", "one", "web-01", "fake/2", "203.0.113.11", "nope")
+	out, errOut, code := e.run("", false, "server", "list", "--account", "one", "web-01", "fake/2", "203.0.113.11", "nope")
 	if code != 1 {
 		t.Errorf("code %d", code)
 	}
@@ -531,7 +539,7 @@ func TestGetServersRefs(t *testing.T) {
 	if errOut != "ump: server \"nope\" not found\nump: 1 of 4 servers not found\n" {
 		t.Errorf("stderr: %q", errOut)
 	}
-	out, _, code = e.run("", false, "get", "servers", "--account", "one", "2001:db8::1", "-o", "name")
+	out, _, code = e.run("", false, "server", "list", "--account", "one", "2001:db8::1", "-o", "name")
 	if code != 0 || out != "fake/1\n" {
 		t.Errorf("IPv6 prefix lookup: code %d, %q", code, out)
 	}
@@ -540,7 +548,7 @@ func TestGetServersRefs(t *testing.T) {
 func TestGetServersPartialFailure(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, errOut, code := e.run("", false, "get", "servers")
+	out, errOut, code := e.run("", false, "server", "list")
 	if code != 4 {
 		t.Errorf("code %d", code)
 	}
@@ -552,7 +560,7 @@ func TestGetServersPartialFailure(t *testing.T) {
 		t.Errorf("stderr: %q", errOut)
 	}
 
-	_, errOut, code = e.run("", false, "get", "servers", "--account", "nope")
+	_, errOut, code = e.run("", false, "server", "list", "--account", "nope")
 	if code != 2 || !strings.Contains(errOut, `account "nope" is not configured (configured: one, two)`) {
 		t.Errorf("unknown account: code %d, %q", code, errOut)
 	}
@@ -560,15 +568,15 @@ func TestGetServersPartialFailure(t *testing.T) {
 
 func TestGetServersNoConfig(t *testing.T) {
 	e := newTestEnv(t)
-	_, errOut, code := e.run("", false, "get", "servers")
-	if code != 1 || !strings.Contains(errOut, "run `ump config`") {
+	_, errOut, code := e.run("", false, "server", "list")
+	if code != 1 || !strings.Contains(errOut, "run `ump config isp`") {
 		t.Errorf("code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "get", "pods")
-	if code != 2 || !strings.Contains(errOut, `unknown resource type "pods"`) {
+	_, errOut, code = e.run("", false, "server", "pods")
+	if code != 2 || !strings.Contains(errOut, `unknown command "pods" for ump server`) {
 		t.Errorf("code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "get", "servers", "--bogus")
+	_, errOut, code = e.run("", false, "server", "list", "--bogus")
 	if code != 2 || !strings.Contains(errOut, "unknown flag") {
 		t.Errorf("code %d, %q", code, errOut)
 	}
@@ -578,7 +586,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
 
-	out, errOut, code := e.run("", false, "config", "add", "fake", "three", "--set", "login=carol", "--set", "password=env:FAKE_PASS", "--set", "region=us")
+	out, errOut, code := e.run("", false, "config", "isp", "add", "fake", "three", "--set", "login=carol", "--set", "password=env:FAKE_PASS", "--set", "region=us")
 	if code != 0 || !strings.Contains(out, "Added account three (fake)") || !strings.Contains(out, "(2 servers)") {
 		t.Fatalf("add: code %d, out %q, err %q", code, out, errOut)
 	}
@@ -586,7 +594,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 		t.Errorf("saved config:\n%s", text)
 	}
 
-	out, _, code = e.run("", false, "config", "view")
+	out, _, code = e.run("", false, "config", "isp", "view")
 	if code != 0 || !strings.HasPrefix(out, "# "+e.cfgPath+"\n") {
 		t.Fatalf("view: code %d\n%s", code, out)
 	}
@@ -595,7 +603,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 		t.Errorf("view redaction:\n%s", out)
 	}
 
-	out, errOut, code = e.run("", false, "config", "test")
+	out, errOut, code = e.run("", false, "config", "isp", "test")
 	if code != 4 {
 		t.Errorf("test: code %d", code)
 	}
@@ -608,7 +616,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 	if !strings.Contains(errOut, "1 of 3 accounts failed") {
 		t.Errorf("test stderr: %q", errOut)
 	}
-	out, _, code = e.run("", false, "config", "test", "one")
+	out, _, code = e.run("", false, "config", "isp", "test", "one")
 	if code != 0 || len(fields(out)) != 2 {
 		t.Errorf("test one: code %d\n%s", code, out)
 	}
@@ -619,7 +627,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.write(e.read() + "  four:\n    type: fake\n    login: d\n    password: {file: " + secret + "}\n")
-	out, _, code = e.run("", false, "config", "remove", "four")
+	out, _, code = e.run("", false, "config", "isp", "remove", "four")
 	if code != 0 || !strings.Contains(out, "Removed account four (fake)") || !strings.Contains(out, "Removed secret file") {
 		t.Errorf("remove: code %d\n%s", code, out)
 	}
@@ -629,7 +637,7 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 	if strings.Contains(e.read(), "four:") {
 		t.Error("account four still in config")
 	}
-	_, errOut, code = e.run("", false, "config", "remove", "four")
+	_, errOut, code = e.run("", false, "config", "isp", "remove", "four")
 	if code != 1 || !strings.Contains(errOut, "not configured") {
 		t.Errorf("remove again: code %d, %q", code, errOut)
 	}
@@ -644,13 +652,13 @@ func TestConfigAddRejects(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"config", "add", "nope", "x", "--set", "a=b"}, 2, "unknown provider type"},
-		{[]string{"config", "add", "fake", "x", "--set", "bogus=1"}, 2, `has no setting "bogus"`},
-		{[]string{"config", "add", "fake", "x", "--set", "login=a"}, 2, "password is required"},
-		{[]string{"config", "add", "fake", "Bad Name", "--set", "login=a"}, 2, "invalid account name"},
-		{[]string{"config", "add", "fake", "x", "--set", "login=a", "--set", "password=bad"}, 4, "not saved"},
-		{[]string{"config", "add", "fake", "x", "--set", "login=a", "--set", "password=env:UMP_TEST_UNSET"}, 1, "UMP_TEST_UNSET is not set"},
-		{[]string{"config", "add", "fake"}, 2, "accepts 2 arg(s)"},
+		{[]string{"config", "isp", "add", "nope", "x", "--set", "a=b"}, 2, "unknown provider type"},
+		{[]string{"config", "isp", "add", "fake", "x", "--set", "bogus=1"}, 2, `has no setting "bogus"`},
+		{[]string{"config", "isp", "add", "fake", "x", "--set", "login=a"}, 2, "password is required"},
+		{[]string{"config", "isp", "add", "fake", "Bad Name", "--set", "login=a"}, 2, "invalid account name"},
+		{[]string{"config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=bad"}, 4, "not saved"},
+		{[]string{"config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=env:UMP_TEST_UNSET"}, 1, "UMP_TEST_UNSET is not set"},
+		{[]string{"config", "isp", "add", "fake"}, 2, "accepts 2 arg(s)"},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -661,11 +669,11 @@ func TestConfigAddRejects(t *testing.T) {
 	if e.read() != before {
 		t.Error("rejected adds changed the configuration")
 	}
-	out, _, code := e.run("", false, "config", "add", "fake", "x", "--set", "login=a", "--set", "password=bad", "--no-test")
+	out, _, code := e.run("", false, "config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=bad", "--no-test")
 	if code != 0 || !strings.Contains(out, "Added account x") {
 		t.Errorf("--no-test: code %d, %q", code, out)
 	}
-	out, _, code = e.run("", false, "config", "add", "fake", "x", "--set", "login=a", "--set", "password=s3cret")
+	out, _, code = e.run("", false, "config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=s3cret")
 	if code != 0 || !strings.Contains(out, "Replaced account x") {
 		t.Errorf("replace: code %d, %q", code, out)
 	}
@@ -673,7 +681,7 @@ func TestConfigAddRejects(t *testing.T) {
 
 func TestConfigTypesAndPath(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("", false, "config", "types")
+	out, _, code := e.run("", false, "config", "isp", "types")
 	if code != 0 {
 		t.Fatal(out)
 	}
@@ -695,7 +703,7 @@ func TestConfigTypesAndPath(t *testing.T) {
 
 func TestWizardNeedsTTY(t *testing.T) {
 	e := newTestEnv(t)
-	_, errOut, code := e.run("", false, "config")
+	_, errOut, code := e.run("", false, "config", "isp")
 	if code != 3 || !strings.Contains(errOut, "needs a terminal") {
 		t.Errorf("code %d, %q", code, errOut)
 	}
@@ -704,13 +712,13 @@ func TestWizardNeedsTTY(t *testing.T) {
 func TestWizardFileStorage(t *testing.T) {
 	e := newTestEnv(t)
 	script := "fake\nacc\n1\ncarol\ns3cret\n\nn\n"
-	out, errOut, code := e.run(script, true, "config")
+	out, errOut, code := e.run(script, true, "config", "isp")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
 	for _, want := range []string{"No accounts configured yet.", "Provider type", "1) fake", "Account name [fake]:",
 		"Where should this account's secrets be kept?", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
-		"Saved account acc (fake)", "Done. Try: ump get servers"} {
+		"Saved account acc (fake)", "Done. Try: ump server list"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, out)
 		}
@@ -728,13 +736,13 @@ func TestWizardFileStorage(t *testing.T) {
 		!strings.Contains(text, "    password: {file: "+config.AbbreviateHome(secret)+"}\n") || strings.Contains(text, "s3cret") {
 		t.Errorf("saved config:\n%s", text)
 	}
-	out, _, code = e.run("", false, "get", "servers", "-o", "name")
+	out, _, code = e.run("", false, "server", "list", "-o", "name")
 	if code != 0 || out != "fake/2\nfake/1\n" {
 		t.Errorf("listing with the wizard's config: code %d, %q", code, out)
 	}
 
 	// replacing an existing account asks first; declining asks for another name
-	out, _, code = e.run("fake\nacc\nn\nacc2\n1\ncarol\ns3cret\n\nn\n", true, "config")
+	out, _, code = e.run("fake\nacc\nn\nacc2\n1\ncarol\ns3cret\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, `Account "acc" (fake) exists. Replace it? [y/N]:`) || !strings.Contains(out, "Saved account acc2") {
 		t.Errorf("replace prompt: code %d\n%s", code, out)
 	}
@@ -742,7 +750,7 @@ func TestWizardFileStorage(t *testing.T) {
 
 func TestWizardEnvStorage(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("fake\nacc\n2\ncarol\nFAKE_PASS\n\nn\n", true, "config")
+	out, _, code := e.run("fake\nacc\n2\ncarol\nFAKE_PASS\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Environment variable holding the password [UMP_ACC_PASSWORD]:") ||
 		!strings.Contains(out, "Testing acc ... ok (2 servers)") || strings.Contains(out, "export") {
 		t.Errorf("env storage: code %d\n%s", code, out)
@@ -751,7 +759,7 @@ func TestWizardEnvStorage(t *testing.T) {
 		t.Errorf("config:\n%s", e.read())
 	}
 	// an unset variable skips the test and still saves
-	out, _, code = e.run("fake\nacc2\n2\ncarol\nUMP_TEST_UNSET_VAR\n\nn\n", true, "config")
+	out, _, code = e.run("fake\nacc2\n2\ncarol\nUMP_TEST_UNSET_VAR\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "UMP_TEST_UNSET_VAR is not set in this shell") ||
 		!strings.Contains(out, "Skipping the connection test") || !strings.Contains(out, "Saved account acc2") ||
 		!strings.Contains(out, "export UMP_TEST_UNSET_VAR=<password>") {
@@ -761,7 +769,7 @@ func TestWizardEnvStorage(t *testing.T) {
 
 func TestWizardCommandStorage(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("fake\nacc\n3\ncarol\nfalse\ny\nprintf s3cret\n\nn\n", true, "config")
+	out, _, code := e.run("fake\nacc\n3\ncarol\nfalse\ny\nprintf s3cret\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Try another command? [Y/n]:") || !strings.Contains(out, "Testing acc ... ok (2 servers)") {
 		t.Errorf("command storage: code %d\n%s", code, out)
 	}
@@ -772,7 +780,7 @@ func TestWizardCommandStorage(t *testing.T) {
 
 func TestWizardFailedTestIsNotSaved(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("fake\nacc\n1\ncarol\nbad\n\nn\nn\n", true, "config")
+	out, _, code := e.run("fake\nacc\n1\ncarol\nbad\n\nn\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "failed\n  fake: authentication failed") ||
 		!strings.Contains(out, "Save the account anyway? [y/N]:") || !strings.Contains(out, "Not saved.") {
 		t.Errorf("code %d\n%s", code, out)
@@ -784,7 +792,7 @@ func TestWizardFailedTestIsNotSaved(t *testing.T) {
 		t.Error("secret file was written although the account was not saved")
 	}
 	// closing stdin aborts cleanly
-	_, errOut, code := e.run("fake\n", true, "config")
+	_, errOut, code := e.run("fake\n", true, "config", "isp")
 	if code != 3 || !strings.Contains(errOut, "input closed") {
 		t.Errorf("EOF: code %d, %q", code, errOut)
 	}
@@ -793,7 +801,7 @@ func TestWizardFailedTestIsNotSaved(t *testing.T) {
 func TestWizardQuit(t *testing.T) {
 	e := newTestEnv(t)
 	// q at the provider menu: nothing to add
-	out, errOut, code := e.run("q\n", true, "config")
+	out, errOut, code := e.run("q\n", true, "config", "isp")
 	if code != 0 || errOut != "" || !strings.Contains(out, "  q) quit\n") || !strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit at menu: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -801,7 +809,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("config file was created")
 	}
 	// q in the middle of adding an account: nothing saved
-	out, _, code = e.run("fake\nacc\nq\n", true, "config")
+	out, _, code = e.run("fake\nacc\nq\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") || !strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit mid-account: code %d\n%s", code, out)
 	}
@@ -809,7 +817,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("config file was created")
 	}
 	// "exit" at a choice field, after the secret was typed
-	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\nexit\n", true, "config")
+	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\nexit\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") {
 		t.Errorf("exit at choice: code %d\n%s", code, out)
 	}
@@ -817,8 +825,8 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("secret file was written although the account was not saved")
 	}
 	// q at the yes/no question after a save keeps what was saved
-	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\n\nq\n", true, "config")
-	if code != 0 || !strings.Contains(out, "Saved account acc (fake)") || !strings.Contains(out, "Done. Try: ump get servers") ||
+	out, _, code = e.run("fake\nacc\n1\ncarol\ns3cret\n\nq\n", true, "config", "isp")
+	if code != 0 || !strings.Contains(out, "Saved account acc (fake)") || !strings.Contains(out, "Done. Try: ump server list") ||
 		strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit after save: code %d\n%s", code, out)
 	}
@@ -826,7 +834,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Errorf("config:\n%s", e.read())
 	}
 	// q at the replace question
-	out, _, code = e.run("fake\nacc\nq\n", true, "config")
+	out, _, code = e.run("fake\nacc\nq\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Replace it? [y/N]: ") || !strings.Contains(out, "Nothing saved for this account.") {
 		t.Errorf("quit at replace: code %d\n%s", code, out)
 	}
@@ -842,7 +850,7 @@ func TestWizardInterrupted(t *testing.T) {
 	defer pw.Close()
 	var out, errOut bytes.Buffer
 	a := &app{stdin: pr, stdout: &out, stderr: &errOut, isTTY: func() bool { return true }}
-	code := a.run(ctx, []string{"--config", e.cfgPath, "config"})
+	code := a.run(ctx, []string{"--config", e.cfgPath, "config", "isp"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" {
 		t.Errorf("interrupted at prompt: code %d, stderr %q\n%s", code, errOut.String(), out.String())
 	}
@@ -868,7 +876,7 @@ func TestWizardInterrupted(t *testing.T) {
 		},
 		saveTerm: func() func() { return func() { restored = true } },
 	}
-	code = a.run(ctx, []string{"--config", e.cfgPath, "config"})
+	code = a.run(ctx, []string{"--config", e.cfgPath, "config", "isp"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" || !restored {
 		t.Errorf("interrupted in secret: code %d, stderr %q, restored %v\n%s", code, errOut.String(), restored, out.String())
 	}
@@ -886,7 +894,7 @@ func TestWizardInterrupted(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	cancel()
 	a = &app{stdin: strings.NewReader(""), stdout: &out, stderr: &errOut}
-	code = a.run(ctx, []string{"--config", e.cfgPath, "get", "servers"})
+	code = a.run(ctx, []string{"--config", e.cfgPath, "server", "list"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" {
 		t.Errorf("interrupted listing: code %d, stderr %q", code, errOut.String())
 	}
@@ -919,7 +927,7 @@ func init() {
 func TestDescribeServerText(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, errOut, code := e.run("", false, "describe", "server", "web-01", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "show", "web-01", "--account", "one")
 	if code != 0 || errOut != "" {
 		t.Fatalf("code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -948,7 +956,7 @@ Power:
 	}
 
 	// two servers, separated by a blank line; aliases work
-	out, _, code = e.run("", false, "describe", "srv", "web-01", "fake/1", "--account", "one")
+	out, _, code = e.run("", false, "server", "show", "web-01", "fake/1", "--account", "one")
 	if code != 0 || strings.Count(out, "Name:      web-01") != 2 || !strings.Contains(out, "\n\nName:") {
 		t.Errorf("two refs: code %d\n%s", code, out)
 	}
@@ -957,7 +965,7 @@ Power:
 func TestDescribeServerFormats(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	out, _, code := e.run("", false, "describe", "server", "web-01", "--account", "one", "-o", "json")
+	out, _, code := e.run("", false, "server", "show", "web-01", "--account", "one", "-o", "json")
 	if code != 0 {
 		t.Fatal(out)
 	}
@@ -979,12 +987,12 @@ func TestDescribeServerFormats(t *testing.T) {
 		t.Errorf("sizes must be plain numbers in JSON:\n%s", out)
 	}
 
-	out, _, code = e.run("", false, "describe", "server", "web-01", "--account", "one", "-o", "yaml")
+	out, _, code = e.run("", false, "server", "show", "web-01", "--account", "one", "-o", "yaml")
 	if code != 0 || !strings.HasPrefix(out, "- provider: fake\n  account: one\n") || !strings.Contains(out, "  details:\n    - name: Power\n      fields:\n        state: \"on\"\n        reset_types:\n          - soft\n") {
 		t.Errorf("yaml: code %d\n%s", code, out)
 	}
 
-	_, errOut, code := e.run("", false, "describe", "server", "web-01", "-o", "wide")
+	_, errOut, code := e.run("", false, "server", "show", "web-01", "-o", "wide")
 	if code != 2 || !strings.Contains(errOut, "unknown output format") {
 		t.Errorf("bad format: code %d, %q", code, errOut)
 	}
@@ -995,46 +1003,46 @@ func TestDescribeServerErrors(t *testing.T) {
 	e.write(testConfig)
 
 	// not found
-	out, errOut, code := e.run("", false, "describe", "server", "nope", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "show", "nope", "--account", "one")
 	if code != 1 || out != "" || errOut != "ump: server \"nope\" not found\nump: 0 of 1 servers described\n" {
 		t.Errorf("not found: code %d, out %q, stderr %q", code, out, errOut)
 	}
 	// JSON output stays an array even when nothing matched
-	out, _, _ = e.run("", false, "describe", "server", "nope", "--account", "one", "-o", "json")
+	out, _, _ = e.run("", false, "server", "show", "nope", "--account", "one", "-o", "json")
 	if out != "[]\n" {
 		t.Errorf("json for nothing: %q", out)
 	}
 
 	// ambiguous without a terminal: the same names exist in accounts one and three
 	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
-	_, errOut, code = e.run("", false, "describe", "server", "web-01", "--account", "one,three")
+	_, errOut, code = e.run("", false, "server", "show", "web-01", "--account", "one,three")
 	if code != 1 || !strings.Contains(errOut, `ump: server "web-01" is ambiguous: fake/1 (account one), fake/1 (account three); use provider/id or --account`) {
 		t.Errorf("ambiguous: code %d, %q", code, errOut)
 	}
 
 	// provider error while describing
-	_, errOut, code = e.run("", false, "describe", "server", "db-01", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "show", "db-01", "--account", "one")
 	if code != 4 || !strings.Contains(errOut, "ump: account one: fake: describe failed (HTTP 500)") {
 		t.Errorf("provider error: code %d, %q", code, errOut)
 	}
 
 	// a failing account is reported, the lookup in the others still works, exit code 4
-	out, errOut, code = e.run("", false, "describe", "server", "web-01", "--account", "one,two")
+	out, errOut, code = e.run("", false, "server", "show", "web-01", "--account", "one,two")
 	if code != 4 || !strings.Contains(out, "Name:      web-01") || !strings.Contains(errOut, "account two: fake: authentication failed") {
 		t.Errorf("failing account: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	_, errOut, code = e.run("", false, "describe", "server", "nope", "--account", "one,two")
+	_, errOut, code = e.run("", false, "server", "show", "nope", "--account", "one,two")
 	if code != 4 || !strings.Contains(errOut, `server "nope" not found (1 of 2 accounts could not be listed)`) {
 		t.Errorf("not found with failing account: code %d, %q", code, errOut)
 	}
 
 	// usage
-	_, errOut, code = e.run("", false, "describe", "server")
+	_, errOut, code = e.run("", false, "server", "show")
 	if code != 2 || !strings.Contains(errOut, "requires at least 1 arg") {
 		t.Errorf("no ref: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "describe", "pod", "x")
-	if code != 2 || !strings.Contains(errOut, `unknown resource type "pod"`) {
+	_, errOut, code = e.run("", false, "server", "show")
+	if code != 2 || !strings.Contains(errOut, "requires at least 1 arg") {
 		t.Errorf("unknown resource: code %d, %q", code, errOut)
 	}
 }
@@ -1042,7 +1050,7 @@ func TestDescribeServerErrors(t *testing.T) {
 func TestDescribeServerWithoutDescriber(t *testing.T) {
 	e := newTestEnv(t)
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	out, errOut, code := e.run("", false, "describe", "server", "web-01")
+	out, errOut, code := e.run("", false, "server", "show", "web-01")
 	if code != 0 || errOut != "" || !strings.Contains(out, "Ref:       listonly/1\n") || strings.Contains(out, "Power:") {
 		t.Errorf("fallback: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1055,14 +1063,14 @@ func TestGetServersDiff(t *testing.T) {
 	e.write(testConfig)
 
 	// first listing: nothing to compare, but the state is recorded
-	out, errOut, code := e.run("", false, "get", "servers", "--diff", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "list", "--diff", "--account", "one")
 	if code != 0 || out != "" || errOut != "account one: first listing, nothing to compare yet (2 servers recorded)\n" {
 		t.Errorf("first diff: code %d, out %q, stderr %q", code, out, errOut)
 	}
 
 	// an hour later nothing changed
 	e.now = e.now.Add(time.Hour)
-	out, errOut, code = e.run("", false, "get", "servers", "--diff", "--account", "one")
+	out, errOut, code = e.run("", false, "server", "list", "--diff", "--account", "one")
 	if code != 0 || out != "" || errOut != "No changes since 2026-10-12 09:00 UTC (2 servers).\n" {
 		t.Errorf("unchanged diff: code %d, out %q, stderr %q", code, out, errOut)
 	}
@@ -1070,7 +1078,7 @@ func TestGetServersDiff(t *testing.T) {
 	// then the world moves on
 	e.write(strings.Replace(testConfig, "    password: {env: FAKE_PASS}\n", "    password: {env: FAKE_PASS}\n"+variantB, 1))
 	e.now = e.now.Add(time.Hour)
-	out, errOut, code = e.run("", false, "get", "servers", "--diff", "--account", "one")
+	out, errOut, code = e.run("", false, "server", "list", "--diff", "--account", "one")
 	if code != 0 {
 		t.Fatalf("diff: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1088,7 +1096,7 @@ changed   one       fake       1    web-01     203.0.113.12   eu-1       off    
 
 	// right after, nothing changed again; the JSON report says so
 	e.now = e.now.Add(time.Hour)
-	out, _, code = e.run("", false, "get", "servers", "--diff", "--account", "one", "-o", "json")
+	out, _, code = e.run("", false, "server", "list", "--diff", "--account", "one", "-o", "json")
 	if code != 0 {
 		t.Fatal(out)
 	}
@@ -1106,37 +1114,37 @@ changed   one       fake       1    web-01     203.0.113.12   eu-1       off    
 	}
 
 	// --since reaches back to the earlier state; -o name marks the changes
-	out, errOut, code = e.run("", false, "get", "servers", "--since", "3h", "--account", "one", "-o", "name")
+	out, errOut, code = e.run("", false, "server", "list", "--since", "3h", "--account", "one", "-o", "name")
 	if code != 0 || out != "+ fake/3\n- fake/2\n~ fake/1\n" || errOut != "1 added, 1 removed, 1 changed, 0 unchanged since 2026-10-12 09:00 UTC.\n" {
 		t.Errorf("--since 3h: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	out, _, code = e.run("", false, "get", "servers", "--since", "2026-10-12T10:30:00Z", "--account", "one", "-o", "json")
+	out, _, code = e.run("", false, "server", "list", "--since", "2026-10-12T10:30:00Z", "--account", "one", "-o", "json")
 	if code != 0 || !strings.Contains(out, `"change": "added"`) {
 		t.Errorf("--since timestamp: code %d\n%s", code, out)
 	}
 	// before the history starts: not compared
-	_, errOut, code = e.run("", false, "get", "servers", "--since", "1w", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "list", "--since", "1w", "--account", "one")
 	if code != 0 || !strings.Contains(errOut, "account one: no listing from before 2026-10-05 12:00 UTC (the cache starts 2026-10-12 09:00 UTC)") {
 		t.Errorf("--since before history: code %d, %q", code, errOut)
 	}
 	// the JSON report explains a skipped account too
-	out, _, _ = e.run("", false, "get", "servers", "--since", "1w", "--account", "one", "-o", "json")
+	out, _, _ = e.run("", false, "server", "list", "--since", "1w", "--account", "one", "-o", "json")
 	if !strings.Contains(out, `"compared": false`) || !strings.Contains(out, `"reason": "no listing from before`) {
 		t.Errorf("json for skipped account:\n%s", out)
 	}
 
 	// a failing account is reported and the others are still compared
-	_, errOut, code = e.run("", false, "get", "servers", "--diff")
+	_, errOut, code = e.run("", false, "server", "list", "--diff")
 	if code != 4 || !strings.Contains(errOut, "account two: fake: authentication failed") || !strings.Contains(errOut, "No changes since") {
 		t.Errorf("failing account: code %d, %q", code, errOut)
 	}
 
 	// usage
 	for _, args := range [][]string{
-		{"get", "servers", "--diff", "web-01"},
-		{"get", "servers", "--cached", "--diff"},
-		{"get", "servers", "--cached", "--since", "1h"},
-		{"get", "servers", "--since", "yesterday"},
+		{"server", "list", "--diff", "web-01"},
+		{"server", "list", "--cached", "--diff"},
+		{"server", "list", "--cached", "--since", "1h"},
+		{"server", "list", "--since", "yesterday"},
 	} {
 		if _, _, code := e.run("", false, args...); code != 2 {
 			t.Errorf("%v: code %d, want 2", args, code)
@@ -1147,17 +1155,17 @@ changed   one       fake       1    web-01     203.0.113.12   eu-1       off    
 func TestGetServersCached(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
-	_, errOut, code := e.run("", false, "get", "servers", "--cached", "--account", "one")
+	_, errOut, code := e.run("", false, "server", "list", "--cached", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, "account one: not in the cache yet") {
 		t.Errorf("empty cache: code %d, %q", code, errOut)
 	}
-	if _, _, code := e.run("", false, "get", "servers", "--account", "one"); code != 0 {
+	if _, _, code := e.run("", false, "server", "list", "--account", "one"); code != 0 {
 		t.Fatal("listing failed")
 	}
 	// the provider now answers differently, the cache still has the old listing
 	e.write(strings.Replace(testConfig, "    password: {env: FAKE_PASS}\n", "    password: {env: FAKE_PASS}\n"+variantB, 1))
 	e.now = e.now.Add(time.Hour)
-	out, errOut, code := e.run("", false, "get", "servers", "--cached", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "list", "--cached", "--account", "one")
 	if code != 0 || errOut != "From cache: one (2026-10-12 09:00 UTC)\n" {
 		t.Errorf("cached: code %d, stderr %q", code, errOut)
 	}
@@ -1166,15 +1174,15 @@ func TestGetServersCached(t *testing.T) {
 		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off"},
 		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running"},
 	})
-	out, _, code = e.run("", false, "get", "servers", "--cached", "--account", "one", "db-01", "-o", "name")
+	out, _, code = e.run("", false, "server", "list", "--cached", "--account", "one", "db-01", "-o", "name")
 	if code != 0 || out != "fake/2\n" {
 		t.Errorf("cached lookup: code %d, %q", code, out)
 	}
 	// describe records listings as well
-	if _, _, code := e.run("", false, "describe", "server", "web-01", "--account", "one"); code != 0 {
+	if _, _, code := e.run("", false, "server", "show", "web-01", "--account", "one"); code != 0 {
 		t.Fatal("describe failed")
 	}
-	out, _, _ = e.run("", false, "get", "servers", "--cached", "--account", "one", "-o", "name")
+	out, _, _ = e.run("", false, "server", "list", "--cached", "--account", "one", "-o", "name")
 	if out != "fake/3\nfake/1\n" {
 		t.Errorf("cache after describe: %q", out)
 	}
@@ -1205,17 +1213,17 @@ func TestDuplicateNames(t *testing.T) {
 	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
 
 	// a listing shows every match and says so
-	out, errOut, code := e.run("", false, "get", "servers", "web-01", "--account", "one,three")
+	out, errOut, code := e.run("", false, "server", "list", "web-01", "--account", "one,three")
 	if code != 0 || len(fields(out)) != 3 || errOut != "Note: \"web-01\" matches 2 servers: fake/1 (account one), fake/1 (account three)\n" {
 		t.Errorf("get: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	out, errOut, code = e.run("", false, "get", "servers", "web-01", "--account", "one,three", "-o", "json")
+	out, errOut, code = e.run("", false, "server", "list", "web-01", "--account", "one,three", "-o", "json")
 	if code != 0 || strings.Count(out, `"name": "web-01"`) != 2 || !strings.HasPrefix(errOut, "Note:") || strings.Contains(out, "Note:") {
 		t.Errorf("get json: code %d, stderr %q\n%s", code, errOut, out)
 	}
 
 	// on a terminal, describe asks which one; the question goes to stderr
-	out, errOut, code = e.run("2\n", true, "describe", "server", "web-01", "--account", "one,three")
+	out, errOut, code = e.run("2\n", true, "server", "show", "web-01", "--account", "one,three")
 	if code != 0 {
 		t.Fatalf("describe with choice: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1228,21 +1236,21 @@ func TestDuplicateNames(t *testing.T) {
 		t.Errorf("stdout after choosing 2:\n%s", out)
 	}
 	// JSON stays clean when stdin is a terminal but stdout is piped
-	out, _, code = e.run("1\n", true, "describe", "server", "web-01", "--account", "one,three", "-o", "json")
+	out, _, code = e.run("1\n", true, "server", "show", "web-01", "--account", "one,three", "-o", "json")
 	if code != 0 || !strings.HasPrefix(out, "[\n  {\n    \"provider\": \"fake\",") || !strings.Contains(out, `"account": "one"`) {
 		t.Errorf("json with prompt: code %d\n%s", code, out)
 	}
 	// an empty answer asks again; q aborts without describing anything
-	out, errOut, code = e.run("\n1\n", true, "describe", "server", "web-01", "--account", "one,three")
+	out, errOut, code = e.run("\n1\n", true, "server", "show", "web-01", "--account", "one,three")
 	if code != 0 || strings.Count(errOut, "Choice: ") != 2 || !strings.Contains(errOut, "Please enter a number between 1 and 2, or q to quit.") || !strings.Contains(out, "Account:   one\n") {
 		t.Errorf("empty answer: code %d, stderr %q", code, errOut)
 	}
-	out, errOut, code = e.run("q\n", true, "describe", "server", "web-01", "--account", "one,three")
+	out, errOut, code = e.run("q\n", true, "server", "show", "web-01", "--account", "one,three")
 	if code != 3 || out != "" || !strings.HasSuffix(errOut, "ump: aborted\n") {
 		t.Errorf("quit: code %d, out %q, stderr %q", code, out, errOut)
 	}
 	// a unique reference never asks
-	out, errOut, code = e.run("", true, "describe", "server", "db-01", "--account", "one")
+	out, errOut, code = e.run("", true, "server", "show", "db-01", "--account", "one")
 	if code != 4 || strings.Contains(errOut, "Which one") {
 		t.Errorf("unique ref: code %d, stderr %q", code, errOut)
 	}
@@ -1253,39 +1261,39 @@ func TestRenameServer(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
 
-	out, errOut, code := e.run("", false, "rename", "server", "web-01", "prod-web-01", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "rename", "web-01", "prod-web-01", "--account", "one")
 	if code != 0 || out != "Renamed fake/1 (account one) from web-01 to prod-web-01\n" ||
 		errOut != "The hostname of the installed system is unchanged; ump install applies the new name.\n" {
 		t.Errorf("rename: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	out, _, code = e.run("", false, "rename", "server", "fake/1", "prod-web-01.example.net", "--account", "one", "-o", "json")
+	out, _, code = e.run("", false, "server", "rename", "fake/1", "prod-web-01.example.net", "--account", "one", "-o", "json")
 	if code != 0 || !strings.Contains(out, `"name": "prod-web-01.example.net"`) || !strings.HasPrefix(out, "[\n") {
 		t.Errorf("rename json: code %d\n%s", code, out)
 	}
-	out, _, code = e.run("", false, "rename", "server", "203.0.113.10", "x-01", "--account", "one", "-o", "name")
+	out, _, code = e.run("", false, "server", "rename", "203.0.113.10", "x-01", "--account", "one", "-o", "name")
 	if code != 0 || out != "fake/1\n" {
 		t.Errorf("rename name output: code %d, %q", code, out)
 	}
 
 	// nothing to do when the name is already set
-	out, errOut, code = e.run("", false, "rename", "server", "web-01", "web-01", "--account", "one")
+	out, errOut, code = e.run("", false, "server", "rename", "web-01", "web-01", "--account", "one")
 	if code != 0 || out != "" || errOut != "fake/1 is already named web-01; nothing to do.\n" {
 		t.Errorf("same name: code %d, out %q, stderr %q", code, out, errOut)
 	}
 
 	// a name another server already has is refused unless forced
-	_, errOut, code = e.run("", false, "rename", "server", "web-01", "db-01", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rename", "web-01", "db-01", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, `the name "db-01" is already used by fake/2 (account one); pick another name or use --force`) {
 		t.Errorf("duplicate refused: code %d, %q", code, errOut)
 	}
-	out, _, code = e.run("", false, "rename", "server", "web-01", "db-01", "--account", "one", "--force")
+	out, _, code = e.run("", false, "server", "rename", "web-01", "db-01", "--account", "one", "--force")
 	if code != 0 || out != "Renamed fake/1 (account one) from web-01 to db-01\n" {
 		t.Errorf("forced: code %d, %q", code, out)
 	}
 
 	// invalid names are rejected before any API call
 	for _, bad := range []string{"Web-01", "web_01", ".web", "web-", "web..01", "", "a b"} {
-		_, errOut, code = e.run("", false, "rename", "server", "web-01", bad, "--account", "one")
+		_, errOut, code = e.run("", false, "server", "rename", "web-01", bad, "--account", "one")
 		if code != 2 || !strings.Contains(errOut, "invalid name") {
 			t.Errorf("name %q: code %d, %q", bad, code, errOut)
 		}
@@ -1300,37 +1308,37 @@ func TestRenameServer(t *testing.T) {
 	}
 
 	// provider refusal, not found, usage
-	_, errOut, code = e.run("", false, "rename", "server", "db-01", "new-01", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rename", "db-01", "new-01", "--account", "one")
 	if code != 4 || !strings.Contains(errOut, "ump: account one: fake: name taken (uniqueness_error, HTTP 409)") {
 		t.Errorf("provider error: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "rename", "server", "nope", "new-01", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rename", "nope", "new-01", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, `server "nope" not found`) {
 		t.Errorf("not found: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "rename", "server", "web-01")
+	_, errOut, code = e.run("", false, "server", "rename", "web-01")
 	if code != 2 || !strings.Contains(errOut, "accepts 2 arg(s)") {
 		t.Errorf("usage: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "rename", "server", "web-01", "x-01", "-o", "table", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rename", "web-01", "x-01", "-o", "table", "--account", "one")
 	if code != 2 || !strings.Contains(errOut, "unknown output format") {
 		t.Errorf("table output: code %d, %q", code, errOut)
 	}
 
 	// duplicates ask on a terminal and fail without one
 	e.write(testConfig + "  three:\n    type: fake\n    login: carol\n    password: s3cret\n")
-	out, errOut, code = e.run("2\n", true, "rename", "server", "web-01", "new-01", "--account", "one,three")
+	out, errOut, code = e.run("2\n", true, "server", "rename", "web-01", "new-01", "--account", "one,three")
 	if code != 0 || out != "Renamed fake/1 (account three) from web-01 to new-01\n" || !strings.Contains(errOut, "Which one?") {
 		t.Errorf("prompted rename: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	_, errOut, code = e.run("", false, "rename", "server", "web-01", "new-01", "--account", "one,three")
+	_, errOut, code = e.run("", false, "server", "rename", "web-01", "new-01", "--account", "one,three")
 	if code != 1 || !strings.Contains(errOut, `server "web-01" is ambiguous`) {
 		t.Errorf("ambiguous: code %d, %q", code, errOut)
 	}
 
 	// a provider without rename support
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	_, errOut, code = e.run("", false, "rename", "server", "web-01", "new-01")
+	_, errOut, code = e.run("", false, "server", "rename", "web-01", "new-01")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot rename servers") {
 		t.Errorf("no renamer: code %d, %q", code, errOut)
 	}
@@ -1344,7 +1352,7 @@ func TestReverseDNSCommands(t *testing.T) {
 	}
 
 	// nothing set yet: the primary IPv4 of every server is listed without an entry
-	out, errOut, code := e.run("", false, "get", "rdns", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "rdns", "get", "--account", "one")
 	if code != 0 || errOut != "" {
 		t.Fatalf("get rdns: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1355,31 +1363,31 @@ func TestReverseDNSCommands(t *testing.T) {
 	})
 
 	// set with the server name as default, by name; then explicitly, by provider/id with an IPv6 address
-	out, errOut, code = e.run("", false, "set", "rdns", "web-01", "--account", "one")
+	out, errOut, code = e.run("", false, "server", "rdns", "set", "web-01", "--account", "one")
 	if code != 0 || out != "Set reverse DNS of 203.0.113.10 (fake/1, account one) to web-01\n" || errOut != "" {
 		t.Errorf("set default: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	out, _, code = e.run("", false, "set", "ptr", "fake/1", "web-01.example.net.", "--ip", "2001:db8::1", "--account", "one", "-o", "json")
+	out, _, code = e.run("", false, "server", "ptr", "set", "fake/1", "web-01.example.net.", "--ip", "2001:db8::1", "--account", "one", "-o", "json")
 	if code != 0 || !strings.Contains(out, `"ip": "2001:db8::1"`) || !strings.Contains(out, `"ptr": "web-01.example.net"`) {
 		t.Errorf("set with --ip json: code %d\n%s", code, out)
 	}
-	out, _, _ = e.run("", false, "get", "rdns", "web-01", "--account", "one")
+	out, _, _ = e.run("", false, "server", "rdns", "get", "web-01", "--account", "one")
 	expectRows(t, out, [][]string{
 		{"ACCOUNT", "SERVER", "IP", "PTR"},
 		{"one", "web-01", "203.0.113.10", "web-01"},
 		{"one", "web-01", "2001:db8::1", "web-01.example.net"},
 	})
-	out, _, code = e.run("", false, "get", "rdns", "web-01", "--account", "one", "-o", "json")
+	out, _, code = e.run("", false, "server", "rdns", "get", "web-01", "--account", "one", "-o", "json")
 	if code != 0 || !strings.HasPrefix(out, "[\n  {\n    \"provider\": \"fake\",") || !strings.Contains(out, `"server": "web-01"`) {
 		t.Errorf("get rdns json: code %d\n%s", code, out)
 	}
 
 	// delete, by default the primary IPv4; then the IPv6 entry
-	out, _, code = e.run("", false, "delete", "rdns", "web-01", "--account", "one")
+	out, _, code = e.run("", false, "server", "rdns", "delete", "web-01", "--account", "one")
 	if code != 0 || out != "Removed reverse DNS of 203.0.113.10 (fake/1, account one)\n" {
 		t.Errorf("delete: code %d, %q", code, out)
 	}
-	if _, _, code = e.run("", false, "delete", "reverse-dns", "web-01", "--ip", "2001:db8::1", "--account", "one"); code != 0 {
+	if _, _, code = e.run("", false, "server", "reverse-dns", "rm", "web-01", "--ip", "2001:db8::1", "--account", "one"); code != 0 {
 		t.Errorf("delete --ip: code %d", code)
 	}
 	if len(fakePTRs) != 0 {
@@ -1392,16 +1400,15 @@ func TestReverseDNSCommands(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"set", "rdns", "web-01", "x.example.net", "--ip", "203.0.113.99", "--account", "one"}, 1, "does not belong to server"},
-		{[]string{"set", "rdns", "web-01", "Bad_Name", "--account", "one"}, 2, "invalid name"},
-		{[]string{"set", "rdns", "web-01", "--ip", "nope", "--account", "one"}, 2, "invalid address"},
-		{[]string{"set", "rdns", "nope", "--account", "one"}, 1, `server "nope" not found`},
-		{[]string{"set", "rdns"}, 2, "accepts between 1 and 2 arg(s)"},
-		{[]string{"delete", "rdns", "web-01", "x", "--account", "one"}, 2, "accepts 1 arg(s)"},
-		{[]string{"get", "rdns", "--account", "two", "-o", "name"}, 2, "unknown output format"},
-		{[]string{"set", "pods", "x"}, 2, `unknown resource type "pods"`},
-		{[]string{"delete", "pods", "x"}, 2, `unknown resource type "pods"`},
-		{[]string{"get", "rdns", "nope", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"server", "rdns", "set", "web-01", "x.example.net", "--ip", "203.0.113.99", "--account", "one"}, 1, "does not belong to server"},
+		{[]string{"server", "rdns", "set", "web-01", "Bad_Name", "--account", "one"}, 2, "invalid name"},
+		{[]string{"server", "rdns", "set", "web-01", "--ip", "nope", "--account", "one"}, 2, "invalid address"},
+		{[]string{"server", "rdns", "set", "nope", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"server", "rdns", "set"}, 2, "accepts between 1 and 2 arg(s)"},
+		{[]string{"server", "rdns", "delete", "web-01", "x", "--account", "one"}, 2, "accepts 1 arg(s)"},
+		{[]string{"server", "rdns", "get", "--account", "two", "-o", "name"}, 2, "unknown output format"},
+		{[]string{"server", "rdns", "pods", "x"}, 2, `unknown command "pods"`},
+		{[]string{"server", "rdns", "get", "nope", "--account", "one"}, 1, `server "nope" not found`},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -1411,18 +1418,18 @@ func TestReverseDNSCommands(t *testing.T) {
 	}
 	// a server whose lookup fails is reported, the others are listed, exit 4
 	e.write(strings.Replace(testConfig, "    password: wrong\n", "    password: {env: FAKE_PASS}\n", 1))
-	out, errOut, code = e.run("", false, "get", "rdns", "--account", "two")
+	out, errOut, code = e.run("", false, "server", "rdns", "get", "--account", "two")
 	if code != 4 || !strings.Contains(errOut, "ump: account two: fake/2: fake: ptr lookup failed") || len(fields(out)) != 2 {
 		t.Errorf("partial failure: code %d, stderr %q\n%s", code, errOut, out)
 	}
 
 	// a provider without reverse DNS support
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	out, errOut, code = e.run("", false, "get", "rdns")
+	out, errOut, code = e.run("", false, "server", "rdns", "get")
 	if code != 0 || out != "" || errOut != "account lo: provider type listonly cannot manage reverse DNS\n" {
 		t.Errorf("unsupported get: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	_, errOut, code = e.run("", false, "set", "rdns", "web-01")
+	_, errOut, code = e.run("", false, "server", "rdns", "set", "web-01")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot manage reverse DNS") {
 		t.Errorf("unsupported set: code %d, %q", code, errOut)
 	}
@@ -1430,7 +1437,7 @@ func TestReverseDNSCommands(t *testing.T) {
 
 func TestConfigTypesCapabilities(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("", false, "config", "types")
+	out, _, code := e.run("", false, "config", "isp", "types")
 	if code != 0 || !strings.Contains(out, "CAPABILITIES") {
 		t.Fatalf("code %d\n%s", code, out)
 	}
@@ -1464,25 +1471,25 @@ func TestPowerCommands(t *testing.T) {
 	e.write(testConfig)
 	resetFakePower()
 
-	out, errOut, code := e.run("", false, "reboot", "server", "web-01", "--yes", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "reboot", "web-01", "--yes", "--account", "one")
 	if code != 0 || out != "Rebooting fake/1 (web-01, 203.0.113.10) (soft)\n" || errOut != "" {
 		t.Errorf("reboot: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	if _, _, code = e.run("", false, "reboot", "server", "fake/1", "--hard", "--yes", "--account", "one"); code != 0 {
+	if _, _, code = e.run("", false, "server", "reboot", "fake/1", "--hard", "--yes", "--account", "one"); code != 0 {
 		t.Errorf("reboot --hard: code %d", code)
 	}
-	if _, _, code = e.run("", false, "reboot", "server", "203.0.113.10", "--power-cycle", "--yes", "--account", "one"); code != 0 {
+	if _, _, code = e.run("", false, "server", "reboot", "203.0.113.10", "--power-cycle", "--yes", "--account", "one"); code != 0 {
 		t.Errorf("reboot --power-cycle: code %d", code)
 	}
-	out, _, code = e.run("", false, "start", "server", "web-01", "--account", "one")
+	out, _, code = e.run("", false, "server", "start", "web-01", "--account", "one")
 	if code != 0 || out != "Switching on fake/1 (web-01, 203.0.113.10)\n" {
 		t.Errorf("start: code %d, %q", code, out)
 	}
-	out, _, code = e.run("", false, "stop", "server", "web-01", "--yes", "--account", "one")
+	out, _, code = e.run("", false, "server", "stop", "web-01", "--yes", "--account", "one")
 	if code != 0 || out != "Switching off fake/1 (web-01, 203.0.113.10) (shutdown)\n" {
 		t.Errorf("stop: code %d, %q", code, out)
 	}
-	out, _, code = e.run("", false, "stop", "server", "web-01", "--hard", "--yes", "--account", "one")
+	out, _, code = e.run("", false, "server", "stop", "web-01", "--hard", "--yes", "--account", "one")
 	if code != 0 || out != "Switching off fake/1 (web-01, 203.0.113.10) (power off)\n" {
 		t.Errorf("stop --hard: code %d, %q", code, out)
 	}
@@ -1491,19 +1498,19 @@ func TestPowerCommands(t *testing.T) {
 	}
 
 	// confirmation: none without a terminal and --yes; a question on a terminal
-	_, errOut, code = e.run("", false, "reboot", "server", "web-01", "--account", "one")
-	if code != 3 || !strings.Contains(errOut, "ump reboot server needs confirmation: run it in a terminal or pass --yes") {
+	_, errOut, code = e.run("", false, "server", "reboot", "web-01", "--account", "one")
+	if code != 3 || !strings.Contains(errOut, "ump server reboot needs confirmation: run it in a terminal or pass --yes") {
 		t.Errorf("no --yes: code %d, %q", code, errOut)
 	}
-	out, errOut, code = e.run("y\n", true, "reboot", "server", "web-01", "--account", "one")
+	out, errOut, code = e.run("y\n", true, "server", "reboot", "web-01", "--account", "one")
 	if code != 0 || !strings.Contains(errOut, "Reboot fake/1 (web-01, 203.0.113.10) (soft)? [y/N]: ") || !strings.HasPrefix(out, "Rebooting") {
 		t.Errorf("confirmed: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	out, errOut, code = e.run("n\n", true, "stop", "server", "web-01", "--account", "one")
+	out, errOut, code = e.run("n\n", true, "server", "stop", "web-01", "--account", "one")
 	if code != 3 || out != "" || !strings.HasSuffix(errOut, "ump: aborted\n") {
 		t.Errorf("declined: code %d, out %q, stderr %q", code, out, errOut)
 	}
-	if _, _, code = e.run("", false, "start", "server", "web-01", "--account", "one"); code != 0 {
+	if _, _, code = e.run("", false, "server", "start", "web-01", "--account", "one"); code != 0 {
 		t.Error("start must not ask for confirmation")
 	}
 
@@ -1513,11 +1520,11 @@ func TestPowerCommands(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"reboot", "server", "web-01", "--hard", "--power-cycle", "--yes", "--account", "one"}, 2, "exclude each other"},
-		{[]string{"reboot", "server", "db-01", "--yes", "--account", "one"}, 4, "fake: server is locked (locked, HTTP 423)"},
-		{[]string{"reboot", "server", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
-		{[]string{"reboot", "pods", "x"}, 2, `unknown resource type "pods"`},
-		{[]string{"reboot", "server"}, 2, "accepts 1 arg(s)"},
+		{[]string{"server", "reboot", "web-01", "--hard", "--power-cycle", "--yes", "--account", "one"}, 2, "exclude each other"},
+		{[]string{"server", "reboot", "db-01", "--yes", "--account", "one"}, 4, "fake: server is locked (locked, HTTP 423)"},
+		{[]string{"server", "reboot", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"server", "bogus", "x"}, 2, `unknown command "bogus" for ump server`},
+		{[]string{"server", "reboot"}, 2, "accepts 1 arg(s)"},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -1526,7 +1533,7 @@ func TestPowerCommands(t *testing.T) {
 		}
 	}
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	_, errOut, code = e.run("", false, "reboot", "server", "web-01", "--yes")
+	_, errOut, code = e.run("", false, "server", "reboot", "web-01", "--yes")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly cannot control power") {
 		t.Errorf("no power: code %d, %q", code, errOut)
 	}
@@ -1542,7 +1549,7 @@ func TestRescueCommands(t *testing.T) {
 
 	// without a terminal and without a command: the key is generated, the
 	// rescue system armed with it, the server reset, and the ssh command printed
-	out, errOut, code := e.run("", false, "rescue", "server", "web-01", "--ssh-key", keyFile, "--yes", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "rescue", "web-01", "--ssh-key", keyFile, "--yes", "--account", "one")
 	if code != 0 {
 		t.Fatalf("rescue: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1590,7 +1597,7 @@ func TestRescueCommands(t *testing.T) {
 
 	// on a terminal the terminal is handed over to ssh, once the image answers
 	resetFakePower()
-	out, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one")
+	out, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || !strings.Contains(errOut, "Connecting to the UMP rescue system of web-01 as root") {
 		t.Errorf("hand-over: code %d, calls %v, interactive %v, stderr %q", code, e.sshCalls, e.sshInteractive, errOut)
 	}
@@ -1606,7 +1613,7 @@ func TestRescueCommands(t *testing.T) {
 
 	// a command after -- runs in the rescue system, its status becomes ump's
 	e.sshCalls, e.sshInteractive, e.sshExit = nil, nil, 7
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one", "--", "lsblk", "-d")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one", "--", "lsblk", "-d")
 	if code != 7 || strings.Contains(errOut, "ump:") || len(e.sshCalls) != 1 || e.sshInteractive[0] {
 		t.Errorf("command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
 	}
@@ -1617,21 +1624,21 @@ func TestRescueCommands(t *testing.T) {
 
 	// --no-connect, --no-reboot, --no-wait print the command for later; -o json carries it
 	e.sshCalls, e.sshInteractive = nil, nil
-	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--no-connect", "--account", "one")
+	out, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--no-connect", "--account", "one")
 	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, "Connect: ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i ") {
 		t.Errorf("--no-connect: code %d, calls %v\n%s", code, e.sshCalls, out)
 	}
 	resetFakePower()
-	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-reboot", "--yes", "--account", "one")
+	out, _, code = e.run("", true, "server", "rescue", "web-01", "--no-reboot", "--yes", "--account", "one")
 	if code != 0 || !strings.Contains(out, "it boots at the next reboot.") || !strings.Contains(out, "Connect once it is up: ssh -o ServerAliveInterval=5") || strings.Join(fakePower.actions, ",") != "rescue" || len(e.sshCalls) != 0 {
 		t.Errorf("--no-reboot: code %d, actions %v, calls %v\n%s", code, fakePower.actions, e.sshCalls, out)
 	}
-	out, _, code = e.run("", true, "rescue", "server", "web-01", "--no-wait", "--yes", "--account", "one")
+	out, _, code = e.run("", true, "server", "rescue", "web-01", "--no-wait", "--yes", "--account", "one")
 	if code != 0 || !strings.Contains(out, "Connect once it is up: ssh -o ServerAliveInterval=5") || len(e.sshCalls) != 0 {
 		t.Errorf("--no-wait: code %d\n%s", code, out)
 	}
 	resetFakePower()
-	out, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
+	out, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one", "-o", "json")
 	if code != 0 || len(e.sshCalls) != 0 || !strings.Contains(out, `"password": "r3scue"`) || !strings.Contains(out, `"ssh": "ssh -o ServerAliveInterval=5`) || !strings.Contains(out, umpKey+".pub") {
 		t.Errorf("rescue json: code %d, calls %v\n%s", code, e.sshCalls, out)
 	}
@@ -1643,16 +1650,16 @@ func TestRescueCommands(t *testing.T) {
 	}
 
 	// unrescue, with and without reboot
-	out, _, code = e.run("", false, "unrescue", "server", "web-01", "--account", "one")
+	out, _, code = e.run("", false, "server", "unrescue", "web-01", "--account", "one")
 	if code != 0 || out != "Rescue system disabled for fake/1 (web-01, 203.0.113.10); the next boot is from disk.\n" {
 		t.Errorf("unrescue: code %d, %q", code, out)
 	}
 	resetFakePower()
-	out, _, code = e.run("", false, "unrescue", "server", "web-01", "--reboot", "--yes", "--account", "one")
+	out, _, code = e.run("", false, "server", "unrescue", "web-01", "--reboot", "--yes", "--account", "one")
 	if code != 0 || out != "Rescue system disabled for fake/1 (web-01, 203.0.113.10); rebooting from disk.\n" || strings.Join(fakePower.actions, ",") != "unrescue,reboot:hard" {
 		t.Errorf("unrescue --reboot: code %d, %q, actions %v", code, out, fakePower.actions)
 	}
-	if _, errOut, code := e.run("", false, "unrescue", "server", "web-01", "--reboot", "--account", "one"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+	if _, errOut, code := e.run("", false, "server", "unrescue", "web-01", "--reboot", "--account", "one"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
 		t.Errorf("unrescue --reboot without --yes: code %d, %q", code, errOut)
 	}
 
@@ -1662,11 +1669,11 @@ func TestRescueCommands(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"rescue", "server", "web-01", "--yes", "--account", "one", "--ssh-key", "/nonexistent.pub"}, 1, "nonexistent.pub"},
-		{[]string{"rescue", "server", "web-01", "--account", "one"}, 3, "needs confirmation"},
-		{[]string{"rescue", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
-		{[]string{"rescue", "server", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
-		{[]string{"rescue", "server", "web-01", "db-01", "--yes", "--account", "one"}, 2, "expected one server reference, got 2"},
+		{[]string{"server", "rescue", "web-01", "--yes", "--account", "one", "--ssh-key", "/nonexistent.pub"}, 1, "nonexistent.pub"},
+		{[]string{"server", "rescue", "web-01", "--account", "one"}, 3, "needs confirmation"},
+		{[]string{"server", "rescue", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
+		{[]string{"server", "rescue", "nope", "--yes", "--account", "one"}, 1, `server "nope" not found`},
+		{[]string{"server", "rescue", "web-01", "db-01", "--yes", "--account", "one"}, 2, "expected one server reference, got 2"},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -1675,7 +1682,7 @@ func TestRescueCommands(t *testing.T) {
 		}
 	}
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes")
 	if code != 1 || !strings.Contains(errOut, "provider type listonly has no rescue system") {
 		t.Errorf("no rescue: code %d, %q", code, errOut)
 	}
@@ -1706,7 +1713,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
 	os.WriteFile(filepath.Join(home, ".ssh", "id_ed25519"), []byte("private"), 0o600)
 	e.sshExit = 3
-	_, errOut, code = e.run("", false, "ssh", "server", "web-01", "--account", "one", "--", "uname", "-a")
+	_, errOut, code = e.run("", false, "ssh", "web-01", "--account", "one", "--", "uname", "-a")
 	if code != 3 || errOut != "" || len(e.sshCalls) != 1 || e.sshInteractive[0] {
 		t.Errorf("ssh command: code %d, stderr %q, calls %v", code, errOut, e.sshCalls)
 	}
@@ -1716,7 +1723,7 @@ func TestSSHCommandAndKey(t *testing.T) {
 	e.sshExit = 0
 	// --staging uses UMP's key without host key checks; --user changes the login
 	e.sshCalls, e.sshInteractive = nil, nil
-	_, _, code = e.run("", false, "ssh", "server", "fake/1", "--staging", "--user", "deploy", "--account", "one", "--", "id")
+	_, _, code = e.run("", false, "ssh", "fake/1", "--staging", "--user", "deploy", "--account", "one", "--", "id")
 	if code != 0 || len(e.sshCalls) != 1 {
 		t.Fatalf("ssh --staging: code %d, calls %v", code, e.sshCalls)
 	}
@@ -1725,18 +1732,18 @@ func TestSSHCommandAndKey(t *testing.T) {
 	}
 	// interactive needs a terminal
 	e.sshCalls, e.sshInteractive = nil, nil
-	_, errOut, code = e.run("", false, "ssh", "server", "web-01", "--account", "one")
+	_, errOut, code = e.run("", false, "ssh", "web-01", "--account", "one")
 	if code != 3 || !strings.Contains(errOut, "needs a terminal") || len(e.sshCalls) != 0 {
 		t.Errorf("interactive without terminal: code %d, %q, calls %v", code, errOut, e.sshCalls)
 	}
-	_, _, code = e.run("", true, "ssh", "server", "web-01", "--account", "one")
+	_, _, code = e.run("", true, "ssh", "web-01", "--account", "one")
 	if code != 0 || len(e.sshCalls) != 1 || !e.sshInteractive[0] || strings.Join(e.sshCalls[0], " ") != "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i "+umpKey+" -i "+filepath.Join(home, ".ssh", "id_ed25519")+" root@203.0.113.10" {
 		t.Errorf("interactive: code %d, calls %v %v", code, e.sshCalls, e.sshInteractive)
 	}
 	if strings.Contains(strings.Join(e.sshCalls[0], " "), "IdentitiesOnly") {
 		t.Error("the default session must not exclude agent keys")
 	}
-	_, errOut, code = e.run("", false, "ssh", "server", "nope", "--account", "one", "--", "id")
+	_, errOut, code = e.run("", false, "ssh", "nope", "--account", "one", "--", "id")
 	if code != 1 || !strings.Contains(errOut, `server "nope" not found`) {
 		t.Errorf("not found: code %d, %q", code, errOut)
 	}
@@ -1794,7 +1801,7 @@ func TestRescueDirectAndRunning(t *testing.T) {
 	// the running system lets UMP in as root: the image is loaded over SSH
 	// and the provider is not touched
 	e.directRoot, e.versionAfter = true, 2
-	out, errOut, code := e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one")
+	out, errOut, code := e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 0 {
 		t.Fatalf("direct: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -1840,14 +1847,14 @@ func TestRescueDirectAndRunning(t *testing.T) {
 	// the way the server got there
 	e.sshCalls, e.sshInteractive = nil, nil
 	e.write(testConfig + "staging:\n  image: https://files.example.net/ump/\n")
-	out, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "json")
+	out, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one", "-o", "json")
 	if code != 0 || !strings.Contains(out, `"url": "https://files.example.net/ump"`) || !strings.Contains(out, `"via": "direct"`) || strings.Contains(out, `"rescue"`) {
 		t.Errorf("json after a direct entry: code %d\n%s", code, out)
 	}
 	if entries := e.entryCommands(); len(entries) != 2 || !strings.HasPrefix(entries[1], entryPrefix("https://files.example.net/ump")+"-H web-01 ") {
 		t.Errorf("entry with the configured image: %q", entries)
 	}
-	_, _, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--account", "one", "--image", "http://10.0.0.1/r/", "--", "lsblk")
+	_, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one", "--image", "http://10.0.0.1/r/", "--", "lsblk")
 	if entries := e.entryCommands(); code != 0 || len(entries) != 3 || !strings.HasPrefix(entries[2], entryPrefix("http://10.0.0.1/r")+"-H web-01 ") {
 		t.Errorf("entry with --image: code %d, %q", code, entries)
 	}
@@ -1858,25 +1865,25 @@ func TestRescueDirectAndRunning(t *testing.T) {
 	// a server that runs the image already is connected to as it is
 	e.directRoot, e.inImage = false, true
 	e.sshCalls, e.sshInteractive, e.remoteCalls = nil, nil, nil
-	out, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	out, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 0 || !strings.Contains(errOut, "Checking root access to 203.0.113.10 over SSH ... web-01 already runs the UMP rescue system 2026.10.12.\n") || !strings.HasPrefix(out, "Connect: ssh ") {
 		t.Errorf("already running: code %d, stderr %q\n%s", code, errOut, out)
 	}
 	if len(e.remoteCalls) != 1 || len(fakePower.actions) != 0 || len(e.entryCommands()) != 0 {
 		t.Errorf("already running must only probe: calls %d, actions %v", len(e.remoteCalls), fakePower.actions)
 	}
-	out, _, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one", "-o", "yaml")
+	out, _, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one", "-o", "yaml")
 	if code != 0 || !strings.Contains(out, "via: running") {
 		t.Errorf("yaml when running: code %d\n%s", code, out)
 	}
 
 	// the direct way asks before it kexecs the running system
 	e.inImage, e.directRoot = false, true
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--account", "one")
 	if code != 3 || !strings.Contains(errOut, "needs confirmation") || len(e.entryCommands()) != 0 {
 		t.Errorf("confirmation: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("n\n", true, "rescue", "server", "web-01", "--account", "one")
+	_, errOut, code = e.run("n\n", true, "server", "rescue", "web-01", "--account", "one")
 	if code != 3 || !strings.Contains(errOut, "aborted") || len(e.entryCommands()) != 0 {
 		t.Errorf("declined: code %d, %q", code, errOut)
 	}
@@ -1888,7 +1895,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	resetFakePower()
 
 	// --via direct without root access does not touch the provider
-	_, errOut, code := e.run("", false, "rescue", "server", "web-01", "--yes", "--via", "direct", "--account", "one")
+	_, errOut, code := e.run("", false, "server", "rescue", "web-01", "--yes", "--via", "direct", "--account", "one")
 	if code != 5 || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH; --via provider") || len(fakePower.actions) != 0 {
 		t.Errorf("--via direct: code %d, %q, actions %v", code, errOut, fakePower.actions)
 	}
@@ -1896,7 +1903,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// --via provider skips the probe even when the system would let UMP in
 	e.directRoot = true
 	e.remoteCalls = nil
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--via", "provider", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--via", "provider", "--account", "one")
 	if code != 0 || strings.Contains(errOut, "Checking root access") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" || len(e.entryCommands()) != 1 {
 		t.Errorf("--via provider: code %d, %q, actions %v", code, errOut, fakePower.actions)
 	}
@@ -1908,7 +1915,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// --no-image stops in the provider's rescue system, as before
 	resetFakePower()
 	e.remoteCalls, e.sshCalls, e.sshInteractive = nil, nil, nil
-	_, errOut, code = e.run("", true, "rescue", "server", "web-01", "--yes", "--no-image", "--account", "one")
+	_, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--no-image", "--account", "one")
 	if code != 0 || len(e.remoteCalls) != 0 || !strings.Contains(errOut, "Connecting to the rescue system of web-01 as root") || len(e.sshCalls) != 1 {
 		t.Errorf("--no-image: code %d, remote %v, stderr %q", code, e.remoteCalls, errOut)
 	}
@@ -1916,7 +1923,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// the provider's rescue system does not take UMP's key: say how to go on by hand
 	resetFakePower()
 	e.rescueNoKey = true
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 5 || !strings.Contains(errOut, "did not accept UMP's key; connect by hand (ssh ") || !strings.Contains(errOut, "bash /tmp/kexec-into-rescue.sh -u https://ump.zhurko.de/rescue") {
 		t.Errorf("rescue without key: code %d, %q", code, errOut)
 	}
@@ -1925,7 +1932,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// the entry script fails: its output was shown, the status is ump's
 	resetFakePower()
 	e.entryExit = 1
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, "download failed: https://nowhere.invalid") || !strings.Contains(errOut, "ump: loading the rescue image on 203.0.113.10 failed (exit status 1)") {
 		t.Errorf("entry failure: code %d, %q", code, errOut)
 	}
@@ -1934,7 +1941,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// the server cannot fetch the script: the base URL is the thing to look at
 	resetFakePower()
 	e.entryNoScript = true
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, "curl: (22)") || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the entry script from https://ump.zhurko.de/rescue/kexec-into-rescue.sh (exit status 22); the server must reach the image's base URL") {
 		t.Errorf("no script: code %d, %q", code, errOut)
 	}
@@ -1943,7 +1950,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	// the connection drops before the script reported the jump
 	resetFakePower()
 	e.entryNoMarker = true
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 5 || !strings.Contains(errOut, "ended before the rescue image was loaded") {
 		t.Errorf("dropped entry: code %d, %q", code, errOut)
 	}
@@ -1955,7 +1962,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	imageWaitTimeout = 30 * time.Millisecond
 	t.Cleanup(func() { imageWaitTimeout = oldTimeout })
 	e.versionAfter = 1 << 30
-	_, errOut, code = e.run("", false, "rescue", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
 	if code != 5 || !strings.Contains(errOut, "did not answer within 30ms") {
 		t.Errorf("image timeout: code %d, %q", code, errOut)
 	}
@@ -1966,8 +1973,8 @@ func TestRescueWaysAndFailures(t *testing.T) {
 		args []string
 		msg  string
 	}{
-		{[]string{"rescue", "server", "web-01", "--yes", "--via", "magic", "--account", "one"}, `unknown --via "magic"`},
-		{[]string{"rescue", "server", "web-01", "--yes", "--via", "direct", "--no-image", "--account", "one"}, "--via direct cannot be combined"},
+		{[]string{"server", "rescue", "web-01", "--yes", "--via", "magic", "--account", "one"}, `unknown --via "magic"`},
+		{[]string{"server", "rescue", "web-01", "--yes", "--via", "direct", "--no-image", "--account", "one"}, "--via direct cannot be combined"},
 	} {
 		if _, errOut, code := e.run("", false, c.args...); code != 2 || !strings.Contains(errOut, c.msg) {
 			t.Errorf("%v: code %d, %q", c.args, code, errOut)
@@ -1987,7 +1994,7 @@ func TestInstallServer(t *testing.T) {
 
 	// through the provider's rescue system, the installer, a reboot, and
 	// the new system answering with UMP's key
-	out, errOut, code := e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
 	if code != 0 {
 		t.Fatalf("install: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -2049,7 +2056,7 @@ func TestInstallServer(t *testing.T) {
 	os.MkdirAll(sshDir, 0o700)
 	os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("private\n"), 0o600)
 	os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop\n"), 0o644)
-	out, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one", "--hostname", "db-01.example.net", "--ipv6", "--mitigations", "--disks", "/dev/sda,/dev/sdb", "--timezone", "Europe/Berlin", "--storage", "https://files.example.net/ump/", "-o", "json")
+	out, _, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--hostname", "db-01.example.net", "--ipv6", "--mitigations", "--disks", "/dev/sda,/dev/sdb", "--timezone", "Europe/Berlin", "--storage", "https://files.example.net/ump/", "-o", "json")
 	if code != 0 {
 		t.Fatalf("install with options: code %d\n%s", code, out)
 	}
@@ -2086,7 +2093,7 @@ func TestInstallServer(t *testing.T) {
 	// the storage from the configuration
 	resetFakePower()
 	e.write(testConfig + "storage: https://mirror.example.org/ump\n")
-	_, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	_, _, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
 	if code != 0 || !strings.HasSuffix(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
 		t.Errorf("configured storage: code %d, %q, %q", code, e.installs[2], e.entryCommands()[2])
 	}
@@ -2094,12 +2101,12 @@ func TestInstallServer(t *testing.T) {
 
 	// --dry-run plans and leaves the server in the rescue system; --no-reboot installs and leaves it there
 	resetFakePower()
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--dry-run", "--account", "one")
-	if code != 0 || !strings.HasSuffix(e.installs[3], " --dry-run") || e.reboots != 0 || !strings.Contains(errOut, "Dry run done; web-01 stays in the UMP rescue system (ump ssh server web-01 --staging).") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run", "--account", "one")
+	if code != 0 || !strings.HasSuffix(e.installs[3], " --dry-run") || e.reboots != 0 || !strings.Contains(errOut, "Dry run done; web-01 stays in the UMP rescue system (ump ssh web-01 --staging).") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
 		t.Errorf("--dry-run: code %d, reboots %d, actions %v, stderr %q", code, e.reboots, fakePower.actions, errOut)
 	}
 	resetFakePower()
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--no-reboot", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-reboot", "--account", "one")
 	if code != 0 || e.reboots != 0 || !strings.Contains(errOut, "Installed; web-01 stays in the UMP rescue system, a reboot starts ubuntu-26.04.") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard,unrescue" {
 		t.Errorf("--no-reboot: code %d, reboots %d, actions %v, stderr %q", code, e.reboots, fakePower.actions, errOut)
 	}
@@ -2107,27 +2114,27 @@ func TestInstallServer(t *testing.T) {
 	// failures: the installer fails, the installer cannot be fetched, the new system does not answer
 	resetFakePower()
 	e.installExit = 1
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
-	if code != 1 || !strings.Contains(errOut, "install.sh: no disk found") || !strings.Contains(errOut, "ump: the installation on web-01 failed (exit status 1, see above); the server stays in the UMP rescue system (ump ssh server web-01 --staging)") || e.reboots != 0 {
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "install.sh: no disk found") || !strings.Contains(errOut, "ump: the installation on web-01 failed (exit status 1, see above); the server stays in the UMP rescue system (ump ssh web-01 --staging)") || e.reboots != 0 {
 		t.Errorf("failed installation: code %d, reboots %d, %q", code, e.reboots, errOut)
 	}
 	resetFakePower()
 	e.installExit = 2
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, "no disk matches") || !strings.Contains(errOut, "ump: the installer refused the specification or the machine (exit status 2, see above); nothing was changed, web-01 stays in the UMP rescue system") {
 		t.Errorf("refused specification: code %d, %q", code, errOut)
 	}
 	e.installExit = 0
 	resetFakePower()
 	e.installNoScript = true
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the installer from https://ump.zhurko.de/install/install.sh (exit status 22); the server must reach the storage") {
 		t.Errorf("no installer: code %d, %q", code, errOut)
 	}
 	e.installNoScript = false
 	resetFakePower()
 	e.bootFails = true
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
 	if code != 5 || !strings.Contains(errOut, "SSH answers on 203.0.113.10, but not with UMP's key; the new system may not have booted") {
 		t.Errorf("boot failure: code %d, %q", code, errOut)
 	}
@@ -2139,13 +2146,13 @@ func TestInstallServer(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"install", "server", "web-01", "--account", "one"}, 3, "needs confirmation"},
-		{[]string{"install", "server", "web-01", "--yes", "--hostname", "bad host", "--account", "one"}, 2, "invalid name"},
-		{[]string{"install", "server", "web-01", "--yes", "--via", "magic", "--account", "one"}, 2, `unknown --via "magic"`},
-		{[]string{"install", "server", "web-01", "--yes", "--os", "../x", "--account", "one"}, 2, "invalid --os"},
-		{[]string{"install", "server", "web-01", "--yes", "--layout", "nope", "--account", "one"}, 1, `layout "nope" is not in layouts.yaml`},
-		{[]string{"install", "server", "web-01", "--yes", "--profile", "/nonexistent/p.yaml", "--account", "one"}, 1, "nonexistent"},
-		{[]string{"install", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
+		{[]string{"server", "reinstall", "web-01", "--account", "one"}, 3, "needs confirmation"},
+		{[]string{"server", "reinstall", "web-01", "--yes", "--hostname", "bad host", "--account", "one"}, 2, "invalid name"},
+		{[]string{"server", "reinstall", "web-01", "--yes", "--via", "magic", "--account", "one"}, 2, `unknown --via "magic"`},
+		{[]string{"server", "reinstall", "web-01", "--yes", "--os", "../x", "--account", "one"}, 2, "invalid --os"},
+		{[]string{"server", "reinstall", "web-01", "--yes", "--layout", "nope", "--account", "one"}, 1, `layout "nope" is not in layouts.yaml`},
+		{[]string{"server", "reinstall", "web-01", "--yes", "--profile", "/nonexistent/p.yaml", "--account", "one"}, 1, "nonexistent"},
+		{[]string{"server", "reinstall", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
 	} {
 		if _, errOut, code := e.run("", false, c.args...); code != c.code || !strings.Contains(errOut, c.msg) {
 			t.Errorf("%v: code %d (want %d), %q", c.args, code, c.code, errOut)
@@ -2182,7 +2189,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 `), 0o600)
 	e.write(testConfig)
 	e.agentKeys = []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@agent"}
-	out, errOut, code := e.run("", false, "install", "server", "web-01", "--yes", "--profile", prof, "--account", "one", "-o", "json")
+	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", prof, "--account", "one", "-o", "json")
 	if code != 0 {
 		t.Fatalf("install with a profile file: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -2213,7 +2220,8 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 		t.Errorf("json result:\n%s", out)
 	}
 
-	// the published profile and layouts, from the storage, when there is no local copy
+	// the published profile and layouts, from the storage, when there is no
+	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/profiles/default.yaml", "/profiles/layouts.yaml":
@@ -2225,14 +2233,21 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	}))
 	defer srv.Close()
 	e.write(testConfig + "storage: " + srv.URL + "\n")
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "(profile default from the storage, layout lvm-striped)") {
+	profilesDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+	os.RemoveAll(profilesDir)
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
 		t.Errorf("published profile: code %d, %q", code, errOut)
+	}
+	for _, f := range []string{"default.yaml", "layouts.yaml"} {
+		if _, err := os.Stat(filepath.Join(profilesDir, f)); err != nil {
+			t.Errorf("first run did not download %s: %v", f, err)
+		}
 	}
 	if l := e.lastSpec()["layout"].(map[string]any); l["name"] != "lvm-striped" || len(l["parts"].([]any)) != 6 {
 		t.Errorf("layout from the storage: %v", l)
 	}
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--profile", "nope", "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "nope", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, `profile "nope": not in `+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")+`, and `+srv.URL+`/profiles/nope.yaml: HTTP 404`) {
 		t.Errorf("missing profile: code %d, %q", code, errOut)
 	}
@@ -2240,8 +2255,129 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// a key reference that gives nothing is an error before anything happens
 	e.agentKeys = nil
 	os.WriteFile(prof, []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [agent]}\n"), 0o600)
-	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--profile", prof, "--account", "one")
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", prof, "--account", "one")
 	if code != 1 || !strings.Contains(errOut, `user root: key "agent": ssh-add -L lists no keys`) || len(e.entryCommands()) != 2 {
 		t.Errorf("agent without keys: code %d, %q, entries %d", code, errOut, len(e.entryCommands()))
+	}
+}
+
+func TestConfigOSAndServerSet(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakePower()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
+		if err != nil || !strings.HasPrefix(r.URL.Path, "/profiles/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(data)
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+
+	// the first run downloads the published profile and layouts
+	out, errOut, code := e.run("", false, "config", "os", "list")
+	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile and the layouts into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   root") {
+		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	for _, f := range []string{"default.yaml", "layouts.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s not downloaded: %v", f, err)
+		}
+	}
+	_, errOut, _ = e.run("", false, "config", "os", "list")
+	if strings.Contains(errOut, "Downloaded") {
+		t.Error("downloaded again although the directory exists")
+	}
+
+	// get prints the file; create copies it with the name changed and, without a terminal, does not open an editor
+	out, _, code = e.run("", false, "config", "os", "get", "default")
+	if code != 0 || !strings.HasPrefix(out, "# The default profile") {
+		t.Errorf("get: code %d\n%s", code, out)
+	}
+	edited := []string{}
+	out, _, code = e.run("", false, "config", "os", "create", "db")
+	if code != 0 || !strings.Contains(out, "Created "+filepath.Join(dir, "db.yaml")+" from default.") || len(edited) != 0 {
+		t.Errorf("create: code %d\n%s", code, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "db.yaml"))
+	if !strings.Contains(string(data), "\nname: db\n") {
+		t.Errorf("created profile keeps the old name:\n%s", data)
+	}
+	if _, errOut, code = e.run("", false, "config", "os", "create", "db"); code != 1 || !strings.Contains(errOut, "exists already") {
+		t.Errorf("create twice: code %d, %q", code, errOut)
+	}
+	if _, errOut, code = e.run("", false, "config", "os", "get", "nope"); code != 1 || !strings.Contains(errOut, `no profile "nope"`) {
+		t.Errorf("get missing: code %d, %q", code, errOut)
+	}
+
+	// edit opens the editor and checks the result; a broken edit is kept and named
+	e.editorHook = func(path string) error {
+		edited = append(edited, path)
+		return os.WriteFile(path, []byte("os: ubuntu-26.04\ndisks: lvm-raid1\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	}
+	out, _, code = e.run("", true, "config", "os", "edit", "db")
+	if code != 0 || len(edited) != 1 || edited[0] != filepath.Join(dir, "db.yaml") || !strings.Contains(out, "Profile db is valid (ubuntu-26.04, layout lvm-raid1).") {
+		t.Errorf("edit: code %d, edited %v\n%s", code, edited, out)
+	}
+	e.editorHook = func(path string) error {
+		return os.WriteFile(path, []byte("os: ubuntu-26.04\ndisks: nope\nusers: []\n"), 0o600)
+	}
+	_, errOut, code = e.run("", true, "config", "os", "edit", "db")
+	if code != 1 || !strings.Contains(errOut, "the profile is kept, but it is not valid") {
+		t.Errorf("broken edit: code %d, %q", code, errOut)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "db.yaml")); !strings.Contains(string(data), "disks: nope") {
+		t.Error("the broken edit was not kept")
+	}
+
+	// server set remembers the profile, reinstall uses it, --clear forgets it
+	e.editorHook = nil
+	os.WriteFile(filepath.Join(dir, "db.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-raid1\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	out, _, code = e.run("", false, "server", "set", "web-01", "--profile", "db", "--account", "one")
+	if code != 0 || !strings.Contains(out, "fake/1 (web-01, 203.0.113.10): profile db; ump server reinstall web-01 uses it.") {
+		t.Errorf("set: code %d\n%s", code, out)
+	}
+	if cfg := e.read(); !strings.Contains(cfg, "servers:\n  fake/1:\n    profile: db\n") {
+		t.Errorf("config after set:\n%s", cfg)
+	}
+	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--profile", "nope", "--account", "one"); code != 1 || !strings.Contains(errOut, `profile "nope"`) {
+		t.Errorf("set unknown profile: code %d, %q", code, errOut)
+	}
+	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--account", "one"); code != 2 || !strings.Contains(errOut, "give --profile NAME or --clear") {
+		t.Errorf("set without a choice: code %d, %q", code, errOut)
+	}
+	e.directRoot = true
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "(profile db from "+filepath.Join(dir, "db.yaml")+", layout lvm-raid1)") {
+		t.Errorf("reinstall with the set profile: code %d, %q", code, errOut)
+	}
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "default", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "(profile default from ") {
+		t.Errorf("--profile wins: code %d, %q", code, errOut)
+	}
+	out, _, code = e.run("", false, "server", "set", "web-01", "--clear", "--account", "one")
+	if code != 0 || !strings.Contains(out, "no profile set; reinstall uses default.") || strings.Contains(e.read(), "profile: db") {
+		t.Errorf("clear: code %d\n%s\n%s", code, out, e.read())
+	}
+
+	// delete asks, then removes
+	if _, errOut, code = e.run("", false, "config", "os", "delete", "db"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("delete without --yes: code %d, %q", code, errOut)
+	}
+	if out, _, code = e.run("", false, "config", "os", "delete", "db", "--yes"); code != 0 || !strings.Contains(out, "Deleted ") {
+		t.Errorf("delete: code %d\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "db.yaml")); err == nil {
+		t.Error("db.yaml still there")
+	}
+
+	// the wizard needs a terminal; config alone prints help
+	if _, errOut, code = e.run("", false, "config", "os"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
+		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	}
+	if out, _, code = e.run("", false, "config"); code != 0 || !strings.Contains(out, "isp") || !strings.Contains(out, "os") {
+		t.Errorf("config help: code %d\n%s", code, out)
 	}
 }

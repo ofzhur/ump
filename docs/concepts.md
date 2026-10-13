@@ -139,7 +139,7 @@ machine's facts: exact devices, partition sizes, RAID members, the rendered
 hostname, the rendered network configuration, users and the handoff step.
 
 The plan is always shown before destructive actions. `ump plan` produces it
-without changing anything. `ump install` produces the same plan and asks for
+without changing anything. `ump server reinstall` produces the same plan and asks for
 confirmation (or accepts `--yes` together with a guard, see
 [architecture](architecture.md#safety)).
 
@@ -178,7 +178,7 @@ UMP deliberately does not try to grow into configuration management.
 
 ## Run
 
-A **run** is one execution of `ump install` against one machine. Each run
+A **run** is one execution of `ump server reinstall` against one machine. Each run
 gets an ID and a local log directory with the plan, the agent's structured
 log and the final result. Runs consist of **steps**, and long steps can be
 resumed (for example after the operator's network connection dropped while
@@ -188,7 +188,7 @@ waiting for a reboot).
 
 An **approval** is recorded consent to a destructive run: bound to the
 plan's hash, created by `ump approve` in an interactive terminal, expiring,
-and consumed by `ump install --approved`. Separating approval from
+and consumed by `ump server reinstall --approved`. Separating approval from
 execution lets an agent prepare and run an install while the decision
 stays human.
 

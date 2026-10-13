@@ -3,8 +3,8 @@
 ## Milestones
 
 Done so far: the Go module and CLI skeleton with the kubectl-style command
-shape, configuration with secret references, the `ump config` wizard, and
-`ump get servers`, `ump describe server`, `ump rename server`,
+shape, configuration with secret references, the `ump config isp` wizard, and
+`ump server list`, `ump server show`, `ump server rename`,
 `ump get|set|delete rdns`, `ump reboot|start|stop server` and
 `ump rescue|unrescue server` for Hetzner Robot, Hetzner Cloud and
 OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
@@ -26,7 +26,7 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 - Debian family driver, systemd-networkd renderer
 - disk layouts: GPT, md RAID, LVM, ext4/xfs/swap
 - QEMU integration tests: 1, 2 and 4 disks, UEFI and BIOS
-- `ump plan`, `ump install`, run logs (first `ump install`: done for
+- `ump plan`, `ump server reinstall`, run logs (first `ump server reinstall`: done for
   Ubuntu 26.04 with the lvm-linear layout, through the UMP rescue
   system, with the installer and the base image fetched from the storage;
   next: more layouts and a benchmarking round)
@@ -35,8 +35,8 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 ### M2 — Hetzner Robot
 
 - Robot API: inventory, rename, rDNS, rescue, reset and SSH key registration (done)
-- `rescue` entry method (the provider side is done: `ump rescue server`)
-- `ump get servers`, `ump describe server` and `ump rename server` (done), `ump machine reboot|rescue`
+- `rescue` entry method (the provider side is done: `ump server rescue`)
+- `ump server list`, `ump server show` and `ump server rename` (done), `ump machine reboot|rescue`
 - listing cache with "added/removed since last time" (done)
 - IPv6 from provider network info
 
@@ -54,7 +54,7 @@ OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
 
 - staging image (kernel + initramfs) build (done: `images/rescue/`, with
   `kexec-into-rescue.sh` for the manual path)
-- `kexec` entry method (done for the rescue: `ump rescue server` kexecs
+- `kexec` entry method (done for the rescue: `ump server rescue` kexecs
   from a running system that lets UMP in as root, or from the provider's
   rescue system)
 - `hetzner-cloud` provider incl. `create`/`destroy`

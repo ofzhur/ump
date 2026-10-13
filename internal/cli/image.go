@@ -302,7 +302,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	}
 	pw, canReboot := prov.(provider.Power)
 	if !canReboot {
-		return nil, fmt.Errorf("account %s: provider type %s cannot reboot; use ump rescue --no-reboot and reboot the server yourself", m.Account, m.Provider)
+		return nil, fmt.Errorf("account %s: provider type %s cannot reboot; use ump server rescue --no-reboot and reboot the server yourself", m.Account, m.Provider)
 	}
 	if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))); err != nil {
 		return nil, err

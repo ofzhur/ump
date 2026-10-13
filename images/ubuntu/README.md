@@ -3,7 +3,7 @@
 A complete Ubuntu 26.04 LTS server system as a root file system archive,
 with the generic kernel and its firmware, LVM, netplan, SSH and the tools
 a server needs, plus the UMP defaults that do not depend on the machine.
-[`ump install`](../../docs/cli.md#install-ump-install-server) unpacks it
+[`ump server reinstall`](../../docs/cli.md#install-ump-install-server) unpacks it
 onto a machine's disks from the UMP rescue system and
 [`install/install.sh`](../../install/README.md) does what depends on the
 machine. One archive per architecture, `amd64` and `arm64`.

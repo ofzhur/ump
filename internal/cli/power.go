@@ -25,26 +25,6 @@ var (
 	dialTimeout  = 3 * time.Second
 )
 
-// serverVerbCmd builds a verb command with a single "server" subcommand,
-// the shape shared by reboot, start, stop, rescue and unrescue.
-func (a *app) serverVerbCmd(verb, short, long, example string, sub *cobra.Command) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     verb + " RESOURCE NAME",
-		Short:   short,
-		Long:    long + "\n\nResources: server (aliases: servers, srv, machine, machines)",
-		Example: example,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			return usageErrorf(cmd, "unknown resource type %q (known: server)", args[0])
-		},
-	}
-	sub.Aliases = []string{"servers", "srv", "machine", "machines"}
-	cmd.AddCommand(sub)
-	return cmd
-}
-
 type powerOptions struct {
 	hard       bool
 	powerCycle bool
@@ -52,10 +32,10 @@ type powerOptions struct {
 	yes        bool
 }
 
-func (a *app) newRebootCmd() *cobra.Command {
+func (a *app) newServerRebootCmd() *cobra.Command {
 	var o powerOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
+		Use:   "reboot NAME|ID|IP|PROVIDER/ID",
 		Short: "Reboot a server",
 		Long: `Reboot a server through its provider. By default the operating system is
 asked to reboot (ACPI); --hard resets the machine without asking it;
@@ -73,14 +53,13 @@ asks for confirmation on a terminal; without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.powerCycle, "power-cycle", false, "cut the power and switch it on again")
 	sub.Flags().BoolVar(&o.wait, "wait", false, "wait until SSH answers again")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
-	return a.serverVerbCmd("reboot", "Reboot a server", "Reboot a server through its provider.",
-		"  ump reboot server web-01\n  ump reboot server web-01 --hard --wait\n  ump reboot server hetzner-robot/123456 --yes", sub)
+	return sub
 }
 
-func (a *app) newStartCmd() *cobra.Command {
+func (a *app) newServerStartCmd() *cobra.Command {
 	var o powerOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
+		Use:   "start NAME|ID|IP|PROVIDER/ID",
 		Short: "Switch a server on",
 		Long:  "Switch a server on through its provider; --wait waits until SSH answers.",
 		Args:  usageArgs(cobra.ExactArgs(1)),
@@ -89,13 +68,13 @@ func (a *app) newStartCmd() *cobra.Command {
 		},
 	}
 	sub.Flags().BoolVar(&o.wait, "wait", false, "wait until SSH answers")
-	return a.serverVerbCmd("start", "Switch a server on", "Switch a server on through its provider.", "  ump start server web-01 --wait", sub)
+	return sub
 }
 
-func (a *app) newStopCmd() *cobra.Command {
+func (a *app) newServerStopCmd() *cobra.Command {
 	var o powerOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
+		Use:   "stop NAME|ID|IP|PROVIDER/ID",
 		Short: "Switch a server off",
 		Long: `Switch a server off through its provider: the operating system is asked
 to shut down unless --hard cuts the power. Asks for confirmation on a
@@ -107,7 +86,7 @@ terminal; without one, --yes is required.`,
 	}
 	sub.Flags().BoolVar(&o.hard, "hard", false, "cut the power instead of asking the operating system")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
-	return a.serverVerbCmd("stop", "Switch a server off", "Switch a server off through its provider.", "  ump stop server web-01\n  ump stop server web-01 --hard --yes", sub)
+	return sub
 }
 
 // resolveOne lists the accounts and resolves one server reference, with

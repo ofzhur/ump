@@ -126,7 +126,7 @@ one owner; everything else is derived.
 |---|---|---|---|
 | Cloud resources: instances, volumes, networks, firewalls, load balancers, DNS | Terraform | `terraform/` + remote state | UMP (import), Ansible (inventory) |
 | Bare metal contracts, rescue, power, rDNS | the provider | provider API, driven by `ump` | UMP |
-| Which machines exist, their addresses, location, product, state | provider APIs | — | `ump get servers`, `ump inventory export` |
+| Which machines exist, their addresses, location, product, state | provider APIs | — | `ump server list`, `ump inventory export` |
 | Per-machine intent: profile, environment, role, overrides | the machine overlay | `ump/machines.yaml` (+ provider labels where they exist) | UMP, Ansible groups |
 | OS, disks, boot, base network, base packages | UMP profiles | `ump/` | the agent on the target |
 | Users and SSH keys | user sets | `ump/users/*.yaml` | UMP at install time; the Ansible `users` role afterwards — the same file |
@@ -140,7 +140,7 @@ terraform output -json ──▶ ump machine import --from terraform    names, l
                                                                    machines Terraform created
 ump inventory export --format ansible ──▶ Ansible dynamic inventory groups from env, role,
                                                                    provider, location, profile
-ump install … handoff: ansible ──▶ ansible-playbook site.yml --limit <host>
+ump server reinstall … handoff: ansible ──▶ ansible-playbook site.yml --limit <host>
 ```
 
 The join key across all three tools is the **machine name**,
@@ -247,7 +247,7 @@ Conventions the skill enforces and, during adoption, introduces:
   environment-gated) or after an explicit human approval (UMP, Ansible
   against production).
 - **Machines are rebuilt, not nursed**: an OS version change is a new image
-  plus `ump install`, one machine at a time, canary first; Ansible owns
+  plus `ump server reinstall`, one machine at a time, canary first; Ansible owns
   configuration, not OS upgrades. Data-carrying machines document their
   rebuild procedure in a runbook.
 - **Environments are separate roots**, separate inventory groups and, where
@@ -264,14 +264,14 @@ does not reinvent the order.
 
 | Workflow | Sequence | Human gates |
 |---|---|---|
-| **Add a cloud machine** | Terraform module call → PR with plan → merge, apply → `ump machine import` → `ump plan` → approve → `ump install` → handoff to Ansible → verify → update README and runbooks | PR review; `ump approve` |
-| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump get servers` → rename to convention (`ump rename server`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
-| **Reinstall / rebuild** | drain (Ansible: remove from LB, stop writers) → `ump plan` → approve → `ump install` → Ansible → undrain → verify | `ump approve` |
+| **Add a cloud machine** | Terraform module call → PR with plan → merge, apply → `ump machine import` → `ump plan` → approve → `ump server reinstall` → handoff to Ansible → verify → update README and runbooks | PR review; `ump approve` |
+| **Add a bare-metal machine** | ordered at the provider by a human → appears in `ump server list` → rename to convention (`ump server rename`) → overlay entry → `ump plan` → approve → install → Ansible → verify | ordering; `ump approve` |
+| **Reinstall / rebuild** | drain (Ansible: remove from LB, stop writers) → `ump plan` → approve → `ump server reinstall` → Ansible → undrain → verify | `ump approve` |
 | **OS upgrade across a fleet** | new image in `ump/images/` → bump profile → PR → canary rebuild → soak → remaining machines one at a time | PR; one approval per machine, or one for a named batch |
 | **Change a disk layout** | new layout → data migration runbook → rebuild as above | PR; approval |
 | **Add or rotate users and keys** | edit `ump/users/*.yaml` → PR → Ansible `users` role on existing machines (`--check` first) → new installs pick it up automatically | PR; production run approval |
 | **Decommission** | Ansible: drain, remove from monitoring and DNS → Terraform destroy (cloud) or contract cancellation at the provider (bare metal, human only) → remove overlay entry → verify inventory | PR; a destroy apply; cancellation |
-| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump get servers --diff` (added or removed since last time) → `ump inventory check` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
+| **Drift check** (weekly) | `terraform plan` in every root (expect no changes) → `ump server list --diff` (added or removed since last time) → `ump inventory check` → `ansible-playbook --check --diff` → report | none; findings become PRs or issues |
 | **Health report** | reachability, machines in no inventory, contracts cancelled or expiring (`paid_until`), traffic, failed runs, expired approvals, pin freshness | none |
 | **Host down** | `ump machine show`, provider status and console, `ump ssh` diagnostics → propose: hard reset, rescue and inspect, or rebuild → execute the approved option → post-mortem note | every action beyond reading |
 | **Dependency bumps** | providers, collections, images, tools → one PR per bump with plan output | PR review |
@@ -306,7 +306,7 @@ working.
 | **0 — Audit** | Understand without changing | `ump repo audit` report plus the agent's reading → `docs/repo-health.md` and a migration plan as an ADR | the owner agrees with the plan |
 | **1 — Safety** | Remove the ways to lose data or secrets | secrets out of git (sops or references), remote state with locking, pinned providers and collections, CI that runs plan and check | `terraform plan` and `--check` are clean and run in CI |
 | **2 — Structure** | Move to the reference layout | pure moves with `moved` blocks (plan shows no changes), one `site.yml`, roles deduplicated, playbook logic pushed into roles, hand-written inventory replaced by the generated one | layout matches; no behaviour change in any PR |
-| **3 — Provisioning** | Replace bespoke install paths with UMP | users and disk layouts extracted from scripts and roles into `ump/`; profiles per role; cloud-init snowflakes and install scripts retired; first machines rebuilt with UMP | every new machine goes through `ump install` |
+| **3 — Provisioning** | Replace bespoke install paths with UMP | users and disk layouts extracted from scripts and roles into `ump/`; profiles per role; cloud-init snowflakes and install scripts retired; first machines rebuilt with UMP | every new machine goes through `ump server reinstall` |
 | **4 — Operation** | Routine work runs through the skill | runbooks written from what was learned, weekly drift and health reports, dependency bumps as PRs | the human mostly reviews and approves |
 
 Rules during adoption:
@@ -345,9 +345,9 @@ when wrong. Three tiers:
 
 | Tier | Examples | The agent may |
 |---|---|---|
-| **Observe** | `ump get servers`, `ump machine show/facts`, `terraform plan`, `ansible --check --diff`, reading state, `ump ssh` with diagnostic commands | act freely and repeatedly |
-| **Change** | editing repository files, `terraform apply` of an additive plan, `ansible-playbook` against staging or an additive role, `ump rename server` | act after showing the plan or diff, through a PR or an explicit go from the human |
-| **Destroy** | `ump install`, `terraform apply` with destroys, Ansible against production data paths, power actions, DNS changes in production, contract cancellation | act only with an approval it could not have produced itself |
+| **Observe** | `ump server list`, `ump machine show/facts`, `terraform plan`, `ansible --check --diff`, reading state, `ump ssh` with diagnostic commands | act freely and repeatedly |
+| **Change** | editing repository files, `terraform apply` of an additive plan, `ansible-playbook` against staging or an additive role, `ump server rename` | act after showing the plan or diff, through a PR or an explicit go from the human |
+| **Destroy** | `ump server reinstall`, `terraform apply` with destroys, Ansible against production data paths, power actions, DNS changes in production, contract cancellation | act only with an approval it could not have produced itself |
 
 How the last line is enforced rather than hoped for:
 
@@ -403,7 +403,7 @@ Takes over, once the repository follows the conventions:
 Stays with the human:
 
 - approvals for everything in the destroy tier, including every
-  `ump install`
+  `ump server reinstall`
 - credentials and access: creating API tokens, granting the agent accounts,
   key custody
 - architecture and capacity: what to buy, where, how big, which provider
@@ -427,7 +427,7 @@ Consequences for the CLI:
   `plan_hash`, the structured plan and a `summary` text ready to paste into
   a PR or a chat
 - `ump approve <run-id>` (TTY only, hash-bound, expiring) and
-  `ump install --approved <run-id>`
+  `ump server reinstall --approved <run-id>`
 - no prompts without a TTY; exit code 3 plus a message naming the missing
   approval
 - `ump inventory export --format ansible|json|hosts --group-by

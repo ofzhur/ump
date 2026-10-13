@@ -20,42 +20,6 @@ import (
 
 var getResources = []string{"servers", "rdns"}
 
-func (a *app) newGetCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "get RESOURCE [NAME...]",
-		Aliases: []string{"list"},
-		Short:   "List resources",
-		Long: `List resources from the configured provider accounts.
-
-Resources: servers (aliases: server, srv, machines, machine)
-           rdns    (aliases: ptr, reverse-dns): reverse DNS entries of servers`,
-		Example: `  # every server of every configured account
-  ump get servers
-
-  # one account, with product and IPv6 columns
-  ump get servers --account hetzner-main -o wide
-
-  # look a server up by name, ID, address or provider/ID
-  ump get servers web-01 hetzner-cloud/234567
-
-  # what changed since the last listing, or since a week ago
-  ump get servers --diff
-  ump get servers --since 7d -o json
-
-  # for scripts and agents
-  ump get servers -o json | jq '.[] | select(.status == "ready")'`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			return usageErrorf(cmd, "unknown resource type %q (known: %s)", args[0], strings.Join(getResources, ", "))
-		},
-	}
-	cmd.AddCommand(a.newGetServersCmd())
-	cmd.AddCommand(a.newGetRDNSCmd())
-	return cmd
-}
-
 type getServersOptions struct {
 	output    string
 	noHeaders bool
@@ -64,11 +28,11 @@ type getServersOptions struct {
 	cached    bool
 }
 
-func (a *app) newGetServersCmd() *cobra.Command {
+func (a *app) newServerListCmd() *cobra.Command {
 	var opts getServersOptions
 	cmd := &cobra.Command{
-		Use:     "servers [NAME|ID|IP|PROVIDER/ID ...]",
-		Aliases: []string{"server", "srv", "machines", "machine"},
+		Use:     "list [NAME|ID|IP|PROVIDER/ID ...]",
+		Aliases: []string{"ls", "l", "get", "g"},
 		Short:   "List servers of all configured accounts",
 		Long: `List servers (dedicated machines and cloud instances) from every
 configured provider account, or from the accounts given with --account.
@@ -116,7 +80,7 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		return usageErrorf(cmd, "%v", err)
 	}
 	if len(cfg.Accounts) == 0 {
-		return fmt.Errorf("no accounts configured in %s; run `ump config` to add one", config.AbbreviateHome(path))
+		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one", config.AbbreviateHome(path))
 	}
 	names, err := a.selectAccounts(cmd, cfg)
 	if err != nil {
@@ -190,7 +154,7 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	return nil
 }
 
-// diffReport is the result of `ump get servers --diff`.
+// diffReport is the result of `ump server list --diff`.
 type diffReport struct {
 	Accounts  []accountDiff  `json:"accounts" yaml:"accounts"`
 	Changes   []cache.Change `json:"changes" yaml:"changes"`
@@ -369,7 +333,7 @@ func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []str
 		case err != nil:
 			r.err = fmt.Errorf("account %s: cache: %w", n, err)
 		case snap == nil:
-			r.err = fmt.Errorf("account %s: not in the cache yet (run `ump get servers` without --cached first)", n)
+			r.err = fmt.Errorf("account %s: not in the cache yet (run `ump server list` without --cached first)", n)
 		default:
 			r.machines = snap.Machines
 			notes = append(notes, n+" ("+a.fmtTime(snap.SeenAt)+")")

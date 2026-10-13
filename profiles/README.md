@@ -1,10 +1,10 @@
 # Profiles
 
-A profile says what a server becomes when `ump install` installs it:
+A profile says what a server becomes when `ump server reinstall` installs it:
 which image, which disk layout, which users with which keys, which extra
 packages, what the firewall lets in, and what happens after the first
 boot. It is YAML, and the one in this directory,
-[`default.yaml`](default.yaml), is the default. `ump install server NAME`
+[`default.yaml`](default.yaml), is the default. `ump server reinstall NAME`
 takes it unless `--profile` names another one.
 
 Where ump looks for a profile named `NAME`: `--profile` with a path
@@ -14,7 +14,7 @@ storage, where `make upload` publishes this directory. So copy
 `default.yaml` to `~/.config/ump/profiles/default.yaml` and make it
 yours; the layouts work the same with `layouts.yaml`.
 
-The flags of `ump install` override a profile for one installation:
+The flags of `ump server reinstall` override a profile for one installation:
 `--layout`, `--os`, `--timezone`, `--ipv6`, `--mitigations`, `--disks`,
 `--ssh-key` (keys added to root).
 
@@ -52,7 +52,7 @@ without keys could not log in. The firewall always lets the loopback
 interface and the answers to the server's own connections through;
 `policy: drop` with `icmp` and `ssh` is what the default profile does.
 The provision step is recorded on the installed system and reported by
-`ump install`; running it is not implemented yet.
+`ump server reinstall`; running it is not implemented yet.
 
 ### Keys
 

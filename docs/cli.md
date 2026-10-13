@@ -1,23 +1,18 @@
 # CLI
 
-The command structure follows kubectl. `ump get servers` and `ump config`
-are implemented; the rest of this document is the intended shape and will
-be converted to the same style as commands are built.
+Everything happens to servers: `ump server ...` lists, shows, installs and
+controls them, `ump ssh` logs in, `ump config isp` sets provider accounts
+up and `ump config os` the profiles. The tree below is implemented; the
+draft further down is the intended shape of what is not.
 
 ## Conventions
 
-- Commands follow the kubectl shape, `ump <verb> <resource>`: `ump get
-  servers` lists, `ump config` configures. The central workflow verbs
-  (`plan`, `install`, `ssh`) are top-level because they are used most.
-  Resource-first forms in the draft below (`machine reboot`, `profile
-  show`, ...) will become `ump reboot server`, `ump describe profile` and
-  so on when they are implemented.
-- Machines are addressed by a **machine reference**: `provider/id`, a
+- Servers are addressed by a **machine reference**: `provider/id`, a
   name or an IP address (see [concepts](concepts.md#machine)). Several
-  references or `--selector` can be given where it makes sense. Names
-  need not be unique: `get` lists every match (with a note on stderr),
-  commands that act on one server ask which one is meant on a terminal
-  and otherwise fail with the candidates; `provider/id` and `--account`
+  references can be given where it makes sense. Names need not be
+  unique: `list` lists every match (with a note on stderr), commands
+  that act on one server ask which one is meant on a terminal and
+  otherwise fail with the candidates; `provider/id` and `--account`
   disambiguate.
 - Every listing supports `-o table|wide|json|yaml`. JSON output is stable
   and meant for scripting.
@@ -34,33 +29,40 @@ Implemented today:
 
 ```
 ump
-├── get
-│   └── servers  [ref...] [-o table|wide|json|yaml|name] [--no-headers]
-│                [--diff] [--since <time>] [--cached]
-│                                                  all servers of all accounts (--account to restrict);
-│                                                  what changed since the last listing; the cached listing
-├── describe
-│   └── server   <ref>... [-o text|json|yaml]       everything the provider knows about a server
-├── rename
-│   └── server   <ref> <new-name> [--force]         set the name at the provider (hostname at the next install)
-├── get rdns     [ref...] [-o table|json|yaml]      reverse DNS entries of servers' public addresses
-├── set rdns     <ref> [ptr-name] [--ip <addr>]     set the PTR of the primary IPv4 (or --ip); default: the server name
-├── delete rdns  <ref> [--ip <addr>]                remove the PTR
-├── reboot       server <ref> [--hard|--power-cycle] [--wait] [--yes]
-├── start        server <ref> [--wait]
-├── stop         server <ref> [--hard] [--yes]
-├── rescue       server <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
-├── install      server <ref> [--profile <name|file>] [--layout <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
-├── unrescue     server <ref> [--reboot] [--wait] [--yes]
-├── ssh          server <ref> [--user <name>] [--staging] [-- command]
-├── config                                         interactive wizard: add an account, test it, save it
-│   ├── view                                       the configuration, secrets redacted
-│   ├── path                                       where the configuration lives
-│   ├── types                                      provider types and their settings
-│   ├── add      <type> <name> --set k=v ...       non-interactive form (CI, agents)
-│   ├── remove   <name>
-│   ├── test     [<name>...]                       check credentials and API access
-│   └── key      [-o json|yaml]                     UMP's own SSH public key (generated on first use)
+├── server (s)
+│   ├── list (ls, l)  [ref...] [-o table|wide|json|yaml|name] [--no-headers] [--diff] [--since <t>] [--cached]
+│   │                                                  all servers of all accounts (--account to restrict);
+│   │                                                  what changed since the last listing; the cached listing
+│   ├── show (describe) <ref>... [-o text|json|yaml]   everything the provider knows about a server
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
+│   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
+│   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
+│   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
+│   ├── start        <ref> [--wait]
+│   ├── stop         <ref> [--hard] [--yes]
+│   ├── rename       <ref> <new-name> [--force]        set the name at the provider (hostname at the next install)
+│   ├── rdns (ptr)
+│   │   ├── get      [ref...] [-o table|json|yaml]     reverse DNS entries of servers' public addresses
+│   │   ├── set      <ref> [ptr-name] [--ip <addr>]    set the PTR of the primary IPv4 (or --ip); default: the server name
+│   │   └── delete   <ref> [--ip <addr>]               remove the PTR
+│   └── set          <ref> --profile <name> | --clear  remember the profile the server is reinstalled with
+├── ssh              <ref> [--user <name>] [--staging] [-- command]
+├── config
+│   ├── isp                                            interactive wizard: add an account, test it, save it
+│   │   ├── view                                       the configuration, secrets redacted
+│   │   ├── types                                      provider types and their settings
+│   │   ├── add      <type> <name> --set k=v ...       non-interactive form (CI, agents)
+│   │   ├── remove   <name>
+│   │   └── test     [<name>...]                       check credentials and API access
+│   ├── os                                             interactive wizard over the profiles
+│   │   ├── list                                       the profiles in ~/.config/ump/profiles
+│   │   ├── get      <name>                            print one
+│   │   ├── create   <name> [--from <name>]            copy one and open it in your editor
+│   │   ├── edit     <name>                            your editor, then a check
+│   │   └── delete   <name> [--yes]
+│   ├── path                                           where the configuration lives
+│   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
+├── completion
 └── version
 ```
 
@@ -118,10 +120,10 @@ ump
 └── version
 ```
 
-## `ump get servers`
+## `ump server list`
 
 ```
-ump get servers [NAME|ID|IP|PROVIDER/ID ...] [--account <name>...]
+ump server list [NAME|ID|IP|PROVIDER/ID ...] [--account <name>...]
                 [-o table|wide|json|yaml|name] [--no-headers]
 ```
 
@@ -167,9 +169,9 @@ the history of observed states (the newest 50 per account), and deleting
 it is always safe.
 
 ```
-ump get servers --diff                  # since the previous listing
-ump get servers --since 7d              # since the state as of a week ago (also 12h, 2026-10-01, RFC 3339)
-ump get servers --cached [ref...]       # the last listing, without any API call
+ump server list --diff                  # since the previous listing
+ump server list --since 7d              # since the state as of a week ago (also 12h, 2026-10-01, RFC 3339)
+ump server list --cached [ref...]       # the last listing, without any API call
 ```
 
 `--diff` lists the current servers, compares them with the previous
@@ -196,10 +198,10 @@ before each reference; `-o json` and `-o yaml` print a report:
 The exit code does not depend on whether something changed; it is 4 when
 an account could not be listed, as for a plain listing.
 
-## `ump describe server`
+## `ump server show`
 
 ```
-ump describe server NAME|ID|IP|PROVIDER/ID ... [--account <name>...] [-o text|json|yaml]
+ump server show NAME|ID|IP|PROVIDER/ID ... [--account <name>...] [-o text|json|yaml]
 ```
 
 Finds each server across the configured accounts with the same references
@@ -223,7 +225,7 @@ array; each element has the machine fields of `get servers` plus
 (sizes in bytes as numbers, booleans as booleans):
 
 ```console
-$ ump describe server web-01 -o json | jq '.[0].details[] | select(.name == "Power").fields'
+$ ump server show web-01 -o json | jq '.[0].details[] | select(.name == "Power").fields'
 {
   "state": "running",
   "reset_types": ["sw", "hw", "man"]
@@ -234,10 +236,10 @@ Exit codes: 1 when a reference matched nothing or was ambiguous without a
 terminal, 3 when the question was left with `q`, 4 when a provider call
 failed or an account could not be listed.
 
-## `ump rename server`
+## `ump server rename`
 
 ```
-ump rename server NAME|ID|IP|PROVIDER/ID NEW-NAME [--force] [-o json|yaml|name]
+ump server rename NAME|ID|IP|PROVIDER/ID NEW-NAME [--force] [-o json|yaml|name]
 ```
 
 Sets the name the server is known by at its provider: the server name at
@@ -259,14 +261,14 @@ codes: 1 for not found, ambiguous without a terminal, a name in use, or a
 provider that cannot rename; 2 for an invalid name; 4 when the provider
 refused.
 
-Reverse DNS is not touched; see `ump set rdns`.
+Reverse DNS is not touched; see `ump server rdns set`.
 
-## Reverse DNS: `ump get|set|delete rdns`
+## Reverse DNS: `ump server rdns`
 
 ```
-ump get rdns [NAME|ID|IP|PROVIDER/ID ...] [-o table|json|yaml]
-ump set rdns NAME|ID|IP|PROVIDER/ID [PTR-NAME] [--ip <address>] [-o json|yaml]
-ump delete rdns NAME|ID|IP|PROVIDER/ID [--ip <address>]
+ump server rdns get [NAME|ID|IP|PROVIDER/ID ...] [-o table|json|yaml]
+ump server rdns set NAME|ID|IP|PROVIDER/ID [PTR-NAME] [--ip <address>] [-o json|yaml]
+ump server rdns delete NAME|ID|IP|PROVIDER/ID [--ip <address>]
 ```
 
 `get rdns` lists the reverse DNS (PTR) entries of servers' public
@@ -282,15 +284,15 @@ Providers differ: Hetzner Robot and Hetzner Cloud accept any name;
 OVHcloud checks that the name resolves to the address first, so create
 the forward record before setting the PTR there. Providers without
 reverse DNS support are noted on stderr by `get rdns` and refused with
-exit code 1 by `set` and `delete`. `ump config types` shows which
+exit code 1 by `set` and `delete`. `ump config isp types` shows which
 capabilities each provider type has.
 
-## Power: `ump reboot|start|stop server`
+## Power: `ump server reboot|start|stop`
 
 ```
-ump reboot server REF [--hard | --power-cycle] [--wait] [--yes]
-ump start  server REF [--wait]
-ump stop   server REF [--hard] [--yes]
+ump server reboot REF [--hard | --power-cycle] [--wait] [--yes]
+ump server start REF [--wait]
+ump server stop REF [--hard] [--yes]
 ```
 
 `reboot` asks the operating system to reboot (ACPI) unless `--hard`
@@ -308,11 +310,11 @@ Hetzner Robot presses the power button for on and off and has no reset
 for a switched-off server; OVHcloud dedicated servers know one reboot (a
 hardware reset) and cannot be switched on or off through the API.
 
-## Rescue: `ump rescue|unrescue server`
+## Rescue: `ump server rescue|unrescue`
 
 ```
-ump rescue   server REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
-ump unrescue server REF [--reboot] [--wait] [--yes]
+ump server rescue REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
+ump server unrescue REF [--reboot] [--wait] [--yes]
 ```
 
 `rescue` brings the server into UMP's own rescue system, the Debian image
@@ -321,7 +323,7 @@ with the disks untouched, waits until it answers and hands the terminal
 over to `ssh`, so you land in its root shell; exiting it returns to your
 shell. With a command after `--`, the command runs there instead and its
 exit status becomes ump's, which is the form for scripts and agents
-(`ump rescue server web-01 --yes -- lsblk`). `--no-connect` prints the
+(`ump server rescue web-01 --yes -- lsblk`). `--no-connect` prints the
 `ssh` command instead, as does a terminal-less run without a command;
 `-o json` prints the details (address, the way the server got there and
 the image version, the provider's password where it issues one, the
@@ -363,7 +365,7 @@ UMP's key (one that only issues a password) is reported together with
 the commands to load the image by hand. Exit status 5 means the server
 did not answer in time: no root access with `--via direct`, or the
 rescue system never came up after the kexec (reset the server with
-`ump reboot --hard` and look at its console).
+`ump server reboot --hard` and look at its console).
 
 `unrescue` disables the provider's rescue system so that the next boot
 is from disk, and with `--reboot` resets the server now. The UMP rescue
@@ -372,10 +374,10 @@ from disk depends on the provider: Hetzner clears its rescue flag once
 its rescue system has booted, OVHcloud dedicated servers keep rescue as
 their boot option until `unrescue`.
 
-## Install: `ump install server`
+## Install: `ump server reinstall`
 
 ```
-ump install server REF [--profile NAME|FILE] [--layout NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -394,7 +396,7 @@ rebooted into the new system; ump waits until it answers over SSH with
 UMP's key and reports what came up:
 
 ```console
-$ ump install server web-01
+$ ump server reinstall web-01
 Install ubuntu-26.04 on hetzner-cloud/123 (web-01, 203.0.113.10) as web-01? Every disk of the server is erased. [y/N] y
 Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 24.04.3 LTS).
 Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.
@@ -446,16 +448,16 @@ hostname, what answered after the reboot). A provision step other than
 `none` is recorded on the server and reported; running it is not
 implemented yet. Exit status 1 means the
 installer failed (its output says where; the server stays in the rescue
-system, `ump ssh server REF --staging` gets there), 5 that the new system
+system, `ump ssh REF --staging` gets there), 5 that the new system
 did not answer after the reboot (look at the server's console). Providers
 that keep their rescue system as the boot option (OVHcloud) have it
 disabled before the reboot. Asks for confirmation on a terminal; without
 one, `--yes` is required.
 
-## `ump ssh server`
+## `ump ssh`
 
 ```
-ump ssh server REF [--user <name>] [--staging] [-- COMMAND...]
+ump ssh REF [--user <name>] [--staging] [-- COMMAND...]
 ```
 
 Resolves the server and starts the local `ssh` client against its primary
@@ -478,7 +480,26 @@ keys and a returned password.
 
 ## `ump config`
 
-Without a subcommand, `ump config` is an interactive wizard: it asks for
+```
+ump config isp [view|types|add|remove|test]
+ump config os  [list|get|create|edit|delete]
+ump config path | key
+```
+
+`ump config isp` is the provider accounts: the wizard without a
+subcommand, and the subcommands for the non-interactive forms. `ump
+config os` is the [profiles](../profiles/README.md): the first run
+downloads the published default profile and layouts into
+`~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
+`create NAME` copies one (`--from`, default `default`) and opens it in
+your editor, `edit NAME` opens it and checks it afterwards (an invalid
+profile is kept, with the problem named), `delete NAME` removes it, and
+without a subcommand it is a small wizard over these. `ump server set
+REF --profile NAME` remembers which profile a server is reinstalled with
+(`servers:` in the configuration file), `--clear` forgets it.
+
+
+Without a subcommand, `ump config isp` is an interactive wizard: it asks for
 the provider type, an account name and the credentials, asks where the
 secrets should be kept (files under `~/.config/ump/secrets/` readable only
 by you, environment variables, or a command such as `pass show ...`),
@@ -489,10 +510,10 @@ wizard, and Ctrl-C aborts at any prompt; an account is written only after
 its test passed (or you chose to save it anyway), so leaving never saves a
 half-entered account. Without a terminal it refuses with exit code 3.
 
-`ump config add <type> <name> --set KEY=VALUE ...` is the non-interactive
+`ump config isp add <type> <name> --set KEY=VALUE ...` is the non-interactive
 form. A value is plain text or a secret reference: `env:NAME`,
 `file:PATH`, `command:CMD`. The credentials are tested before saving
-unless `--no-test` is given; `ump config types` lists the settings of
+unless `--no-test` is given; `ump config isp types` lists the settings of
 every provider type. `view` shows the configuration with plaintext
 secrets redacted (references are shown as they are), `test` checks every
 account, `remove` deletes an account together with the secret files the
@@ -501,7 +522,7 @@ wizard created for it.
 ### `ump config key`
 
 UMP has its own SSH key pair, generated on first use (by `ump config key`
-or the first `ump rescue`) at `~/.config/ump/staging_ed25519`, or at the
+or the first `ump server rescue`) at `~/.config/ump/staging_ed25519`, or at the
 path set as `staging.key` in the configuration. It is what rescue
 systems and, later, the install pipeline are reached with, so it works
 whatever personal keys are around. `ump config key` prints the public
@@ -524,13 +545,13 @@ running machine that means entering the staging environment, which
 reboots it. `plan` asks before doing that, and `--facts <file>` lets you
 plan from previously collected facts instead.
 
-### `ump install`
+### `ump server reinstall`
 
 ```
-ump install <machine>... --profile <name> [plan flags]
+ump server reinstall <machine>... --profile <name> [plan flags]
             [--approved <run-id> | --yes --confirm-machine <ref>] [--parallel N]
             [--skip-handoff] [--keep-rescue] [--dry-run]
-ump install --resume <run-id>
+ump server reinstall --resume <run-id>
 ```
 
 Runs the full pipeline (see [architecture](architecture.md#the-install-pipeline)).
@@ -576,38 +597,38 @@ Shows the hardware facts. Uses the cache from the last run unless
 ```console
 # set up provider accounts interactively, or without a terminal:
 $ ump config
-$ ump config add hetzner-robot main --set login=env:HROBOT_USER --set password=env:HROBOT_PASS
-$ ump config test main
+$ ump config isp add hetzner-robot main --set login=env:HROBOT_USER --set password=env:HROBOT_PASS
+$ ump config isp test main
 
 # what do I have?
-$ ump get servers
-$ ump get servers -o wide --account main
-$ ump get servers -o json | jq '.[] | select(.status=="ready")'
-$ ump describe server web-01
-$ ump rename server web-01 prod-web-01
-$ ump set rdns prod-web-01 prod-web-01.example.net
-$ ump reboot server prod-web-01 --wait
-$ ump rescue server prod-web-01            # into a root shell of the rescue system
-$ ump rescue server prod-web-01 --yes -- lsblk
-$ ump unrescue server prod-web-01 --reboot
-$ ump ssh server prod-web-01 -- uptime
+$ ump server list
+$ ump server list -o wide --account main
+$ ump server list -o json | jq '.[] | select(.status=="ready")'
+$ ump server show web-01
+$ ump server rename web-01 prod-web-01
+$ ump server rdns set prod-web-01 prod-web-01.example.net
+$ ump server reboot prod-web-01 --wait
+$ ump server rescue prod-web-01            # into a root shell of the rescue system
+$ ump server rescue prod-web-01 --yes -- lsblk
+$ ump server unrescue prod-web-01 --reboot
+$ ump ssh prod-web-01 -- uptime
 
 # reinstall one server
 $ ump plan web-01 --profile base
-$ ump install web-01 --profile base
+$ ump server reinstall web-01 --profile base
 
 # reinstall three servers from CI, without prompts
-$ ump install web-01 web-02 web-03 --profile base \
+$ ump server reinstall web-01 web-02 web-03 --profile base \
       --yes --confirm-machine web-01,web-02,web-03 --parallel 3
 
 # take over a cloud VM that terraform created, using kexec
-$ ump install hetzner-cloud/234567 --profile base --entry kexec
+$ ump server reinstall hetzner-cloud/234567 --profile base --entry kexec
 
 # install a box in the rack through its Redfish controller
-$ ump install rack1-07 --profile storage --entry virtual-media
+$ ump server reinstall rack1-07 --profile storage --entry virtual-media
 
 # a machine that is not behind any API: boot something with SSH yourself
-$ ump install 192.0.2.50 --profile base --entry manual
+$ ump server reinstall 192.0.2.50 --profile base --entry manual
 
 # agent-driven flow: the agent plans, a human approves, the agent installs
 $ ump plan prod-web-03 --profile web -o json       # agent
@@ -618,7 +639,7 @@ $ ump install prod-web-03 --approved run-7f3a      # agent
 $ ump inventory export --format ansible --group-by env,role,provider
 ```
 
-Everything after `ump unrescue server` in the examples is draft.
+Everything after `ump server unrescue` in the examples is draft.
 
 ## Exit codes
 

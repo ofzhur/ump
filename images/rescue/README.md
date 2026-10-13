@@ -92,7 +92,7 @@ Nothing ties ump to that hostname: any web server or object store that
 answers plain `GET` requests, without authentication, redirects to login
 pages or bot challenges, and that the servers can reach, does. Set
 `storage: https://files.example.net/ump` in the configuration (or
-`--storage` on `ump install`, `--image` on `ump rescue` for the rescue
+`--storage` on `ump server reinstall`, `--image` on `ump server rescue` for the rescue
 image alone) and serve this below it:
 
 | Path | What it is |
@@ -163,7 +163,7 @@ serial console) gives a root shell on the out-of-band console.
 
 ## Entering it by hand
 
-Until `ump install` does this itself, from a provider's rescue system or
+Until `ump server reinstall` does this itself, from a provider's rescue system or
 any running Linux, as root (the script is published next to the images,
 so one line is enough):
 
@@ -171,14 +171,14 @@ so one line is enough):
 # curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue
 ```
 
-With ump, from your own machine, that is `ump rescue server web-01`. It
+With ump, from your own machine, that is `ump server rescue web-01`. It
 checks whether the server lets UMP in as root over SSH and, if so, runs
 the script there right away (no reboot through the provider); otherwise
 it puts the server into the provider's rescue system, runs the script
 there, and connects once the UMP rescue system answers with its version:
 
 ```console
-$ ump rescue server web-01
+$ ump server rescue web-01
 Checking root access to 203.0.113.10 over SSH ... no.
 Going through the provider's rescue system.
 Rescue system enabled for hetzner-cloud/123 (web-01, 203.0.113.10); rebooting into it.
@@ -202,7 +202,7 @@ forces one of the two ways.
 [`kexec-into-rescue.sh`](kexec-into-rescue.sh) downloads the image for
 the machine's architecture, verifies the checksums, takes the current
 address, gateway, hostname, `console=` settings and `root`'s
-`authorized_keys` (which is where `ump rescue` put UMP's key) plus any
+`authorized_keys` (which is where `ump server rescue` put UMP's key) plus any
 `-K` keys, loads the image with `kexec` (the published static one, or the
 system's), syncs and remounts the file systems of a system that runs
 from disk read-only, and boots it. Reconnect as root
@@ -270,6 +270,6 @@ with 542 MB available. SSH answered about ten seconds after `kexec -e`.
   not reproducible bit for bit; the manifest pins what was built.
 - Secure Boot is not considered: `kexec` into an unsigned kernel needs
   Secure Boot off, which is how provider rescue systems run anyway.
-- `ump install` will fetch `manifest.json` from the configured base URL
+- `ump server reinstall` will fetch `manifest.json` from the configured base URL
   (`staging.kexec_image`), verify the files and do what
   `kexec-into-rescue.sh` does, including waiting for the new host key.

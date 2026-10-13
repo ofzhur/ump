@@ -38,7 +38,7 @@ func parseFormat(s string) (outputFormat, error) {
 	return "", fmt.Errorf("unknown output format %q (use one of %s)", s, strings.Join(outputFormats, ", "))
 }
 
-// column is one table column of `ump get servers`.
+// column is one table column of `ump server list`.
 type column struct {
 	header string
 	wide   bool
@@ -59,7 +59,7 @@ var serverColumns = []column{
 }
 
 // printMachines writes machines in the requested format. JSON output is a
-// plain array, so that `ump get servers -o json | jq '.[]'` works.
+// plain array, so that `ump server list -o json | jq '.[]'` works.
 func printMachines(w io.Writer, ms []provider.Machine, f outputFormat, noHeaders bool) error {
 	if ms == nil {
 		ms = []provider.Machine{}

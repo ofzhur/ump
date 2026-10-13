@@ -15,35 +15,14 @@ import (
 
 var renameResources = []string{"server"}
 
-func (a *app) newRenameCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "rename RESOURCE NAME NEW-NAME",
-		Short: "Rename a resource at its provider",
-		Long: `Rename a resource at its provider.
-
-Resources: server (aliases: servers, srv, machine, machines)`,
-		Example: `  ump rename server web-01 prod-web-01
-  ump rename server hetzner-robot/123456 prod-web-01 -o json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			return usageErrorf(cmd, "unknown resource type %q (known: %s)", args[0], strings.Join(renameResources, ", "))
-		},
-	}
-	cmd.AddCommand(a.newRenameServerCmd())
-	return cmd
-}
-
-func (a *app) newRenameServerCmd() *cobra.Command {
+func (a *app) newServerRenameCmd() *cobra.Command {
 	var (
 		output string
 		force  bool
 	)
 	cmd := &cobra.Command{
-		Use:     "server NAME|ID|IP|PROVIDER/ID NEW-NAME",
-		Aliases: []string{"servers", "srv", "machine", "machines"},
-		Short:   "Rename a server at its provider",
+		Use:   "rename NAME|ID|IP|PROVIDER/ID NEW-NAME",
+		Short: "Rename a server at its provider",
 		Long: `Set the name a server is known by at its provider: the server name at
 Hetzner Robot and Hetzner Cloud, the instance name at OVHcloud Public
 Cloud (OVHcloud dedicated servers cannot be renamed through the API).

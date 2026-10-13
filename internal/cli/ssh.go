@@ -15,7 +15,7 @@ func (a *app) newSSHCmd() *cobra.Command {
 		staging bool
 	)
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID [-- COMMAND...]",
+		Use:   "ssh NAME|ID|IP|PROVIDER/ID [-- COMMAND...]",
 		Short: "Open an SSH session on a server, or run a command there",
 		Long: `Resolve the server and start the local ssh client against its primary
 address: an interactive session, or the command given after "--", whose
@@ -27,9 +27,9 @@ configuration applies.
 --staging connects the way UMP does to rescue and staging systems: with
 UMP's key alone and without host key checks, because those systems have
 a fresh host key every boot.`,
-		Example: `  ump ssh server web-01
-  ump ssh server web-01 -- uptime
-  ump ssh server web-01 --staging -- lsblk`,
+		Example: `  ump ssh web-01
+  ump ssh web-01 -- uptime
+  ump ssh web-01 --staging -- lsblk`,
 		Args: usageArgs(cobra.MinimumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			refs, command := splitDash(cmd.ArgsLenAtDash(), args)
@@ -41,8 +41,7 @@ a fresh host key every boot.`,
 	}
 	sub.Flags().StringVar(&user, "user", "root", "the login name")
 	sub.Flags().BoolVar(&staging, "staging", false, "use UMP's key alone and no host key checks (rescue and staging systems)")
-	return a.serverVerbCmd("ssh", "Open an SSH session on a server", "Open an SSH session on a server, or run a command there.",
-		"  ump ssh server web-01\n  ump ssh server web-01 -- uptime", sub)
+	return sub
 }
 
 func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, command []string) error {

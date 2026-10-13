@@ -17,32 +17,11 @@ import (
 
 var describeResources = []string{"server"}
 
-func (a *app) newDescribeCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "describe RESOURCE NAME...",
-		Short: "Show details of a resource",
-		Long: `Show everything the provider knows about a resource.
-
-Resources: server (aliases: servers, srv, machine, machines)`,
-		Example: `  ump describe server web-01
-  ump describe server hetzner-robot/123456 -o json
-  ump describe server 203.0.113.10 --account hetzner-main`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			return usageErrorf(cmd, "unknown resource type %q (known: %s)", args[0], strings.Join(describeResources, ", "))
-		},
-	}
-	cmd.AddCommand(a.newDescribeServerCmd())
-	return cmd
-}
-
-func (a *app) newDescribeServerCmd() *cobra.Command {
+func (a *app) newServerShowCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
-		Use:     "server NAME|ID|IP|PROVIDER/ID ...",
-		Aliases: []string{"servers", "srv", "machine", "machines"},
+		Use:     "show NAME|ID|IP|PROVIDER/ID ...",
+		Aliases: []string{"describe", "info"},
 		Short:   "Show details of one or more servers",
 		Long: `Show the common fields of a server and everything else its provider
 reports about it: contract and rescue state at Hetzner Robot, type, image,
@@ -73,7 +52,7 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 		return err
 	}
 	if len(cfg.Accounts) == 0 {
-		return fmt.Errorf("no accounts configured in %s; run `ump config` to add one", config.AbbreviateHome(path))
+		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one", config.AbbreviateHome(path))
 	}
 	names, err := a.selectAccounts(cmd, cfg)
 	if err != nil {

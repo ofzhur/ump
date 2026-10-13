@@ -69,6 +69,8 @@ type app struct {
 	sshExec sshExecer
 	// agentKeys lists the ssh-agent's public keys; nil means ssh-add -L.
 	agentKeys func() ([]string, error)
+	// editor opens a file in the user's editor; nil means $VISUAL/$EDITOR.
+	editor func(path string) error
 
 	// global flags
 	configFlag string
@@ -122,6 +124,9 @@ func (a *app) run(ctx context.Context, args []string) int {
 	if a.agentKeys == nil {
 		a.agentKeys = sshAgentKeys
 	}
+	if a.editor == nil {
+		a.editor = runEditor
+	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
@@ -154,9 +159,10 @@ func (a *app) newRootCmd() *cobra.Command {
 		Long: `ump puts the same operating system, in the same shape, on any machine:
 dedicated servers, cloud VMs and boxes in your own rack.
 
-Commands follow the kubectl shape: ` + "`ump get servers`" + ` lists machines of every
-configured provider account, ` + "`ump describe server NAME`" + ` shows one in detail,
-` + "`ump config`" + ` sets accounts up.`,
+Everything happens to servers: ` + "`ump server list`" + ` lists the machines of every
+configured provider account, ` + "`ump server show NAME`" + ` shows one in detail,
+` + "`ump server reinstall NAME`" + ` installs it the way a profile says, ` + "`ump ssh NAME`" + `
+logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.`,
 		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -173,17 +179,7 @@ configured provider account, ` + "`ump describe server NAME`" + ` shows one in d
 	pf.StringSliceVar(&a.accounts, "account", nil, "only use these accounts (repeatable, or comma-separated)")
 	pf.BoolVarP(&a.verbose, "verbose", "v", false, "log API requests to stderr")
 
-	root.AddCommand(a.newGetCmd())
-	root.AddCommand(a.newDescribeCmd())
-	root.AddCommand(a.newRenameCmd())
-	root.AddCommand(a.newSetCmd())
-	root.AddCommand(a.newDeleteCmd())
-	root.AddCommand(a.newRebootCmd())
-	root.AddCommand(a.newStartCmd())
-	root.AddCommand(a.newStopCmd())
-	root.AddCommand(a.newRescueCmd())
-	root.AddCommand(a.newInstallCmd())
-	root.AddCommand(a.newUnrescueCmd())
+	root.AddCommand(a.newServerCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())

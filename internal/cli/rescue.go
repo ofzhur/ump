@@ -26,10 +26,10 @@ type rescueOptions struct {
 	via       string
 }
 
-func (a *app) newRescueCmd() *cobra.Command {
+func (a *app) newServerRescueCmd() *cobra.Command {
 	var o rescueOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID [-- COMMAND...]",
+		Use:   "rescue NAME|ID|IP|PROVIDER/ID [-- COMMAND...]",
 		Short: "Boot a server into the UMP rescue system and connect",
 		Long: `Bring the server into UMP's own rescue system, a Debian that runs from
 RAM with the disks untouched, and hand the terminal over to ssh there.
@@ -72,18 +72,17 @@ without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.noConnect, "no-connect", false, "print how to connect instead of connecting")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the connection details as json or yaml instead of connecting")
-	return a.serverVerbCmd("rescue", "Boot a server into the UMP rescue system and connect", "Boot a server into UMP's rescue system, directly over SSH or through the provider's rescue system, and connect to it.",
-		"  ump rescue server web-01\n  ump rescue server web-01 --yes -- lsblk\n  ump rescue server web-01 --no-image\n  ump rescue server web-01 --no-reboot", sub)
+	return sub
 }
 
-func (a *app) newUnrescueCmd() *cobra.Command {
+func (a *app) newServerUnrescueCmd() *cobra.Command {
 	var (
 		reboot bool
 		wait   bool
 		yes    bool
 	)
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
+		Use:   "unrescue NAME|ID|IP|PROVIDER/ID",
 		Short: "Leave the rescue system: the next boot is from disk",
 		Long: `Disable the provider's rescue system so that the next boot is from disk.
 With --reboot the server is reset right away (--wait waits for SSH).
@@ -96,8 +95,7 @@ Some providers (OVHcloud Public Cloud) reboot the instance themselves.`,
 	sub.Flags().BoolVar(&reboot, "reboot", false, "reset the server now")
 	sub.Flags().BoolVar(&wait, "wait", false, "with --reboot: wait until SSH answers again")
 	sub.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation of the reboot")
-	return a.serverVerbCmd("unrescue", "Leave the rescue system", "Disable the rescue system so that the next boot is from disk.",
-		"  ump unrescue server web-01 --reboot --wait", sub)
+	return sub
 }
 
 // stagingKey returns UMP's own public key, generating the pair on first

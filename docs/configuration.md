@@ -17,11 +17,11 @@ never needs interactive input except for confirmations.
 `--config <dir|file>` or `UMP_CONFIG` overrides the location. A project
 can keep its UMP configuration in a repository next to its Ansible code
 and point UMP at it — that is the recommended setup for teams. Secret
-files written by `ump config` always go to `~/.config/ump/secrets/`
+files written by `ump config isp` always go to `~/.config/ump/secrets/`
 (mode 0600), never next to a project configuration.
 
-`ump config` (the wizard) and `ump config add` write the `accounts`
-section; `ump config view` shows it with plaintext secrets redacted.
+`ump config isp` (the wizard) and `ump config isp add` write the `accounts`
+section; `ump config isp view` shows it with plaintext secrets redacted.
 
 Built-in defaults (a `base` profile, common layouts, official Debian and
 Ubuntu images) ship inside the binary and can be overridden by files with
@@ -91,7 +91,7 @@ Any string value that holds a secret can be a reference instead:
 | `{ file: path }` | contents of a file (trailing newline stripped) |
 | `{ command: "..." }` | stdout of a command (`pass`, `op read`, `sops -d`, `vault kv get`, ...) |
 
-Plaintext values are accepted; `ump config view` redacts them. `ump config
+Plaintext values are accepted; `ump config isp view` redacts them. `ump config
 types` lists which settings each provider type has and which are secret.
 
 ## Profiles

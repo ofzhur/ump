@@ -19,22 +19,44 @@ import (
 func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Set up provider accounts (interactive wizard)",
-		Long: `Set up provider accounts. Without a subcommand, ump config starts an
+		Short: "Set up provider accounts (isp) and OS profiles (os)",
+		Long: `The configuration: provider accounts under isp, the profiles that say
+what a server becomes under os, UMP's own SSH key, and where it all lives.`,
+		Example: `  ump config isp                  # the account wizard
+  ump config isp view             # the accounts, secrets redacted
+  ump config os                   # the profile wizard
+  ump config os edit default      # a profile in your editor
+  ump config key                  # UMP's SSH key
+  ump config path`,
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
+	return cmd
+}
+
+func (a *app) newConfigISPCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "isp",
+		Aliases: []string{"provider", "providers", "account", "accounts"},
+		Short:   "Set up provider accounts (interactive wizard)",
+		Long: `Set up provider accounts. Without a subcommand, ump config isp starts an
 interactive wizard that asks for a provider type, a name and the
 credentials, tests them and writes them to the configuration file.
 Secrets are stored as references (a file readable only by you, an
 environment variable or a command), never as plaintext.
 
-Without a terminal, use ` + "`ump config add`" + ` instead.`,
-		Example: `  ump config                      # the wizard
-  ump config view                 # the configuration, secrets redacted
-  ump config test                 # check every account's credentials
-  ump config add hetzner-robot main --set login=#ws+AbCdEfGh --set password=env:HROBOT_PASSWORD
-  ump config add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
-  ump config add ovh ovh --set endpoint=ovh-eu --set application_key=... \
+Without a terminal, use ` + "`ump config isp add`" + ` instead.`,
+		Example: `  ump config isp                      # the wizard
+  ump config isp view                 # the configuration, secrets redacted
+  ump config isp test                 # check every account's credentials
+  ump config isp add hetzner-robot main --set login=#ws+AbCdEfGh --set password=env:HROBOT_PASSWORD
+  ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
+  ump config isp add ovh ovh --set endpoint=ovh-eu --set application_key=... \
       --set application_secret=command:"pass show ovh/app-secret" --set consumer_key=env:OVH_CK
-  ump config remove main`,
+  ump config isp remove main`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runWizard(cmd)
@@ -42,12 +64,10 @@ Without a terminal, use ` + "`ump config add`" + ` instead.`,
 	}
 	cmd.AddCommand(
 		a.newConfigViewCmd(),
-		a.newConfigPathCmd(),
 		a.newConfigTypesCmd(),
 		a.newConfigAddCmd(),
 		a.newConfigRemoveCmd(),
 		a.newConfigTestCmd(),
-		a.newConfigKeyCmd(),
 	)
 	return cmd
 }
@@ -175,7 +195,7 @@ func (a *app) newConfigTypesCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(a.stdout)
-			fmt.Fprintln(a.stdout, "Settings, for `ump config add TYPE NAME --set KEY=VALUE` (VALUE may be plain, env:NAME, file:PATH or command:CMD):")
+			fmt.Fprintln(a.stdout, "Settings, for `ump config isp add TYPE NAME --set KEY=VALUE` (VALUE may be plain, env:NAME, file:PATH or command:CMD):")
 			for _, t := range provider.Types() {
 				fmt.Fprintf(a.stdout, "\n  %s\n", t.Name)
 				tw := tabwriter.NewWriter(a.stdout, 0, 8, 3, ' ', 0)

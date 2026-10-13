@@ -228,7 +228,7 @@ const (
 // runWizard is `ump config` without a subcommand.
 func (a *app) runWizard(cmd *cobra.Command) error {
 	if a.isTTY == nil || !a.isTTY() {
-		return withExit(exitAborted, errors.New("ump config is interactive and needs a terminal; use `ump config add TYPE NAME --set KEY=VALUE ...` instead"))
+		return withExit(exitAborted, errors.New("ump config isp is interactive and needs a terminal; use `ump config isp add TYPE NAME --set KEY=VALUE ...` instead"))
 	}
 	cfg, path, err := a.loadConfig()
 	if err != nil {
@@ -287,7 +287,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 		ui.Printf("Nothing changed.\n")
 		return nil
 	}
-	ui.Printf("\nDone. Try: ump get servers\n")
+	ui.Printf("\nDone. Try: ump server list\n")
 	return nil
 }
 

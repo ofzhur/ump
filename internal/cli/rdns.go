@@ -16,7 +16,7 @@ import (
 
 var rdnsAliases = []string{"ptr", "reverse-dns"}
 
-// ptrRow is one line of `ump get rdns`.
+// ptrRow is one line of `ump server rdns get`.
 type ptrRow struct {
 	Provider string `json:"provider" yaml:"provider"`
 	Account  string `json:"account" yaml:"account"`
@@ -32,8 +32,8 @@ func (a *app) newGetRDNSCmd() *cobra.Command {
 		noHeaders bool
 	)
 	cmd := &cobra.Command{
-		Use:     "rdns [NAME|ID|IP|PROVIDER/ID ...]",
-		Aliases: rdnsAliases,
+		Use:     "get [NAME|ID|IP|PROVIDER/ID ...]",
+		Aliases: []string{"list", "ls"},
 		Short:   "List reverse DNS entries of servers",
 		Long: `List the reverse DNS (PTR) entries of the public addresses of servers:
 the primary IPv4 always, plus every other address of the server that has
@@ -48,44 +48,24 @@ listed. Providers that cannot manage reverse DNS are noted on stderr.`,
 	return cmd
 }
 
-func (a *app) newSetCmd() *cobra.Command {
+func (a *app) newServerRDNSCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set RESOURCE ...",
-		Short: "Set a property of a resource",
-		Long: `Set a property of a resource at its provider.
-
-Resources: rdns (aliases: ptr, reverse-dns)`,
-		Example: `  ump set rdns web-01                        # PTR of the primary IPv4 = the server name
-  ump set rdns web-01 web-01.example.net
-  ump set rdns web-01 web-01.example.net --ip 2001:db8:1:2::1`,
+		Use:     "rdns",
+		Aliases: rdnsAliases,
+		Short:   "Reverse DNS entries of servers: get, set, delete",
+		Long: `The reverse DNS (PTR) entries of servers' public addresses: list them,
+set one, or delete one. Providers that cannot manage reverse DNS say so.`,
+		Example: `  ump server rdns get
+  ump server rdns set web-01 web-01.example.net
+  ump server rdns delete web-01 --ip 2001:db8::1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			return usageErrorf(cmd, "unknown resource type %q (known: rdns)", args[0])
+			return usageErrorf(cmd, "unknown command %q for ump server rdns (get, set, delete)", args[0])
 		},
 	}
-	cmd.AddCommand(a.newSetRDNSCmd())
-	return cmd
-}
-
-func (a *app) newDeleteCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "delete RESOURCE ...",
-		Short: "Delete a resource or a property of one",
-		Long: `Delete a resource, or a property of one, at its provider.
-
-Resources: rdns (aliases: ptr, reverse-dns)`,
-		Example: `  ump delete rdns web-01
-  ump delete rdns web-01 --ip 2001:db8:1:2::1`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			return usageErrorf(cmd, "unknown resource type %q (known: rdns)", args[0])
-		},
-	}
-	cmd.AddCommand(a.newDeleteRDNSCmd())
+	cmd.AddCommand(a.newGetRDNSCmd(), a.newSetRDNSCmd(), a.newDeleteRDNSCmd())
 	return cmd
 }
 
@@ -95,9 +75,8 @@ func (a *app) newSetRDNSCmd() *cobra.Command {
 		output string
 	)
 	cmd := &cobra.Command{
-		Use:     "rdns NAME|ID|IP|PROVIDER/ID [PTR-NAME]",
-		Aliases: rdnsAliases,
-		Short:   "Set the reverse DNS entry of a server address",
+		Use:   "set NAME|ID|IP|PROVIDER/ID [PTR-NAME]",
+		Short: "Set the reverse DNS entry of a server address",
 		Long: `Set the reverse DNS (PTR) entry of one of a server's public addresses:
 the primary IPv4 unless --ip names another address of the server (an
 IPv6 address inside the server's prefix, an additional IP). Without a
@@ -123,8 +102,8 @@ does); create the forward record first there.`,
 func (a *app) newDeleteRDNSCmd() *cobra.Command {
 	var ip string
 	cmd := &cobra.Command{
-		Use:     "rdns NAME|ID|IP|PROVIDER/ID",
-		Aliases: rdnsAliases,
+		Use:     "delete NAME|ID|IP|PROVIDER/ID",
+		Aliases: []string{"rm", "unset"},
 		Short:   "Remove the reverse DNS entry of a server address",
 		Long: `Remove the reverse DNS (PTR) entry of one of a server's public
 addresses: the primary IPv4 unless --ip names another address. Providers

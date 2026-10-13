@@ -37,6 +37,9 @@ type Config struct {
 	// layout). Default: DefaultStorage, the project's own.
 	Storage string  `yaml:"storage,omitempty"`
 	Staging Staging `yaml:"staging,omitempty"`
+	// Servers holds what the user set for single servers (ump server set),
+	// keyed by the server's reference (provider/id).
+	Servers map[string]ServerSettings `yaml:"servers,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -46,6 +49,12 @@ type Config struct {
 type Defaults struct {
 	// Output is the default output format (table, wide, json, yaml, name).
 	Output string `yaml:"output,omitempty"`
+}
+
+// ServerSettings is what the user set for one server.
+type ServerSettings struct {
+	// Profile is the profile the server is reinstalled with.
+	Profile string `yaml:"profile,omitempty"`
 }
 
 // Staging configures how UMP reaches staging environments (rescue

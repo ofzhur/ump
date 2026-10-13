@@ -5,7 +5,7 @@ from a [UMP base image](../images/ubuntu/README.md) the way a
 specification says. It runs as root in the [UMP rescue
 system](../images/rescue/README.md), where no disk is in use, and
 refuses to run anywhere else unless told to with `--force`, because it
-erases every disk of the machine it runs on. `ump install` renders the
+erases every disk of the machine it runs on. `ump server reinstall` renders the
 specification from a [profile](../profiles/README.md), fetches the
 installer from the storage and runs it there with the specification on
 its stdin; it can be run by hand just the same, with a specification
@@ -18,7 +18,7 @@ root and the keys of a file).
    disks (whole devices that are not removable media, RAM or loop
    devices, and not on USB; NVMe first, so `first` in a layout is an
    NVMe disk when there is one), the network of the rescue system (the
-   address, gateway and MAC that `ump rescue` carried over on the kernel
+   address, gateway and MAC that `ump server rescue` carried over on the kernel
    command line, or what is configured).
 2. **Plans the layout** against the disks: every partition with its
    number and size per disk, every md array, every volume group and
@@ -76,7 +76,7 @@ root and the keys of a file).
 12. Writes `/etc/ump/install` (what was installed, when, on which disks,
     which profile and layout, the provision step) and
     `/etc/ump/spec.json` (the specification), unmounts everything and
-    reports; `ump install` then reboots the machine and waits for the
+    reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
 
 ## Usage
@@ -90,12 +90,12 @@ install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/
 The specification is JSON with the fields of a resolved profile (`os`,
 `hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
 `disks`, `users` with key lines, `packages`, `firewall`, `provision`);
-`ump install` writes it, and `/etc/ump/spec.json` of an installed system
+`ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`
 layout with root alone: `--storage` is the base URL that serves
 `os/<os>/<arch>/manifest.json` and `rootfs.tar.zst` (see [the storage
 layout](../images/rescue/README.md#your-own-storage)), `--keys` defaults
-to `/root/.ssh/authorized_keys`, which is where `ump rescue` put UMP's
+to `/root/.ssh/authorized_keys`, which is where `ump server rescue` put UMP's
 key and yours. By hand, from the rescue system:
 
 ```console

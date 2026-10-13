@@ -39,11 +39,12 @@ type installOptions struct {
 	output      string
 }
 
-func (a *app) newInstallCmd() *cobra.Command {
+func (a *app) newServerReinstallCmd() *cobra.Command {
 	var o installOptions
 	sub := &cobra.Command{
-		Use:   "server NAME|ID|IP|PROVIDER/ID",
-		Short: "Install an operating system on a server",
+		Use:     "reinstall NAME|ID|IP|PROVIDER/ID",
+		Aliases: []string{"install"},
+		Short:   "Install an operating system on a server",
 		Long: `Put an operating system on the server's disks from a UMP base image and
 boot it, the way a profile says. The server is brought into the UMP
 rescue system first (the way ump rescue does it: as it is when it runs
@@ -74,7 +75,7 @@ terminal; without one, --yes is required.`,
 			return a.installServer(cmd, args[0], o)
 		},
 	}
-	sub.Flags().StringVar(&o.profile, "profile", "default", "the profile: a name (profiles/NAME.yaml in the configuration directory, else published) or a file")
+	sub.Flags().StringVar(&o.profile, "profile", "", "the profile: a name (profiles/NAME.yaml in the configuration directory, else published) or a file (default: the one set for the server with ump server set, else default)")
 	sub.Flags().StringVar(&o.layout, "layout", "", "the disk layout, by name from layouts.yaml (default: the profile's)")
 	sub.Flags().StringVar(&o.os, "os", "", "the operating system image (default: the profile's)")
 	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name)")
@@ -89,8 +90,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.noReboot, "no-reboot", false, "leave the server in the rescue system after the installation")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the result as json or yaml")
-	return a.serverVerbCmd("install", "Install an operating system on a server", "Install an operating system on a server from a UMP base image, through the UMP rescue system.",
-		"  ump install server web-01\n  ump install server web-01 --profile db --hostname db-01.example.net\n  ump install server web-01 --layout lvm-raid1 --dry-run\n  ump install server web-01 --yes --ipv6 --mitigations", sub)
+	return sub
 }
 
 // installResult is what ump install reports.
@@ -174,8 +174,16 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		}
 	}
 	ctx := cmd.Context()
-	// the profile, resolved to the specification the installer takes
-	prof, from, err := a.loadProfile(ctx, o.profile, storage)
+	// the profile, resolved to the specification the installer takes:
+	// --profile, else the one set for the server, else default
+	profileName := o.profile
+	if profileName == "" {
+		profileName = cfg.Servers[m.Ref()].Profile
+	}
+	if profileName == "" {
+		profileName = "default"
+	}
+	prof, from, err := a.loadProfile(ctx, profileName, storage)
 	if err != nil {
 		return err
 	}
@@ -260,17 +268,17 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	installerRan := strings.Contains(buf.String(), "==> ") || strings.Contains(buf.String(), "install.sh:")
 	switch {
 	case code == 255:
-		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (ump ssh server %s --staging)", entry.addr, ref))
+		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (ump ssh %s --staging)", entry.addr, ref))
 	case code != 0 && !installerRan && code != 1 && code != 2:
 		return fmt.Errorf("%s could not fetch the installer from %s (exit status %d); the server must reach the storage", entry.addr, installer, code)
 	case code == 2:
 		return fmt.Errorf("the installer refused the specification or the machine (exit status 2, see above); nothing was changed, %s stays in the UMP rescue system", m.Name)
 	case code != 0:
-		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh server %s --staging)", m.Name, code, ref)
+		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh %s --staging)", m.Name, code, ref)
 	}
 	result := installResult{Machine: m, Profile: prof.Name, Layout: spec.Layout.Name, OS: spec.OS, Hostname: hostname, Via: entry.via, DryRun: o.dryRun}
 	if o.dryRun {
-		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh server %s --staging).\n", m.Name, ref)
+		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh %s --staging).\n", m.Name, ref)
 		return a.installReport(result, format)
 	}
 
@@ -327,6 +335,9 @@ func (a *app) loadProfile(ctx context.Context, name, storage string) (*profile.P
 			p.Name = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(name), ".yaml"), ".yml")
 		}
 		return p, name, nil
+	}
+	if err := a.ensureProfiles(ctx, storage); err != nil {
+		return nil, "", err
 	}
 	local := filepath.Join(config.ProfilesDir(), name+".yaml")
 	if _, err := os.Stat(local); err == nil {

@@ -12,10 +12,10 @@ See [architecture](architecture.md#providers) for the interfaces.
 The table shows the **intended** use of each provider's API. Details are
 to be verified against the current APIs when each integration is
 implemented. Implemented today, for `hetzner-robot`, `hetzner-cloud`
-and `ovh`: `inventory` (`ump get servers`), `describe`, `rename`, `rdns`
+and `ovh`: `inventory` (`ump server list`), `describe`, `rename`, `rdns`
 (`ump get|set|delete rdns`), `power` (`ump reboot|start|stop server`)
 and `rescue` (`ump rescue|unrescue server`). Not every provider supports every feature: each provider
-declares its capabilities (`ump config types` lists them), and a command
+declares its capabilities (`ump config isp types` lists them), and a command
 that needs one the provider lacks says so instead of failing half-way.
 
 | Provider | Kind | inventory | rename | power | rescue | create | rdns | network-info | virtual-media | Entry method |
@@ -62,7 +62,7 @@ SSH as root. It is also the provider used by the integration test suite.
   arms the rescue system with `POST /boot/{number}/rescue`; Robot issues
   a password only when no key is given.
 - When the server is switched off, a hardware reset does nothing, so
-  `ump reboot` presses the power button instead. `stop` is a short press
+  `ump server reboot` presses the power button instead. `stop` is a short press
   (ACPI shutdown) or, with `--hard`, a long press; `start` a short press.
   The `man` reset type (a technician) is never used.
 - Provider network info: main IPv4, additional single IPs, subnets and the
@@ -73,7 +73,7 @@ SSH as root. It is also the provider used by the integration test suite.
 ### Hetzner Cloud
 
 - Server names must be unique within the project and valid hostnames;
-  `ump rename server` uses `PUT /servers/{id}` and reports the API's
+  `ump server rename` uses `PUT /servers/{id}` and reports the API's
   `uniqueness_error` plainly.
 - Reverse DNS is set with the `change_dns_ptr` action for the IPv4 and
   for single addresses inside the IPv6 /64; removing an entry restores
@@ -104,7 +104,7 @@ SSH as root. It is also the provider used by the integration test suite.
   `rescueMode`, `start` and `stop` actions, and shows the validation URL; a key that may not see one of the two families is
   tolerated, that family is skipped. A key made elsewhere needs the same
   rules; a missing one shows up as `NOT_GRANTED_CALL` with the path.
-- `ump rename server` renames Public Cloud instances (`instanceName`).
+- `ump server rename` renames Public Cloud instances (`instanceName`).
   Dedicated servers cannot be renamed through the API: the display name
   is read-only in every public API model, the v2 IAM resource included,
   so UMP says so instead of pretending; set it in the control panel.
@@ -125,9 +125,9 @@ SSH as root. It is also the provider used by the integration test suite.
   and rescue through the netboot mode (`rescue` until `unrescue`, the
   machine boots it at the next reboot). The VPS API takes no rescue SSH
   key and OVH mails the password, so UMP cannot log into a VPS rescue
-  system by itself; `ump rescue --no-image` with the mailed password is
+  system by itself; `ump server rescue --no-image` with the mailed password is
   the way in. A consumer key made before VPS support lacks the `/vps`
-  rules and shows no VPS; `ump config add` requests a new key with them.
+  rules and shows no VPS; `ump config isp add` requests a new key with them.
 - The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
 
 ### Clouds without rescue (AWS, GCP, ...)
@@ -154,13 +154,13 @@ SSH as root. It is also the provider used by the integration test suite.
 1. Create a package under `internal/provider/<name>`.
 2. Declare a `provider.Type`: the name used in `config.yaml`, a
    description for the wizard, the settings as `Fields` (label, help,
-   secret, required, choices, defaults — the wizard and `ump config add`
+   secret, required, choices, defaults — the wizard and `ump config isp add`
    are driven by them) and a `New` function that builds an instance from
    resolved settings. A `Complete` hook can fill settings interactively
    (OVH uses it to request a consumer key).
 3. Implement `Provider` plus the optional capability interfaces
    (`Inventory` first; `Describer` returns the provider's extra facts as
-   named sections for `ump describe server`).
+   named sections for `ump server show`).
 4. Map provider objects to UMP's `Machine` (ID, name, addresses, location,
    product, status, labels). Lower-case locations and statuses; keep
    product names as the provider spells them.
