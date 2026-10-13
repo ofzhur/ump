@@ -1,66 +1,100 @@
 # The UMP installer
 
 [`install.sh`](install.sh) puts an operating system on a machine's disks
-from a [UMP base image](../images/ubuntu/README.md). It runs as root in
-the [UMP rescue system](../images/rescue/README.md), where no disk is in
-use, and refuses to run anywhere else unless told to with `--force`,
-because it erases every disk of the machine it runs on. `ump install`
-fetches it from the storage and runs it there; it can be run by hand just
-the same.
+from a [UMP base image](../images/ubuntu/README.md) the way a
+specification says. It runs as root in the [UMP rescue
+system](../images/rescue/README.md), where no disk is in use, and
+refuses to run anywhere else unless told to with `--force`, because it
+erases every disk of the machine it runs on. `ump install` renders the
+specification from a [profile](../profiles/README.md), fetches the
+installer from the storage and runs it there with the specification on
+its stdin; it can be run by hand just the same, with a specification
+file or with the flags alone (which give the `lvm-linear` layout with
+root and the keys of a file).
 
 ## What it does
 
 1. **Looks at the machine:** architecture, firmware (UEFI or BIOS), the
    disks (whole devices that are not removable media, RAM or loop
-   devices, and not on USB), the network of the rescue system (the
+   devices, and not on USB; NVMe first, so `first` in a layout is an
+   NVMe disk when there is one), the network of the rescue system (the
    address, gateway and MAC that `ump rescue` carried over on the kernel
-   command line, or what is configured), and root's authorized keys.
-   Prints the plan; `--dry-run` stops here.
-2. **Fetches the manifest** of the image, so that a missing image costs
+   command line, or what is configured).
+2. **Plans the layout** against the disks: every partition with its
+   number and size per disk, every md array, every volume group and
+   volume. A target that matches no disk, two parts taking the rest of
+   one disk, an md or raid level with too few members, a UEFI machine
+   without an `efi` part or a BIOS machine without a `bios` part stop it
+   here. Prints the plan, with the users, packages, firewall and
+   provision step; `--dry-run` stops here.
+3. **Fetches the manifest** of the image, so that a missing image costs
    no disk.
-3. **Releases and wipes the disks:** swap off, everything mounted from
+4. **Releases and wipes the disks:** swap off, everything mounted from
    them unmounted, volume groups deactivated, md arrays stopped, then the
    signatures inside the old partitions, the partition tables and the
    signatures of the disks themselves.
-4. **Partitions:** the first disk (NVMe before the others) gets a 1 MiB
-   BIOS boot partition, a 512 MiB EFI system partition (FAT32), a 1 GiB
-   `/boot` (ext4) and the rest as an LVM physical volume; every other
-   disk becomes one physical volume. `vg0/root` is one linear logical
-   volume over all of them, ext4. `/boot` stays a plain partition on
-   purpose: the boot loader never has to read LVM.
-5. **Unpacks the image** straight from the download into the mounted
-   volumes, and checks the archive's SHA-256 against the manifest.
-6. **Configures the machine:** hostname, `/etc/fstab` by UUID, a netplan
-   file for the interface (matched by MAC) with the static address and
-   on-link gateway, or DHCP when nothing is known, IPv6 only with
-   `--ipv6`, resolvers 1.1.1.1 and 8.8.8.8, root's `authorized_keys`,
-   the kernel command line (`mitigations=off ipv6.disable=1` unless
-   `--mitigations`, `--ipv6`, and `kho=off`: the kernel's kexec handover
-   would reserve up to half the memory of a small machine for live
-   updates, and stop ump from re-entering its rescue system), time zone,
-   a fresh machine id and SSH host keys.
-7. **Installs the boot loader:** GRUB on the EFI removable path
-   (`EFI/BOOT/BOOT*.EFI`), which every firmware tries without a boot
-   entry, and without writing one, so the firmware's boot order stays as
-   the provider set it, with its network boot (which is how rescue
-   systems get in) ahead of the disk; on amd64 also the BIOS loader into
-   the BIOS boot partition, so the disk boots either way. Then
-   `update-grub`.
-8. Writes `/etc/ump/install` (what was installed, when, on which disks),
-   unmounts everything and reports; `ump install` then reboots the
-   machine and waits for the new system.
+5. **Builds the layout:** GPT partitions (the one that takes the rest of
+   a disk last), md arrays (`mdadm --create`, metadata 1.2), file systems
+   (ext4, xfs, btrfs, vfat, swap), physical volumes, volume groups and
+   logical volumes (striped, mirrored, raid5, raid6, raid10 or linear;
+   striping over a single physical volume becomes linear). Mirrored and
+   parity volumes synchronise in the background after the first boot.
+   `/boot` stays a plain partition on purpose: the boot loader never has
+   to read LVM or md.
+6. **Mounts** root, then the other mountpoints by depth, and **unpacks
+   the image** straight from the download into them, checking the
+   archive's SHA-256 against the manifest.
+7. **Configures the machine:** hostname, `/etc/fstab` by UUID (swap
+   included), a netplan file for the interface (matched by MAC) with the
+   static address and on-link gateway, or DHCP when nothing is known,
+   IPv6 only when the profile keeps it, resolvers 1.1.1.1 and 8.8.8.8,
+   the kernel command line (`mitigations=off ipv6.disable=1` unless the
+   profile keeps them, the profile's extra, and `kho=off`: the kernel's
+   kexec handover would reserve up to half the memory of a small machine
+   for live updates, and stop ump from re-entering its rescue system),
+   time zone, a fresh machine id and SSH host keys.
+8. **Users:** root gets its keys; every other user is created with its
+   shell, groups (created when missing) and keys, and `sudo: true` makes
+   it a member of `sudo` with a `NOPASSWD` drop-in, since no passwords
+   are set.
+9. **Packages:** the profile's packages are installed from the Ubuntu
+   archive inside the new system (through the rescue system's resolver,
+   with no service started), as is `nftables` when the firewall needs
+   it and the image lacks it.
+10. **Firewall:** with `policy: drop`, `/etc/nftables.conf` is written
+    (input drop; loopback, established and related connections, and the
+    allowed entries accepted; forward drop; output accept) and
+    `nftables.service` enabled.
+11. **Installs the boot loader:** GRUB on the EFI removable path
+    (`EFI/BOOT/BOOT*.EFI`), which every firmware tries without a boot
+    entry, and without writing one, so the firmware's boot order stays as
+    the provider set it, with its network boot (which is how rescue
+    systems get in) ahead of the disk; on amd64 also the BIOS loader into
+    the BIOS boot partition of every disk that has one, so the disk boots
+    either way. With md arrays or raid volumes, `mdadm.conf` is written
+    and the initramfs rebuilt first. Then `update-grub`.
+12. Writes `/etc/ump/install` (what was installed, when, on which disks,
+    which profile and layout, the provision step) and
+    `/etc/ump/spec.json` (the specification), unmounts everything and
+    reports; `ump install` then reboots the machine and waits for the
+    new system.
 
 ## Usage
 
 ```
-install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--arch amd64|arm64]
-           [--layout lvm-linear] [--disks /dev/sda,/dev/sdb] [--keys FILE]
-           [--ipv6] [--mitigations] [--timezone ZONE] [--force] [--dry-run]
+install.sh --spec FILE [--dry-run] [--force]
+install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
+           [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
 ```
 
-`--storage` is the base URL that serves `os/<os>/<arch>/manifest.json`
-and `rootfs.tar.zst` (see [the storage
-layout](../images/rescue/README.md#your-own-storage)); `--keys` defaults
+The specification is JSON with the fields of a resolved profile (`os`,
+`hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
+`disks`, `users` with key lines, `packages`, `firewall`, `provision`);
+`ump install` writes it, and `/etc/ump/spec.json` of an installed system
+is one to start from. Without `--spec`, the flags give the `lvm-linear`
+layout with root alone: `--storage` is the base URL that serves
+`os/<os>/<arch>/manifest.json` and `rootfs.tar.zst` (see [the storage
+layout](../images/rescue/README.md#your-own-storage)), `--keys` defaults
 to `/root/.ssh/authorized_keys`, which is where `ump rescue` put UMP's
 key and yours. By hand, from the rescue system:
 

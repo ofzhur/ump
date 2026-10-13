@@ -50,7 +50,7 @@ ump
 ├── start        server <ref> [--wait]
 ├── stop         server <ref> [--hard] [--yes]
 ├── rescue       server <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
-├── install      server <ref> [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
+├── install      server <ref> [--profile <name|file>] [--layout <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
 ├── unrescue     server <ref> [--reboot] [--wait] [--yes]
 ├── ssh          server <ref> [--user <name>] [--staging] [-- command]
 ├── config                                         interactive wizard: add an account, test it, save it
@@ -375,18 +375,23 @@ their boot option until `unrescue`.
 ## Install: `ump install server`
 
 ```
-ump install server REF [--os ubuntu-26.04] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump install server REF [--profile NAME|FILE] [--layout NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
-image](../images/ubuntu/README.md) and boots it. The server is brought
-into the UMP rescue system the way `rescue` does it (as it is when it
-runs it already, by a kexec from the running system when that lets UMP
-in as root, else through the provider's rescue system); the
+image](../images/ubuntu/README.md) the way a [profile](../profiles/README.md)
+says, and boots it. The profile (`--profile`, default `default`: a file
+of that name in `~/.config/ump/profiles/`, else the published one, or a
+path) names the image, the disk layout (by name from `layouts.yaml`, or
+its own), the users with their keys, extra packages, what the firewall
+lets in, and the provision step after the first boot. The server is
+brought into the UMP rescue system the way `rescue` does it (as it is
+when it runs it already, by a kexec from the running system when that
+lets UMP in as root, else through the provider's rescue system); the
 [installer](../install/README.md) is fetched from the storage and run
-there, with its progress shown; the server is rebooted into the new
-system; ump waits until it answers over SSH with UMP's key and reports
-what came up:
+there with the resolved profile, with its progress shown; the server is
+rebooted into the new system; ump waits until it answers over SSH with
+UMP's key and reports what came up:
 
 ```console
 $ ump install server web-01
@@ -407,31 +412,39 @@ Waiting for SSH on 203.0.113.10 ... up after 18s.
 web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root.
 ```
 
-Every disk of the server is erased. The default layout, `lvm-linear`,
-puts the boot partitions on the first disk and makes every disk a
-physical volume of one volume group, with root as one linear volume over
-all of it (`--disks` limits the disks). The new system gets the server's
-name as hostname (`--hostname` for another; it must be a valid one), the
-address, gateway and interface of the rescue system (which `rescue`
-carried over from the running system), resolvers 1.1.1.1 and 8.8.8.8,
-root with UMP's key, your public keys next to the usual `~/.ssh/id_*`
-files, the keys the rescue system had, and `--ssh-key` files (a key that
-lives only in an agent: `ssh-add -L > me.pub` and `--ssh-key me.pub`),
-the time zone (`--timezone`, default UTC), and a kernel command
-line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the
-kernel's kexec handover reserves memory for live updates and gets in the
-way of ump's own re-entry). Both cost performance
-and most servers need neither; `--mitigations` and `--ipv6` keep them on,
-and [the installer's README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
-says how to turn them on later. `--os` names the image (`ubuntu-26.04`
-is the first and so far the only one), `--storage` another storage than
-the configured one for the installer, the images and the rescue image.
+Every disk of the server is erased. The default profile's layout,
+`lvm-linear`, puts the boot partitions on the first disk and makes every
+disk a physical volume of one volume group, with root as one linear
+volume over all of it; `lvm-striped`, `lvm-raid1` and `lvm-example` are
+the other published layouts, and a profile can carry its own (`--disks`
+limits the disks). The new system gets the server's name as hostname
+(`--hostname` for another; it must be a valid one), the address, gateway
+and interface of the rescue system (which `rescue` carried over from the
+running system), resolvers 1.1.1.1 and 8.8.8.8, the profile's users with
+their keys (the default: root with UMP's key and your `~/.ssh/id_*.pub`
+keys; `--ssh-key` adds files to root; `agent` in a profile takes what
+`ssh-add -L` lists), the time zone (`--timezone`), and a kernel command
+line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the kernel's
+kexec handover reserves memory for live updates and gets in the way of
+ump's own re-entry). The first two cost performance and most servers
+need neither; the profile's `kernel` section, `--mitigations` and
+`--ipv6` keep them on, and [the installer's
+README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
+says how to turn them on later. The flags override the profile for one
+installation: `--layout`, `--os`, `--timezone`, `--ipv6`,
+`--mitigations`, `--disks`, `--ssh-key`; `--storage` names another
+storage than the configured one for the installer, the images, the
+profiles and the rescue image.
 
 `--dry-run` brings the server into the rescue system, prints the
-installer's plan (machine, disks, layout, network, keys) and leaves it
-there without touching a disk. `--no-reboot` installs and leaves the
-server in the rescue system. `-o json` prints the result (the way in, the
-hostname, what answered after the reboot). Exit status 1 means the
+installer's plan (machine, every partition, array and volume per disk,
+network, users, packages, firewall, provision) and leaves it there
+without touching a disk; a layout whose targets match no disk, or a raid
+level with too few members, stops there too. `--no-reboot` installs and leaves the
+server in the rescue system. `-o json` prints the result (the profile and layout, the way in, the
+hostname, what answered after the reboot). A provision step other than
+`none` is recorded on the server and reported; running it is not
+implemented yet. Exit status 1 means the
 installer failed (its output says where; the server stays in the rescue
 system, `ump ssh server REF --staging` gets there), 5 that the new system
 did not answer after the reboot (look at the server's console). Providers

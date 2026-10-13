@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -199,8 +202,12 @@ type testEnv struct {
 	sshExit int
 
 	// The fake machine behind the non-interactive ssh runs (probes, the
-	// entry script, version checks); remoteCalls records the command lines.
+	// entry script, version checks); remoteCalls records the command lines
+	// and remoteStdin what each got on stdin.
 	remoteCalls [][]string
+	remoteStdin []string
+	// agentKeys is what the fake ssh-agent lists.
+	agentKeys []string
 	// directRoot: the running system lets UMP in as root; inImage: it runs
 	// the UMP rescue system already; rescueNoKey: the provider's rescue
 	// system does not take UMP's key; entryExit: the entry script fails
@@ -273,8 +280,20 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 			return e.sshExit, nil
 		},
 		probe: func(ctx context.Context, addr string) bool { return true },
+		agentKeys: func() ([]string, error) {
+			if e.agentKeys == nil {
+				return nil, errors.New("ssh-add -L lists no keys")
+			}
+			return e.agentKeys, nil
+		},
 		sshExec: func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+			in := ""
+			if stdin != nil {
+				b, _ := io.ReadAll(stdin)
+				in = string(b)
+			}
 			e.remoteCalls = append(e.remoteCalls, argv)
+			e.remoteStdin = append(e.remoteStdin, in)
 			out, errOut, code := e.remote(argv)
 			io.WriteString(stdout, out)
 			io.WriteString(stderr, errOut)
@@ -325,6 +344,9 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 		if e.installNoScript {
 			return "", "curl: (22) The requested URL returned error: 404\n", 22
 		}
+		if e.installExit == 2 {
+			return "", "install.sh: layout lvm-striped, part 4 (slice): no disk matches [\"nvme.*\"] (disks: /dev/sda)\n", 2
+		}
 		if e.installExit != 0 {
 			return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n", "install.sh: no disk found\n", e.installExit
 		}
@@ -371,6 +393,37 @@ func (e *testEnv) entryCommands() []string {
 // fetches the published script and runs it with the URL.
 func entryPrefix(url string) string {
 	return `f=/tmp/kexec-into-rescue.sh; if command -v curl >/dev/null; then curl -fsSL ` + url + `/kexec-into-rescue.sh -o "$f"; else wget -q -O "$f" ` + url + `/kexec-into-rescue.sh; fi && bash "$f" -u ` + url + ` `
+}
+
+// writeProfiles puts the repository's profiles into the configuration
+// directory, where ump looks first.
+func (e *testEnv) writeProfiles() {
+	e.t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+	os.MkdirAll(dir, 0o700)
+	for _, name := range []string{"default.yaml", "layouts.yaml"} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "profiles", name))
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(dir, name), data, 0o600)
+	}
+}
+
+// lastSpec returns the specification the last installer run got.
+func (e *testEnv) lastSpec() map[string]any {
+	e.t.Helper()
+	for i := len(e.remoteCalls) - 1; i >= 0; i-- {
+		if strings.Contains(e.remoteCalls[i][len(e.remoteCalls[i])-1], "/install/install.sh") {
+			var spec map[string]any
+			if err := json.Unmarshal([]byte(e.remoteStdin[i]), &spec); err != nil {
+				e.t.Fatalf("spec: %v\n%s", err, e.remoteStdin[i])
+			}
+			return spec
+		}
+	}
+	e.t.Fatal("no installer run")
+	return nil
 }
 
 func fields(s string) [][]string {
@@ -1923,12 +1976,13 @@ func TestRescueWaysAndFailures(t *testing.T) {
 }
 
 func installerPrefix(storage string) string {
-	return `f=/tmp/ump-install.sh; if command -v curl >/dev/null; then curl -fsSL ` + storage + `/install/install.sh -o "$f"; else wget -q -O "$f" ` + storage + `/install/install.sh; fi && bash "$f" --storage ` + storage + ` `
+	return `cat > /tmp/ump-install.json && f=/tmp/ump-install.sh; if command -v curl >/dev/null; then curl -fsSL ` + storage + `/install/install.sh -o "$f"; else wget -q -O "$f" ` + storage + `/install/install.sh; fi && bash "$f" --spec /tmp/ump-install.json`
 }
 
 func TestInstallServer(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
+	e.writeProfiles()
 	resetFakePower()
 
 	// through the provider's rescue system, the installer, a reboot, and
@@ -1940,7 +1994,7 @@ func TestInstallServer(t *testing.T) {
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... no.\n",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
-		"Installing ubuntu-26.04 on web-01 as web-01 ...\n",
+		"Installing ubuntu-26.04 (profile default from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "default.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
 		"==> installed: ubuntu-26.04 2026.10.12",
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
 		"Waiting for SSH on 203.0.113.10 to go down ...",
@@ -1953,11 +2007,31 @@ func TestInstallServer(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout: %q", out)
 	}
-	if len(e.installs) != 1 || !strings.Contains(e.installs[0], installerPrefix("https://ump.zhurko.de")+"--os ubuntu-26.04 --hostname web-01") || strings.Contains(e.installs[0], "--ipv6") || strings.Contains(e.installs[0], "--mitigations") || strings.Contains(e.installs[0], "--dry-run") {
+	if len(e.installs) != 1 || !strings.HasSuffix(e.installs[0], installerPrefix("https://ump.zhurko.de")) {
 		t.Errorf("installer command: %q", e.installs)
 	}
+	spec := e.lastSpec()
+	if spec["os"] != "ubuntu-26.04" || spec["hostname"] != "web-01" || spec["storage"] != "https://ump.zhurko.de" || spec["timezone"] != "UTC" {
+		t.Errorf("spec: %v", spec)
+	}
+	if k := spec["kernel"].(map[string]any); k["mitigations"] != false || k["ipv6"] != false {
+		t.Errorf("spec kernel: %v", k)
+	}
+	if l := spec["layout"].(map[string]any); l["name"] != "lvm-linear" || len(l["parts"].([]any)) != 5 {
+		t.Errorf("spec layout: %v", l)
+	}
+	users := spec["users"].([]any)
+	if len(users) != 1 || users[0].(map[string]any)["name"] != "root" || len(users[0].(map[string]any)["keys"].([]any)) != 1 || !strings.HasPrefix(users[0].(map[string]any)["keys"].([]any)[0].(string), "ssh-ed25519 ") {
+		t.Errorf("spec users: %v", users)
+	}
+	if fw := spec["firewall"].(map[string]any); fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
+		t.Errorf("spec firewall: %v", fw)
+	}
+	if spec["provision"].(map[string]any)["type"] != "none" || len(spec["packages"].([]any)) != 0 {
+		t.Errorf("spec provision/packages: %v %v", spec["provision"], spec["packages"])
+	}
 	// root's keys of the new system are put into the rescue system first
-	if !strings.HasPrefix(e.installs[0], `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in 'ssh-ed25519 `) || !strings.Contains(e.installs[0], `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; f=/tmp/ump-install.sh;`) {
+	if !strings.HasPrefix(e.installs[0], `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in 'ssh-ed25519 `) || !strings.Contains(e.installs[0], `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; cat > /tmp/ump-install.json && f=/tmp/ump-install.sh;`) {
 		t.Errorf("keys not ensured before the installer: %q", e.installs[0])
 	}
 	if got := strings.Join(fakePower.actions, ","); got != "rescue,reboot:hard,unrescue" {
@@ -1979,8 +2053,21 @@ func TestInstallServer(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("install with options: code %d\n%s", code, out)
 	}
-	if !strings.Contains(e.installs[1], installerPrefix("https://files.example.net/ump")+"--os ubuntu-26.04 --hostname db-01.example.net --ipv6 --mitigations --disks /dev/sda,/dev/sdb --timezone Europe/Berlin") || !strings.Contains(e.installs[1], "me@laptop' 'ssh-ed25519 ") && !strings.Contains(e.installs[1], "for k in 'ssh-ed25519 ") {
+	if !strings.HasSuffix(e.installs[1], installerPrefix("https://files.example.net/ump")) || !strings.Contains(e.installs[1], "for k in 'ssh-ed25519 ") {
 		t.Errorf("installer command with options: %q", e.installs[1])
+	}
+	spec = e.lastSpec()
+	if spec["hostname"] != "db-01.example.net" || spec["timezone"] != "Europe/Berlin" || spec["storage"] != "https://files.example.net/ump" {
+		t.Errorf("spec with options: %v", spec)
+	}
+	if k := spec["kernel"].(map[string]any); k["mitigations"] != true || k["ipv6"] != true {
+		t.Errorf("spec kernel with options: %v", k)
+	}
+	if d := spec["disks"].([]any); len(d) != 2 || d[0] != "/dev/sda" || d[1] != "/dev/sdb" {
+		t.Errorf("spec disks: %v", spec["disks"])
+	}
+	if keys := spec["users"].([]any)[0].(map[string]any)["keys"].([]any); len(keys) != 2 || !strings.HasSuffix(keys[1].(string), " me@laptop") {
+		t.Errorf("root keys with the local key: %v", keys)
 	}
 	if entries := e.entryCommands(); len(entries) != 2 || !strings.HasPrefix(entries[1], entryPrefix("https://files.example.net/ump/rescue")) || !strings.Contains(entries[1], "-K 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop'") {
 		t.Errorf("rescue entry with --storage and the user's key: %q", entries)
@@ -2000,7 +2087,7 @@ func TestInstallServer(t *testing.T) {
 	resetFakePower()
 	e.write(testConfig + "storage: https://mirror.example.org/ump\n")
 	_, _, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
-	if code != 0 || !strings.Contains(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
+	if code != 0 || !strings.HasSuffix(e.installs[2], installerPrefix("https://mirror.example.org/ump")) || !strings.HasPrefix(e.entryCommands()[2], entryPrefix("https://mirror.example.org/ump/rescue")) {
 		t.Errorf("configured storage: code %d, %q, %q", code, e.installs[2], e.entryCommands()[2])
 	}
 	e.write(testConfig)
@@ -2008,7 +2095,7 @@ func TestInstallServer(t *testing.T) {
 	// --dry-run plans and leaves the server in the rescue system; --no-reboot installs and leaves it there
 	resetFakePower()
 	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--dry-run", "--account", "one")
-	if code != 0 || !strings.Contains(e.installs[3], " --dry-run") || e.reboots != 0 || !strings.Contains(errOut, "Dry run done; web-01 stays in the UMP rescue system (ump ssh server web-01 --staging).") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
+	if code != 0 || !strings.HasSuffix(e.installs[3], " --dry-run") || e.reboots != 0 || !strings.Contains(errOut, "Dry run done; web-01 stays in the UMP rescue system (ump ssh server web-01 --staging).") || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
 		t.Errorf("--dry-run: code %d, reboots %d, actions %v, stderr %q", code, e.reboots, fakePower.actions, errOut)
 	}
 	resetFakePower()
@@ -2021,8 +2108,14 @@ func TestInstallServer(t *testing.T) {
 	resetFakePower()
 	e.installExit = 1
 	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
-	if code != 1 || !strings.Contains(errOut, "install.sh: no disk found") || !strings.Contains(errOut, "ump: the installation on web-01 failed (exit status 1); the server stays in the UMP rescue system (ump ssh server web-01 --staging)") || e.reboots != 0 {
+	if code != 1 || !strings.Contains(errOut, "install.sh: no disk found") || !strings.Contains(errOut, "ump: the installation on web-01 failed (exit status 1, see above); the server stays in the UMP rescue system (ump ssh server web-01 --staging)") || e.reboots != 0 {
 		t.Errorf("failed installation: code %d, reboots %d, %q", code, e.reboots, errOut)
+	}
+	resetFakePower()
+	e.installExit = 2
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, "no disk matches") || !strings.Contains(errOut, "ump: the installer refused the specification or the machine (exit status 2, see above); nothing was changed, web-01 stays in the UMP rescue system") {
+		t.Errorf("refused specification: code %d, %q", code, errOut)
 	}
 	e.installExit = 0
 	resetFakePower()
@@ -2050,10 +2143,105 @@ func TestInstallServer(t *testing.T) {
 		{[]string{"install", "server", "web-01", "--yes", "--hostname", "bad host", "--account", "one"}, 2, "invalid name"},
 		{[]string{"install", "server", "web-01", "--yes", "--via", "magic", "--account", "one"}, 2, `unknown --via "magic"`},
 		{[]string{"install", "server", "web-01", "--yes", "--os", "../x", "--account", "one"}, 2, "invalid --os"},
+		{[]string{"install", "server", "web-01", "--yes", "--layout", "nope", "--account", "one"}, 1, `layout "nope" is not in layouts.yaml`},
+		{[]string{"install", "server", "web-01", "--yes", "--profile", "/nonexistent/p.yaml", "--account", "one"}, 1, "nonexistent"},
 		{[]string{"install", "server", "web-01", "--yes", "-o", "table", "--account", "one"}, 2, "unknown output format"},
 	} {
 		if _, errOut, code := e.run("", false, c.args...); code != c.code || !strings.Contains(errOut, c.msg) {
 			t.Errorf("%v: code %d (want %d), %q", c.args, code, c.code, errOut)
 		}
+	}
+}
+
+func TestInstallProfiles(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakePower()
+	e.directRoot = true
+
+	// a profile file of its own: users with sudo and agent keys, packages,
+	// an inline layout, a firewall, a provision step
+	dir := t.TempDir()
+	prof := filepath.Join(dir, "db.yaml")
+	os.WriteFile(prof, []byte(`os: ubuntu-26.04
+timezone: Europe/Berlin
+kernel: {ipv6: true}
+disks:
+  parts:
+    - {type: slice, target: [first], size: 1M, filesystem: bios}
+    - {type: slice, target: [first], size: 512M, filesystem: efi, mountpoint: /boot/efi}
+    - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
+    - {type: slice, target: ["nvme.*"], size: rest, filesystem: lvm, vg: data}
+    - {type: lvm, vg: data, name: swap, size: 8G, filesystem: swap}
+    - {type: lvm, vg: data, name: root, size: rest, raid: 0, filesystem: xfs, mountpoint: /}
+users:
+  - {name: root, keys: [ump, agent]}
+  - {name: dba, sudo: true, groups: [adm], keys: [agent]}
+packages: [postgresql, htop]
+firewall: {policy: drop, allow: [icmp, ssh, tcp/5432, {proto: tcp, port: 9100, from: 10.0.0.0/8}]}
+provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
+`), 0o600)
+	e.write(testConfig)
+	e.agentKeys = []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@agent"}
+	out, errOut, code := e.run("", false, "install", "server", "web-01", "--yes", "--profile", prof, "--account", "one", "-o", "json")
+	if code != 0 {
+		t.Fatalf("install with a profile file: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	if !strings.Contains(errOut, "Installing ubuntu-26.04 (profile db from "+prof+", layout inline) on web-01 as web-01 ...") || !strings.Contains(errOut, "The provision step ansible-pull is recorded in /etc/ump/install on the server; running it is not implemented yet.") {
+		t.Errorf("stderr: %q", errOut)
+	}
+	spec := e.lastSpec()
+	if spec["timezone"] != "Europe/Berlin" || spec["kernel"].(map[string]any)["ipv6"] != true || spec["kernel"].(map[string]any)["mitigations"] != false {
+		t.Errorf("spec: %v", spec)
+	}
+	if l := spec["layout"].(map[string]any); l["name"] != "inline" || len(l["parts"].([]any)) != 6 {
+		t.Errorf("layout: %v", l)
+	}
+	users := spec["users"].([]any)
+	if len(users) != 2 || users[1].(map[string]any)["name"] != "dba" || users[1].(map[string]any)["sudo"] != true || len(users[0].(map[string]any)["keys"].([]any)) != 2 || len(users[1].(map[string]any)["keys"].([]any)) != 1 {
+		t.Errorf("users: %v", users)
+	}
+	if pk := spec["packages"].([]any); len(pk) != 2 || pk[0] != "postgresql" {
+		t.Errorf("packages: %v", pk)
+	}
+	if fw := spec["firewall"].(map[string]any); len(fw["allow"].([]any)) != 4 || fw["allow"].([]any)[3].(map[string]any)["from"] != "10.0.0.0/8" {
+		t.Errorf("firewall: %v", fw)
+	}
+	if pv := spec["provision"].(map[string]any); pv["type"] != "ansible-pull" || pv["options"].(map[string]any)["repo"] != "https://git.example.net/infra.git" {
+		t.Errorf("provision: %v", pv)
+	}
+	if !strings.Contains(out, `"profile": "db"`) || !strings.Contains(out, `"layout": "inline"`) {
+		t.Errorf("json result:\n%s", out)
+	}
+
+	// the published profile and layouts, from the storage, when there is no local copy
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/profiles/default.yaml", "/profiles/layouts.yaml":
+			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
+			w.Write(data)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "(profile default from the storage, layout lvm-striped)") {
+		t.Errorf("published profile: code %d, %q", code, errOut)
+	}
+	if l := e.lastSpec()["layout"].(map[string]any); l["name"] != "lvm-striped" || len(l["parts"].([]any)) != 6 {
+		t.Errorf("layout from the storage: %v", l)
+	}
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--profile", "nope", "--account", "one")
+	if code != 1 || !strings.Contains(errOut, `profile "nope": not in `+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")+`, and `+srv.URL+`/profiles/nope.yaml: HTTP 404`) {
+		t.Errorf("missing profile: code %d, %q", code, errOut)
+	}
+
+	// a key reference that gives nothing is an error before anything happens
+	e.agentKeys = nil
+	os.WriteFile(prof, []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [agent]}\n"), 0o600)
+	_, errOut, code = e.run("", false, "install", "server", "web-01", "--yes", "--profile", prof, "--account", "one")
+	if code != 1 || !strings.Contains(errOut, `user root: key "agent": ssh-add -L lists no keys`) || len(e.entryCommands()) != 2 {
+		t.Errorf("agent without keys: code %d, %q, entries %d", code, errOut, len(e.entryCommands()))
 	}
 }

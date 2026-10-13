@@ -167,7 +167,8 @@ apart. See [the skill](docs/skill.md).
 | [Skill](docs/skill.md) | The UMP skill: operating a hybrid fleet and its Terraform/Ansible repository with an AI agent; reference repository layout; safety model |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system: one kernel and initramfs per architecture, built from Debian, entered with kexec from any provider's rescue system or running system; also the layout of the storage that serves it |
 | [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu 26.04 system `ump install` puts on disks, and its defaults |
-| [Installer](install/README.md) | what `ump install` runs in the rescue system: disks, LVM, the image, the boot loader |
+| [Profiles](profiles/README.md) | what a server becomes: image, disk layout, users and keys, packages, firewall, provision step; the default profile and the named layouts |
+| [Installer](install/README.md) | what `ump install` runs in the rescue system: disks, md and LVM, the image, users, packages, firewall, the boot loader |
 | [Roadmap](docs/roadmap.md) | Milestones and open questions |
 
 ## Goals

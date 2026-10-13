@@ -3,19 +3,27 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
 )
 
 type installOptions struct {
+	profile     string
+	layout      string
 	os          string
 	hostname    string
 	storage     string
@@ -37,21 +45,25 @@ func (a *app) newInstallCmd() *cobra.Command {
 		Use:   "server NAME|ID|IP|PROVIDER/ID",
 		Short: "Install an operating system on a server",
 		Long: `Put an operating system on the server's disks from a UMP base image and
-boot it. The server is brought into the UMP rescue system first (the way
-ump rescue does it: as it is when it runs it already, by a kexec from the
-running system when that lets UMP in as root, else through the provider's
-rescue system), the installer is fetched from the storage and run there,
-the server is rebooted into the new system, and ump waits until it
-answers over SSH with UMP's key and reports what came up.
+boot it, the way a profile says. The server is brought into the UMP
+rescue system first (the way ump rescue does it: as it is when it runs
+it already, by a kexec from the running system when that lets UMP in as
+root, else through the provider's rescue system), the installer is
+fetched from the storage and run there with the profile, the server is
+rebooted into the new system, and ump waits until it answers over SSH
+with UMP's key and reports what came up.
 
-Every disk of the server is erased. The default layout, lvm-linear, puts
-the boot partitions on the first disk and makes every disk a physical
-volume of one volume group, with root as one linear volume over all of
-it. The new system gets the server's name as hostname (or --hostname),
-the address, gateway and resolvers 1.1.1.1 and 8.8.8.8, root with UMP's
-key and the keys the rescue system had, and a kernel command line with
-mitigations=off and ipv6.disable=1 unless --mitigations or --ipv6 keep
-them on (see docs/cli.md for turning them on later).
+Every disk of the server is erased. A profile (--profile, default:
+default; a file of that name in the profiles directory of the
+configuration, else the published one) says which image, which disk
+layout (by name from layouts.yaml, or its own), which users with which
+keys, which extra packages, what the firewall lets in, and the provision
+step after the first boot. The default profile puts Ubuntu 26.04 on
+every disk as one linear volume group, gives root UMP's key and your
+~/.ssh/id_*.pub keys, lets ICMP and SSH in and nothing else, and a kernel
+command line with mitigations=off and ipv6.disable=1; --mitigations and
+--ipv6 keep them on (docs/cli.md says how to turn them on later). The
+other flags override the profile for this one installation.
 
 --dry-run brings the server into the rescue system and prints the
 installer's plan without touching a disk; --no-reboot leaves the server
@@ -62,26 +74,30 @@ terminal; without one, --yes is required.`,
 			return a.installServer(cmd, args[0], o)
 		},
 	}
-	sub.Flags().StringVar(&o.os, "os", "ubuntu-26.04", "the operating system image")
+	sub.Flags().StringVar(&o.profile, "profile", "default", "the profile: a name (profiles/NAME.yaml in the configuration directory, else published) or a file")
+	sub.Flags().StringVar(&o.layout, "layout", "", "the disk layout, by name from layouts.yaml (default: the profile's)")
+	sub.Flags().StringVar(&o.os, "os", "", "the operating system image (default: the profile's)")
 	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name)")
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
-	sub.Flags().StringVar(&o.timezone, "timezone", "UTC", "time zone of the new system")
+	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
 	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for root of the new system (repeatable)")
-	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on (default: off, ipv6.disable=1)")
-	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on (default: off, mitigations=off)")
+	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
+	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")
 	sub.Flags().BoolVar(&o.dryRun, "dry-run", false, "print the installer's plan instead of installing")
 	sub.Flags().BoolVar(&o.noReboot, "no-reboot", false, "leave the server in the rescue system after the installation")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the result as json or yaml")
 	return a.serverVerbCmd("install", "Install an operating system on a server", "Install an operating system on a server from a UMP base image, through the UMP rescue system.",
-		"  ump install server web-01\n  ump install server web-01 --yes --hostname web-01.example.net\n  ump install server web-01 --dry-run\n  ump install server web-01 --ipv6 --mitigations", sub)
+		"  ump install server web-01\n  ump install server web-01 --profile db --hostname db-01.example.net\n  ump install server web-01 --layout lvm-raid1 --dry-run\n  ump install server web-01 --yes --ipv6 --mitigations", sub)
 }
 
 // installResult is what ump install reports.
 type installResult struct {
 	provider.Machine `yaml:",inline"`
+	Profile          string `json:"profile" yaml:"profile"`
+	Layout           string `json:"layout" yaml:"layout"`
 	OS               string `json:"os" yaml:"os"`
 	Hostname         string `json:"hostname" yaml:"hostname"`
 	Via              string `json:"via" yaml:"via"`
@@ -111,7 +127,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	default:
 		return usageErrorf(cmd, "unknown --via %q (use one of auto, direct, provider)", o.via)
 	}
-	if o.os == "" || strings.ContainsAny(o.os, "/ ") {
+	if o.os != "" && strings.ContainsAny(o.os, "/ ") {
 		return usageErrorf(cmd, "invalid --os %q", o.os)
 	}
 	if o.hostname != "" {
@@ -157,63 +173,102 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return fmt.Errorf("the name %q of %s is not a valid hostname; give one with --hostname", m.Name, m.Ref())
 		}
 	}
-	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", o.os, describeRef(m), hostname)
+	ctx := cmd.Context()
+	// the profile, resolved to the specification the installer takes
+	prof, from, err := a.loadProfile(ctx, o.profile, storage)
+	if err != nil {
+		return err
+	}
+	if o.layout != "" {
+		prof.Disks = profile.Disks{Name: o.layout}
+	}
+	if o.os != "" {
+		prof.OS = o.os
+	}
+	if o.timezone != "" {
+		prof.Timezone = o.timezone
+	}
+	if o.ipv6 {
+		t := true
+		prof.Kernel.IPv6 = &t
+	}
+	if o.mitigations {
+		t := true
+		prof.Kernel.Mitigations = &t
+	}
+	if len(o.keyFiles) > 0 {
+		addRootKeys(prof, o.keyFiles)
+	}
+	var layouts map[string]*profile.Layout
+	if prof.Disks.Layout == nil {
+		if layouts, err = a.loadLayouts(ctx, storage); err != nil {
+			return err
+		}
+	}
+	spec, err := prof.Resolve(layouts, a.keyResolver(cfg))
+	if err != nil {
+		return err
+	}
+	spec.Hostname = hostname
+	spec.Storage = storage
+	if o.disks != "" {
+		spec.Disks = strings.Split(o.disks, ",")
+	}
+	specJSON, err := spec.JSON()
+	if err != nil {
+		return err
+	}
+	what := fmt.Sprintf("%s (profile %s from %s, layout %s)", spec.OS, prof.Name, from, spec.Layout.Name)
+	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", what, describeRef(m), hostname)
 	if o.dryRun {
-		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), o.os)
+		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), what)
 	}
 	if err := a.confirm(cmd, o.yes, question); err != nil {
 		return err
 	}
-	ctx := cmd.Context()
 	// everything on the way is progress (stderr); stdout is for the result
 	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true})
 	if err != nil {
 		return err
 	}
 
-	// the installer, from the storage, in the rescue system
-	args := []string{"--storage", storage, "--os", o.os, "--hostname", hostname}
-	if o.ipv6 {
-		args = append(args, "--ipv6")
-	}
-	if o.mitigations {
-		args = append(args, "--mitigations")
-	}
-	if o.disks != "" {
-		args = append(args, "--disks", o.disks)
-	}
-	if o.timezone != "" && o.timezone != "UTC" {
-		args = append(args, "--timezone", o.timezone)
-	}
+	// the installer, from the storage, in the rescue system, with the
+	// specification on its stdin
+	args := []string{"--spec", "/tmp/ump-install.json"}
 	if o.dryRun {
 		args = append(args, "--dry-run")
 	}
 	if o.dryRun {
-		fmt.Fprintf(a.stderr, "Installation plan for %s on %s:\n", o.os, m.Name)
+		fmt.Fprintf(a.stderr, "Installation plan for %s on %s:\n", what, m.Name)
 	} else {
-		fmt.Fprintf(a.stderr, "Installing %s on %s as %s ...\n", o.os, m.Name, hostname)
+		fmt.Fprintf(a.stderr, "Installing %s on %s as %s ...\n", what, m.Name, hostname)
 	}
 	installer := storage + "/install/install.sh"
-	// the keys for root of the new system are root's keys in the rescue
-	// system; a server that was there already got its keys from an earlier
-	// entry, so every key is put there first
-	remote := ensureKeysCommand(keys) + fetchAndRun(installer, "/tmp/ump-install.sh", args)
+	// the keys go into the rescue system too, so that it stays reachable
+	// with them while the installation runs
+	remote := ensureKeysCommand(keys) + "cat > /tmp/ump-install.json && " + fetchAndRun(installer, "/tmp/ump-install.sh", args)
 	argv := withSSHOptions(sshArgs(entry.user, entry.addr, []string{keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
 	w := io.MultiWriter(a.stderr, &buf)
-	code, err := a.sshExec(ctx, argv, nil, w, w)
+	code, err := a.sshExec(ctx, argv, bytes.NewReader(specJSON), w, w)
 	if err != nil {
 		return err
 	}
+	// the installer ends with 1 (a failed step) or 2 (a bad specification
+	// or environment) and says so; anything else without a line of it is
+	// the fetch that failed
+	installerRan := strings.Contains(buf.String(), "==> ") || strings.Contains(buf.String(), "install.sh:")
 	switch {
 	case code == 255:
 		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (ump ssh server %s --staging)", entry.addr, ref))
-	case code != 0 && !strings.Contains(buf.String(), "==> "):
+	case code != 0 && !installerRan && code != 1 && code != 2:
 		return fmt.Errorf("%s could not fetch the installer from %s (exit status %d); the server must reach the storage", entry.addr, installer, code)
+	case code == 2:
+		return fmt.Errorf("the installer refused the specification or the machine (exit status 2, see above); nothing was changed, %s stays in the UMP rescue system", m.Name)
 	case code != 0:
-		return fmt.Errorf("the installation on %s failed (exit status %d); the server stays in the UMP rescue system (ump ssh server %s --staging)", m.Name, code, ref)
+		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh server %s --staging)", m.Name, code, ref)
 	}
-	result := installResult{Machine: m, OS: o.os, Hostname: hostname, Via: entry.via, DryRun: o.dryRun}
+	result := installResult{Machine: m, Profile: prof.Name, Layout: spec.Layout.Name, OS: spec.OS, Hostname: hostname, Via: entry.via, DryRun: o.dryRun}
 	if o.dryRun {
 		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh server %s --staging).\n", m.Name, ref)
 		return a.installReport(result, format)
@@ -229,11 +284,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		}
 	}
 	if o.noReboot {
-		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, a reboot starts %s.\n", m.Name, o.os)
+		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, a reboot starts %s.\n", m.Name, spec.OS)
 		return a.installReport(result, format)
 	}
 
-	fmt.Fprintf(a.stderr, "Rebooting %s into %s ...\n", m.Name, o.os)
+	fmt.Fprintf(a.stderr, "Rebooting %s into %s ...\n", m.Name, spec.OS)
 	reboot := withSSHOptions(sshArgs(entry.user, entry.addr, []string{keyPath}, true, true, []string{"systemctl reboot"}), batchOptions(10*time.Second)...)
 	if code, err := a.sshExec(ctx, reboot, nil, io.Discard, io.Discard); err != nil || (code != 0 && code != 255) {
 		pw, ok := prov.(provider.Power)
@@ -254,7 +309,151 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	result.System = sys
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s.\n", m.Name, sys.Name, hostname, sys.Root)
+	if spec.Provision.Type != "none" {
+		fmt.Fprintf(a.stderr, "The provision step %s is recorded in /etc/ump/install on the server; running it is not implemented yet.\n", spec.Provision.Type)
+	}
 	return a.installReport(result, format)
+}
+
+// loadProfile finds a profile: a file when the name is a path, else
+// <config>/profiles/NAME.yaml, else <storage>/profiles/NAME.yaml.
+func (a *app) loadProfile(ctx context.Context, name, storage string) (*profile.Profile, string, error) {
+	if strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
+		p, err := profile.Load(expandHome(name))
+		if err != nil {
+			return nil, "", err
+		}
+		if p.Name == "" {
+			p.Name = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(name), ".yaml"), ".yml")
+		}
+		return p, name, nil
+	}
+	local := filepath.Join(config.ProfilesDir(), name+".yaml")
+	if _, err := os.Stat(local); err == nil {
+		p, err := profile.Load(local)
+		if err != nil {
+			return nil, "", err
+		}
+		if p.Name == "" {
+			p.Name = name
+		}
+		return p, config.AbbreviateHome(local), nil
+	}
+	url := storage + "/profiles/" + name + ".yaml"
+	data, err := a.fetch(ctx, url)
+	if err != nil {
+		return nil, "", fmt.Errorf("profile %q: not in %s, and %w", name, config.AbbreviateHome(config.ProfilesDir()), err)
+	}
+	p, err := profile.Parse(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", url, err)
+	}
+	if p.Name == "" {
+		p.Name = name
+	}
+	return p, "the storage", nil
+}
+
+// loadLayouts reads layouts.yaml: the user's own in the profiles
+// directory, else the published one.
+func (a *app) loadLayouts(ctx context.Context, storage string) (map[string]*profile.Layout, error) {
+	local := filepath.Join(config.ProfilesDir(), "layouts.yaml")
+	data, err := os.ReadFile(local)
+	if err != nil {
+		url := storage + "/profiles/layouts.yaml"
+		if data, err = a.fetch(ctx, url); err != nil {
+			return nil, fmt.Errorf("layouts: not in %s, and %w", config.AbbreviateHome(config.ProfilesDir()), err)
+		}
+		local = url
+	}
+	layouts, err := profile.ParseLayouts(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", local, err)
+	}
+	return layouts, nil
+}
+
+// fetch gets a small text file from the storage.
+func (a *app) fetch(ctx context.Context, url string) ([]byte, error) {
+	client := a.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// keyResolver resolves the key references of a profile: ump (UMP's own
+// key), local (the public keys next to the usual ~/.ssh/id_* files),
+// agent (what ssh-add -L lists), a file, or a key line.
+func (a *app) keyResolver(cfg *config.Config) profile.KeyResolver {
+	return func(ref string) ([]string, error) {
+		switch ref {
+		case "ump":
+			k, _, err := a.stagingKey(cfg)
+			if err != nil {
+				return nil, err
+			}
+			return []string{k.Line()}, nil
+		case "local":
+			var keys []string
+			for _, id := range sshkey.DefaultIdentityFiles() {
+				if data, err := os.ReadFile(id + ".pub"); err == nil {
+					keys = append(keys, strings.Split(string(data), "\n")...)
+				}
+			}
+			return keys, nil
+		case "agent":
+			keys, err := a.agentKeys()
+			if err != nil {
+				return nil, err
+			}
+			return keys, nil
+		}
+		if profile.IsKeyLine(ref) {
+			return []string{ref}, nil
+		}
+		if strings.HasPrefix(ref, "~") || strings.Contains(ref, "/") || strings.HasSuffix(ref, ".pub") {
+			data, err := os.ReadFile(expandHome(ref))
+			if err != nil {
+				return nil, err
+			}
+			return strings.Split(string(data), "\n"), nil
+		}
+		return nil, errors.New("not a key reference (ump, local, agent, a file, or a public key line)")
+	}
+}
+
+// addRootKeys adds --ssh-key files to root's keys, or a root user with
+// them when the profile has none.
+func addRootKeys(p *profile.Profile, files []string) {
+	for i := range p.Users {
+		if p.Users[i].Name == "root" {
+			p.Users[i].Keys = append(p.Users[i].Keys, files...)
+			return
+		}
+	}
+	p.Users = append(p.Users, profile.User{Name: "root", Keys: append([]string{"ump"}, files...)})
+}
+
+// sshAgentKeys lists the public keys of the running ssh-agent.
+func sshAgentKeys() ([]string, error) {
+	out, err := exec.Command("ssh-add", "-L").Output()
+	if err != nil {
+		return nil, errors.New("ssh-add -L lists no keys (is an agent running, with keys loaded?)")
+	}
+	return strings.Split(string(out), "\n"), nil
 }
 
 func (a *app) installReport(r installResult, format outputFormat) error {

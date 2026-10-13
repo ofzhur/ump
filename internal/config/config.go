@@ -64,6 +64,13 @@ type Staging struct {
 // StagingKeyFile is the default name of UMP's SSH key.
 const StagingKeyFile = "staging_ed25519"
 
+// ProfilesDir is where the user's own profiles live: <name>.yaml and
+// layouts.yaml in the profiles directory of the configuration directory;
+// they take precedence over the published ones.
+func ProfilesDir() string {
+	return filepath.Join(UserConfigDir(), "profiles")
+}
+
 // DefaultStorage is where this project publishes its images and scripts.
 const DefaultStorage = "https://ump.zhurko.de"
 

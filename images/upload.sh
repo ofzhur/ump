@@ -8,13 +8,14 @@
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh
+#   profiles/default.yaml, profiles/layouts.yaml
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)
 #
 # Per image, manifest.json is uploaded last, so a reader never sees a
 # manifest that points to files which are not there yet.
 #
-# Usage: upload.sh [rescue|os|scripts]...     (default: everything that is built)
+# Usage: upload.sh [rescue|os|scripts|profiles]...     (default: everything that is built)
 #
 # Environment:
 #   STORE_ACCOUNT_ID         account ID (makes the endpoint
@@ -36,7 +37,7 @@ PREFIX="${PREFIX%/}"
 DRY_RUN="${DRY_RUN:-0}"
 
 what=("$@")
-[ ${#what[@]} -gt 0 ] || what=(rescue os scripts)
+[ ${#what[@]} -gt 0 ] || what=(rescue os scripts profiles)
 for v in STORE_ACCESS_KEY_ID STORE_SECRET_ACCESS_KEY STORE_BUCKET; do
 	[ -n "${!v:-}" ] || { echo "upload.sh: $v is not set (see the environment section of images/rescue/README.md)" >&2; exit 2; }
 done
@@ -59,6 +60,7 @@ content_type() {
 	case "$1" in
 	*.json) echo application/json ;;
 	*.txt|*.sh|SHA256SUMS) echo text/plain ;;
+	*.yaml|*.yml) echo application/yaml ;;
 	*) echo application/octet-stream ;;
 	esac
 }
@@ -153,7 +155,12 @@ for w in "${what[@]}"; do
 		put "$HERE/../install/install.sh" "$(key install/install.sh)"
 		built=1
 		;;
-	*) echo "upload.sh: unknown item $w (rescue, os, scripts)" >&2; exit 2 ;;
+	profiles)
+		echo "==> uploading the profiles"
+		for f in "$HERE"/../profiles/*.yaml; do put "$f" "$(key "profiles/$(basename "$f")")"; done
+		built=1
+		;;
+	*) echo "upload.sh: unknown item $w (rescue, os, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
 [ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build an image first (make rescue-image, make os-image)" >&2; exit 2; }

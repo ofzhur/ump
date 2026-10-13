@@ -67,6 +67,8 @@ type app struct {
 	// sshExec runs the local ssh client without a terminal, for what ump
 	// does on machines by itself; nil means the real one.
 	sshExec sshExecer
+	// agentKeys lists the ssh-agent's public keys; nil means ssh-add -L.
+	agentKeys func() ([]string, error)
 
 	// global flags
 	configFlag string
@@ -116,6 +118,9 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	if a.sshExec == nil {
 		a.sshExec = execSSH
+	}
+	if a.agentKeys == nil {
+		a.agentKeys = sshAgentKeys
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)

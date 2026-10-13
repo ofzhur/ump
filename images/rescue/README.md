@@ -103,6 +103,7 @@ image alone) and serve this below it:
 | `rescue/<arch>/initrd.zst` | the rescue system, as a zstd-compressed initramfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
+| `profiles/default.yaml`, `profiles/layouts.yaml` | the published [profile and layouts](../../profiles/README.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/<os>/<arch>/manifest.json` | an [OS image](../ubuntu/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
 | `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |

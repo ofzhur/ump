@@ -1,41 +1,38 @@
 #!/usr/bin/env bash
 # UMP installer. Runs as root in the UMP rescue system, where no disk is in
-# use, and puts an operating system on the machine's disks from a UMP base
-# image: wipes the disks, partitions them, builds the volume group, unpacks
-# the image, configures what depends on the machine (hostname, network,
-# keys, boot loader) and leaves the machine ready to reboot into the new
-# system. ump install runs it; it can be run by hand just the same.
+# use, and puts an operating system on the machine's disks the way a
+# specification says (ump install renders it from a profile): wipes the
+# disks, partitions them, builds md arrays and volume groups, unpacks the
+# image, configures what depends on the machine (hostname, network, users
+# and keys, packages, firewall, boot loader) and leaves the machine ready
+# to reboot into the new system. See README.md.
 #
-# Usage: install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--arch amd64|arm64]
-#            [--layout lvm-linear] [--disks /dev/sda,/dev/sdb] [--keys FILE]
-#            [--ipv6] [--mitigations] [--timezone ZONE] [--force] [--dry-run]
+# Usage: install.sh --spec FILE [--dry-run] [--force]
+#        install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
+#                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
 #
-#   --storage URL    base URL of the storage, which serves
-#                    os/<os>/<arch>/manifest.json and rootfs.tar.zst (or UMP_STORAGE)
+#   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
+#                    kernel, layout, disks, users, packages, firewall, provision
+#   without --spec   the lvm-linear layout with root alone; the flags are:
+#   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
+#                    manifest.json and rootfs.tar.zst (or UMP_STORAGE)
 #   --hostname NAME  hostname of the new system
 #   --os NAME        the image to install (default ubuntu-26.04)
-#   --arch ARCH      default: the machine's
-#   --layout NAME    disk layout; lvm-linear (the default and so far the only one):
-#                    the first disk gets the boot partitions, every disk becomes a
-#                    physical volume of one volume group, root is one linear logical
-#                    volume over all of them, ext4
 #   --disks LIST     the disks to use, comma-separated (default: every disk; USB
 #                    devices are left out)
-#   --keys FILE      authorized_keys for root (default: /root/.ssh/authorized_keys,
-#                    which is where ump rescue put its key and yours)
+#   --keys FILE      authorized_keys for root (default: /root/.ssh/authorized_keys)
 #   --ipv6           keep IPv6 on; by default the kernel gets ipv6.disable=1
 #   --mitigations    keep the CPU vulnerability mitigations; by default mitigations=off
 #   --timezone ZONE  default UTC
 #   --force          run outside the UMP rescue system too (it erases every disk
 #                    of the machine it runs on)
-#   --dry-run        print what would be done and stop before touching a disk
+#   --dry-run        print the plan and stop before touching a disk
 set -euo pipefail
 
+spec_file=""
 storage="${UMP_STORAGE:-}"
 hostname=""
 os="ubuntu-26.04"
-arch=""
-layout="lvm-linear"
 disks_arg=""
 keys="/root/.ssh/authorized_keys"
 ipv6=0
@@ -45,11 +42,10 @@ force=0
 dry=0
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--spec) spec_file="$2"; shift 2 ;;
 	--storage) storage="$2"; shift 2 ;;
 	--hostname) hostname="$2"; shift 2 ;;
 	--os) os="$2"; shift 2 ;;
-	--arch) arch="$2"; shift 2 ;;
-	--layout) layout="$2"; shift 2 ;;
 	--disks) disks_arg="$2"; shift 2 ;;
 	--keys) keys="$2"; shift 2 ;;
 	--ipv6) ipv6=1; shift ;;
@@ -61,44 +57,82 @@ while [ $# -gt 0 ]; do
 	*) echo "install.sh: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
-storage="${storage%/}"
-[ -n "$storage" ] || { echo "install.sh: --storage URL is required" >&2; exit 2; }
-[ -n "$hostname" ] || { echo "install.sh: --hostname NAME is required" >&2; exit 2; }
-[ "$layout" = lvm-linear ] || { echo "install.sh: unknown layout $layout (known: lvm-linear)" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "install.sh: run as root" >&2; exit 2; }
 case "$(uname -m)" in
-x86_64) machine_arch=amd64 ;;
-aarch64) machine_arch=arm64 ;;
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
 *) echo "install.sh: unsupported machine $(uname -m)" >&2; exit 2 ;;
 esac
-[ -n "$arch" ] || arch="$machine_arch"
-[ "$arch" = "$machine_arch" ] || { echo "install.sh: this machine is $machine_arch; a $arch image cannot be configured here" >&2; exit 2; }
 if [ ! -f /etc/ump-rescue-version ] && [ "$force" = 0 ]; then
 	echo "install.sh: this is not the UMP rescue system. The installer erases every disk of the machine it runs on; run it from the rescue system (ump install), or pass --force if that is what you want." >&2
 	exit 2
 fi
 # Every command this script relies on, checked up front: the rescue system
 # is minimal, and a missing tool must fail here, not halfway through the
-# disks. mdadm is only needed to stop old arrays and is optional.
-for t in lsblk sgdisk wipefs partprobe udevadm pvcreate vgcreate lvcreate pvscan vgchange swapoff mount umount mountpoint \
-	mkfs.ext4 mkfs.vfat blkid zstd tar curl chroot dd sha256sum mktemp nproc awk sed grep sort head tail cut tr seq date \
-	ln chmod mkdir rm cat basename ip sync sleep touch wc uname id tee; do
+# disks. mdadm is needed for md layouts and to stop old arrays.
+for t in jq lsblk sgdisk wipefs partprobe udevadm blockdev pvcreate vgcreate lvcreate pvscan vgchange vgs swapoff mount umount mountpoint \
+	mkfs.ext4 mkfs.vfat mkswap blkid zstd tar curl chroot dd sha256sum mktemp nproc awk sed grep sort head tail cut tr seq date \
+	ln chmod chown mkdir rm cat basename ip sync sleep touch wc uname id tee; do
 	command -v "$t" >/dev/null || { echo "install.sh: $t is missing in this rescue system; the UMP rescue image has it (images/rescue/packages.txt)" >&2; exit 2; }
 done
-command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old md arrays on the disks cannot be stopped first" >&2
+command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old md arrays cannot be stopped and md parts cannot be made" >&2
 
 log() { printf '==> %s\n' "$*"; }
 die() { echo "install.sh: $*" >&2; exit 1; }
 TARGET=/mnt/target
-VG=vg0
+
+# --- the specification -------------------------------------------------
+
+if [ -n "$spec_file" ]; then
+	spec="$(cat "$spec_file")" || die "cannot read $spec_file"
+	jq -e . >/dev/null <<< "$spec" || die "$spec_file is not valid JSON"
+else
+	[ -n "$storage" ] || { echo "install.sh: --storage URL is required" >&2; exit 2; }
+	[ -n "$hostname" ] || { echo "install.sh: --hostname NAME is required" >&2; exit 2; }
+	[ -f "$keys" ] || die "$keys does not exist; the new system would have no way in"
+	spec="$(jq -n --arg os "$os" --arg hostname "$hostname" --arg timezone "$timezone" --arg storage "${storage%/}" \
+		--argjson mitigations "$([ "$mitigations" = 1 ] && echo true || echo false)" --argjson ipv6 "$([ "$ipv6" = 1 ] && echo true || echo false)" \
+		--arg disks "$disks_arg" --rawfile keys "$keys" '{
+		os: $os, hostname: $hostname, timezone: $timezone, storage: $storage,
+		kernel: {mitigations: $mitigations, ipv6: $ipv6, extra: ""},
+		layout: {name: "lvm-linear", parts: [
+			{type: "slice", target: ["first"], size: "1M", filesystem: "bios"},
+			{type: "slice", target: ["first"], size: "512M", filesystem: "efi", mountpoint: "/boot/efi"},
+			{type: "slice", target: ["first"], size: "1G", filesystem: "ext4", mountpoint: "/boot"},
+			{type: "slice", target: [".*"], size: "rest", filesystem: "lvm", vg: "vg0"},
+			{type: "lvm", vg: "vg0", name: "root", size: "rest", filesystem: "ext4", mountpoint: "/"}]},
+		disks: ($disks | if . == "" then [] else split(",") end),
+		users: [{name: "root", shell: "/bin/bash", groups: [], sudo: false, keys: ($keys | split("\n") | map(select(test("^[a-z]"))))}],
+		packages: [], firewall: {policy: "accept", allow: []}, provision: {type: "none"},
+		profile: {name: "command line"}}')"
+fi
+s() { jq -r "$1 // empty" <<< "$spec"; }           # a string, empty when absent
+sb() { jq -r "$1 // false" <<< "$spec"; }           # a boolean
+os="$(s .os)"; hostname="$(s .hostname)"; timezone="$(s .timezone)"; storage="$(s .storage)"
+[ -n "$os" ] && [ -n "$hostname" ] && [ -n "$storage" ] || die "the specification needs os, hostname and storage"
+[ -n "$timezone" ] || timezone=UTC
+storage="${storage%/}"
+mitigations="$(sb .kernel.mitigations)"; ipv6="$(sb .kernel.ipv6)"; kernel_extra="$(s .kernel.extra)"
+layout_name="$(s .layout.name)"; [ -n "$layout_name" ] || layout_name="inline"
+jq -e '.layout.parts | length > 0' >/dev/null <<< "$spec" || die "the layout has no parts"
+jq -e '.users | length > 0' >/dev/null <<< "$spec" || die "the specification names no users"
+profile_name="$(s .profile.name)"
 image_url="$storage/os/$os/$arch"
-
-# --- the machine -------------------------------------------------------
-
 efi=0; [ -d /sys/firmware/efi ] && efi=1
 
-# the disks: whole block devices that are not removable media, not RAM or
-# loop devices, and not on USB (an install medium or virtual media)
+# kho=off: the kernel's kexec handover (on by default in Ubuntu's kernel)
+# reserves a scratch area of up to half the memory of a small machine for
+# live updates of hypervisors, and that reservation starved the kexec
+# into the rescue system on a 1 GB machine
+kernel_cmdline="kho=off"
+[ "$mitigations" = true ] || kernel_cmdline="$kernel_cmdline mitigations=off"
+[ "$ipv6" = true ] || kernel_cmdline="$kernel_cmdline ipv6.disable=1"
+[ -n "$kernel_extra" ] && kernel_cmdline="$kernel_cmdline $kernel_extra"
+
+# --- the disks ---------------------------------------------------------
+
+# whole block devices that are not removable media, RAM or loop devices,
+# and not on USB (an install medium or virtual media)
 all_disks=()
 # (raw lsblk output drops empty columns, so the one that can be empty is last)
 while IFS= read -r line; do
@@ -111,15 +145,15 @@ while IFS= read -r line; do
 	all_disks+=("$path")
 done < <(lsblk -dnr -o PATH,TYPE,RO,TRAN | sort)
 disks=()
-if [ -n "$disks_arg" ]; then
-	IFS=, read -ra wanted <<< "$disks_arg"
-	for d in "${wanted[@]}"; do
+wanted="$(jq -r '.disks // [] | .[]' <<< "$spec")"
+if [ -n "$wanted" ]; then
+	for d in $wanted; do
 		[ -b "$d" ] || die "$d is not a block device"
 		[ "$(lsblk -dnr -o TYPE "$d")" = disk ] || die "$d is not a whole disk"
 		disks+=("$d")
 	done
 else
-	# NVMe first, then the rest by name: the first one carries the boot partitions
+	# NVMe first, then the rest by name: the first one is "first" in layouts
 	for d in "${all_disks[@]}"; do case "$d" in /dev/nvme*) disks+=("$d") ;; esac; done
 	for d in "${all_disks[@]}"; do case "$d" in /dev/nvme*) ;; *) disks+=("$d") ;; esac; done
 fi
@@ -131,6 +165,113 @@ describe_disk() {
 	tran="$(lsblk -dnr -o TRAN "$1")"; model="$(lsblk -dn -o MODEL "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 	printf '%s %s%s%s' "$size" "$([ "$rota" = 1 ] && echo HDD || echo SSD)" "${tran:+ $tran}" "${model:+ $model}"
 }
+disk_bytes() { blockdev --getsize64 "$1"; }
+
+# --- the plan: every partition, array and volume, before anything is touched ---
+
+# partitions: one entry per planned partition
+P_DISK=(); P_INDEX=(); P_SIZE=(); P_FS=(); P_MOUNT=(); P_LABEL=(); P_VG=(); P_MD=(); P_DEV=()
+# md arrays
+M_LEVEL=(); M_FS=(); M_MOUNT=(); M_LABEL=(); M_VG=(); M_DEV=()
+# logical volumes
+L_VG=(); L_NAME=(); L_SIZE=(); L_RAID=(); L_FS=(); L_MOUNT=(); L_LABEL=(); L_DEV=()
+declare -A VG_PVS=()        # volume group -> physical volume devices
+declare -A VG_NPV=()        # volume group -> number of physical volumes
+declare -A DISK_REST=()     # disk -> 1 when a partition takes the rest
+
+match_disks() { # match_disks TARGETS_JSON -> the matching disks, in order, once each
+	local t d out=()
+	while IFS= read -r t; do
+		[ -n "$t" ] || continue
+		for d in "${disks[@]}"; do
+			if [ "$t" = first ]; then [ "$d" = "$boot_disk" ] || continue
+			else [[ "$d" =~ $t ]] || continue; fi
+			case " ${out[*]:-} " in *" $d "*) ;; *) out+=("$d") ;; esac
+		done
+	done < <(jq -r '.[]' <<< "$1")
+	printf '%s\n' "${out[@]:-}"
+}
+next_index() { # next_index DISK: the next free partition number below 100
+	local i max=0
+	for i in "${!P_DISK[@]}"; do
+		[ "${P_DISK[$i]}" = "$1" ] || continue
+		[ "${P_INDEX[$i]}" -lt 100 ] && [ "${P_INDEX[$i]}" -gt "$max" ] && max="${P_INDEX[$i]}"
+	done
+	echo $((max + 1))
+}
+plan_partition() { # plan_partition DISK INDEX SIZE FS MOUNT LABEL VG MD
+	local i
+	for i in "${!P_DISK[@]}"; do
+		[ "${P_DISK[$i]}" = "$1" ] && [ "${P_INDEX[$i]}" = "$2" ] && die "partition $2 of $1 is planned twice"
+	done
+	case "$3" in rest|all|100%)
+		[ -z "${DISK_REST[$1]:-}" ] || die "two parts take the rest of $1"
+		DISK_REST[$1]=1 ;;
+	esac
+	P_DISK+=("$1"); P_INDEX+=("$2"); P_SIZE+=("$3"); P_FS+=("$4"); P_MOUNT+=("$5"); P_LABEL+=("$6"); P_VG+=("$7"); P_MD+=("$8"); P_DEV+=("")
+}
+min_members() { # min_members LEVEL KIND(md|lvm)
+	case "$2:$1" in
+	md:0|md:1|md:10) echo 2 ;; md:4|md:5) echo 3 ;; md:6) echo 4 ;;
+	lvm:0|lvm:1) echo 2 ;; lvm:5) echo 3 ;; lvm:6) echo 5 ;; lvm:10) echo 4 ;;
+	*) echo 1 ;;
+	esac
+}
+
+nparts="$(jq '.layout.parts | length' <<< "$spec")"
+for ((n = 0; n < nparts; n++)); do
+	part="$(jq -c ".layout.parts[$n]" <<< "$spec")"
+	f() { jq -r "$1 // empty" <<< "$part"; }
+	type="$(f .type)"; size="$(f .size)"; fs="$(f .filesystem)"; mount="$(f .mountpoint)"; label="$(f .label)"; vg="$(f .vg)"
+	raid="$(jq -r '.raid // "none"' <<< "$part")"
+	at="layout $layout_name, part $((n + 1)) ($type)"
+	case "$type" in
+	slice|md)
+		mapfile -t targets < <(match_disks "$(jq -c '.target // []' <<< "$part")")
+		[ -n "${targets[0]:-}" ] || die "$at: no disk matches $(jq -c '.target' <<< "$part") (disks: ${disks[*]})"
+		if [ "$type" = slice ]; then
+			index="$(jq -r '.index // 0' <<< "$part")"
+			for d in "${targets[@]}"; do
+				i="$index"; [ "$i" -gt 0 ] || i="$(next_index "$d")"
+				plan_partition "$d" "$i" "$size" "$fs" "$mount" "$label" "$vg" ""
+			done
+		else
+			need="$(min_members "$raid" md)"
+			[ ${#targets[@]} -ge "$need" ] || die "$at: raid $raid needs $need disks, ${#targets[@]} match"
+			j=${#M_LEVEL[@]}
+			M_LEVEL+=("$raid"); M_FS+=("$fs"); M_MOUNT+=("$mount"); M_LABEL+=("$label"); M_VG+=("$vg"); M_DEV+=("/dev/md$j")
+			for d in "${targets[@]}"; do plan_partition "$d" "$(next_index "$d")" "$size" "md" "" "" "" "$j"; done
+		fi
+		;;
+	lvm)
+		name="$(f .name)"
+		L_VG+=("$vg"); L_NAME+=("$name"); L_SIZE+=("$size"); L_RAID+=("$raid"); L_FS+=("$fs"); L_MOUNT+=("$mount"); L_LABEL+=("$label"); L_DEV+=("/dev/$vg/$name")
+		;;
+	*) die "$at: unknown part type" ;;
+	esac
+done
+# the volume groups: how many physical volumes each will have, for the
+# raid levels that need a minimum
+for i in "${!P_DISK[@]}"; do [ "${P_FS[$i]}" = lvm ] && VG_NPV[${P_VG[$i]}]=$(( ${VG_NPV[${P_VG[$i]}]:-0} + 1 )); done
+for j in "${!M_LEVEL[@]}"; do [ "${M_FS[$j]}" = lvm ] && VG_NPV[${M_VG[$j]}]=$(( ${VG_NPV[${M_VG[$j]}]:-0} + 1 )); done
+for k in "${!L_VG[@]}"; do
+	[ -n "${VG_NPV[${L_VG[$k]}]:-}" ] || die "volume group ${L_VG[$k]} of volume ${L_NAME[$k]} gets no physical volume on this machine"
+	need="$(min_members "${L_RAID[$k]}" lvm)"
+	if [ "${L_RAID[$k]}" = 0 ] && [ "${VG_NPV[${L_VG[$k]}]}" -lt 2 ]; then
+		L_RAID[$k]="none"   # striping over one physical volume is linear
+	elif [ "${VG_NPV[${L_VG[$k]}]}" -lt "$need" ]; then
+		die "volume ${L_NAME[$k]}: raid ${L_RAID[$k]} needs $need physical volumes in ${L_VG[$k]}, this machine gives ${VG_NPV[${L_VG[$k]}]}"
+	fi
+done
+# what the boot loader needs
+has_bios=0; has_efi=0; root_dev=""
+for i in "${!P_DISK[@]}"; do
+	[ "${P_FS[$i]}" = bios ] && has_bios=1
+	[ "${P_FS[$i]}" = efi ] && has_efi=1
+done
+[ "$has_efi" = 1 ] || [ "$efi" = 0 ] || die "this machine boots with UEFI and the layout has no efi part"
+[ "$has_bios" = 1 ] || [ "$efi" = 1 ] || [ "$arch" != amd64 ] || die "this machine boots with BIOS and the layout has no bios part"
+jq -e '[.layout.parts[] | select(.mountpoint == "/")] | length == 1' >/dev/null <<< "$spec" || die "the layout must mount exactly one part at /"
 
 # the network: what the rescue system was given on its kernel command line
 # (ump rescue carries the running system's over), else what is configured
@@ -156,27 +297,35 @@ fi
 [ -n "$mac" ] || die "no network interface with a default route; the new system would be unreachable"
 dns="1.1.1.1 8.8.8.8"
 
-[ -f "$keys" ] || die "$keys does not exist; the new system would have no way in"
-nkeys="$(grep -c '^[a-z]' "$keys" || true)"
-[ "$nkeys" -gt 0 ] || die "$keys holds no key"
-
-# kho=off: the kernel's kexec handover (on by default in Ubuntu's kernel)
-# reserves a scratch area of up to half the memory of a small machine for
-# live updates of hypervisors, and that reservation starved the kexec
-# into the rescue system on a 1 GB machine
-kernel_cmdline="kho=off"
-[ "$mitigations" = 1 ] || kernel_cmdline="$kernel_cmdline mitigations=off"
-[ "$ipv6" = 1 ] || kernel_cmdline="$kernel_cmdline ipv6.disable=1"
-
-# --- the plan ----------------------------------------------------------
+# --- the plan, printed ---------------------------------------------------
 
 log "machine: $arch, $([ "$efi" = 1 ] && echo UEFI || echo BIOS) firmware, $(nproc) CPUs, $(awk '/^MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo) MB RAM"
-log "image: $os for $arch from $image_url"
+log "image: $os for $arch from $image_url (profile ${profile_name:-?}, layout $layout_name)"
 d=""; for x in "${disks[@]}"; do d="${d:+$d, }$x ($(describe_disk "$x"))"; done
 log "disks (${#disks[@]}): $d"
-log "layout $layout: $boot_disk gets 1 MiB BIOS boot, 512 MiB EFI (vfat), 1 GiB /boot (ext4) and the rest as LVM; every other disk is LVM whole; $VG/root is one linear volume over all of it, ext4"
-log "network: $mac $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = 1 ] && echo on || echo off); DNS $dns; hostname $hostname"
-log "root keys: $nkeys from $keys; kernel command line: ${kernel_cmdline:-(defaults)}; mitigations $([ "$mitigations" = 1 ] && echo on || echo off)"
+for x in "${disks[@]}"; do
+	line=""
+	for i in "${!P_DISK[@]}"; do
+		[ "${P_DISK[$i]}" = "$x" ] || continue
+		what="${P_FS[$i]}"
+		[ "${P_FS[$i]}" = lvm ] && what="lvm (${P_VG[$i]})"
+		[ "${P_FS[$i]}" = md ] && what="md${P_MD[$i]} member"
+		line="${line:+$line, }${P_INDEX[$i]}: ${P_SIZE[$i]} $what${P_MOUNT[$i]:+ at ${P_MOUNT[$i]}}"
+	done
+	log "  $x: ${line:-untouched}"
+done
+for j in "${!M_LEVEL[@]}"; do
+	what="${M_FS[$j]}"; [ "${M_FS[$j]}" = lvm ] && what="lvm (${M_VG[$j]})"
+	log "  md$j: raid ${M_LEVEL[$j]} over $(for i in "${!P_DISK[@]}"; do [ "${P_MD[$i]}" = "$j" ] && printf '%s ' "${P_DISK[$i]}"; done), $what${M_MOUNT[$j]:+ at ${M_MOUNT[$j]}}"
+done
+for k in "${!L_VG[@]}"; do
+	r="linear"; [ "${L_RAID[$k]}" != none ] && r="raid ${L_RAID[$k]}"
+	log "  ${L_VG[$k]}/${L_NAME[$k]}: ${L_SIZE[$k]} $r ${L_FS[$k]}${L_MOUNT[$k]:+ at ${L_MOUNT[$k]}}"
+done
+log "network: $mac $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS $dns; hostname $hostname; time zone $timezone"
+log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
+log "packages: $(jq -r '.packages | if length == 0 then "none" else join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
+log "kernel command line: $kernel_cmdline"
 if [ "$dry" = 1 ]; then
 	log "dry run: stopping here, no disk was touched"
 	exit 0
@@ -186,10 +335,10 @@ fi
 
 log "fetching the manifest"
 manifest="$(curl -fsSL "$image_url/manifest.json")" || die "cannot fetch $image_url/manifest.json; the storage must serve the image (see images/ubuntu/README.md)"
-want_sum="$(printf '%s' "$manifest" | sed -n 's/.*"rootfs.tar.zst": {"sha256": "\([0-9a-f]*\)".*/\1/p' | head -n 1)"
-image_version="$(printf '%s' "$manifest" | sed -n 's/.*"version": "\([^"]*\)".*/\1/p' | head -n 1)"
-image_kernel="$(printf '%s' "$manifest" | sed -n 's/.*"kernel": "\([^"]*\)".*/\1/p' | head -n 1)"
-unpacked_mb="$(printf '%s' "$manifest" | sed -n 's/.*"unpacked_mb": \([0-9]*\).*/\1/p' | head -n 1)"
+want_sum="$(printf '%s' "$manifest" | jq -r '.files["rootfs.tar.zst"].sha256 // empty')"
+image_version="$(printf '%s' "$manifest" | jq -r '.version // empty')"
+image_kernel="$(printf '%s' "$manifest" | jq -r '.kernel // empty')"
+unpacked_mb="$(printf '%s' "$manifest" | jq -r '.unpacked_mb // empty')"
 [ -n "$want_sum" ] || die "the manifest names no rootfs.tar.zst checksum"
 log "image $os version ${image_version:-?}, kernel ${image_kernel:-?}, ${unpacked_mb:-?} MB unpacked"
 
@@ -197,19 +346,15 @@ log "image $os version ${image_version:-?}, kernel ${image_kernel:-?}, ${unpacke
 
 log "releasing the disks"
 swapoff -a 2>/dev/null || true
-# unmount in depth-first order whatever is mounted from the disks, LVM or md
 while read -r src tgt; do
 	case "$src" in /dev/*) ;; *) continue ;; esac
-	for x in "${disks[@]}"; do case "$src" in "$x"*|/dev/mapper/*|/dev/md*|/dev/dm-*|/dev/$VG/*) umount -l "$tgt" 2>/dev/null || true; break ;; esac; done
+	for x in "${disks[@]}"; do case "$src" in "$x"*|/dev/mapper/*|/dev/md*|/dev/dm-*) umount -l "$tgt" 2>/dev/null || true; break ;; esac; done
 done < <(awk '{print $1, $2}' /proc/mounts | sort -k2 -r)
 vgchange -an >/dev/null 2>&1 || true
-mdadm --stop --scan >/dev/null 2>&1 || true
+command -v mdadm >/dev/null && mdadm --stop --scan >/dev/null 2>&1 || true
 
 log "wiping the disks"
 for x in "${disks[@]}"; do
-	# signatures inside the old partitions first (LVM, md, file systems),
-	# so that nothing is found again at the same offsets after the new
-	# partitioning; then the partition tables and signatures of the disk
 	for p in $(lsblk -nr -o PATH "$x" | tail -n +2); do wipefs -af "$p" >/dev/null 2>&1 || true; done
 	sgdisk --zap-all "$x" >/dev/null 2>&1 || true
 	wipefs -af "$x" >/dev/null
@@ -220,9 +365,26 @@ udevadm settle
 pvscan --cache >/dev/null 2>&1 || true
 
 log "partitioning"
-sgdisk -n 1:0:+1M -t 1:ef02 -c 1:bios -n 2:0:+512M -t 2:ef00 -c 2:esp -n 3:0:+1G -t 3:8300 -c 3:boot -n 4:0:0 -t 4:8e00 -c 4:lvm "$boot_disk" >/dev/null
-for x in "${disks[@]:1}"; do
-	sgdisk -n 1:0:0 -t 1:8e00 -c 1:lvm "$x" >/dev/null
+sg_size() { # sg_size DISK SIZE -> the end argument for sgdisk
+	case "$2" in
+	rest|all|100%) echo 0 ;;
+	*%) echo "+$(( $(disk_bytes "$1") / 100 * ${2%\%} / 1024 / 1024 ))M" ;;
+	*) echo "+$2" ;;
+	esac
+}
+type_code() { case "$1" in bios) echo ef02 ;; efi) echo ef00 ;; swap) echo 8200 ;; lvm) echo 8e00 ;; md) echo fd00 ;; *) echo 8300 ;; esac; }
+for x in "${disks[@]}"; do
+	args=()
+	# every partition in index order, the one that takes the rest last
+	for pass in fixed rest; do
+		for i in $(for i in "${!P_DISK[@]}"; do [ "${P_DISK[$i]}" = "$x" ] && echo "${P_INDEX[$i]} $i"; done | sort -n | cut -d' ' -f2); do
+			case "${P_SIZE[$i]}" in rest|all|100%) [ "$pass" = rest ] || continue ;; *) [ "$pass" = fixed ] || continue ;; esac
+			name="${P_LABEL[$i]:-${P_FS[$i]}}"
+			args+=(-n "${P_INDEX[$i]}:0:$(sg_size "$x" "${P_SIZE[$i]}")" -t "${P_INDEX[$i]}:$(type_code "${P_FS[$i]}")" -c "${P_INDEX[$i]}:$name")
+		done
+	done
+	[ ${#args[@]} -gt 0 ] || continue
+	sgdisk "${args[@]}" "$x" >/dev/null || die "partitioning $x failed"
 done
 partprobe >/dev/null 2>&1 || true
 udevadm settle
@@ -233,36 +395,102 @@ partdev() { # partdev DISK N
 	[ -b "$p" ] || die "partition $2 of $1 did not appear"
 	printf '%s' "$p"
 }
-esp="$(partdev "$boot_disk" 2)"
-bootp="$(partdev "$boot_disk" 3)"
-pvs=("$(partdev "$boot_disk" 4)")
-for x in "${disks[@]:1}"; do pvs+=("$(partdev "$x" 1)"); done
+for i in "${!P_DISK[@]}"; do P_DEV[$i]="$(partdev "${P_DISK[$i]}" "${P_INDEX[$i]}")"; done
 
-log "file systems and the volume group ($VG over ${#pvs[@]} physical volume(s))"
-mkfs.vfat -F 32 -n ESP "$esp" >/dev/null
-mkfs.ext4 -q -F -L boot "$bootp"
-for p in "${pvs[@]}"; do pvcreate -ff -y "$p" >/dev/null; done
-vgcreate -y "$VG" "${pvs[@]}" >/dev/null
-lvcreate -y -l 100%FREE -n root "$VG" >/dev/null
-udevadm settle
-mkfs.ext4 -q -F -L root "/dev/$VG/root"
-root_mb="$(lsblk -dnr -o SIZE -b "/dev/$VG/root" | awk '{printf "%d", $1 / 1024 / 1024}')"
+if [ ${#M_LEVEL[@]} -gt 0 ]; then
+	log "md arrays"
+	for j in "${!M_LEVEL[@]}"; do
+		members=(); for i in "${!P_DISK[@]}"; do [ "${P_MD[$i]}" = "$j" ] && members+=("${P_DEV[$i]}"); done
+		mdadm --create "${M_DEV[$j]}" --level="${M_LEVEL[$j]}" --raid-devices="${#members[@]}" --metadata=1.2 --force --run "${members[@]}" >/dev/null 2>&1 || die "mdadm --create ${M_DEV[$j]} failed"
+	done
+	udevadm settle
+fi
+
+format() { # format DEV FS LABEL
+	local l=()
+	case "$2" in
+	efi|vfat) [ -n "$3" ] && l=(-n "$3"); mkfs.vfat -F 32 "${l[@]}" "$1" >/dev/null ;;
+	ext4) [ -n "$3" ] && l=(-L "$3"); mkfs.ext4 -q -F "${l[@]}" "$1" ;;
+	xfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.xfs >/dev/null || die "mkfs.xfs is missing"; mkfs.xfs -f -q "${l[@]}" "$1" ;;
+	btrfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.btrfs >/dev/null || die "mkfs.btrfs is missing"; mkfs.btrfs -f -q "${l[@]}" "$1" >/dev/null ;;
+	swap) [ -n "$3" ] && l=(-L "$3"); mkswap -f "${l[@]}" "$1" >/dev/null ;;
+	lvm) pvcreate -ff -y "$1" >/dev/null ;;
+	bios|none|md) ;;
+	*) die "unknown file system $2" ;;
+	esac
+}
+add_pv() { VG_PVS[$1]="${VG_PVS[$1]:-}${VG_PVS[$1]:+ }$2"; }
+
+log "file systems"
+for i in "${!P_DISK[@]}"; do
+	format "${P_DEV[$i]}" "${P_FS[$i]}" "${P_LABEL[$i]}"
+	[ "${P_FS[$i]}" = lvm ] && add_pv "${P_VG[$i]}" "${P_DEV[$i]}"
+done
+for j in "${!M_LEVEL[@]}"; do
+	format "${M_DEV[$j]}" "${M_FS[$j]}" "${M_LABEL[$j]}"
+	[ "${M_FS[$j]}" = lvm ] && add_pv "${M_VG[$j]}" "${M_DEV[$j]}"
+done
+if [ ${#VG_PVS[@]} -gt 0 ]; then
+	log "volume groups: $(for vg in "${!VG_PVS[@]}"; do printf '%s (%s) ' "$vg" "${VG_PVS[$vg]}"; done)"
+	for vg in "${!VG_PVS[@]}"; do vgcreate -y "$vg" ${VG_PVS[$vg]} >/dev/null || die "vgcreate $vg failed"; done
+	for k in "${!L_VG[@]}"; do
+		npv="$(vgs --noheadings -o pv_count "${L_VG[$k]}" | tr -d ' ')"
+		sz=()
+		case "${L_SIZE[$k]}" in
+		rest|all|100%) sz=(-l 100%FREE) ;;
+		*%) sz=(-l "${L_SIZE[$k]}VG") ;;
+		*) sz=(-L "${L_SIZE[$k]}") ;;
+		esac
+		kind=()
+		case "${L_RAID[$k]}" in
+		0) kind=(--type striped -i "$npv") ;;
+		1) kind=(--type raid1 -m 1) ;;
+		5) kind=(--type raid5 -i $((npv - 1))) ;;
+		6) kind=(--type raid6 -i $((npv - 2))) ;;
+		10) kind=(--type raid10 -i $((npv / 2)) -m 1) ;;
+		esac
+		lvcreate -y "${sz[@]}" "${kind[@]}" -n "${L_NAME[$k]}" "${L_VG[$k]}" >/dev/null || die "lvcreate ${L_VG[$k]}/${L_NAME[$k]} failed"
+	done
+	udevadm settle
+	for k in "${!L_VG[@]}"; do format "${L_DEV[$k]}" "${L_FS[$k]}" "${L_LABEL[$k]}"; done
+fi
+
+# --- mounting: root first, then the rest by depth -------------------------
+
+MOUNTS=()   # "mountpoint dev fs"
+SWAPS=()
+efi_dev=""
+collect() { # collect DEV FS MOUNT
+	case "$2" in
+	swap) SWAPS+=("$1") ;;
+	efi) [ -n "$efi_dev" ] || { efi_dev="$1"; MOUNTS+=("$3 $1 vfat"); } ;;
+	bios|lvm|md|none) ;;
+	*) [ -n "$3" ] && MOUNTS+=("$3 $1 $2") ;;
+	esac
+}
+for i in "${!P_DISK[@]}"; do collect "${P_DEV[$i]}" "${P_FS[$i]}" "${P_MOUNT[$i]}"; done
+for j in "${!M_LEVEL[@]}"; do collect "${M_DEV[$j]}" "${M_FS[$j]}" "${M_MOUNT[$j]}"; done
+for k in "${!L_VG[@]}"; do collect "${L_DEV[$k]}" "${L_FS[$k]}" "${L_MOUNT[$k]}"; done
+mapfile -t MOUNTS < <(printf '%s\n' "${MOUNTS[@]}" | awk '{print length($1), $0}' | sort -n | cut -d' ' -f2-)
+root_dev=""
+for m in "${MOUNTS[@]}"; do set -- $m; [ "$1" = / ] && root_dev="$2"; done
+[ -n "$root_dev" ] || die "nothing is mounted at /"
+root_mb="$(lsblk -dnr -o SIZE -b "$root_dev" | awk '{printf "%d", $1 / 1024 / 1024}')"
 if [ -n "$unpacked_mb" ] && [ "$root_mb" -lt $((unpacked_mb * 2)) ]; then
-	die "the root volume ($root_mb MB) is too small for the image ($unpacked_mb MB unpacked)"
+	die "the root file system ($root_mb MB) is too small for the image ($unpacked_mb MB unpacked)"
 fi
 
 log "mounting the new system at $TARGET"
 mkdir -p "$TARGET"
-mount "/dev/$VG/root" "$TARGET"
-mkdir -p "$TARGET/boot"
-mount "$bootp" "$TARGET/boot"
-mkdir -p "$TARGET/boot/efi"
-mount "$esp" "$TARGET/boot/efi"
+for m in "${MOUNTS[@]}"; do
+	set -- $m
+	mkdir -p "$TARGET$1"
+	mount -t "$3" "$2" "$TARGET$1" || die "mounting $2 at $1 failed"
+done
 cleanup() {
 	set +e
-	for m in "$TARGET/sys/firmware/efi/efivars" "$TARGET/run" "$TARGET/sys" "$TARGET/proc" "$TARGET/dev" "$TARGET/boot/efi" "$TARGET/boot" "$TARGET"; do
-		mountpoint -q "$m" && umount -l "$m" 2>/dev/null
-	done
+	for m in "$TARGET/dev/pts" "$TARGET/run" "$TARGET/sys" "$TARGET/proc" "$TARGET/dev"; do mountpoint -q "$m" && umount -l "$m" 2>/dev/null; done
+	for ((n = ${#MOUNTS[@]} - 1; n >= 0; n--)); do set -- ${MOUNTS[$n]}; mountpoint -q "$TARGET$1" && umount -l "$TARGET$1" 2>/dev/null; done
 }
 trap cleanup EXIT
 
@@ -290,15 +518,20 @@ printf '127.0.0.1\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\t%s\n' "$hostname" > "
 ln -sf "/usr/share/zoneinfo/$timezone" "$TARGET/etc/localtime"
 echo "$timezone" > "$TARGET/etc/timezone"
 
-root_uuid="$(blkid -s UUID -o value "/dev/$VG/root")"
-boot_uuid="$(blkid -s UUID -o value "$bootp")"
-esp_uuid="$(blkid -s UUID -o value "$esp")"
-cat > "$TARGET/etc/fstab" <<FSTAB
-# /etc/fstab, written by UMP; root is $VG/root over ${disks[*]}
-UUID=$root_uuid  /          ext4  defaults,errors=remount-ro  0 1
-UUID=$boot_uuid  /boot      ext4  defaults                    0 2
-UUID=$esp_uuid   /boot/efi  vfat  umask=0077                  0 1
-FSTAB
+{
+	echo "# /etc/fstab, written by UMP (layout $layout_name over ${disks[*]})"
+	for m in "${MOUNTS[@]}"; do
+		set -- $m
+		uuid="$(blkid -s UUID -o value "$2")"
+		case "$1:$3" in
+		/boot/efi:*) printf 'UUID=%s  %s  vfat  umask=0077  0 1\n' "$uuid" "$1" ;;
+		/:ext4) printf 'UUID=%s  /  ext4  defaults,errors=remount-ro  0 1\n' "$uuid" ;;
+		/:*) printf 'UUID=%s  /  %s  defaults  0 1\n' "$uuid" "$3" ;;
+		*) printf 'UUID=%s  %s  %s  defaults  0 2\n' "$uuid" "$1" "$3" ;;
+		esac
+	done
+	for sw in "${SWAPS[@]:-}"; do [ -n "$sw" ] && printf 'UUID=%s  none  swap  sw  0 0\n' "$(blkid -s UUID -o value "$sw")"; done
+} > "$TARGET/etc/fstab"
 
 mkdir -p "$TARGET/etc/netplan"
 {
@@ -316,20 +549,16 @@ mkdir -p "$TARGET/etc/netplan"
 		echo "      dhcp4: false"
 		echo "      addresses:"
 		[ -n "$ip4" ] && echo "        - \"${ip4%%,*}\""
-		[ "$ipv6" = 1 ] && [ -n "$ip6" ] && echo "        - \"${ip6%%,*}\""
+		[ "$ipv6" = true ] && [ -n "$ip6" ] && echo "        - \"${ip6%%,*}\""
 		echo "      routes:"
 		case "$ip4" in *,*) printf '        - to: default\n          via: "%s"\n          on-link: true\n' "${ip4#*,}" ;; esac
-		if [ "$ipv6" = 1 ]; then case "$ip6" in *,*) printf '        - to: "::/0"\n          via: "%s"\n          on-link: true\n' "${ip6#*,}" ;; esac; fi
+		if [ "$ipv6" = true ]; then case "$ip6" in *,*) printf '        - to: "::/0"\n          via: "%s"\n          on-link: true\n' "${ip6#*,}" ;; esac; fi
 	fi
-	if [ "$ipv6" = 1 ]; then echo "      accept-ra: false"; else echo "      link-local: []"; fi
+	if [ "$ipv6" = true ]; then echo "      accept-ra: false"; else echo "      link-local: []"; fi
 	echo "      nameservers:"
 	echo "        addresses: [$(echo "$dns" | sed 's/ /, /g')]"
 } > "$TARGET/etc/netplan/10-ump.yaml"
 chmod 600 "$TARGET/etc/netplan/10-ump.yaml"
-
-mkdir -p -m 700 "$TARGET/root/.ssh"
-grep '^[a-z]' "$keys" | awk '!seen[$0]++' > "$TARGET/root/.ssh/authorized_keys"
-chmod 600 "$TARGET/root/.ssh/authorized_keys"
 
 mkdir -p "$TARGET/etc/default/grub.d"
 cat > "$TARGET/etc/default/grub.d/ump-cmdline.cfg" <<GRUB
@@ -347,54 +576,151 @@ GRUB
 : > "$TARGET/etc/machine-id"
 rm -f "$TARGET/var/lib/dbus/machine-id"
 
-# --- the boot loader ---------------------------------------------------
-
-log "installing the boot loader on $boot_disk"
 mount --bind /dev "$TARGET/dev"
+mount -t devpts devpts "$TARGET/dev/pts" 2>/dev/null || true
 mount -t proc proc "$TARGET/proc"
 mount -t sysfs sysfs "$TARGET/sys"
 mount --bind /run "$TARGET/run"
 in_target() { chroot "$TARGET" /usr/bin/env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive "$@"; }
-in_target ssh-keygen -A >/dev/null
-# The EFI loader goes to the removable path (EFI/BOOT/BOOT*.EFI), which
-# every firmware tries without a boot entry, and no boot entry is written:
-# the firmware's boot order stays as the provider set it, with its network
-# boot (which is how rescue systems get in) ahead of the disk. On amd64 the
-# BIOS loader goes into the BIOS boot partition as well, so the disk boots
-# either way.
 run_in_target() { # run_in_target WHAT COMMAND...: the output is shown only when it fails
 	local what="$1" out; shift
 	if ! out="$(in_target "$@" 2>&1)"; then printf '%s\n' "$out" >&2; die "$what failed"; fi
 }
+in_target ssh-keygen -A >/dev/null
+
+# --- users --------------------------------------------------------------
+
+log "users"
+nusers="$(jq '.users | length' <<< "$spec")"
+for ((n = 0; n < nusers; n++)); do
+	u="$(jq -c ".users[$n]" <<< "$spec")"
+	name="$(jq -r .name <<< "$u")"; shell="$(jq -r '.shell // "/bin/bash"' <<< "$u")"; sudo="$(jq -r '.sudo // false' <<< "$u")"
+	if [ "$name" = root ]; then
+		home=/root
+	else
+		if ! in_target getent passwd "$name" >/dev/null 2>&1; then
+			run_in_target "useradd $name" useradd -m -s "$shell" "$name"
+		fi
+		home="$(in_target getent passwd "$name" | cut -d: -f6)"
+		for g in $(jq -r '.groups // [] | .[]' <<< "$u"); do
+			in_target getent group "$g" >/dev/null 2>&1 || run_in_target "groupadd $g" groupadd "$g"
+			run_in_target "usermod $name" usermod -aG "$g" "$name"
+		done
+		if [ "$sudo" = true ]; then
+			run_in_target "usermod $name" usermod -aG sudo "$name"
+			mkdir -p "$TARGET/etc/sudoers.d"
+			printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$name" > "$TARGET/etc/sudoers.d/90-ump-$name"
+			chmod 440 "$TARGET/etc/sudoers.d/90-ump-$name"
+		fi
+	fi
+	mkdir -p -m 700 "$TARGET$home/.ssh"
+	jq -r '.keys[]' <<< "$u" | awk '!seen[$0]++' > "$TARGET$home/.ssh/authorized_keys"
+	chmod 600 "$TARGET$home/.ssh/authorized_keys"
+	[ "$name" = root ] || in_target chown -R "$name:$name" "$home/.ssh"
+done
+
+# --- packages -----------------------------------------------------------
+
+packages="$(jq -r '.packages // [] | join(" ")' <<< "$spec")"
+need_nft=0
+if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec" && [ ! -x "$TARGET/usr/sbin/nft" ]; then need_nft=1; fi
+if [ -n "$packages" ] || [ "$need_nft" = 1 ]; then
+	log "packages: ${packages:-}${need_nft:+ nftables}"
+	# the resolver of the rescue system serves the chroot; no service starts
+	resolv_was="$(readlink "$TARGET/etc/resolv.conf" 2>/dev/null || true)"
+	rm -f "$TARGET/etc/resolv.conf"
+	printf 'nameserver %s\n' $dns > "$TARGET/etc/resolv.conf"
+	printf '#!/bin/sh\nexit 101\n' > "$TARGET/usr/sbin/policy-rc.d"; chmod 755 "$TARGET/usr/sbin/policy-rc.d"
+	run_in_target "apt-get update" apt-get update -q
+	run_in_target "apt-get install" apt-get install -y -q --no-install-recommends $packages $([ "$need_nft" = 1 ] && echo nftables)
+	in_target apt-get clean >/dev/null 2>&1 || true
+	rm -f "$TARGET/usr/sbin/policy-rc.d" "$TARGET/etc/resolv.conf"
+	[ -n "$resolv_was" ] && ln -s "$resolv_was" "$TARGET/etc/resolv.conf"
+fi
+
+# --- firewall -----------------------------------------------------------
+
+if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
+	log "firewall: input drop, allowing $(jq -r '[.firewall.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)" end] | join(", ")' <<< "$spec")"
+	{
+		echo "#!/usr/sbin/nft -f"
+		echo "# written by UMP from the profile's firewall section; nft -f after editing"
+		echo "flush ruleset"
+		echo "table inet filter {"
+		echo "  chain input {"
+		echo "    type filter hook input priority 0; policy drop;"
+		echo "    iif lo accept"
+		echo "    ct state established,related accept"
+		echo "    ct state invalid drop"
+		jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
+		echo "  }"
+		echo "  chain forward {"
+		echo "    type filter hook forward priority 0; policy drop;"
+		echo "  }"
+		echo "  chain output {"
+		echo "    type filter hook output priority 0; policy accept;"
+		echo "  }"
+		echo "}"
+	} > "$TARGET/etc/nftables.conf"
+	chmod 755 "$TARGET/etc/nftables.conf"
+	run_in_target "enabling nftables" systemctl enable nftables.service
+fi
+
+# --- the boot loader ---------------------------------------------------
+
+log "installing the boot loader"
+if [ ${#M_LEVEL[@]} -gt 0 ]; then
+	mkdir -p "$TARGET/etc/mdadm"
+	mdadm --detail --scan >> "$TARGET/etc/mdadm/mdadm.conf"
+fi
+need_initramfs=0
+[ ${#M_LEVEL[@]} -gt 0 ] && need_initramfs=1
+for k in "${!L_VG[@]}"; do [ "${L_RAID[$k]}" != none ] && need_initramfs=1; done
+if [ "$need_initramfs" = 1 ]; then
+	log "initramfs (md or raid volumes)"
+	run_in_target "update-initramfs" update-initramfs -u -k all
+fi
 case "$arch" in
 amd64)
-	run_in_target "grub-install (BIOS)" grub-install --target=i386-pc --recheck "$boot_disk"
-	run_in_target "grub-install (EFI)" grub-install --target=x86_64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
+	for x in "${disks[@]}"; do
+		for i in "${!P_DISK[@]}"; do
+			[ "${P_DISK[$i]}" = "$x" ] && [ "${P_FS[$i]}" = bios ] || continue
+			run_in_target "grub-install (BIOS, $x)" grub-install --target=i386-pc --recheck "$x"
+			break
+		done
+	done
+	[ "$has_efi" = 1 ] && run_in_target "grub-install (EFI)" grub-install --target=x86_64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
 	;;
 arm64)
-	run_in_target "grub-install (EFI)" grub-install --target=arm64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
+	[ "$has_efi" = 1 ] && run_in_target "grub-install (EFI)" grub-install --target=arm64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
 	;;
 esac
 run_in_target "update-grub" update-grub
 grep -q 'vmlinuz' "$TARGET/boot/grub/grub.cfg" || die "grub.cfg names no kernel"
 
 mkdir -p "$TARGET/etc/ump"
+printf '%s\n' "$spec" | jq . > "$TARGET/etc/ump/spec.json"
+chmod 600 "$TARGET/etc/ump/spec.json"
 cat > "$TARGET/etc/ump/install" <<META
 os=$os
 image_version=$image_version
 image_kernel=$image_kernel
 installed=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-layout=$layout
+profile=$profile_name
+layout=$layout_name
 disks=${disks[*]}
 boot_disk=$boot_disk
-vg=$VG
+root=$root_dev
 hostname=$hostname
-ipv6=$([ "$ipv6" = 1 ] && echo on || echo off)
-mitigations=$([ "$mitigations" = 1 ] && echo on || echo off)
+ipv6=$([ "$ipv6" = true ] && echo on || echo off)
+mitigations=$([ "$mitigations" = true ] && echo on || echo off)
+firewall=$(jq -r '.firewall.policy' <<< "$spec")
+provision=$(jq -r '.provision.type' <<< "$spec")
+$(jq -r '.provision.options // {} | to_entries[] | "provision_\(.key)=\(.value)"' <<< "$spec")
 META
 
 sync
 cleanup
 trap - EXIT
-vgchange -an "$VG" >/dev/null 2>&1 || true
-log "installed: $os ${image_version:-?} (kernel ${image_kernel:-?}) as $hostname on $VG/root ($root_mb MB over ${#disks[@]} disk(s)); reboot to start it"
+vgchange -an >/dev/null 2>&1 || true
+log "installed: $os ${image_version:-?} (kernel ${image_kernel:-?}) as $hostname, root on $root_dev ($root_mb MB; layout $layout_name over ${#disks[@]} disk(s)); reboot to start it"

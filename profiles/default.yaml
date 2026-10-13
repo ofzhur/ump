@@ -1,0 +1,38 @@
+# The default profile: what a server becomes when ump installs it.
+#
+# ump install server NAME takes this profile (or --profile NAME|FILE); a
+# file of the same name in ~/.config/ump/profiles/ wins over the published
+# one, so copy this file there and make it yours. Every field is described
+# in profiles/README.md.
+name: default
+description: Ubuntu 26.04 on every disk as one linear volume group; root with your keys; ICMP and SSH open, nothing else.
+
+os: ubuntu-26.04
+timezone: UTC
+
+kernel:
+  mitigations: false   # the CPU vulnerability mitigations (mitigations=off when false); they cost performance
+  ipv6: false          # IPv6 (ipv6.disable=1 when false); turn it on when the server needs it
+  extra: ""            # anything else for the kernel command line
+
+# a layout from layouts.yaml (lvm-linear, lvm-striped, lvm-raid1, lvm-example), or an inline one
+disks: lvm-linear
+
+users:
+  - name: root
+    keys: [ump, local]  # ump: UMP's own key; local: the public keys next to your ~/.ssh/id_* files;
+                        # agent: every key your ssh-agent holds; a file path; or a key line itself
+  # - name: ops
+  #   sudo: true        # member of sudo, without a password (no passwords are set)
+  #   groups: [adm]
+  #   keys: [local, ~/.ssh/ops.pub]
+
+packages: []            # more Ubuntu packages, installed from the archive at installation
+
+firewall:
+  policy: drop          # drop: only what is allowed gets in (plus what the server asked for); accept: no firewall
+  allow: [icmp, ssh]    # icmp, ssh, tcp/80, udp/53, or {proto: tcp, port: 443, from: 10.0.0.0/8}
+
+provision:
+  type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
+                        # recorded in /etc/ump/install, not run yet

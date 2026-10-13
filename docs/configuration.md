@@ -69,9 +69,11 @@ accounts:
         address: 192.0.2.50
 
 storage: https://ump.zhurko.de          # base URL of what UMP fetches onto machines: the rescue
-                                        # image (rescue/), the installer (install/) and the OS images
-                                        # (os/); this is the default, images/rescue/README.md says
-                                        # what a storage of your own must serve
+                                        # image (rescue/), the installer (install/), the profiles
+                                        # (profiles/) and the OS images (os/); this is the default,
+                                        # images/rescue/README.md says what a storage of your own
+                                        # must serve. Profiles of your own go to ~/.config/ump/profiles/
+                                        # (NAME.yaml, layouts.yaml), see profiles/README.md
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key; this is the default, generated
                                         # on first use (`ump config key` shows the public key)

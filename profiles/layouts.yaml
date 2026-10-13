@@ -1,0 +1,57 @@
+# Named disk layouts for the profiles' disks field. A layout is a list of
+# parts, applied in order; profiles/README.md describes the fields.
+#
+#   slice  a partition on every disk the target matches (first: the first
+#          disk, NVMe before others; a regular expression on the device
+#          path otherwise), with a size, a file system (or lvm with a vg,
+#          efi, bios, swap, none) and a mountpoint
+#   md     one md array over a partition of that size on every matching
+#          disk, with a raid level, then a file system or lvm
+#   lvm    a logical volume in a volume group: size, raid (0 striped, 1,
+#          5, 6, 10, none linear), file system, mountpoint
+#
+# Sizes: 1M, 512M, 1G, 8G, 20% (of the disk or the volume group), rest.
+# The boot loader needs an efi part (UEFI) and, on amd64, a bios part
+# (BIOS); /boot stays a plain partition, never on LVM or md.
+layouts:
+  lvm-linear:
+    description: every disk in one volume group, root as one linear volume over all of them; the first disk carries the boot partitions
+    parts:
+      - {type: slice, target: [first], size: 1M, filesystem: bios}
+      - {type: slice, target: [first], size: 512M, filesystem: efi, mountpoint: /boot/efi}
+      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
+      - {type: slice, target: [".*"], size: rest, filesystem: lvm, vg: vg0}
+      - {type: lvm, vg: vg0, name: root, size: rest, filesystem: ext4, mountpoint: /}
+
+  lvm-striped:
+    description: the NVMe disks in one volume group, root and swap striped over all of them; boot partitions on every disk
+    parts:
+      - {type: slice, target: [".*"], index: 127, size: 1M, filesystem: bios}
+      - {type: slice, target: [".*"], index: 128, size: 512M, filesystem: efi, mountpoint: /boot/efi}
+      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
+      - {type: slice, target: ["nvme.*"], size: rest, filesystem: lvm, vg: data}
+      - {type: lvm, vg: data, name: swap, size: 8G, raid: 0, filesystem: swap}
+      - {type: lvm, vg: data, name: root, size: rest, raid: 0, filesystem: ext4, mountpoint: /}
+
+  lvm-raid1:
+    description: the NVMe disks in one volume group, root mirrored (raid1), swap striped; boot partitions on every disk
+    parts:
+      - {type: slice, target: [".*"], index: 127, size: 1M, filesystem: bios}
+      - {type: slice, target: [".*"], index: 128, size: 512M, filesystem: efi, mountpoint: /boot/efi}
+      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
+      - {type: slice, target: ["nvme.*"], size: rest, filesystem: lvm, vg: data}
+      - {type: lvm, vg: data, name: swap, size: 8G, raid: 0, filesystem: swap}
+      - {type: lvm, vg: data, name: root, size: rest, raid: 1, filesystem: ext4, mountpoint: /}
+
+  lvm-example:
+    description: two volume groups, NVMe for the system (mirrored root, striped home and swap) and SATA for data
+    parts:
+      - {type: slice, target: [".*"], index: 127, size: 1M, filesystem: bios}
+      - {type: slice, target: [".*"], index: 128, size: 512M, filesystem: efi, mountpoint: /boot/efi}
+      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
+      - {type: slice, target: ["nvme.*"], size: rest, filesystem: lvm, vg: vg1}
+      - {type: slice, target: ["sd.*"], size: rest, filesystem: lvm, vg: vg2}
+      - {type: lvm, vg: vg1, name: swap, size: 16G, raid: 0, filesystem: swap}
+      - {type: lvm, vg: vg1, name: root, size: 100G, raid: 1, filesystem: ext4, mountpoint: /}
+      - {type: lvm, vg: vg1, name: home, size: rest, raid: 0, filesystem: ext4, mountpoint: /home}
+      - {type: lvm, vg: vg2, name: data, size: rest, filesystem: ext4, mountpoint: /data}

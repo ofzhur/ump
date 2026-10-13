@@ -42,6 +42,8 @@ efibootmgr
 lvm2
 mdadm
 e2fsprogs
+xfsprogs
+btrfs-progs
 dosfstools
 gdisk
 parted
@@ -51,6 +53,7 @@ hdparm
 
 # network
 netplan.io
+nftables
 iproute2
 iputils-ping
 ethtool
