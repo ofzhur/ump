@@ -70,9 +70,17 @@ root and the keys of a file).
    with no service started), as is `nftables` when the firewall needs
    it and the image lacks it.
 10. **Firewall:** with `policy: drop`, `/etc/nftables.conf` is written
-    (input drop; loopback, established and related connections, and the
-    allowed entries accepted; forward drop; output accept) and
-    `nftables.service` enabled.
+    and `nftables.service` enabled: input drop, with the loopback
+    interface, established and related connections and the allowed
+    entries accepted; output accept; forward accept, except that a new
+    connection coming in on an external interface (`ext*`) is held to
+    the same allowed entries, matched on the port it was addressed to
+    (`ct original proto-dst`, since the port a container publishes is
+    rewritten by DNAT before the forward hook). So containers and
+    virtual machines reach out freely, and a port Docker publishes with
+    `-p` is reachable from outside only when the profile allows it,
+    whatever rules the container engine adds (their chains and UMP's
+    are evaluated both; a drop in either is final).
 11. **Installs the boot loader:** GRUB on the EFI removable path
     (`EFI/BOOT/BOOT*.EFI`), which every firmware tries without a boot
     entry, and without writing one, so the firmware's boot order stays as

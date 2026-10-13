@@ -60,9 +60,14 @@ counts when it is listed. Root cannot log in over SSH unless the profile
 lists it with keys (then with keys only, never a password); it is still
 the user of the rescue system. The default profile's administrator is
 `ump` with zsh (oh-my-zsh, theme crunch): rename it, give it bash, or
-add your own users. The firewall always lets the loopback
+add your own users. The firewall (nftables) always lets the loopback
 interface and the answers to the server's own connections through;
 `policy: drop` with `icmp` and `ssh` is what the default profile does.
+The list also holds for connections forwarded in from the external
+interfaces, matched on the port they were addressed to: a port a
+container publishes (`docker run -p 8080:80`) is reachable only with
+`tcp/8080` allowed, while containers reach out freely; see [the
+installer](../install/README.md#what-it-does).
 The provision step is recorded on the installed system and reported by
 `ump server reinstall`; running it is not implemented yet.
 

@@ -80,6 +80,7 @@ command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old 
 
 log() { printf '==> %s\n' "$*"; }
 die() { echo "install.sh: $*" >&2; exit 1; }
+warn() { echo "install.sh: warning: $*" >&2; }
 TARGET=/mnt/target
 
 # --- the specification -------------------------------------------------
@@ -704,7 +705,18 @@ fi
 # --- firewall -----------------------------------------------------------
 
 if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
-	log "firewall: input drop, allowing $(jq -r '[.firewall.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)" end] | join(", ")' <<< "$spec")"
+	log "firewall: input drop, allowing $(jq -r '[.firewall.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)" end] | join(", ")' <<< "$spec"); the same for connections forwarded in from outside (containers' published ports)"
+	ext=""; for i in "${!IF_MAC[@]}"; do [ "${IF_KIND[$i]}" = ext ] && ext="${ext:+$ext, }\"${IF_NAME[$i]}\""; done
+	# the allowed entries, for the input chain (dport) and for the forward
+	# chain, where the destination port is the container's after the DNAT
+	# of a published port, so the original one is matched
+	allow() { # allow input|forward
+		if [ "$1" = input ]; then
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
+		else
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + "meta l4proto " + .proto + " ct original proto-dst " + .port + " accept" end' <<< "$spec"
+		fi
+	}
 	{
 		echo "#!/usr/sbin/nft -f"
 		echo "# written by UMP from the profile's firewall section; nft -f after editing"
@@ -715,10 +727,22 @@ if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
 		echo "    iif lo accept"
 		echo "    ct state established,related accept"
 		echo "    ct state invalid drop"
-		jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
+		allow input
 		echo "  }"
+		echo "  # Forwarded traffic (containers, virtual machines) passes, except"
+		echo "  # new connections coming in on the external interfaces: those are"
+		echo "  # held to the same list, by the port they were addressed to. A"
+		echo "  # port a container publishes (docker run -p) is reachable only"
+		echo "  # when it is allowed here, whatever the container engine adds."
 		echo "  chain forward {"
-		echo "    type filter hook forward priority 0; policy drop;"
+		echo "    type filter hook forward priority 0; policy accept;"
+		echo "    ct state established,related accept"
+		echo "    ct state invalid drop"
+		echo "    iifname { ${ext:-\"ext*\"} } ct state new jump forward-in"
+		echo "  }"
+		echo "  chain forward-in {"
+		allow forward
+		echo "    drop"
 		echo "  }"
 		echo "  chain output {"
 		echo "    type filter hook output priority 0; policy accept;"
@@ -726,6 +750,13 @@ if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
 		echo "}"
 	} > "$TARGET/etc/nftables.conf"
 	chmod 755 "$TARGET/etc/nftables.conf"
+	if ! out="$(in_target nft -c -f /etc/nftables.conf 2>&1)"; then
+		printf '%s\n' "$out" >&2
+		# a syntax error is the file's fault; anything else is the rescue
+		# kernel's (the check needs its nf_tables)
+		case "$out" in *"Error:"*) die "the firewall rules in /etc/nftables.conf are wrong (see above)" ;; esac
+		warn "could not check /etc/nftables.conf here (see above); the new system loads it at boot"
+	fi
 	run_in_target "enabling nftables" systemctl enable nftables.service
 fi
 
