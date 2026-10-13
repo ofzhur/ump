@@ -54,7 +54,7 @@ alike, booting from UEFI and, on amd64, from legacy BIOS.
 
 ## The objects
 
-Four kinds of things are configured, all as YAML in `~/.config/ump/`,
+Six kinds of things are configured, all as YAML in `~/.config/ump/`,
 each with its own `ump config` command and a small wizard:
 
 | Object | Command | What it is |
@@ -63,6 +63,8 @@ each with its own `ump config` command and a small wizard:
 | [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, packages, firewall, kernel command line, the step after the first boot |
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
+| [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
+| [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
 
 The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
@@ -105,6 +107,8 @@ own](images/rescue/README.md#your-own-storage).
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
+| [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
+| [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Concepts](docs/concepts.md) | the vocabulary and how the pieces fit, briefly |
@@ -112,7 +116,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
 | [Ubuntu base image](images/ubuntu/README.md) | the system `ump server reinstall` puts on disks, and its defaults |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the image, users, packages, firewall, the boot loader |
-| [Published profiles](profiles/README.md) | the directory the default profile, layouts and firewalls are published from |
+| [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls and users come from |
 | [Skill](docs/skill.md) | design outline for a planned part: operating a fleet and its Terraform and Ansible repository with an AI agent |
 
 ## Principles

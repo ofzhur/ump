@@ -199,7 +199,7 @@ Unknown fields are an error, so a typo in a field name is caught by
 
 ### Users
 
-Users are objects of their own: [`users.yaml`](../profiles/users.yaml)
+[Users](users.md) are objects of their own: [`users.yaml`](../profiles/users.yaml)
 next to the profiles holds them by name, with `description`, `sudo`,
 `groups`, `shell` and `keys`, and a profile lists the names it wants
 (`users: [ump, ops]`), so the same user goes into any number of
@@ -240,7 +240,7 @@ rescue system, which is how ump installs the machine.
 
 ### Keys
 
-A key reference in `users[].keys` is one of:
+A [key](keys.md) reference in `users[].keys` is one of:
 
 | Reference | Meaning |
 |---|---|

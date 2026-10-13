@@ -73,25 +73,30 @@ Downloaded the published profiles, layouts, firewalls and users into ~/.config/u
 $ ump config os get ubuntu-26.04    # the profile itself
 $ ump config disk-layout list       # the named disk layouts: lvm-linear, lvm-striped, lvm-raid1, lvm-example
 $ ump config firewall list          # the named firewalls: default, web, open
+$ ump config user list              # the named users: ump, the administrator
+$ ump config key list               # UMP's own key, and the keys you keep under names
 ```
 
 The first of these commands downloads the published defaults into
-`~/.config/ump/profiles/`. From then on they are your files. The
-[default profile](profiles.md#the-default-profile) installs Ubuntu 26.04
-with every disk in one volume group, a sudo user `ump` with UMP's own key
+`~/.config/ump/profiles/`; they are templates, kept current by `ump
+config os update`, and what you make from them is yours. The [default
+profile](profiles.md#the-default-profile) installs Ubuntu 26.04 with
+every disk in one volume group, the sudo user `ump` with UMP's own key
 and the public keys next to your `~/.ssh/id_*` files, no root login and
 no passwords, an nftables firewall that lets ICMP and SSH in, and IPv6
-and the CPU mitigations off. Change what you like:
+and the CPU mitigations off. Make it yours:
 
 ```console
-$ ump config os edit default        # your editor, then a check
+$ ump config os create mine         # a few questions: image, layout, firewall, users, ...
+$ ump config os default mine        # what reinstall takes from now on
 ```
 
-Common first edits: rename the `ump` user or add yourself, set
-`kernel.ipv6: true` if the server needs IPv6, pick another layout
-(`disks: lvm-raid1` for two NVMe disks) or firewall (`firewall: web`).
-[Profiles](profiles.md), [disk layouts](disk-layouts.md) and
-[firewalls](firewalls.md) describe every field and the published ones.
+Common first choices: a user of your own next to `ump` (`ump config
+user create oleg --from ump`, with your keys), `kernel.ipv6: true` if
+the server needs IPv6, another layout (`lvm-raid1` for two NVMe disks)
+or firewall (`web`). [Profiles](profiles.md), [disk
+layouts](disk-layouts.md), [firewalls](firewalls.md), [users](users.md)
+and [keys](keys.md) describe every field and the published ones.
 
 ## 5. See the plan, then install
 
@@ -164,10 +169,14 @@ uptime, memory, the root disk and the addresses.
   profile and opens it; `ump server set web-01 --profile web` remembers
   it for the server, so `ump server reinstall web-01` takes it from then
   on. See [profiles](profiles.md).
-- **Your own disk layouts and firewalls.** `ump config disk-layout create
-  NAME --from lvm-raid1`, `ump config firewall create NAME --from web`;
-  both check the file after your editor returns. See [disk
-  layouts](disk-layouts.md) and [firewalls](firewalls.md).
+- **Your own disk layouts, firewalls and users.** `ump config disk-layout
+  create NAME --from lvm-raid1`, `ump config firewall create NAME --from
+  web`, `ump config user create NAME --from ump`; each checks the file
+  after your editor returns. See [disk layouts](disk-layouts.md),
+  [firewalls](firewalls.md) and [users](users.md).
+- **Keys under names.** `ump config key add oleg --file
+  ~/.ssh/id_ed25519.pub` keeps a public key as `oleg`, for any user's
+  `keys`; `ump config key` is a wizard over them. See [keys](keys.md).
 - **The rescue system by itself.** `ump server rescue web-01` boots a
   server into UMP's rescue system and hands you a root shell there, with
   the disks untouched; `ump server rescue web-01 --yes -- lsblk` runs one
@@ -180,8 +189,8 @@ uptime, memory, the root disk and the addresses.
   published; the same `get.sh` one-liner installs it. The rescue image,
   the installer and the OS image come from the storage at every use, so
   they are current without a new binary, and `ump config os update`
-  refreshes your copies of the published profile, layouts and firewalls
-  while keeping the files you edited.
+  refreshes the published profiles, layouts, firewalls and users while
+  keeping what you made.
 - **Scripts and agents.** Every command has `-o json`; nothing prompts
   without a terminal (`--yes` where something is destructive, exit code 3
   otherwise). See the [CLI reference](cli.md).

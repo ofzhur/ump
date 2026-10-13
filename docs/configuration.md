@@ -123,7 +123,7 @@ ump has an SSH key pair of its own, generated on first use (`ump config
 key`, or the first `ump server rescue` or `reinstall`) at `staging.key`.
 It is what rescue systems are booted with and reached by, what the
 administrator of an installed system gets (the `ump` key reference in a
-[profile](profiles.md#keys)) and what `ump ssh` offers next to your own
+[user](keys.md)) and what `ump ssh` offers next to your own
 keys, so ump can reach its machines whatever personal keys are around.
 
 ```console

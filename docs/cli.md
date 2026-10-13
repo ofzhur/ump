@@ -540,7 +540,7 @@ same without a terminal, and is a small wizard over the subcommands on
 one); put the public key wherever UMP should be able to log in. The
 subcommands keep more public keys under
 names in `~/.config/ump/keys.yaml`, for the `keys` of
-[users](profiles.md#keys): `add NAME --file FILE` (every key line of the
+[users](keys.md): `add NAME --file FILE` (every key line of the
 file; a second one becomes `NAME-2`), `add NAME --line 'ssh-... AAAA...'`,
 `add NAME --agent` (what `ssh-add -L` lists), `list` (with `ump`, UMP's
 own) and `remove NAME`. The names `ump`, `local` and `agent` are taken.

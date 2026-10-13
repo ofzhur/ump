@@ -59,19 +59,24 @@ profiles, the OS images, plus `get.sh` and the ump binaries. The default
 is `https://ump.zhurko.de/dl`; any web server or object store with plain
 `GET` does. See [configuration](configuration.md#storage).
 
-## Profiles, layouts and firewalls
+## Profiles, layouts, firewalls, users and keys
 
 A **profile** says what a server becomes: the OS image, the disk layout,
-the users with their keys, extra packages, the firewall, the kernel
-command line, the step after the first boot. A **disk layout** is a list
-of parts (partitions, md arrays, logical volumes) applied to whatever
-disks a server has; a **firewall** is an input policy and the allowed
-ports. Layouts and firewalls are named entries in `layouts.yaml` and
-`firewalls.yaml`, referred to from profiles, or written inline in one.
-All three are YAML in `~/.config/ump/profiles/`, start out as the
-published defaults, and are checked when edited. See
+the users, extra packages, the firewall, the kernel command line, the
+step after the first boot. A **disk layout** is a list of parts
+(partitions, md arrays, logical volumes) applied to whatever disks a
+server has; a **firewall** is an input policy and the allowed ports; a
+**user** is an account with sudo, groups, a shell and key references.
+Layouts, firewalls and users are named entries in `layouts.yaml`,
+`firewalls.yaml` and `users.yaml`, referred to from profiles by name, or
+written inline in one. All of it is YAML in `~/.config/ump/profiles/`;
+the published entries are templates that `ump config os update`
+replaces, what you create under names of your own is kept, and every
+file is checked when edited. **Keys** are the public keys a user's
+references resolve to: UMP's own, your `~/.ssh` files, the agent, or
+keys kept under names in `~/.config/ump/keys.yaml`. See
 [profiles](profiles.md), [disk layouts](disk-layouts.md),
-[firewalls](firewalls.md).
+[firewalls](firewalls.md), [users](users.md), [keys](keys.md).
 
 ## The image and the installer
 
@@ -94,8 +99,8 @@ installed system: the profile's first sudo user, `ump` by default. The
 administrator is who ump logs in as afterwards (`ump ssh`, the check
 after an installation, the direct way back into the rescue system), and
 who you log in as; root has no SSH login unless the profile lists it.
-No passwords are set anywhere. See [configuration](configuration.md#umps-key)
-and [profiles](profiles.md#users-the-administrator-and-root).
+No passwords are set anywhere. See [keys](keys.md) and
+[users](users.md#the-administrator-and-root).
 
 ## How a reinstall runs
 
