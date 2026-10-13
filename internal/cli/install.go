@@ -61,11 +61,12 @@ configuration, else the published one) says which image, which disk
 layout (by name from layouts.yaml, or its own), which users with which
 keys, which extra packages, what the firewall lets in, and the provision
 step after the first boot. The default profile puts Ubuntu 26.04 on
-every disk as one linear volume group, gives root UMP's key and your
-~/.ssh/id_*.pub keys, lets ICMP and SSH in and nothing else, and a kernel
-command line with mitigations=off and ipv6.disable=1; --mitigations and
---ipv6 keep them on (docs/cli.md says how to turn them on later). The
-other flags override the profile for this one installation.
+every disk as one linear volume group, gives the sudo user ump UMP's key
+and your ~/.ssh/id_*.pub keys (root has no SSH login), lets ICMP and SSH
+in and nothing else, and a kernel command line with mitigations=off and
+ipv6.disable=1; --mitigations and --ipv6 keep them on (install/README.md
+says how to turn them on later). The other flags override the profile for
+this one installation.
 
 --dry-run brings the server into the rescue system and prints the
 installer's plan without touching a disk; --no-reboot leaves the server
@@ -84,7 +85,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
-	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for root of the new system (repeatable)")
+	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for the administrator of the new system (repeatable)")
 	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")

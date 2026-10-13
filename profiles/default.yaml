@@ -1,9 +1,10 @@
 # The default profile: what a server becomes when ump installs it.
 #
-# ump install server NAME takes this profile (or --profile NAME|FILE); a
+# ump server reinstall NAME takes this profile (or --profile NAME|FILE); a
 # file of the same name in ~/.config/ump/profiles/ wins over the published
-# one, so copy this file there and make it yours. Every field is described
-# in profiles/README.md.
+# one, which ump config os puts there on first use, so edit that copy and
+# make it yours. Every field is described in docs/profiles.md of the ump
+# repository (github.com/ofzhur/ump).
 name: default
 description: Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
 

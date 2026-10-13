@@ -1,188 +1,243 @@
-# Providers (draft)
+# Provider accounts
 
-Providers connect UMP to the APIs that know about machines. They are kept
-deliberately small: list machines, act on power and boot state, and
-report provider-side network information. Everything else happens in the
-staging environment and is the same for every provider.
+A provider is a hosting API that knows about servers: which ones exist,
+how to reset them, how to boot them into a rescue system, how to set
+their names and reverse DNS. A **provider account** (`ump config isp`,
+for *internet service provider*) is one set of credentials for one
+provider, stored in the configuration under a name of your choice. You
+can have several accounts of the same type, say one per Hetzner Cloud
+project, and `ump server list` shows the servers of all of them together.
 
-See [architecture](architecture.md#providers) for the interfaces.
+```console
+$ ump config isp view
+# ~/.config/ump/config.yaml
+accounts:
+  hcloud:
+    type: hetzner-cloud
+    token: {file: ~/.config/ump/secrets/hcloud.token}
+  hrobot:
+    type: hetzner-robot
+    login: '#ws+AbCdEfGh'
+    password: {file: ~/.config/ump/secrets/hrobot.password}
+```
 
-## Capability matrix
+## Provider types
 
-The table shows the **intended** use of each provider's API. Details are
-to be verified against the current APIs when each integration is
-implemented. Implemented today, for `hetzner-robot`, `hetzner-cloud`
-and `ovh`: `inventory` (`ump server list`), `describe`, `rename`, `rdns`
-(`ump get|set|delete rdns`), `power` (`ump reboot|start|stop server`)
-and `rescue` (`ump rescue|unrescue server`). Not every provider supports every feature: each provider
-declares its capabilities (`ump config isp types` lists them), and a command
-that needs one the provider lacks says so instead of failing half-way.
+```console
+$ ump config isp types
+TYPE            KIND         CAPABILITIES                                          DESCRIPTION
+hetzner-cloud   cloud        inventory, describe, rename, rdns, power, rescue      Hetzner Cloud servers
+hetzner-robot   bare-metal   inventory, describe, rename, rdns, power, rescue      Hetzner dedicated servers (Robot web service)
+ovh             mixed        inventory, describe, rename, rdns, power, rescue      OVHcloud dedicated servers and Public Cloud instances
+```
 
-| Provider | Kind | inventory | rename | power | rescue | create | rdns | network-info | virtual-media | Entry method |
-|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
-| `hetzner-robot` | bare metal | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
-| `hetzner-cloud` | cloud | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
-| `ovh` | bare metal + VPS + cloud | ✓ | VPS, instances | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
-| `scaleway-baremetal` | bare metal | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
-| `aws-ec2` | cloud | ✓ | ✓ | ✓ | – | ✓ | – | ✓ | – | kexec |
-| `gcp-compute` | cloud | ✓ | – | ✓ | – | ✓ | – | ✓ | – | kexec |
-| `redfish` | own hardware | ✓ (static) | – | ✓ | – | – | – | – | ✓ | virtual-media |
-| `ipmi` | own hardware | ✓ (static) | – | ✓ | – | – | – | – | – | pxe |
-| `libvirt` / `proxmox` | lab / private cloud | ✓ | ✓ | ✓ | – | ✓ | – | – | ✓ | virtual-media |
-| `ssh` | anything with SSH | ✓ (static) | – | – | – | – | – | – | – | kexec, manual |
+| Type | Lists | Credentials | Where to get them |
+|---|---|---|---|
+| `hetzner-robot` | Hetzner dedicated servers | `login` (`#ws+...`), `password` | Robot → Settings → Web service and app settings |
+| `hetzner-cloud` | the servers of one Hetzner Cloud project | `token` | Cloud Console → the project → Security → API tokens; read permission is enough for listing, read and write for everything else |
+| `ovh` | OVHcloud dedicated servers, VPS and Public Cloud instances of one account | `endpoint` (`ovh-eu`, `ovh-ca`, `ovh-us`, or a URL), `application_key`, `application_secret`, `consumer_key` | an application at `https://eu.api.ovh.com/createApp/` (`ca.`/`us.` for the other endpoints) gives key and secret; the wizard requests the consumer key for you |
 
-`ssh` is the universal fallback: a static list of hosts, no API. With
-`kexec` it can reinstall any running Linux machine that is reachable over
-SSH as root. It is also the provider used by the integration test suite.
+`ump config isp types` prints the settings of every type below the table,
+with which are required and which are secret. The three types implement
+every capability UMP has today, so every command of `ump server` works
+with every account; the differences are in the details, see [per
+provider](#per-provider) below.
 
-## Priorities
+## Adding an account
 
-1. **`hetzner-robot`** — inventory, rescue, reset, rename, rDNS, SSH key
-   registration.
-2. **`ssh` + `kexec`/`manual` entry** — needed for testing in QEMU and
-   immediately useful on its own.
-3. **`hetzner-cloud`** — the first cloud, proves that bare metal and cloud
-   go through the same pipeline.
-4. **`redfish`** — own hardware.
-5. Others as needed.
+On a terminal, the wizard:
 
-## Notes per provider
+```console
+$ ump config isp
+UMP configuration wizard
+Configuration file: ~/.config/ump/config.yaml
+No accounts configured yet.
+Type q at a menu or press Ctrl-C to quit. ...
 
-### Hetzner Robot
+Provider type
+  1) hetzner-cloud   Hetzner Cloud servers
+  2) hetzner-robot   Hetzner dedicated servers (Robot web service)
+  3) ovh             OVHcloud dedicated servers and Public Cloud instances
+  q) quit
+Choice [1]: 1
 
-- The server name is a free label, not required to be unique; `ump rename
-  server` sets it with `POST /server/{number}` (form-encoded, like every
-  Robot write).
-- Reverse DNS is account-wide (`GET /rdns`); UMP matches entries to a
-  server by its addresses (primary IP, additional IPs, subnets, the
-  IPv6 /64). Entries are created with `PUT /rdns/{ip}` and updated with
-  `POST /rdns/{ip}`; any name is accepted.
-- Rescue requires the SSH key to be registered at the account first; the
-  provider registers keys whose fingerprint is missing (`POST /key`) and
-  arms the rescue system with `POST /boot/{number}/rescue`; Robot issues
-  a password only when no key is given.
-- When the server is switched off, a hardware reset does nothing, so
-  `ump server reboot` presses the power button instead. `stop` is a short press
-  (ACPI shutdown) or, with `--hard`, a long press; `start` a short press.
-  The `man` reset type (a technician) is never used.
-- Provider network info: main IPv4, additional single IPs, subnets and the
-  IPv6 /64.
-- Boot order on Hetzner dedicated servers usually has PXE first; this
-  is how rescue works. The bootloader step must not change that.
+Account name [hcloud]:
 
-### Hetzner Cloud
+Where should this account's secrets be kept?
+  1) files under ~/.config/ump/secrets, readable only by you
+  2) environment variables that you set in your shell
+  3) a command that prints the secret (pass, op, sops, vault, ...)
+  q) quit
+Choice [1]:
 
-- Server names must be unique within the project and valid hostnames;
-  `ump server rename` uses `PUT /servers/{id}` and reports the API's
-  `uniqueness_error` plainly.
-- Reverse DNS is set with the `change_dns_ptr` action for the IPv4 and
-  for single addresses inside the IPv6 /64; removing an entry restores
-  Hetzner's default (`static.….clients.your-server.de`).
-- Rescue is enabled with the `enable_rescue` action and project SSH keys
-  (registered by fingerprint when missing), followed by a reset; Hetzner
-  always issues a root password. Actions are followed until they finish.
-- The API returns the place as a top-level `location` (`fsn1`) and
-  `datacenter: null`; UMP reads both for older responses.
-- IPv4 is configured as `/32` with an on-link default gateway; the network
-  model must express on-link routes.
-- The stock images ship cloud-init. UMP installs its own image instead, so
-  provider metadata cannot later override what UMP configured.
+  a project API token; read permission is enough for listing (Cloud Console: project → Security → API tokens)
+API token:
 
-### OVHcloud
+Testing hcloud ... ok (3 servers)
+Saved account hcloud (hetzner-cloud) to ~/.config/ump/config.yaml
+Add another account? [y/N]
 
-- One account covers both dedicated servers (`/dedicated/server`) and
-  Public Cloud instances (`/cloud/project/*/instance`), because one set of
-  API keys does. Instances carry the project as labels (`project`,
-  `project_id`); a dedicated server's ID is its service name
-  (`ns1234.ip-1-2-3.eu`), its name the IAM display name when one is set.
-- Credentials are an application key and secret plus a consumer key. The
-  wizard requests a consumer key (`POST /auth/credential`) with the access
-  rules the implemented commands need, `GET /dedicated/server*`,
-  `GET /cloud/project*`, `PUT /cloud/project/*/instance/*`, `GET /ip/*`,
-  `POST /ip/*/reverse`, `DELETE /ip/*/reverse/*`, `PUT /dedicated/server/*`,
-  `POST /dedicated/server/*/reboot` and the instance `reboot`,
-  `rescueMode`, `start` and `stop` actions, and shows the validation URL; a key that may not see one of the two families is
-  tolerated, that family is skipped. A key made elsewhere needs the same
-  rules; a missing one shows up as `NOT_GRANTED_CALL` with the path.
-- `ump server rename` renames Public Cloud instances (`instanceName`).
-  Dedicated servers cannot be renamed through the API: the display name
-  is read-only in every public API model, the v2 IAM resource included,
-  so UMP says so instead of pretending; set it in the control panel.
-- A dedicated server has one reboot (`POST /reboot`, a hardware reset
-  as a task) and no power on/off through the API. Rescue means setting
-  the `rescue` boot option (`PUT` with `bootId`) and one `rescueSshKey`;
-  without a key OVH mails the password to the rescue mail address.
-  Instances reboot soft or hard, start and stop, and `rescueMode` puts
-  them into rescue (OVH reboots them itself and returns the password).
-- Reverse DNS lives on IP blocks (`/ip/{block}/reverse`): for a
-  dedicated server UMP uses the blocks routed to it (`/ips`), for an
-  instance the `/32` of each IPv4 and the `/64` of each IPv6. OVH
-  requires the name to resolve to the address before it accepts the
-  entry. The instance path is untested against the live API.
-- VPS (`/vps`) are listed next to dedicated servers and Public Cloud
-  instances, labelled `family: vps`: reboot, start, stop, rename (the
-  display name), reverse DNS on the `/32` and `/64` of their addresses,
-  and rescue through the netboot mode (`rescue` until `unrescue`, the
-  machine boots it at the next reboot). The VPS API takes no rescue SSH
-  key and OVH mails the password, so UMP cannot log into a VPS rescue
-  system by itself. `ump server reinstall` takes another way in: OVH
-  rebuilds the VPS with its newest plain Debian image (Ubuntu when there
-  is none) and UMP's key, a script of the first boot opens root to that
-  key, and from there the direct way kexecs into the UMP rescue system;
-  the whole reinstall is unattended, the provider's rebuild just takes a
-  few minutes more. `ump server rescue` never does that (it would erase
-  the machine): it refuses the provider's way for a VPS before enabling
-  anything, and says so. The direct way works for both when the running
-  system lets UMP in as root (UMP's key in root's `authorized_keys`);
-  `ump server rescue --no-image` with the mailed password is the way
-  into the provider's rescue system.
-  Every change to a VPS is a task at OVH, and OVH refuses the next action
-  while one runs, so ump waits for the tasks before it reboots or
-  changes the netboot mode. A consumer key made before VPS support lacks
-  the `/vps` rules and shows no VPS; `ump config isp add` requests a new
-  key with them.
-- The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
+Done. Try: ump server list
+```
 
-### Clouds without rescue (AWS, GCP, ...)
+It asks for the provider type, an account name, where the account's
+secrets should be kept, and the credentials (secrets are read without
+echo), tests them with one API call (a listing) and writes the account to
+the configuration. An account is written only after its test passed, or
+you chose to save it anyway, so leaving with `q` or Ctrl-C never saves a
+half-entered account. With environment variables that are not set in the
+current shell, the test is skipped and the wizard prints the `export`
+lines to run first. For OVHcloud the wizard requests a consumer key with
+the access rules the commands need and hands you the validation URL to
+approve it.
 
-- Create the instance from any small stock image (or let Terraform do it),
-  then use `kexec`: UMP connects to the stock OS, kexecs into its staging
-  environment in RAM and installs onto the root volume.
-- Network on these platforms is DHCP-based; the profile's network mode is
-  `dhcp` there. A provider can set this default.
-- Some platforms need specific drivers in the image (ENA/NVMe on AWS,
-  gVNIC on GCP); the OS family driver ensures the kernel and initramfs
-  include them.
+Without a terminal, in CI or from an agent:
 
-### Redfish
+```console
+$ ump config isp add hetzner-robot hrobot --set login='#ws+AbCdEfGh' --set password=env:HROBOT_PASSWORD
+$ ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
+$ ump config isp add ovh ovh --set endpoint=ovh-eu --set application_key=AbCdEfGh \
+      --set application_secret=command:"pass show ovh/app-secret" --set consumer_key=env:OVH_CK
+```
 
-- Insert the UMP staging ISO as virtual media, set one-time boot to
-  virtual CD, power-cycle. After installation: eject, reset boot override.
-- The staging ISO must get UMP's SSH key and network configuration. The
-  ISO's kernel command line or a small config image carries both, because
-  there is usually no DHCP on management-only networks.
+A value is plain text or a secret reference, `env:NAME`, `file:PATH` or
+`command:CMD`; the credentials are tested before the account is saved
+unless `--no-test` is given, and an account of the same name is replaced.
+Account names are lower-case letters, digits, `-`, `_` and `.`.
 
-## Writing a provider
+### Secrets
 
-1. Create a package under `internal/provider/<name>`.
-2. Declare a `provider.Type`: the name used in `config.yaml`, a
+Credentials never need to land in `config.yaml` as plaintext. A setting
+is a plain string or a reference to where the secret is:
+
+| In `config.yaml` | With `--set` | Source |
+|---|---|---|
+| `{ env: NAME }` | `env:NAME` | an environment variable |
+| `{ file: PATH }` | `file:PATH` | the content of a file, trailing newline stripped; the wizard writes these under `~/.config/ump/secrets/` with mode 0600 |
+| `{ command: "..." }` | `command:CMD` | the standard output of a command: `pass show ...`, `op read ...`, `sops -d ...`, `vault kv get ...` |
+
+References are resolved when a command needs the account. Plaintext
+values are accepted; `ump config isp view` redacts them and shows
+references as they are. The secret files stay under your own
+configuration directory even when `--config` points at a configuration in
+a repository, so a shared configuration carries references only.
+
+## Managing accounts
+
+```
+ump config isp                   # the wizard
+ump config isp view              # the configuration, plaintext secrets redacted
+ump config isp types             # the provider types, their capabilities and settings
+ump config isp add TYPE NAME --set KEY=VALUE ... [--no-test]
+ump config isp test [NAME...]    # resolve the secrets and list once; all accounts without names
+ump config isp remove NAME       # the account and the secret files the wizard created for it
+```
+
+`ump config isp` has the aliases `provider`, `providers`, `account` and
+`accounts`. Every command that touches servers takes `--account NAME`
+(repeatable) to work with some accounts only; without it, every account
+is used, queried in parallel, and an account whose API fails is reported
+on stderr while the others are still listed (exit code 4).
+
+## Per provider
+
+### Hetzner Robot (`hetzner-robot`)
+
+- Dedicated servers. The server name is a free label at Hetzner, not
+  required to be unique; `ump server rename` sets it and refuses a name
+  another listed server has (`--force` renames anyway).
+- Rescue: UMP's key (and `--ssh-key` files) must be registered at the
+  account; the provider registers keys it does not know by fingerprint,
+  then arms the rescue system and resets the server. Robot prints the
+  rescue system's host key fingerprints, and ump shows them.
+- Power: `reboot` asks the system to reboot (ACPI), `--hard` is a
+  hardware reset, `--power-cycle` cuts the power; a server that is
+  switched off is switched on instead, because a reset does nothing
+  then. `stop` presses the power button (ACPI shutdown), `--hard` holds
+  it; `start` presses it.
+- Reverse DNS is set for any address of the server (primary IP,
+  additional IPs, subnets, the IPv6 /64), and any name is accepted.
+- `ump server show` adds the contract (product, traffic, paid until,
+  cancellation), addresses, features, power state and reset types, and
+  the rescue state.
+
+### Hetzner Cloud (`hetzner-cloud`)
+
+- One account is one project; its API token is the credential. Server
+  names must be unique within the project and valid hostnames; the API's
+  uniqueness error is reported plainly.
+- Rescue: the rescue system is enabled with the project's SSH keys (UMP's
+  is registered when missing) and the server reset; Hetzner always issues
+  a root password too. Actions are followed until they finish.
+- Power: soft reboot, hard reset, power cycle, start and stop all exist.
+- Reverse DNS works for the IPv4 and for single addresses inside the
+  IPv6 /64; deleting an entry restores Hetzner's default name.
+- `ump server show` adds the server type, image, location, networks
+  (PTR records, floating IPs, private networks, cloud firewalls), traffic
+  and protection.
+
+### OVHcloud (`ovh`)
+
+One account covers dedicated servers, VPS and Public Cloud instances,
+because one set of API keys does. A dedicated server's ID is its service
+name (`ns1234.ip-1-2-3.eu`) and its name the display name when one is
+set; instances carry their project as labels; VPS are labelled
+`family: vps`.
+
+- Credentials: an application key and secret, plus a consumer key with
+  access rules. The wizard requests a consumer key with exactly the rules
+  the commands need and shows the validation URL; a consumer key made
+  elsewhere needs the same rules, and a missing one shows up as
+  `NOT_GRANTED_CALL` with the path. A key that may not see one family
+  (say, no Public Cloud) is tolerated: that family is skipped. A consumer
+  key made before VPS support lacks the `/vps` rules and shows no VPS;
+  `ump config isp add` requests a new key with them.
+- Rename: Public Cloud instances and VPS can be renamed; dedicated servers
+  cannot through the API (the display name is read-only there), and ump
+  says so.
+- Power: a dedicated server knows one reboot (a hardware reset) and cannot
+  be switched on or off through the API; instances and VPS reboot, start
+  and stop. Every change to a VPS is a task at OVH, and OVH refuses the
+  next action while one runs, so ump waits for the tasks.
+- Rescue: a dedicated server takes one rescue SSH key; an instance is put
+  into rescue mode by OVH itself (it reboots the instance and returns a
+  password); a VPS rescue takes no key, so `ump server rescue` refuses the
+  provider's way for a VPS and says so (the direct way, a kexec from the
+  running system that lets UMP in as root, works). `ump server reinstall`
+  still works on a VPS: OVH rebuilds it with its newest stock Debian
+  image and UMP's key, and ump continues from there; the whole reinstall
+  is unattended and takes a few minutes longer. Rescue stays the boot
+  option on OVH dedicated servers until `ump server unrescue`; `reinstall`
+  does that for you.
+- Reverse DNS: OVH requires the name to resolve to the address before it
+  accepts the entry, so create the forward record first.
+- `ump server show` adds, for a dedicated server, the boot option, the
+  addresses, the service dates and the hardware; for an instance, the
+  flavor, image, addresses, SSH key and project.
+
+## Adding a provider type
+
+Providers are small Go packages under `internal/provider/<name>` with
+hand-written REST clients: UMP needs a handful of calls per provider, and
+the binary does not pick up an SDK's dependency tree.
+
+1. Declare a `provider.Type`: the name used in `config.yaml`, a
    description for the wizard, the settings as `Fields` (label, help,
-   secret, required, choices, defaults — the wizard and `ump config isp add`
-   are driven by them) and a `New` function that builds an instance from
-   resolved settings. A `Complete` hook can fill settings interactively
-   (OVH uses it to request a consumer key).
-3. Implement `Provider` plus the optional capability interfaces
-   (`Inventory` first; `Describer` returns the provider's extra facts as
-   named sections for `ump server show`).
-4. Map provider objects to UMP's `Machine` (ID, name, addresses, location,
-   product, status, labels). Lower-case locations and statuses; keep
-   product names as the provider spells them.
-5. Register the type in `internal/provider/all`.
-6. Add tests against an `httptest` server with recorded API responses.
+   secret, required, choices, defaults; the wizard, `ump config isp add`
+   and `types` are driven by them) and a `New` function that builds an
+   instance from resolved settings. A `Complete` hook can fill settings
+   interactively (OVH uses it to request the consumer key).
+2. Implement `Provider` plus the capability interfaces: `Inventory`
+   first, then `Describer`, `Renamer`, `ReverseDNS`, `Power`, `Rescue`
+   as the API allows. The CLI checks them with type assertions, and a
+   command that needs one the provider lacks says so instead of failing
+   half-way.
+3. Map the provider's objects to UMP's `Machine`: ID, name, addresses,
+   kind, location, product, status, labels. Lower-case locations and
+   statuses; keep product names as the provider spells them.
+4. Register the type in `internal/provider/all`, and add tests against
+   an `httptest` server with recorded API responses.
 
-The API clients are hand-written over REST rather than taken from SDKs:
-UMP needs a handful of calls per provider, the clients stay a few hundred
-lines, and the binary does not pick up an SDK's dependency tree (the
-official Hetzner Cloud SDK, for instance, pulls in Prometheus and
-protobuf). Provider-specific quirks stay inside the provider package. If a
-quirk leaks into the pipeline, the interface is missing something.
+Provider quirks stay inside the provider package. If one leaks into the
+rest of ump, the interface is missing something. Providers UMP does not
+have yet are listed in the [roadmap](roadmap.md).

@@ -6,7 +6,7 @@ rescue system for one thing only, to get root over SSH once; then it
 downloads **this** image and `kexec`s into it, so that the inspection and
 installation steps run in the same environment everywhere: a Debian
 system with a generic kernel, the firmware of server NICs and storage
-controllers, and the tools the UMP agent calls, running entirely from
+controllers, and the tools the installer calls, running entirely from
 RAM with no disk mounted. The same image serves the `kexec` entry method
 on clouds without a rescue system, and later virtual media and PXE.
 
@@ -106,7 +106,7 @@ image alone) and serve this below it:
 | `rescue/<arch>/initrd.zst` | the rescue system, as a zstd-compressed initramfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
-| `profiles/default.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml` | the published [profile, layouts and firewalls](../../profiles/README.md); a copy in `~/.config/ump/profiles/` wins |
+| `profiles/default.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml` | the published [profile](../../docs/profiles.md), [layouts](../../docs/disk-layouts.md) and [firewalls](../../docs/firewalls.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/<os>/<arch>/manifest.json` | an [OS image](../ubuntu/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
 | `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
@@ -168,9 +168,9 @@ serial console) gives a root shell on the out-of-band console.
 
 ## Entering it by hand
 
-Until `ump server reinstall` does this itself, from a provider's rescue system or
-any running Linux, as root (the script is published next to the images,
-so one line is enough):
+`ump server rescue` and `ump server reinstall` do this for you. From a
+provider's rescue system or any running Linux, as root, the script alone
+does it too (it is published next to the images, so one line is enough):
 
 ```console
 # curl -fsSL https://files.example.net/rescue/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u https://files.example.net/rescue
@@ -227,7 +227,7 @@ boots the built image in QEMU (`-kernel`/`-initrd`, 2 GB, a virtio disk
 that must stay unmounted, user networking with SSH forwarded to
 `127.0.0.1:2222`), waits for SSH with a throwaway key passed through
 `ump.authorized_keys`, and checks the hostname, the root file system,
-every tool the agent needs, the network, the services and that nothing
+every tool the installer needs, the network, the services and that nothing
 failed. Then it does what a provider rescue system will do: inside the
 guest it runs `kexec-into-rescue.sh` against an HTTP server on the host,
 which downloads and verifies the image, reads the DHCP configuration,
@@ -275,6 +275,3 @@ with 542 MB available. SSH answered about ten seconds after `kexec -e`.
   not reproducible bit for bit; the manifest pins what was built.
 - Secure Boot is not considered: `kexec` into an unsigned kernel needs
   Secure Boot off, which is how provider rescue systems run anyway.
-- `ump server reinstall` will fetch `manifest.json` from the configured base URL
-  (`staging.kexec_image`), verify the files and do what
-  `kexec-into-rescue.sh` does, including waiting for the new host key.

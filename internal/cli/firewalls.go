@@ -26,7 +26,7 @@ the published firewalls there. A firewall is the input policy (drop or
 accept) and what it lets in (icmp, ssh, tcp/80, udp/53, or {proto, port,
 from}); the same list holds for connections forwarded in from outside,
 so a port a container publishes is reachable only when it is allowed.
-profiles/README.md in the repository describes the fields.
+docs/firewalls.md in the repository describes the fields.
 
 Without a subcommand and on a terminal, ump config firewall is a small
 wizard over the subcommands below.`,

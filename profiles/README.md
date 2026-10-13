@@ -1,155 +1,19 @@
-# Profiles
+# Published profiles
 
-A profile says what a server becomes when `ump server reinstall` installs it:
-which image, which disk layout, which users with which keys, which extra
-packages, what the firewall lets in, and what happens after the first
-boot. It is YAML, and the one in this directory,
-[`default.yaml`](default.yaml), is the default. `ump server reinstall NAME`
-takes it unless `--profile` names another one.
+This directory holds the profile, the disk layouts and the firewalls that
+ump publishes: `make upload` puts them under `profiles/` of the storage
+(`https://ump.zhurko.de/profiles/` for this project's). The first
+`ump config os`, `disk-layout` or `firewall` command downloads them into
+`~/.config/ump/profiles/`, where they are yours to edit; a profile that
+is not there is still fetched from the storage by name, so `ump server
+reinstall NAME` works with the published `default` out of the box.
 
-Where ump looks for a profile named `NAME`: `--profile` with a path
-takes that file; else `~/.config/ump/profiles/NAME.yaml` (the profiles
-directory next to the configuration); else `profiles/NAME.yaml` on the
-storage, where `make upload` publishes this directory. So copy
-`default.yaml` to `~/.config/ump/profiles/default.yaml` and make it
-yours; the layouts and the firewalls work the same with `layouts.yaml`
-and `firewalls.yaml`.
+| File | What it holds | Documentation |
+|---|---|---|
+| [`default.yaml`](default.yaml) | the `default` profile: Ubuntu 26.04 on every disk as one linear volume group, the sudo user `ump` with your keys, ICMP and SSH open | [OS profiles](../docs/profiles.md) |
+| [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
+| [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 
-The flags of `ump server reinstall` override a profile for one installation:
-`--layout`, `--firewall`, `--os`, `--timezone`, `--ipv6`,
-`--mitigations`, `--disks`, `--ssh-key` (keys added to the
-administrator).
-
-## Fields
-
-```yaml
-name: default                 # optional; the file name otherwise
-description: ...              # optional
-os: ubuntu-26.04              # the image: os/<os>/<arch>/ on the storage
-timezone: UTC                 # optional, UTC
-kernel:                       # optional; everything off unless said
-  mitigations: false          # CPU vulnerability mitigations; mitigations=off when false
-  ipv6: false                 # ipv6.disable=1 when false
-  extra: ""                   # anything else for the kernel command line
-disks: lvm-linear             # a layout name from layouts.yaml, or an inline layout (below)
-users:
-  - name: ump                 # the administrator: the first sudo user (see below)
-    sudo: true                # member of sudo without a password (no passwords are set)
-    shell: /bin/zsh           # optional; /bin/bash by default
-    keys: [ump, local]        # see Keys
-  - name: ops
-    groups: [adm]             # optional, created when missing
-    keys: [agent, ~/.ssh/ops.pub]
-  - name: root                # only when listed does root log in over SSH (keys only)
-    keys: [ump]
-packages: [htop]              # optional; Ubuntu packages, installed from the archive at installation
-firewall: default             # a firewall name from firewalls.yaml, or an inline one:
-#  policy: drop               # drop: only what is allowed gets in; accept: no firewall
-#  allow: [icmp, ssh, tcp/80, udp/53, "tcp/8000-8100", {proto: tcp, port: 443, from: 10.0.0.0/8}]
-                              # no firewall without the field
-provision:                    # optional; the step after the first boot
-  type: none                  # none | ansible-pull | ansible-bootstrap
-  repo: ...                   # whatever the step needs; kept with the type in /etc/ump/install
-network:                      # optional
-  rename: true                # uniform interface names (ext01, int01, ...); false keeps the kernel's
-```
-
-Every user needs at least one key: no passwords are set, so a user
-without keys could not log in. One user must be able to administer the
-system: the first user with `sudo: true` is the **administrator**, the
-user ump logs in as afterwards (to re-enter its rescue system, to check
-an installation, and `ump ssh` by default) and the one you use; `root`
-counts when it is listed. Root cannot log in over SSH unless the profile
-lists it with keys (then with keys only, never a password); it is still
-the user of the rescue system. The default profile's administrator is
-`ump` with zsh (oh-my-zsh, theme crunch): rename it, give it bash, or
-add your own users. The firewall (nftables) always lets the loopback
-interface and the answers to the server's own connections through;
-`policy: drop` with `icmp` and `ssh` is what `default` in
-[`firewalls.yaml`](firewalls.yaml) does, and the default profile names
-it; `web` adds HTTP and HTTPS, `open` is no firewall. `ump config
-firewall` (`fw`) lists, prints, creates, edits and deletes them, like
-`ump config disk-layout` for the layouts.
-The list also holds for connections forwarded in from the external
-interfaces, matched on the port they were addressed to: a port a
-container publishes (`docker run -p 8080:80`) is reachable only with
-`tcp/8080` allowed, while containers reach out freely; see [the
-installer](../install/README.md#what-it-does).
-The provision step is recorded on the installed system and reported by
-`ump server reinstall`; running it is not implemented yet.
-
-### Interface names
-
-With `network.rename` on (the default), the installer names the wired
-interfaces of the machine uniformly instead of leaving the kernel's
-`enp0s3`, `eno1` or `eth0`: `ext01`, `ext02`, ... for the ones with a
-public address (the uplink the rescue system uses first, then the others
-in the kernel's order), `int01`, `int02`, ... for the rest, whether they
-carry a private address or nothing. The names are bound to the MAC
-addresses in `/etc/netplan/10-ump.yaml` (`set-name`), so they survive
-reboots and kernel upgrades, and `/etc/ump/install` lists them
-(`interfaces=ext01=aa:bb:... int01=...`). Only the uplink is configured;
-the others are up without an address, ready for your netplan. `rename:
-false` keeps the kernel's names, with the uplink matched by MAC as
-before.
-
-### Keys
-
-A key reference is one of:
-
-| Reference | Meaning |
-|---|---|
-| `ump` | UMP's own key (`ump config key`), which is how ump reaches the server afterwards |
-| `local` | the public keys next to your `~/.ssh/id_*` files (`id_ed25519.pub`, `id_rsa.pub`, ...) |
-| `agent` | every key your ssh-agent holds (`ssh-add -L`); an error when it holds none |
-| a path | a file with one key per line, `~` allowed |
-| a key line | `ssh-ed25519 AAAA... comment` as it stands |
-
-## Layouts
-
-[`layouts.yaml`](layouts.yaml) holds named layouts (`ump config
-disk-layout` lists, prints, creates, edits and deletes them); a profile
-may hold its own under `disks:` with the same shape. A layout is a list of
-parts, applied in order:
-
-```yaml
-parts:
-  - {type: slice, target: [first], size: 1M, filesystem: bios}
-  - {type: slice, target: [first], size: 512M, filesystem: efi, mountpoint: /boot/efi}
-  - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}
-  - {type: slice, target: [".*"], size: rest, filesystem: lvm, vg: vg0}
-  - {type: lvm, vg: vg0, name: root, size: rest, filesystem: ext4, mountpoint: /}
-```
-
-| Field | slice | md | lvm |
-|---|---|---|---|
-| `target` | the disks: `first` (the first disk, NVMe before others) or a regular expression on the device path (`nvme.*`, `sd.*`, `.*`) | same | |
-| `index` | the partition number (default: the next free one); the ported layouts use 127 and 128 for the boot partitions on every disk | | |
-| `size` | `1M`, `512M`, `1G`, `8G`, `20%` of the disk, or `rest` | the member partition on each disk | `8G`, `20%` of the volume group, or `rest` |
-| `raid` | | the md level: 0, 1, 4, 5, 6, 10 | 0 (striped over the physical volumes), 1, 5, 6, 10; none is linear |
-| `filesystem` | `ext4`, `xfs`, `btrfs`, `vfat`, `swap`, `efi`, `bios`, `lvm` (a physical volume of `vg`), `none` | same but `efi` and `bios` | `ext4`, `xfs`, `btrfs`, `swap` |
-| `mountpoint` | where it is mounted; `efi` needs `/boot/efi` | same | same |
-| `vg` | the volume group this physical volume joins | same | the volume group of the volume |
-| `name` | | | the volume's name |
-| `label` | a file system label | same | same |
-
-A `slice` makes one partition on every matching disk; an `md` part makes
-a partition of that size on every matching disk and one array over them;
-an `lvm` part makes a volume in a group that an earlier `slice` or `md`
-with `filesystem: lvm` created. The layouts in `layouts.yaml`:
-
-| Layout | What it is |
-|---|---|
-| `lvm-linear` | every disk in one volume group, root linear over all of them, boot partitions on the first disk (the default) |
-| `lvm-striped` | the NVMe disks in one volume group, root and 8 GB of swap striped, boot partitions on every disk |
-| `lvm-raid1` | as `lvm-striped`, but root mirrored |
-| `lvm-example` | two groups: NVMe for the system (mirrored root, striped home and swap), SATA for `/data` |
-
-Rules the installer keeps: there must be exactly one `/`; `/boot` must
-be a plain partition when root is on LVM or md (the boot loader reads
-plain partitions only); the boot loader needs an `efi` part for UEFI
-machines and a `bios` part for BIOS machines on amd64, and it is
-installed on every disk that has a `bios` part; a target that matches no
-disk, or an md or raid level with too few members, stops the
-installation before any disk is touched. Mirrored and parity volumes
-synchronise in the background after the first boot.
+A change here reaches every ump without a local copy of the file at the
+next `make upload`; the installer that consumes the resolved profile is
+described in [`install/README.md`](../install/README.md).

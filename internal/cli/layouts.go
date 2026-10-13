@@ -23,7 +23,7 @@ var layoutSet = &namedSet{
 (` + config.AbbreviateHome(layoutsPath()) + `), one named entry each; a profile
 names one in its disks field, or carries its own. The first use puts the
 published layouts there. A layout is a list of parts (slices on matching
-disks, md arrays, logical volumes); profiles/README.md in the repository
+disks, md arrays, logical volumes); docs/disk-layouts.md in the repository
 describes the fields.
 
 Without a subcommand and on a terminal, ump config disk-layout is a

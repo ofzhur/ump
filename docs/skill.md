@@ -1,6 +1,13 @@
 # The UMP skill
 
-UMP ships in two parts that are designed together:
+> **Design outline.** The skill described here does not exist yet, and
+> neither do the `ump` commands it relies on (`ump plan`, `ump approve`,
+> `ump inventory`, `ump repo`, `ump machine import`, `ump skill`,
+> `ump doctor`). This document records the intent so that the tool grows
+> toward it; the [roadmap](roadmap.md) says where it stands. Everything
+> that exists today is in the [CLI reference](cli.md).
+
+UMP is meant to ship in two parts that are designed together:
 
 | | **`ump`, the tool** | **the UMP skill** |
 |---|---|---|
@@ -20,9 +27,6 @@ metal, has an agent (Claude Code or another one that supports skills) and
 a repository of Terraform and Ansible. They install the skill, point the
 agent at the repository, and most of the infrastructure work is done for
 them — within a safety model that keeps the irreversible decisions human.
-
-> Like the rest of UMP, this is a design outline. The skill does not
-> exist yet.
 
 ## Why a skill
 

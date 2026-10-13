@@ -1,6 +1,7 @@
-# Named firewalls for the profiles' firewall field; profiles/README.md
-# describes the fields. A firewall is the input policy and what it lets
-# in; the loopback interface and the answers to the server's own
+# Named firewalls for the profiles' firewall field; docs/firewalls.md of
+# the ump repository (github.com/ofzhur/ump) describes the fields. A
+# firewall is the input policy and what it lets in; the loopback
+# interface and the answers to the server's own
 # connections always pass. The same list holds for connections forwarded
 # in from the external interfaces, so a port a container publishes is
 # reachable only when it is allowed here.

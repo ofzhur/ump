@@ -1,209 +1,164 @@
 # Concepts
 
-This document defines the vocabulary used across UMP. The other documents
-assume these terms.
+The vocabulary of UMP, and how the pieces fit together. Each term links to
+the document that goes into depth.
 
-## Machine
+## Servers and references
 
-A **machine** is anything UMP can install an operating system on: a
-dedicated server, a cloud VM or a physical box in a rack. A machine is
-always seen *through* a provider and is identified by a **machine reference**:
+A **server** is anything ump can install: a dedicated server or a cloud
+VM, always seen through a provider. Commands take a **server reference**:
 
 | Form | Example | Meaning |
 |---|---|---|
-| `provider/id` | `hetzner-robot/123456` | Unambiguous, provider-native ID |
-| `name` | `web-01` | Name as known at the provider |
-| `ip` | `203.0.113.10` | Primary IPv4 or IPv6 address |
+| `provider/id` | `hetzner-robot/123456` | unambiguous: the provider type and its native ID |
+| `id` | `123456` | the provider's ID alone |
+| `name` | `web-01` | the name as known at the provider |
+| `ip` | `203.0.113.10` | the primary IPv4 or IPv6 address; an address inside the server's IPv6 prefix matches too |
 
-Names are not unique: accounts that were not set up with UMP's naming
-convention can hold the same name twice, and some providers do not
-enforce unique names even within one account. UMP never fails because of
-that. A listing shows every server a reference matches. A command that
-needs exactly one server asks which one is meant when it runs in a
-terminal; without a terminal it fails and lists the candidates, so a
-script or an agent retries with `provider/id` or `--account`.
+Names need not be unique: `ump server list` lists every match, a command
+that acts on one server asks which one is meant on a terminal and fails
+with the candidates without one, so a script retries with `provider/id` or
+`--account`. ump keeps no inventory of its own: the provider APIs are the
+source of truth, and listings are cached only to show what changed
+(`ump server list --diff`).
 
-UMP keeps no authoritative inventory of its own. The provider APIs are the
-source of truth; UMP only caches listings locally to show what changed
-between runs.
+The server's name at the provider is the name ump uses everywhere,
+including the hostname it sets at installation, so `ump server rename`
+requires a valid hostname.
 
-## Provider
+## Accounts and providers
 
-A **provider** is an integration with something that can tell UMP about
-machines and act on them: a bare metal API (Hetzner Robot, OVH, ...), a
-cloud API (Hetzner Cloud, AWS, ...), an out-of-band controller (Redfish,
-IPMI) or simply a list of SSH hosts.
+A **provider** is an integration with a hosting API: Hetzner Robot,
+Hetzner Cloud, OVHcloud. An **account** is one set of credentials for one
+provider, under a name of your choice (`ump config isp`); several
+accounts of the same type are fine. Each provider type declares its
+**capabilities** (inventory, describe, rename, rdns, power, rescue), and
+a command that needs one the provider lacks says so instead of failing
+half-way. See [provider accounts](providers.md).
 
-A configured provider with credentials is an **account**. You can have
-several accounts of the same provider type.
+## The rescue system
 
-Providers differ widely in what they can do, so each one declares its
-**capabilities** (see [providers](providers.md)):
+The **provider's rescue system** is the Linux a provider can boot a
+server into over its API, with an SSH key. Every provider's differs, so
+ump uses it for one thing only: to get root over SSH once. From there the
+server downloads **UMP's rescue image**, a Debian built by this project
+that is one kernel and one initramfs, and `kexec`s into it. It runs
+entirely from RAM with no disk mounted, and it is the same at every
+provider. When the running system already lets UMP in as root (UMP's key
+in `authorized_keys`), the `kexec` happens from there and no reboot
+through the provider is needed: the **direct way**, as opposed to the
+**provider's way**. `ump server rescue` lands you in a root shell there,
+`ump server reinstall` installs from there. See [the rescue
+image](../images/rescue/README.md).
 
-- `inventory` — list and look up machines
-- `power` — reboot, power on, power off
-- `rescue` — boot the machine into a provider rescue system with our SSH key
-- `create` / `destroy` — create and delete instances (clouds)
-- `rdns` — manage reverse DNS
-- `rename` — set the machine name at the provider
-- `console` — get a serial / VNC console URL
-- `virtual-media` — attach an ISO image (Redfish, some IPMI)
-- `network-info` — report additional IPs, subnets and gateways
+## The storage
 
-UMP picks the workflow based on what the provider can do, not on the
-provider's name.
+The **storage** is one base URL that serves everything a server fetches:
+the rescue image and its entry script, the installer, the published
+profiles, the OS images, plus `get.sh` and the ump binaries. The default
+is `https://ump.zhurko.de`; any web server or object store with plain
+`GET` does. See [configuration](configuration.md#storage).
 
-## Entry method
+## Profiles, layouts and firewalls
 
-The **entry method** is how a machine gets from "whatever it is running now"
-to the staging environment. This is the main place where providers differ.
+A **profile** says what a server becomes: the OS image, the disk layout,
+the users with their keys, extra packages, the firewall, the kernel
+command line, the step after the first boot. A **disk layout** is a list
+of parts (partitions, md arrays, logical volumes) applied to whatever
+disks a server has; a **firewall** is an input policy and the allowed
+ports. Layouts and firewalls are named entries in `layouts.yaml` and
+`firewalls.yaml`, referred to from profiles, or written inline in one.
+All three are YAML in `~/.config/ump/profiles/`, start out as the
+published defaults, and are checked when edited. See
+[profiles](profiles.md), [disk layouts](disk-layouts.md),
+[firewalls](firewalls.md).
 
-| Method | How | Typical for |
-|---|---|---|
-| `rescue` | Provider API enables a rescue system, then a reboot | Hetzner Robot, Hetzner Cloud, OVH, Scaleway |
-| `kexec` | SSH into the running OS, kexec into the UMP staging kernel | Cloud VMs without rescue, already-installed servers |
-| `virtual-media` | Mount the UMP ISO through Redfish/IPMI, boot from it | Own hardware, enterprise servers |
-| `pxe` | Netboot the UMP staging image through iPXE | Own racks, larger installations |
-| `manual` | The user boots something with SSH and points UMP at it | Anything else |
+## The image and the installer
 
-Every entry method ends in the same state: a Linux system running from
-RAM, reachable over SSH with UMP's key, with the target disks unmounted.
+The **OS image** is a complete root file system as a `tar.zst` with a
+manifest that pins its checksum, built by this project from Ubuntu 26.04
+for amd64 and arm64 ([the Ubuntu base image](../images/ubuntu/README.md)).
+The **installer** is a script fetched from the storage and run in the
+rescue system with the resolved profile as a JSON **specification**: it
+plans the layout against the disks, wipes them, builds partitions, md and
+LVM, unpacks the image and configures what depends on the machine
+([the installer](../install/README.md)). The specification stays on the
+installed system as `/etc/ump/spec.json`, and `/etc/ump/install` records
+what was installed.
 
-## Staging environment
+## UMP's key and the administrator
 
-The **staging environment** is the temporary Linux system the installation
-runs in. It can be the provider's rescue system or UMP's own minimal
-image (used by `kexec`, `virtual-media` and `pxe`).
+ump has an SSH key of its own. It goes into every rescue system ump boots
+and, through the `ump` key reference, to the **administrator** of an
+installed system: the profile's first sudo user, `ump` by default. The
+administrator is who ump logs in as afterwards (`ump ssh`, the check
+after an installation, the direct way back into the rescue system), and
+who you log in as; root has no SSH login unless the profile lists it.
+No passwords are set anywhere. See [configuration](configuration.md#umps-key)
+and [profiles](profiles.md#users-the-administrator-and-root).
 
-UMP expects very little from it: a Linux kernel, SSH, and the usual block
-device tools (`sgdisk`, `mdadm`, `lvm2`, `mkfs.*`, `wipefs`). Missing tools
-are reported during inspection, before anything changes. In practice the
-provider's rescue system is only the first hop: UMP kexecs from it into
-its own image ([`images/rescue/`](../images/rescue/README.md)), so the
-environment the agent runs in is the same at every provider.
+## How a reinstall runs
 
-## Agent
+1. **Resolve.** Find the server at its provider; load the profile
+   (`--profile`, the one set for the server, or `default`), its layout and
+   firewall; resolve the key references on your machine. Ask for
+   confirmation.
+2. **Enter.** Bring the server into UMP's rescue system: as it is when it
+   already runs it, by the direct way when the running system lets UMP
+   in as root, else through the provider's rescue system. UMP's key and
+   yours go in.
+3. **Install.** Fetch the installer from the storage and run it there with
+   the specification: plan, wipe, partition, md, LVM, file systems, unpack
+   the image, hostname, netplan with uniform interface names, kernel
+   command line, users and keys, packages, firewall, boot loader. `--dry-run`
+   stops after the plan.
+4. **Reboot and verify.** Disable the provider's rescue flag where it
+   persists, reboot, wait until SSH answers as the administrator with
+   UMP's key, and report the system that came up.
 
-The **agent** is `ump` itself in its second role: the CLI uploads a copy
-of the binary for the target's platform into the staging environment over
-SSH and starts it as `ump agent`. It does the actual work on the machine:
-inspecting hardware, partitioning, unpacking the image, configuring the
-installed system. The CLI drives it remotely. See
-[architecture](architecture.md#one-binary-two-roles).
+Steps 3 and 4 are identical at every provider; that is where the
+homogeneity comes from.
 
-## Facts
+## Safety
 
-**Facts** are what the agent finds out about the machine during
-inspection: disks (model, serial, size, rotational, transport), RAM, CPU,
-firmware mode (UEFI or legacy BIOS), NICs and MAC addresses, current IPs,
-gateways and DNS servers. Facts are combined with provider metadata, for
-example the IPv6 subnet a provider assigned.
+Installing erases every disk of a server. ump makes that hard to do by
+accident: `--dry-run` shows the plan without touching a disk; a
+reinstall, a reboot, a stop and a rescue ask for confirmation on a
+terminal and require `--yes` without one; ump never prompts when stdin
+is not a terminal but fails with exit code 3 and says what was needed;
+the installer refuses to run outside the UMP rescue system; a layout
+whose targets match no disk, or an array with too few members, stops the
+installation before any disk is touched; `ump server rescue` never takes
+a way in that would erase a machine (only `reinstall` may, on an OVH VPS,
+since it erases the machine anyway). Credentials are references, never
+plaintext in the configuration, and `ump config isp view` redacts what
+is.
 
-Facts feed the plan and are available to templates (hostname, network,
-handoff variables).
+## Where state lives
 
-## Image
+ump keeps only local, disposable state: `~/.config/ump/` (the
+configuration, profiles, secrets, UMP's key) and `~/.cache/ump/` (listing
+snapshots). Deleting the cache is always safe. See
+[configuration](configuration.md#where-things-live).
 
-An **image** is the operating system to install: a root filesystem archive
-(`squashfs` or `tar.zst`) plus a small metadata file describing it:
+## Design in brief
 
-- OS family and version (`debian-13`, `ubuntu-24.04`, ...)
-- architecture
-- checksum and optional signature
-- what the image already contains (kernel, bootloader packages, SSH server)
-
-Images are referenced by URL and verified by checksum. UMP can use stock
-distribution cloud images as well as images built from a UMP image recipe.
-Using the *same image* everywhere is a key part of making machines
-homogeneous.
-
-## OS family
-
-The **OS family** driver knows how to configure a given distribution
-offline: package manager, initramfs tooling, bootloader packages, network
-renderer and service manager quirks. Debian and Ubuntu come first; the
-interface leaves room for RHEL-like systems and others later.
-
-## Disk layout
-
-A **disk layout** is an abstract, declarative description of how disks
-should be partitioned: which disks to use (by selectors like type, size or
-count, not by device name), RAID levels, LVM volume groups, filesystems,
-sizes and mount points. The same layout can be applied to machines with
-different hardware. See [disk layouts](disk-layouts.md).
-
-## Plan
-
-The **plan** is the concrete result of resolving a profile against a
-machine's facts: exact devices, partition sizes, RAID members, the rendered
-hostname, the rendered network configuration, users and the handoff step.
-
-The plan is always shown before destructive actions. `ump plan` produces it
-without changing anything. `ump server reinstall` produces the same plan and asks for
-confirmation (or accepts `--yes` together with a guard, see
-[architecture](architecture.md#safety)).
-
-## Profile
-
-A **profile** bundles everything that describes *what a machine should
-become*:
-
-- image
-- disk layout
-- users and SSH keys
-- network policy
-- hostname template
-- base settings (timezone, locale, kernel options, extra packages)
-- handoff
-
-Profiles are named and stored in configuration. Profiles can extend other
-profiles, so "base" can be shared and "database" can override only the disk
-layout.
-
-## Handoff
-
-The **handoff** is the last step: after the machine boots the installed
-system and is verified, UMP passes control to configuration management.
-
-- `ansible` — run `ansible-playbook` from the operator's machine against the
-  freshly installed host
-- `ansible-pull` — install a first-boot unit that runs `ansible-pull` from a
-  repository
-- `script` — run a local command with the machine's facts as environment /
-  JSON input
-- `remote-script` — run a script on the new machine
-- `none`
-
-UMP deliberately does not try to grow into configuration management.
-
-## Run
-
-A **run** is one execution of `ump server reinstall` against one machine. Each run
-gets an ID and a local log directory with the plan, the agent's structured
-log and the final result. Runs consist of **steps**, and long steps can be
-resumed (for example after the operator's network connection dropped while
-waiting for a reboot).
-
-## Approval
-
-An **approval** is recorded consent to a destructive run: bound to the
-plan's hash, created by `ump approve` in an interactive terminal, expiring,
-and consumed by `ump server reinstall --approved`. Separating approval from
-execution lets an agent prepare and run an install while the decision
-stays human.
-
-## Machine overlay
-
-The **machine overlay** (`ump/machines.yaml`) holds per-machine intent
-that providers cannot carry: the profile, labels such as environment and
-role, and one-off overrides. It lives in the infrastructure repository and
-is read by UMP and, through the inventory export, by Ansible. See
-[the skill](skill.md#the-machine-overlay).
-
-## Skill
-
-The **skill** is the agent-facing half of UMP: operating knowledge in the
-Agent Skills format that tells an AI agent how to run a hybrid fleet and
-its Terraform and Ansible repository with UMP — ownership of facts,
-conventions, runbooks, the adoption path for an existing repository and
-the safety model. See [the skill](skill.md).
+- **One static Go binary**, built for Linux, macOS and Windows; the
+  provider clients are hand-written over REST, so the binary does not
+  carry an SDK's dependency tree. On the server, the rescue image and a
+  shell installer do the work; ump drives them over SSH with the local
+  `ssh` client and its own key.
+- **The same path everywhere.** Providers differ in how a server gets
+  root over SSH once. Everything after that, the kexec into UMP's rescue
+  image and the installer, is one code path for bare metal and clouds.
+- **Data, not tool, lives on the storage.** The rescue image, the OS
+  images, the installer and the published profiles are fetched by URL
+  with pinned checksums; the binary carries the CLI alone.
+- **Providers are small.** List, describe, rename, reverse DNS, power,
+  rescue, behind interfaces checked with type assertions; a quirk that
+  leaks out of a provider package means the interface is missing
+  something. See [adding a provider type](providers.md#adding-a-provider-type).
+- **Tests without hardware.** Provider packages are tested against
+  recorded API responses, the CLI against a fake provider, the rescue
+  image in QEMU, and `make check` runs gofmt, vet, the tests and the
+  script syntax checks.

@@ -1,5 +1,6 @@
 # Named disk layouts for the profiles' disks field. A layout is a list of
-# parts, applied in order; profiles/README.md describes the fields.
+# parts, applied in order; docs/disk-layouts.md of the ump repository
+# (github.com/ofzhur/ump) describes the fields.
 #
 #   slice  a partition on every disk the target matches (first: the first
 #          disk, NVMe before others; a regular expression on the device

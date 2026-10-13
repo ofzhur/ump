@@ -115,7 +115,7 @@ configuration (` + config.AbbreviateHome(config.ProfilesDir()) + `), one per nam
 plus layouts.yaml with the named disk layouts. The first run puts the
 published default profile and layouts there. A profile names the image,
 the disk layout, the users with their keys, extra packages, the firewall
-and the provision step; profiles/README.md in the repository describes
+and the provision step; docs/profiles.md in the repository describes
 every field. ump server reinstall NAME --profile NAME installs with one,
 ump server set NAME --profile NAME remembers it for a server.
 

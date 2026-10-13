@@ -1,31 +1,32 @@
 # CLI
 
 Everything happens to servers: `ump server ...` lists, shows, installs and
-controls them, `ump ssh` logs in, `ump config isp` sets provider accounts
-up and `ump config os` the profiles. The tree below is implemented; the
-draft further down is the intended shape of what is not.
+controls them, `ump ssh` logs in, `ump config isp` sets [provider
+accounts](providers.md) up, and `ump config os`, `disk-layout` and
+`firewall` manage the [profiles](profiles.md), [disk
+layouts](disk-layouts.md) and [firewalls](firewalls.md). `ump --help`
+and `ump COMMAND --help` say the same at the terminal.
 
 ## Conventions
 
-- Servers are addressed by a **machine reference**: `provider/id`, a
-  name or an IP address (see [concepts](concepts.md#machine)). Several
-  references can be given where it makes sense. Names need not be
-  unique: `list` lists every match (with a note on stderr), commands
-  that act on one server ask which one is meant on a terminal and
-  otherwise fail with the candidates; `provider/id` and `--account`
-  disambiguate.
+- Servers are addressed by a **server reference**: `provider/id`, a
+  provider ID, a name or an IP address (see
+  [concepts](concepts.md#servers-and-references)). Several references
+  can be given where it makes sense. Names need not be unique: `list`
+  lists every match (with a note on stderr), commands that act on one
+  server ask which one is meant on a terminal and otherwise fail with
+  the candidates; `provider/id` and `--account` disambiguate.
 - Every listing supports `-o table|wide|json|yaml`. JSON output is stable
   and meant for scripting.
-- Destructive commands ask for confirmation. `--yes` skips the prompt but
-  needs a guard flag (see [architecture](architecture.md#safety)).
-- Global flags: `--config <file>`, `--account <name>`, `-v/--verbose`,
-  `--no-color`.
-- UMP never prompts when stdin is not a TTY. It fails with exit code 3 and
-  names the approval that is missing (see `ump approve`).
+- Destructive commands (reinstall, rescue, reboot, stop, delete) ask for
+  confirmation on a terminal; `--yes` skips the question and is required
+  without one.
+- Global flags: `--config <file|dir>`, `--account <name>` (repeatable),
+  `-v/--verbose` (log the API requests to stderr).
+- UMP never prompts when stdin is not a terminal. It fails with exit
+  code 3 and says what was needed.
 
 ## Overview
-
-Implemented today:
 
 ```
 ump
@@ -34,7 +35,7 @@ ump
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (describe) <ref>... [-o text|json|yaml]   everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
@@ -76,60 +77,6 @@ ump
 │   ├── path                                           where the configuration lives
 │   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
 ├── completion
-└── version
-```
-
-Draft of the rest:
-
-```
-ump
-├── plan       <machine> --profile <name>          show what install would do
-├── approve    <run-id>                            approve a plan (interactive, TTY only)
-├── install    <machine>... --profile <name>       install the OS
-├── facts      <machine>                           inspect hardware (enters staging env if needed)
-│
-├── machine
-│   ├── show     <machine>
-│   ├── import   --from terraform [file]           names and labels of machines Terraform created
-│   ├── create   --account <name> --type <type> --location <loc>   (clouds)
-│   └── destroy  <machine>                                          (clouds)
-│
-├── profile
-│   ├── list
-│   ├── show     <name>                            fully resolved (inheritance applied)
-│   └── validate [<name>]
-│
-├── layout
-│   ├── list
-│   ├── show     <name>
-│   └── validate [<name>]
-│
-├── image
-│   ├── list
-│   ├── show     <name>
-│   ├── fetch    <name>                            pre-download and verify
-│   └── build    <recipe>                          build an image from a recipe (later)
-│
-├── inventory
-│   ├── export   [--format ansible|json|hosts] [--group-by env,role,provider,location,profile]
-│   ├── ansible  --list | --host <name>            Ansible's script-inventory protocol, behind an exec wrapper
-│   └── check                                      provider machines vs. terraform outputs vs. ansible inventory
-│
-├── repo
-│   ├── init     [dir]                             write the reference repository skeleton
-│   └── audit    [dir] [-o markdown|json]          repository health report (see skill.md)
-│
-├── run
-│   ├── list                                       past runs
-│   ├── show     <run-id>                          plan, steps, result
-│   └── logs     <run-id> [-f]
-│
-├── skill
-│   ├── install  [--user|--project] [--with-permissions]
-│   └── path
-│
-├── doctor                                         tools, versions, credentials reachable, skill version
-├── agent                                          (internal) the target-side role, started over SSH by install
 └── version
 ```
 
@@ -175,7 +122,7 @@ per line. `defaults.output` in the configuration sets the default format.
 
 ### The listing cache and `--diff`
 
-Every successful listing of an account (by `get`, `describe` or `config
+Every successful listing of an account (by `list`, `show` or `config isp
 test`) is recorded under `~/.cache/ump/listings/<config>/<account>/`. A
 new snapshot is written only when the listing changed, so the cache holds
 the history of observed states (the newest 50 per account), and deleting
@@ -218,7 +165,7 @@ ump server show NAME|ID|IP|PROVIDER/ID ... [--account <name>...] [-o text|json|y
 ```
 
 Finds each server across the configured accounts with the same references
-as `get`. A name that matches several servers is asked about on a
+as `list`. A name that matches several servers is asked about on a
 terminal (the question goes to stderr, so `-o json` output stays clean);
 without a terminal the command fails with the candidates, and
 `provider/id` or `--account` picks one. Prints the common fields followed
@@ -233,7 +180,7 @@ by everything the provider reports about it, grouped in sections:
 
 A section whose extra API call fails is kept with an `error` field, so a
 partial description stays honest. `-o json` and `-o yaml` always print an
-array; each element has the machine fields of `get servers` plus
+array; each element has the machine fields of `server list` plus
 `details`, a list of `{"name": ..., "fields": {...}}` with typed values
 (sizes in bytes as numbers, booleans as booleans):
 
@@ -267,9 +214,9 @@ letters, digits and hyphens, dots between labels).
 
 A name that another listed server already has is refused, so that renames
 do not create the duplicates that make references ambiguous; `--force`
-renames anyway. The server reference is resolved like for `describe`
+renames anyway. The server reference is resolved like for `show`
 (duplicates are asked about on a terminal). Without `-o` the result is
-one sentence; `-o json` prints the renamed server as `get` would. Exit
+one sentence; `-o json` prints the renamed server as `list` would. Exit
 codes: 1 for not found, ambiguous without a terminal, a name in use, or a
 provider that cannot rename; 2 for an invalid name; 4 when the provider
 refused.
@@ -284,19 +231,19 @@ ump server rdns set NAME|ID|IP|PROVIDER/ID [PTR-NAME] [--ip <address>] [-o json|
 ump server rdns delete NAME|ID|IP|PROVIDER/ID [--ip <address>]
 ```
 
-`get rdns` lists the reverse DNS (PTR) entries of servers' public
+`rdns get` lists the reverse DNS (PTR) entries of servers' public
 addresses: the primary IPv4 always, plus every other address of the
 server that has an entry (an IPv6 address in the server's prefix, an
-additional IP). `set rdns` sets the entry of the primary IPv4, or of the
+additional IP). `rdns set` sets the entry of the primary IPv4, or of the
 address given with `--ip`, which must belong to the server; without a
 PTR name the server's name is used, which is the convention: the machine
-name is the hostname is the reverse DNS. `delete rdns` removes the entry;
+name is the hostname is the reverse DNS. `rdns delete` removes the entry;
 Hetzner Cloud then shows its default again.
 
 Providers differ: Hetzner Robot and Hetzner Cloud accept any name;
 OVHcloud checks that the name resolves to the address first, so create
 the forward record before setting the PTR there. Providers without
-reverse DNS support are noted on stderr by `get rdns` and refused with
+reverse DNS support are noted on stderr by `rdns get` and refused with
 exit code 1 by `set` and `delete`. `ump config isp types` shows which
 capabilities each provider type has.
 
@@ -318,7 +265,7 @@ answering and answers again (exit code 5 after 10 minutes).
 
 Rebooting and stopping are disruptive: on a terminal they ask for
 confirmation, without one they need `--yes` (exit code 3 otherwise), as
-the [safety model](architecture.md#safety) says. Provider differences:
+the [safety model](concepts.md#safety) says. Provider differences:
 Hetzner Robot presses the power button for on and off and has no reset
 for a switched-off server; OVHcloud dedicated servers know one reboot (a
 hardware reset) and cannot be switched on or off through the API.
@@ -393,11 +340,11 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
-image](../images/ubuntu/README.md) the way a [profile](../profiles/README.md)
+image](../images/ubuntu/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS) is first reinstalled by the provider with its
 stock Linux and UMP's key, which `reinstall` may do since it erases the
@@ -437,12 +384,12 @@ Every disk of the server is erased. The default profile's layout,
 `lvm-linear`, puts the boot partitions on the first disk and makes every
 disk a physical volume of one volume group, with root as one linear
 volume over all of it; `lvm-striped`, `lvm-raid1` and `lvm-example` are
-the other published layouts, and a profile can carry its own (`--disks`
-limits the disks). The new system gets the server's name as hostname
-(`--hostname` for another; it must be a valid one), the address, gateway
-and interface of the rescue system (which `rescue` carried over from the
-running system), uniform interface names (`ext01`, `int01`, ...; see
-[the profiles](../profiles/README.md#interface-names)), resolvers
+the other published [layouts](disk-layouts.md), and a profile can carry
+its own (`--disks` limits the disks). The new system gets the server's
+name as hostname (`--hostname` for another; it must be a valid one), the
+address, gateway and interface of the rescue system (which `rescue`
+carried over from the running system), uniform interface names (`ext01`,
+`int01`, ...; see [the profiles](profiles.md#interface-names)), resolvers
 1.1.1.1 and 8.8.8.8, the profile's users with their keys (the default:
 the sudo user `ump` with UMP's key and your `~/.ssh/id_*.pub` keys, and
 no root login over SSH; `--ssh-key` adds files to the administrator;
@@ -455,7 +402,7 @@ need neither; the profile's `kernel` section, `--mitigations` and
 `--ipv6` keep them on, and [the installer's
 README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
 says how to turn them on later. The flags override the profile for one
-installation: `--layout`, `--os`, `--timezone`, `--ipv6`,
+installation: `--layout`, `--firewall`, `--os`, `--timezone`, `--ipv6`,
 `--mitigations`, `--disks`, `--ssh-key`; `--storage` names another
 storage than the configured one for the installer, the images, the
 profiles and the rescue image.
@@ -510,9 +457,9 @@ ump config firewall    [list|get|create|edit|delete]      (alias: fw)
 ump config path | key
 ```
 
-`ump config isp` is the provider accounts: the wizard without a
-subcommand, and the subcommands for the non-interactive forms. `ump
-config os` is the [profiles](../profiles/README.md): the first run
+`ump config isp` is the [provider accounts](providers.md): the wizard
+without a subcommand, and the subcommands for the non-interactive forms.
+`ump config os` is the [profiles](profiles.md): the first run
 downloads the published default profile, layouts and firewalls into
 `~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
 `create NAME` copies one (`--from`, default `default`) and opens it in
@@ -524,17 +471,16 @@ edited is kept with the new version next to it in `.published/`), and
 without a subcommand it is a small wizard over these. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with
 (`servers:` in the configuration file), `--clear` forgets it.
-`ump config disk-layout` (`dl`) is the same for the named layouts in
-`layouts.yaml` that profiles refer to: `list` shows each with its parts
-and whether it is valid, `get` prints one, `create NAME --from NAME`
-copies an entry (the file's comments survive) and opens the file in your
-editor, `edit` opens it and checks every layout afterwards, `delete`
-removes one. `ump config firewall` (`fw`) is the same for the named
-firewalls in `firewalls.yaml` (`default`: ICMP and SSH; `web`: plus
-HTTP and HTTPS; `open`: none), which a profile names in its `firewall`
-field; `ump server reinstall --firewall NAME` picks one for an
-installation.
-
+`ump config disk-layout` (`dl`) is the same for the named [disk
+layouts](disk-layouts.md) in `layouts.yaml` that profiles refer to:
+`list` shows each with its parts and whether it is valid, `get` prints
+one, `create NAME --from NAME` copies an entry (the file's comments
+survive) and opens the file in your editor, `edit` opens it and checks
+every layout afterwards, `delete` removes one. `ump config firewall`
+(`fw`) is the same for the named [firewalls](firewalls.md) in
+`firewalls.yaml` (`default`: ICMP and SSH; `web`: plus HTTP and HTTPS;
+`open`: none), which a profile names in its `firewall` field; `ump
+server reinstall --firewall NAME` picks one for an installation.
 
 Without a subcommand, `ump config isp` is an interactive wizard: it asks for
 the provider type, an account name and the credentials, asks where the
@@ -561,82 +507,16 @@ wizard created for it.
 UMP has its own SSH key pair, generated on first use (by `ump config key`
 or the first `ump server rescue`) at `~/.config/ump/staging_ed25519`, or at the
 path set as `staging.key` in the configuration. It is what rescue
-systems and, later, the install pipeline are reached with, so it works
-whatever personal keys are around. `ump config key` prints the public
-key and its fingerprints (`-o json` for scripts); put the public key
-wherever UMP should be able to log in.
-
-## Workflow commands
-
-### `ump plan`
-
-```
-ump plan <machine> --profile <name> [--layout <name>] [--image <name>]
-         [--entry rescue|kexec|virtual-media|manual] [--hostname <tmpl>]
-         [-o text|json]
-```
-
-Resolves the profile against the machine and prints the plan. If facts
-are not cached for the machine, `plan` needs to inspect it — for a
-running machine that means entering the staging environment, which
-reboots it. `plan` asks before doing that, and `--facts <file>` lets you
-plan from previously collected facts instead.
-
-### `ump server reinstall`
-
-```
-ump server reinstall <machine>... --profile <name> [plan flags]
-            [--approved <run-id> | --yes --confirm-machine <ref>] [--parallel N]
-            [--skip-handoff] [--keep-rescue] [--dry-run]
-ump server reinstall --resume <run-id>
-```
-
-Runs the full pipeline (see [architecture](architecture.md#the-install-pipeline)).
-`--dry-run` goes up to and including `plan` and then prints the
-commands the agent would run. Without a TTY, an install needs either an
-approval from `ump approve` or `--yes` with a guard.
-
-### `ump approve`
-
-```
-ump approve <run-id> [--ttl 1h]
-```
-
-Shows the plan recorded by `ump plan` (or by an `install` that stopped at
-the confirmation step) and records an approval bound to the plan's hash.
-Refuses to run without a TTY: this is the step a human does, and an agent
-in a non-interactive shell cannot do it for itself. The approval expires,
-and is void if the facts or the profile change before the install. Built
-for the [skill](skill.md) workflow; useful on its own for a four-eyes
-process.
-
-### `ump ssh`
-
-```
-ump ssh <machine> [--user <name>] [--staging] [-- command...]
-```
-
-Resolves the machine to an address and opens an SSH session, or runs a
-command. The login is `--user`, else the administrator of the profile
-set for the server (`ump server set --profile`) or of the default
-profile: `ump`, since root cannot log in over SSH on a UMP-installed
-system. `--staging` uses UMP's staging key and `root`, for when the
-machine is in rescue.
-
-### `ump facts`
-
-```
-ump facts <machine> [--refresh] [-o yaml|json]
-```
-
-Shows the hardware facts. Uses the cache from the last run unless
-`--refresh` is given.
+systems and installed systems are reached with, so it works whatever
+personal keys are around. `ump config key` prints the public key and its
+fingerprints (`-o json` for scripts); put the public key wherever UMP
+should be able to log in.
 
 ## Examples
 
 ```console
 # set up provider accounts interactively, or without a terminal:
-$ ump config
+$ ump config isp
 $ ump config isp add hetzner-robot main --set login=env:HROBOT_USER --set password=env:HROBOT_PASS
 $ ump config isp test main
 
@@ -654,42 +534,29 @@ $ ump server unrescue prod-web-01 --reboot
 $ ump ssh prod-web-01 -- uptime
 
 # reinstall one server
-$ ump plan web-01 --profile base
-$ ump server reinstall web-01 --profile base
+$ ump server reinstall web-01 --dry-run            # the plan on that machine, nothing erased
+$ ump server reinstall web-01                      # the profile set for it, else default
+$ ump server reinstall web-01 --profile web --layout lvm-raid1 --firewall web
+$ ump server set web-01 --profile web              # from now on without --profile
 
-# reinstall three servers from CI, without prompts
-$ ump server reinstall web-01 web-02 web-03 --profile base \
-      --yes --confirm-machine web-01,web-02,web-03 --parallel 3
+# without a terminal (CI, agents): --yes, and -o json for the result
+$ ump server reinstall hetzner-cloud/234567 --yes -o json
+$ ump server rescue web-01 --yes -- lsblk
 
-# take over a cloud VM that terraform created, using kexec
-$ ump server reinstall hetzner-cloud/234567 --profile base --entry kexec
-
-# install a box in the rack through its Redfish controller
-$ ump server reinstall rack1-07 --profile storage --entry virtual-media
-
-# a machine that is not behind any API: boot something with SSH yourself
-$ ump server reinstall 192.0.2.50 --profile base --entry manual
-
-# agent-driven flow: the agent plans, a human approves, the agent installs
-$ ump plan prod-web-03 --profile web -o json       # agent
-$ ump approve run-7f3a                             # human, in a terminal
-$ ump install prod-web-03 --approved run-7f3a      # agent
-
-# Ansible inventory straight from the providers
-$ ump inventory export --format ansible --group-by env,role,provider
+# the profiles and what they refer to
+$ ump config os list
+$ ump config os create web                         # from default, then your editor
+$ ump config disk-layout get lvm-raid1
+$ ump config firewall create mail --from default
 ```
-
-Everything after `ump server unrescue` in the examples is draft.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | generic error |
-| 2 | usage / validation error |
-| 3 | aborted by user or guard mismatch |
-| 4 | provider API error |
-| 5 | machine unreachable / timeout |
-| 6 | installation failed on the target |
-| 7 | verification or handoff failed (the OS is installed) |
+| 1 | generic error, including a failed installation (the server stays in the rescue system) |
+| 2 | usage or validation error |
+| 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes` |
+| 4 | provider API error, or an account that could not be listed |
+| 5 | the server did not answer in time (rescue system, reboot, new system) |

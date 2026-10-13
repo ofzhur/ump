@@ -3,7 +3,7 @@
 A complete Ubuntu 26.04 LTS server system as a root file system archive,
 with the generic kernel and its firmware, LVM, netplan, SSH and the tools
 a server needs, plus the UMP defaults that do not depend on the machine.
-[`ump server reinstall`](../../docs/cli.md#install-ump-install-server) unpacks it
+[`ump server reinstall`](../../docs/cli.md#install-ump-server-reinstall) unpacks it
 onto a machine's disks from the UMP rescue system and
 [`install/install.sh`](../../install/README.md) does what depends on the
 machine. One archive per architecture, `amd64` and `arm64`.
@@ -63,7 +63,9 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   back on, remove it from that file, run
   `update-grub`, for IPv6 add the address and route to
   `/etc/netplan/10-ump.yaml` (`netplan apply`), and reboot.
-  `ump install --mitigations` and `--ipv6` keep them on from the start.
+  `ump server reinstall --mitigations` and `--ipv6`, or the `kernel`
+  section of the [profile](../../docs/profiles.md), keep them on from
+  the start.
 - **SSH:** no passwords, and no root login (`PermitRootLogin no` in
   `/etc/ssh/sshd_config.d/50-ump.conf`); the installer opens root with
   keys only (`10-ump-root.conf`) when the profile lists it. The
@@ -89,7 +91,9 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   {rename: false}` in the profile keeps the kernel's names.
 - **Boot loader:** a 2 s menu on the console, no OS prober; the kernel
   command line file above is read by `update-grub`.
-- Time zone UTC (`ump install --timezone`), locale `C.UTF-8`, no swap.
+- Time zone UTC (`ump server reinstall --timezone`, or the profile's
+  `timezone`), locale `C.UTF-8`; swap only when the [disk
+  layout](../../docs/disk-layouts.md) makes one.
 - Every installation gets its own machine id and SSH host keys.
 
 ## Publishing
@@ -102,5 +106,3 @@ layout](../rescue/README.md#your-own-storage).
 
 - No Secure Boot: the boot loader is the unsigned GRUB on the removable
   path; machines with Secure Boot on need it off.
-- One layout, all disks in one linear volume group, and no swap; more
-  layouts and a benchmarking round come next.

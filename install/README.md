@@ -6,7 +6,7 @@ specification says. It runs as root in the [UMP rescue
 system](../images/rescue/README.md), where no disk is in use, and
 refuses to run anywhere else unless told to with `--force`, because it
 erases every disk of the machine it runs on. `ump server reinstall` renders the
-specification from a [profile](../profiles/README.md), fetches the
+specification from a [profile](../docs/profiles.md), fetches the
 installer from the storage and runs it there with the specification on
 its stdin; it can be run by hand just the same, with a specification
 file or with the flags alone (which give the `lvm-linear` layout with
@@ -134,5 +134,6 @@ The defaults trade the CPU vulnerability mitigations and IPv6 for speed.
 On an installed system, edit `/etc/default/grub.d/ump-cmdline.cfg`
 (remove `mitigations=off` or `ipv6.disable=1`), run `update-grub`, for
 IPv6 add the address and the default route to `/etc/netplan/10-ump.yaml`
-(`netplan apply` or `netplan try`), and reboot. `ump install
---mitigations --ipv6` installs with both on.
+(`netplan apply` or `netplan try`), and reboot. `ump server reinstall
+--mitigations --ipv6` installs with both on, as does `kernel: {mitigations:
+true, ipv6: true}` in the [profile](../docs/profiles.md).

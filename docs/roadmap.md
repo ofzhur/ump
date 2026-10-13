@@ -1,109 +1,67 @@
-# Roadmap and open questions
+# Roadmap
 
-## Milestones
+## Where it stands
 
-Done so far: the Go module and CLI skeleton with the kubectl-style command
-shape, configuration with secret references, the `ump config isp` wizard, and
-`ump server list`, `ump server show`, `ump server rename`,
-`ump get|set|delete rdns`, `ump reboot|start|stop server` and
-`ump rescue|unrescue server` for Hetzner Robot, Hetzner Cloud and
-OVHcloud, and the listing cache with `--diff`, `--since` and `--cached`
-(October 2026).
+As of October 2026, ump does what the [README](../README.md) and the
+[quickstart](quickstart.md) describe:
 
-### M0 — Skeleton
+- **Providers:** Hetzner Robot, Hetzner Cloud and OVHcloud (dedicated
+  servers, VPS, Public Cloud instances), with listing, details, rename,
+  reverse DNS, power, rescue and reinstall for all of them; the account
+  wizard and the non-interactive form, secret references, the listing
+  cache with `--diff`, `--since` and `--cached`.
+- **The rescue system:** UMP's own rescue image for amd64 and arm64,
+  entered by `kexec` from a running system that lets UMP in as root or
+  from the provider's rescue system; `ump server rescue` and `unrescue`.
+- **Installation:** `ump server reinstall` from profiles, with named and
+  inline disk layouts (partitions, md, LVM with striping, mirroring and
+  parity), users and keys, packages, nftables firewalls that also hold
+  the ports containers publish, uniform interface names, the kernel
+  command line, UEFI and BIOS boot; `--dry-run`; the Ubuntu 26.04 base
+  image; `ump ssh`.
+- **Configuration objects:** `ump config os`, `disk-layout` and
+  `firewall` with list, get, create, edit, delete and a wizard each; the
+  published defaults downloaded on first use.
+- **Distribution:** `get.sh` and the binaries for Linux, macOS and
+  Windows on the storage, `make release`.
 
-- Go module, the single `ump` binary with the agent role, embedded target
-  payloads (linux amd64/arm64) and the two-stage release build for
-  linux/darwin/windows; CI
-- config loading, secret references, profile inheritance, validation
-- output formatting (`table`, `json`, `yaml`)
+## Next
 
-### M1 — Install through SSH
-
-- `ssh` provider with `manual` entry
-- agent: `inspect`, `prepare-disks`, `install-image`, `configure`,
-  `bootloader`, `finalize`
-- Debian family driver, systemd-networkd renderer
-- disk layouts: GPT, md RAID, LVM, ext4/xfs/swap
-- QEMU integration tests: 1, 2 and 4 disks, UEFI and BIOS
-- `ump plan`, `ump server reinstall`, run logs (first `ump server reinstall`: done for
-  Ubuntu 26.04 with the lvm-linear layout, through the UMP rescue
-  system, with the installer and the base image fetched from the storage;
-  next: more layouts and a benchmarking round)
-- no prompts without a TTY; `ump approve` and `--approved`
-
-### M2 — Hetzner Robot
-
-- Robot API: inventory, rename, rDNS, rescue, reset and SSH key registration (done)
-- `rescue` entry method (the provider side is done: `ump server rescue`)
-- `ump server list`, `ump server show` and `ump server rename` (done), `ump machine reboot|rescue`
-- listing cache with "added/removed since last time" (done)
-- IPv6 from provider network info
-
-### M3 — Handoff and fleet use
-
-- `ansible`, `ansible-pull`, `script` handoff
-- parallel installs, `--resume`
-- non-interactive guards for CI
-- `ump inventory export`, `ump machine import --from terraform`, the
-  machine overlay
-- skill v0 (operate): `SKILL.md`, ownership, CLI cheat sheet, runbooks for
-  add / reinstall / decommission / drift; `ump skill install`, `ump doctor`
-
-### M4 — Cloud and kexec
-
-- staging image (kernel + initramfs) build (done: `images/rescue/`, with
-  `kexec-into-rescue.sh` for the manual path)
-- `kexec` entry method (done for the rescue: `ump server rescue` kexecs
-  from a running system that lets UMP in as root, or from the provider's
-  rescue system)
-- `hetzner-cloud` provider incl. `create`/`destroy`
-- Ubuntu family support
-
-### M5 — Own hardware
-
-- `redfish` provider, staging ISO, `virtual-media` entry
-- `ipmi` + iPXE
-
-### M6 — Skill v1: organize
-
-- `ump repo audit`, `ump inventory check`, the adoption guide and migration
-  phases
-- `ump repo init`: reference repository skeleton and templates (PR, runbook,
-  ADR, health report)
-- health and drift reports as runbooks
-- validated by taking over a real, grown Terraform/Ansible repository
-
-### Later
-
-- more providers (OVH, Scaleway, AWS, GCP, libvirt/Proxmox)
-- RHEL-like family driver
-- LUKS with remote unlock, btrfs
-- image build recipes (`ump image build`)
-- bonds/VLANs/bridges in the network model
+- **The provision step.** `provision.type: ansible-pull` and
+  `ansible-bootstrap` are recorded on the installed system and reported,
+  but not run yet. Running them after the first boot, and a plain
+  `script` step, come next.
+- **More images.** A Debian base image next to the Ubuntu one; a profile
+  picks it with `os:`.
+- **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
+  partition.
+- **Network.** IPv6 addresses from the provider's network information
+  where the rescue system cannot see them; bonds and VLANs.
+- **Several servers at once.** `ump server reinstall` over a list of
+  servers with a parallel limit and a per-server progress view.
+- **More providers.** Scaleway bare metal (rescue), clouds without a
+  rescue system such as AWS and GCP (the direct way from a stock image),
+  own hardware through Redfish virtual media or PXE, and a static list of
+  SSH hosts as the universal fallback. The provider interface is in
+  place; see [adding a provider type](providers.md#adding-a-provider-type).
+- **Cloud instances.** Creating and destroying instances for providers
+  that have them, for convenience; Terraform remains the usual way.
+- **The skill.** Packaged operating knowledge for AI agents that run a
+  fleet with ump, Terraform and Ansible, with an approval step that stays
+  human. [The design outline](skill.md) is written; the tool-side
+  pieces it needs (a plan with a hash, a separate approval command, an
+  inventory export) are not.
 
 ## Open questions
 
-- **Images: build our own or use distribution cloud images?** Own images
-  give full control and identical content everywhere; stock cloud images
-  are less work and trusted. Possibly both: stock images as input,
-  customised during `configure`.
-- **Staging environment: always our own?** Decided: yes. Provider rescue
-  systems differ (Debian vs. other bases, tool versions), so they are
-  used only to get root once; UMP then kexecs into its own image
-  (`images/rescue/`), which makes steps 4–10 identical everywhere at the
-  cost of one more reboot-like step.
-- **Inventory for handoff.** Proposed answer in [the skill](skill.md#who-owns-what):
-  UMP exports, Ansible consumes it as a dynamic inventory, nothing is
-  copied by hand. Still open: whether an explicit "expected machines" list
-  is needed to notice machines that should exist but do not.
-- **Machine-level overrides.** Proposed answer: the machine overlay
-  (`ump/machines.yaml`, see [the skill](skill.md#the-machine-overlay)) with
-  defaults, match rules and per-machine entries, in git.
-- **ZFS.** Popular on bare metal, but licensing and distribution support
-  differ. Possibly as an optional OS family feature.
-- **Windows / BSD targets.** Out of scope for now; the agent and OS family
-  split should not make them impossible.
-- **License.** To be decided before the first public release.
-- **Skill questions** — one skill or two, approval without a terminal, an
-  MCP server next to the CLI: see [the skill](skill.md#open-questions).
+- **A separate approval for destructive runs.** Today a reinstall asks on
+  a terminal or takes `--yes`. An agent workflow wants a plan recorded
+  with a hash, approved by a human in a separate step and consumed by the
+  install; whether that is a TTY-only command, a signed comment or a CI
+  environment gate is open.
+- **Stock images as an alternative to UMP's own.** The base image gives
+  identical content everywhere; a provider's stock cloud image would be
+  less work to keep current. Possibly both, with the profile choosing.
+- **ZFS.** Popular on bare metal; licensing and distribution support
+  differ. Possibly as an optional feature of a Debian or Ubuntu image.
+- **License.** To be decided before the first tagged release.

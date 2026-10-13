@@ -1,209 +1,150 @@
-# Configuration (draft)
+# Configuration
 
-UMP is configured with YAML files. Everything is declarative; the CLI
-never needs interactive input except for confirmations.
+ump keeps its configuration in YAML files under `~/.config/ump/`. The
+provider accounts are written by `ump config isp`, the profiles, layouts
+and firewalls edited through `ump config os|disk-layout|firewall`, and
+the rest is optional.
 
-## Locations
+## Where things live
 
 ```
 ~/.config/ump/
-├── config.yaml          accounts, defaults
-├── profiles/*.yaml      profiles
-├── layouts/*.yaml       disk layouts
-├── users/*.yaml         user sets
-└── images/*.yaml        image definitions
+├── config.yaml              accounts, storage, UMP's key, per-server settings, output default
+├── profiles/
+│   ├── default.yaml         the default profile (downloaded on first use, then yours)
+│   ├── NAME.yaml            your profiles
+│   ├── layouts.yaml         the named disk layouts
+│   ├── firewalls.yaml       the named firewalls
+│   └── .published/          the three files as published, for ump config os update to compare
+├── secrets/                 the secret files the account wizard writes (mode 0600)
+├── staging_ed25519          UMP's own SSH key, generated on first use
+├── staging_ed25519.pub
+└── update-check.json        when the storage was last asked for a newer release, and what it said
+
+~/.cache/ump/listings/       snapshots of server listings, for ump server list --diff; safe to delete
 ```
 
-`--config <dir|file>` or `UMP_CONFIG` overrides the location. A project
-can keep its UMP configuration in a repository next to its Ansible code
-and point UMP at it — that is the recommended setup for teams. Secret
-files written by `ump config isp` always go to `~/.config/ump/secrets/`
-(mode 0600), never next to a project configuration.
-
-`ump config isp` (the wizard) and `ump config isp add` write the `accounts`
-section; `ump config isp view` shows it with plaintext secrets redacted.
-
-Built-in defaults (a `base` profile, common layouts, official Debian and
-Ubuntu images) ship inside the binary and can be overridden by files with
-the same name.
+`$XDG_CONFIG_HOME/ump` and `$XDG_CACHE_HOME/ump` are used when those
+variables are set. `--config PATH` or `UMP_CONFIG=PATH` selects another
+configuration file (a directory means `config.yaml` inside it); a team can
+keep its accounts, as references, in a repository and point ump at it.
+The profiles directory, the secret files and UMP's key stay under your own
+`~/.config/ump/` whatever `--config` says, so a shared configuration never
+carries secrets. `ump config path` prints the file in use.
 
 ## `config.yaml`
 
+Everything in it is optional; a missing file is an empty configuration.
+
 ```yaml
 defaults:
-  account: hetzner-main
-  profile: base
-  parallel: 4
-  output: table
+  output: table                        # the output format of ump server list: table, wide, json, yaml or name
 
-accounts:
-  hetzner-main:
+accounts:                              # written by ump config isp; see docs/providers.md
+  hrobot:
     type: hetzner-robot
     login: "#ws+AbCdEfGh"
-    password: { command: "pass show robot/password" }
-
+    password: { file: ~/.config/ump/secrets/hrobot.password }
   hcloud:
     type: hetzner-cloud
     token: { env: HCLOUD_TOKEN }
-
   ovh:
     type: ovh
-    endpoint: ovh-eu                     # ovh-eu | ovh-ca | ovh-us | URL
+    endpoint: ovh-eu                   # ovh-eu | ovh-ca | ovh-us | a URL
     application_key: AbCdEfGh
-    application_secret: { file: ~/.config/ump/secrets/ovh.application_secret }
+    application_secret: { command: "pass show ovh/app-secret" }
     consumer_key: { file: ~/.config/ump/secrets/ovh.consumer_key }
 
-  rack1:
-    type: redfish
-    endpoints:
-      - name: rack1-07
-        address: https://10.0.0.107
-        username: admin
-        password: { file: ~/.config/ump/secrets/rack1 }
-    staging_iso: https://images.example.net/ump/staging-amd64.iso
+storage: https://ump.zhurko.de         # the base URL everything a server fetches comes from (the default)
 
-  lab:
-    type: ssh            # a static list of hosts, no API
-    machines:
-      - name: lab-01
-        address: 192.0.2.50
+updates: true                          # once a day, after a command, say when a newer ump is published (the default)
 
-updates: true                           # once a day, after a command, ump reads bin/latest/VERSION
-                                        # on the storage and says when a newer release is published;
-                                        # false (or UMP_NO_UPDATE_CHECK=1) turns it off
-storage: https://ump.zhurko.de          # base URL of what UMP fetches onto machines: the rescue
-                                        # image (rescue/), the installer (install/), the profiles
-                                        # (profiles/) and the OS images (os/); this is the default,
-                                        # images/rescue/README.md says what a storage of your own
-                                        # must serve. Profiles of your own go to ~/.config/ump/profiles/
-                                        # (NAME.yaml, layouts.yaml, firewalls.yaml), see profiles/README.md
 staging:
-  key: ~/.config/ump/staging_ed25519   # UMP's own SSH key; this is the default, generated
-                                        # on first use (`ump config key` shows the public key)
-  image: https://ump.zhurko.de/rescue   # the rescue image alone, when it lives elsewhere than
-                                        # <storage>/rescue
+  key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
+  image: https://ump.zhurko.de/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
+
+servers:                               # written by ump server set
+  hetzner-cloud/234567:
+    profile: web
 ```
+
+| Section | Meaning |
+|---|---|
+| `defaults.output` | The format `ump server list` uses without `-o`: `table` (the default), `wide`, `json`, `yaml` or `name`. |
+| `accounts` | One entry per [provider account](providers.md): the `type` and the type's settings, each a plain value or a secret reference. `ump config isp types` lists the settings. |
+| `storage` | The base URL of the [storage](#storage), without a trailing slash. Default `https://ump.zhurko.de`. |
+| `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
+| `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
+| `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage and says when a newer release is published, with the one-liner that installs it; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks. |
+| `servers` | Per-server settings, keyed by `provider/id`: the `profile` the server is reinstalled with (`ump server set NAME --profile NAME`, `--clear` removes it). |
+
+Sections this version of ump does not know are kept when the file is
+saved. The file is written with mode 0600, atomically.
 
 ### Secret references
 
-Any string value that holds a secret can be a reference instead:
+Any setting of an account can be a reference instead of the value:
 
 | Form | Source |
 |---|---|
-| `{ env: NAME }` | environment variable |
-| `{ file: path }` | contents of a file (trailing newline stripped) |
-| `{ command: "..." }` | stdout of a command (`pass`, `op read`, `sops -d`, `vault kv get`, ...) |
+| `{ env: NAME }` | the environment variable |
+| `{ file: PATH }` | the content of a file, trailing newline stripped; `~` is expanded |
+| `{ command: "..." }` | the standard output of a command, run with `sh -c` (`cmd /C` on Windows): `pass show ...`, `op read ...`, `sops -d ...`, `vault kv get ...` |
 
-Plaintext values are accepted; `ump config isp view` redacts them. `ump config
-types` lists which settings each provider type has and which are secret.
+The wizard writes `file` references to `~/.config/ump/secrets/ACCOUNT.KEY`
+and `ump config isp remove` deletes those files with the account.
+Plaintext values work too; `ump config isp view` shows them as
+`<redacted>` and references as they are. On the command line (`ump config
+isp add --set KEY=VALUE`) the same references are `env:NAME`, `file:PATH`
+and `command:CMD`.
 
-## Profiles
+## Storage
 
-```yaml
-# profiles/base.yaml
-name: base
-image: debian-13
-layout: auto-mirror
-users: [admins]
+The storage is the one place a server fetches from during a rescue or an
+installation: the rescue image (`rescue/`), the entry script, the
+installer (`install/install.sh`), the published profiles (`profiles/`)
+and the OS images (`os/<os>/<arch>/`); `get.sh` and the ump binaries live
+there too. The default is this project's, `https://ump.zhurko.de`. A
+storage of your own is any web server or object store that answers plain
+`GET` requests and that the servers can reach; [the rescue image's
+README](../images/rescue/README.md#your-own-storage) lists what to serve,
+and `make upload` produces exactly that layout. Set `storage:` here, or
+`--storage URL` on `ump server reinstall` for one installation (the
+rescue image moves along unless `staging.image` pins it).
 
-hostname: "{{ .Name }}.example.net"
+## UMP's key
 
-system:
-  timezone: Europe/Berlin
-  locale: en_US.UTF-8
-  kernel_options: []
-  packages: [vim, htop, curl, ca-certificates]
-  remove_packages: [cloud-init]
-  ssh:
-    password_authentication: false
-    permit_root_login: prohibit-password
+ump has an SSH key pair of its own, generated on first use (`ump config
+key`, or the first `ump server rescue` or `reinstall`) at `staging.key`.
+It is what rescue systems are booted with and reached by, what the
+administrator of an installed system gets (the `ump` key reference in a
+[profile](profiles.md#keys)) and what `ump ssh` offers next to your own
+keys, so ump can reach its machines whatever personal keys are around.
 
-network:
-  mode: static-from-facts     # static-from-facts | dhcp
-  ipv6: provider              # provider | none | auto
-  dns:
-    servers: [1.1.1.1, 9.9.9.9]
-    search: [example.net]
-
-handoff:
-  type: ansible
-  playbook: site.yml
-  inventory: inventory/
-  extra_args: ["--limit", "{{ .Hostname }}"]
+```console
+$ ump config key
+Path:         ~/.config/ump/staging_ed25519
+Public key:   ssh-ed25519 AAAAC3... ump@laptop
+Fingerprint:  SHA256:... (MD5 ...)
 ```
 
-```yaml
-# profiles/database.yaml
-name: database
-extends: base
-layout: nvme-raid10-lvm
-system:
-  kernel_options: ["transparent_hugepage=never"]
-```
+`-o json` prints the same for scripts. Put the public key wherever ump
+should be able to log in as root, for instance in `authorized_keys` of a
+machine installed by other means, so that `ump server rescue` and
+`reinstall` can take the direct way in, without a reboot through the
+provider.
 
-Profiles are merged with `extends`: maps merge, lists and scalars are
-replaced. `ump profile show <name>` prints the fully resolved result.
+## The profiles directory
 
-### Templates
-
-Hostnames, handoff arguments and a few other fields are Go templates with
-access to the machine and its facts:
-
-| Variable | Example | Source |
-|---|---|---|
-| `.Name` | `web-01` | provider |
-| `.ID` | `123456` | provider |
-| `.Provider` | `hetzner-robot` | provider |
-| `.Account` | `hetzner-main` | config |
-| `.Location` | `fsn1-dc7` | provider (datacenter / region / zone) |
-| `.Product` | `ax52` | provider |
-| `.IPv4`, `.IPv6` | `203.0.113.10` | provider / facts |
-| `.RAM` | `64g` | facts |
-| `.DiskTotal` | `4t` | facts |
-| `.Arch` | `amd64` | facts |
-| `.Hostname` | — | the rendered hostname (available after rendering) |
-
-Values used in hostnames are sanitised to `[a-z0-9-]`.
-
-## User sets
-
-```yaml
-# users/admins.yaml
-name: admins
-users:
-  - name: oleg
-    groups: [sudo]
-    shell: /bin/bash
-    ssh_keys:
-      - ssh-ed25519 AAAA... oleg@laptop
-    sudo: nopasswd
-  - name: deploy
-    ssh_keys:
-      - { url: https://github.com/example-deploy.keys }
-root:
-  ssh_keys: inherit-staging    # inherit-staging | none | list of keys
-```
-
-## Images
-
-```yaml
-# images/debian-13.yaml
-name: debian-13
-family: debian
-version: "13"
-arch:
-  amd64:
-    url: https://images.example.net/ump/debian-13-amd64.tar.zst
-    sha256: 4e1f...
-  arm64:
-    url: https://images.example.net/ump/debian-13-arm64.tar.zst
-    sha256: 9a0c...
-```
-
-Images can be fetched by the agent directly from the URL (fast, the usual
-case at providers) or streamed from the operator's machine over SSH
-(`transfer: push`) for networks without outbound access.
-
-## Disk layouts
-
-See [disk layouts](disk-layouts.md).
+`~/.config/ump/profiles/` holds the [profiles](profiles.md) as
+`NAME.yaml`, the [disk layouts](disk-layouts.md) in `layouts.yaml` and the
+[firewalls](firewalls.md) in `firewalls.yaml`. The first command that
+needs the directory creates it and downloads the published
+`default.yaml`, `layouts.yaml` and `firewalls.yaml` from the storage; from
+then on the files are yours and never overwritten. A profile, layout or
+firewall is looked up locally first, then on the storage, so the
+published ones remain available until you shadow them with a file of the
+same name. `ump config os update` fetches the three published files
+again: a file still as published is replaced, one you edited is kept and
+the new published version is put next to it in `.published/` for you to
+compare; profiles under other names are never touched.
