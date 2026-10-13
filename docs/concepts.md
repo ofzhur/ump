@@ -11,7 +11,7 @@ always seen *through* a provider and is identified by a **machine reference**:
 
 | Form | Example | Meaning |
 |---|---|---|
-| `provider/id` | `hetzner-robot/1234567` | Unambiguous, provider-native ID |
+| `provider/id` | `hetzner-robot/123456` | Unambiguous, provider-native ID |
 | `name` | `web-01` | Name as known at the provider |
 | `ip` | `203.0.113.10` | Primary IPv4 or IPv6 address |
 

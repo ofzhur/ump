@@ -139,7 +139,7 @@ code is 4. A reference that matches nothing gives exit code 1.
   {
     "provider": "hetzner-robot",
     "account": "hrobot",
-    "id": "1234567",
+    "id": "123456",
     "name": "web-01",
     "kind": "bare-metal",
     "ipv4": "203.0.113.10",
@@ -185,7 +185,7 @@ before each reference; `-o json` and `-o yaml` print a report:
 {
   "accounts": [{"account": "hrobot", "compared": true, "since": "2026-10-05T07:00:00Z"}],
   "changes": [
-    {"change": "added", "machine": {"provider": "hetzner-robot", "id": "1234568", "...": "..."}},
+    {"change": "added", "machine": {"provider": "hetzner-robot", "id": "123457", "...": "..."}},
     {"change": "changed", "fields": ["status"], "before": {"...": "..."}, "machine": {"...": "..."}},
     {"change": "removed", "machine": {"...": "..."}}
   ],
@@ -601,7 +601,7 @@ $ ump install web-01 web-02 web-03 --profile base \
       --yes --confirm-machine web-01,web-02,web-03 --parallel 3
 
 # take over a cloud VM that terraform created, using kexec
-$ ump install hetzner-cloud/7654321 --profile base --entry kexec
+$ ump install hetzner-cloud/234567 --profile base --entry kexec
 
 # install a box in the rack through its Redfish controller
 $ ump install rack1-07 --profile storage --entry virtual-media

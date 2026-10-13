@@ -23,7 +23,7 @@ func (a *app) newRenameCmd() *cobra.Command {
 
 Resources: server (aliases: servers, srv, machine, machines)`,
 		Example: `  ump rename server web-01 prod-web-01
-  ump rename server hetzner-robot/1234567 prod-web-01 -o json`,
+  ump rename server hetzner-robot/123456 prod-web-01 -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return cmd.Help()

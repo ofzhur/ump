@@ -74,7 +74,7 @@ asks for confirmation on a terminal; without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.wait, "wait", false, "wait until SSH answers again")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	return a.serverVerbCmd("reboot", "Reboot a server", "Reboot a server through its provider.",
-		"  ump reboot server web-01\n  ump reboot server web-01 --hard --wait\n  ump reboot server hetzner-robot/1234567 --yes", sub)
+		"  ump reboot server web-01\n  ump reboot server web-01 --hard --wait\n  ump reboot server hetzner-robot/123456 --yes", sub)
 }
 
 func (a *app) newStartCmd() *cobra.Command {

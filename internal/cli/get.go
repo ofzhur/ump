@@ -36,7 +36,7 @@ Resources: servers (aliases: server, srv, machines, machine)
   ump get servers --account hetzner-main -o wide
 
   # look a server up by name, ID, address or provider/ID
-  ump get servers web-01 hetzner-cloud/7654321
+  ump get servers web-01 hetzner-cloud/234567
 
   # what changed since the last listing, or since a week ago
   ump get servers --diff

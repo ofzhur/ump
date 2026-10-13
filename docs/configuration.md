@@ -149,7 +149,7 @@ access to the machine and its facts:
 | Variable | Example | Source |
 |---|---|---|
 | `.Name` | `web-01` | provider |
-| `.ID` | `1234567` | provider |
+| `.ID` | `123456` | provider |
 | `.Provider` | `hetzner-robot` | provider |
 | `.Account` | `hetzner-main` | config |
 | `.Location` | `fsn1-dc7` | provider (datacenter / region / zone) |

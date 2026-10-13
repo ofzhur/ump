@@ -25,7 +25,7 @@ func (a *app) newDescribeCmd() *cobra.Command {
 
 Resources: server (aliases: servers, srv, machine, machines)`,
 		Example: `  ump describe server web-01
-  ump describe server hetzner-robot/1234567 -o json
+  ump describe server hetzner-robot/123456 -o json
   ump describe server 203.0.113.10 --account hetzner-main`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {

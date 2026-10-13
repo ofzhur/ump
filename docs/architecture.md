@@ -366,7 +366,7 @@ machine:
 - `ump plan` never changes anything; `ump install` always prints the plan
 - interactive confirmation requires typing the machine name
 - non-interactive runs need `--yes` **and** a guard, e.g.
-  `--confirm-machine hetzner-robot/1234567` or
+  `--confirm-machine hetzner-robot/123456` or
   `--confirm-disks <serial>,<serial>` — so a script cannot accidentally hit
   the wrong host
 - disk selectors match on stable attributes (type, size, serial), never on

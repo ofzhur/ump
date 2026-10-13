@@ -88,11 +88,11 @@ user experience.
 $ ump config                     # wizard: provider type, credentials, connection test
 $ ump get servers
 ACCOUNT   PROVIDER        ID        NAME      IPV4            LOCATION    STATUS
-hrobot    hetzner-robot   1234567   web-01    203.0.113.10    fsn1-dc7    ready
-hcloud    hetzner-cloud   7654321   edge-01   198.51.100.22   hel1-dc2    running
+hrobot    hetzner-robot   123456    web-01    203.0.113.10    fsn1-dc7    ready
+hcloud    hetzner-cloud   234567    edge-01   198.51.100.22   hel1-dc2    running
 
 $ ump plan web-01 --profile base
-machine   hetzner-robot/1234567 (web-01, 203.0.113.10)
+machine   hetzner-robot/123456 (web-01, 203.0.113.10)
 hostname  web-01-fsn1-dc7.example.net
 image     debian-13 (amd64, sha256:4e1f…)
 disks     nvme0n1 (1.92T)  nvme1n1 (1.92T)

@@ -6,13 +6,13 @@ import (
 )
 
 func TestMachineMatches(t *testing.T) {
-	m := Machine{Provider: "hetzner-robot", ID: "1234567", Name: "web-01", IPv4: "203.0.113.10", IPv6: "2001:db8:1:2::/64"}
-	for _, ref := range []string{"hetzner-robot/1234567", "1234567", "web-01", "WEB-01", "203.0.113.10", "2001:db8:1:2::2", "2001:db8:1:2::"} {
+	m := Machine{Provider: "hetzner-robot", ID: "123456", Name: "web-01", IPv4: "203.0.113.10", IPv6: "2001:db8:1:2::/64"}
+	for _, ref := range []string{"hetzner-robot/123456", "123456", "web-01", "WEB-01", "203.0.113.10", "2001:db8:1:2::2", "2001:db8:1:2::"} {
 		if !m.Matches(ref) {
 			t.Errorf("Matches(%q) = false, want true", ref)
 		}
 	}
-	for _, ref := range []string{"", "hetzner-cloud/1234567", "web-02", "203.0.113.11", "2001:db8:1:3::1", "21043"} {
+	for _, ref := range []string{"", "hetzner-cloud/123456", "web-02", "203.0.113.11", "2001:db8:1:3::1", "12345"} {
 		if m.Matches(ref) {
 			t.Errorf("Matches(%q) = true, want false", ref)
 		}
