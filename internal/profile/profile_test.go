@@ -182,3 +182,46 @@ func TestProfileErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestSet(t *testing.T) {
+	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
+	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	p, err := Parse(repoFile(t, "default.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := p.Set([]string{"disks=lvm-striped", "kernel.ipv6=true", "kernel.extra=quiet splash", "users[0].shell=/bin/bash", "users[ump].keys=[ump, agent]",
+		"packages=[htop, nginx]", "users[+]={name: ops, sudo: true, keys: [ump]}", "network.rename=false", "firewall={policy: drop, allow: [icmp, ssh, tcp/80]}", "timezone=Europe/Berlin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Disks.Name != "lvm-linear" || *p.Kernel.IPv6 || len(p.Users) != 1 || p.Users[0].Shell != "/bin/zsh" {
+		t.Errorf("the original changed: %+v", p)
+	}
+	spec, err := q.Resolve(layouts, firewalls, fakeResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Layout.Name != "lvm-striped" || !spec.Kernel.IPv6 || spec.Kernel.Mitigations || spec.Kernel.Extra != "quiet splash" || spec.Timezone != "Europe/Berlin" || spec.Network.Rename {
+		t.Errorf("spec: %+v", spec)
+	}
+	if len(spec.Users) != 2 || spec.Users[0].Shell != "/bin/bash" || len(spec.Users[0].Keys) != 2 || spec.Users[1].Name != "ops" || !spec.Users[1].Sudo {
+		t.Errorf("users: %+v", spec.Users)
+	}
+	if strings.Join(spec.Packages, ",") != "htop,nginx" || len(spec.Firewall.Allow) != 3 || spec.Firewall.Allow[2].Port != "80" {
+		t.Errorf("packages %v, firewall %+v", spec.Packages, spec.Firewall)
+	}
+	for _, c := range []struct{ set, want string }{
+		{"nope=1", "field nope not found"},
+		{"kernel.colour=blue", "field colour not found"},
+		{"users[3].shell=/bin/sh", "users has 1 entries, no index 3"},
+		{"users[bob].shell=/bin/sh", `no entry of users named "bob"`},
+		{"disks", "expected FIELD=VALUE"},
+		{"packages=[a", "is not YAML"},
+		{"os.name=x", "os is not a mapping"},
+	} {
+		if _, err := p.Set([]string{c.set}); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error %v, want %q", c.set, err, c.want)
+		}
+	}
+}

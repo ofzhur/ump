@@ -31,6 +31,7 @@ type installOptions struct {
 	timezone    string
 	disks       string
 	keyFiles    []string
+	sets        []string
 	ipv6        bool
 	mitigations bool
 	yes         bool
@@ -86,6 +87,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
 	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for the administrator of the new system (repeatable)")
+	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, packages='[htop, nginx]'; repeatable)")
 	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")
@@ -215,6 +217,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	if len(o.keyFiles) > 0 {
 		addAdminKeys(prof, o.keyFiles)
+	}
+	if len(o.sets) > 0 {
+		if prof, err = prof.Set(o.sets); err != nil {
+			return usageErrorf(cmd, "%v", err)
+		}
 	}
 	var layouts map[string]*profile.Layout
 	if prof.Disks.Layout == nil {

@@ -314,6 +314,7 @@ installation:
 | `--ssh-key FILE` | adds the file's keys to the administrator (repeatable) |
 | `--disks /dev/sda,/dev/sdb` | the disks the layout is applied to (default: every disk of the server) |
 | `--hostname NAME` | the hostname (default: the server's name at the provider) |
+| `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable): `--set kernel.extra=quiet`, `--set users[0].shell=/bin/bash`, `--set users[ump].keys='[ump, agent]'`, `--set 'packages=[htop, nginx]'`, `--set 'users[+]={name: ops, sudo: true, keys: [local]}'`, `--set network.rename=false`; an unknown field is refused like in a profile file |
 
 The resolved profile travels to the installer as a JSON specification and
 stays on the installed system as `/etc/ump/spec.json` (mode 0600);

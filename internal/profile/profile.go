@@ -659,3 +659,119 @@ func kindName(k yaml.Kind) string {
 	}
 	return "node"
 }
+
+// Set applies assignments of the form FIELD=VALUE to a copy of the
+// profile and returns it, parsed and checked as a profile again. FIELD
+// is a path into the YAML (kernel.ipv6, users[0].shell, users[ump].keys
+// for the user named ump, users[+] to append one); VALUE is YAML
+// (true, 8, a word, [a, b], {name: ops, sudo: true}). An unknown field
+// is an error, as in a profile file.
+func (p *Profile) Set(assignments []string) (*Profile, error) {
+	data, err := yaml.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	for _, a := range assignments {
+		path, value, ok := strings.Cut(a, "=")
+		if !ok || strings.TrimSpace(path) == "" {
+			return nil, fmt.Errorf("--set %q: expected FIELD=VALUE", a)
+		}
+		var v any
+		if err := yaml.Unmarshal([]byte(value), &v); err != nil {
+			return nil, fmt.Errorf("--set %s: value %q is not YAML: %w", path, value, err)
+		}
+		if err := setPath(doc, strings.TrimSpace(path), v); err != nil {
+			return nil, fmt.Errorf("--set %s: %w", path, err)
+		}
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	q, err := Parse(out)
+	if err != nil {
+		return nil, fmt.Errorf("after --set: %w", err)
+	}
+	return q, nil
+}
+
+var pathSegment = regexp.MustCompile(`^([A-Za-z0-9_-]+)(\[([^\]]*)\])?$`)
+
+// setPath sets value at a dotted path in a YAML document.
+func setPath(doc map[string]any, path string, value any) error {
+	segments := strings.Split(path, ".")
+	var cur any = doc
+	for i, seg := range segments {
+		m := pathSegment.FindStringSubmatch(seg)
+		if m == nil {
+			return fmt.Errorf("%q is not a field name", seg)
+		}
+		key, indexed, index := m[1], m[2] != "", m[3]
+		last := i == len(segments)-1
+		node, ok := cur.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s is not a mapping", strings.Join(segments[:i], "."))
+		}
+		if !indexed {
+			if last {
+				node[key] = value
+				return nil
+			}
+			next, ok := node[key].(map[string]any)
+			if !ok {
+				if node[key] != nil {
+					return fmt.Errorf("%s is not a mapping", key)
+				}
+				next = map[string]any{}
+				node[key] = next
+			}
+			cur = next
+			continue
+		}
+		list, _ := node[key].([]any)
+		pos := -1
+		switch {
+		case index == "+":
+			list = append(list, nil)
+			pos = len(list) - 1
+		default:
+			if n, err := strconv.Atoi(index); err == nil {
+				pos = n
+			} else {
+				for j, item := range list {
+					if im, ok := item.(map[string]any); ok && im["name"] == index {
+						pos = j
+					}
+				}
+				if pos < 0 {
+					return fmt.Errorf("no entry of %s named %q", key, index)
+				}
+			}
+		}
+		if pos < 0 || pos >= len(list) {
+			return fmt.Errorf("%s has %d entries, no index %d", key, len(list), pos)
+		}
+		node[key] = list
+		if last {
+			list[pos] = value
+			return nil
+		}
+		next, ok := list[pos].(map[string]any)
+		if !ok {
+			if list[pos] != nil {
+				return fmt.Errorf("%s[%s] is not a mapping", key, index)
+			}
+			next = map[string]any{}
+			list[pos] = next
+		}
+		cur = next
+	}
+	return nil
+}

@@ -2993,3 +2993,23 @@ func TestProfileWizard(t *testing.T) {
 		t.Errorf("without a terminal: code %d, %q", code, errOut)
 	}
 }
+
+func TestReinstallSet(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	e.directRoot = true
+	resetFakePower()
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one",
+		"--set", "kernel.extra=quiet", "--set", "users[ump].shell=/bin/bash", "--set", "packages=[htop, nginx]", "--set", "network.rename=false")
+	if code != 0 {
+		t.Fatalf("reinstall --set: code %d, %q", code, errOut)
+	}
+	spec := e.lastSpec()
+	if spec["kernel"].(map[string]any)["extra"] != "quiet" || spec["users"].([]any)[0].(map[string]any)["shell"] != "/bin/bash" || len(spec["packages"].([]any)) != 2 || spec["network"].(map[string]any)["rename"] != false {
+		t.Errorf("spec: %v", spec)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--set", "kernel.colour=blue"); code != 2 || !strings.Contains(errOut, "field colour not found") {
+		t.Errorf("unknown field: code %d, %q", code, errOut)
+	}
+}
