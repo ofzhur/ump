@@ -97,20 +97,25 @@ image alone) and serve this below it:
 
 | Path | What it is |
 |---|---|
+| `get.sh` | [the install script](../../install/get.sh) of ump itself: `curl -fsSL <storage>/get.sh \| sh` |
+| `bin/latest/ump-<os>-<arch>`, `SHA256SUMS`, `VERSION` | the ump binaries (`linux`, `darwin`, `windows`; `amd64`, `arm64`) of the latest release, which get.sh takes |
+| `bin/v/<version>/...` | the same per release (`UMP_VERSION=` of get.sh) |
 | `rescue/kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
 | `rescue/<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
 | `rescue/<arch>/vmlinuz` | the rescue kernel |
 | `rescue/<arch>/initrd.zst` | the rescue system, as a zstd-compressed initramfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
-| `profiles/default.yaml`, `profiles/layouts.yaml` | the published [profile and layouts](../../profiles/README.md); a copy in `~/.config/ump/profiles/` wins |
+| `profiles/default.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml` | the published [profile, layouts and firewalls](../../profiles/README.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/<os>/<arch>/manifest.json` | an [OS image](../ubuntu/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
 | `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
 | `rescue/v/<version>/<arch>/...`, `os/<os>/v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
 
 `<arch>` is `amd64` or `arm64`, `<os>` is `ubuntu-26.04`. `make upload`
-produces exactly this layout from the built images, and
+produces exactly this layout from the built images and binaries (`make
+release` builds and publishes the binaries alone, from a tagged
+commit), and
 [`images/upload.sh`](../upload.sh) is a short script to adapt for a store
 that is not S3-compatible.
 

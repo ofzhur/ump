@@ -115,8 +115,19 @@ $ ump server reinstall web-01 --profile base
 ## Getting started
 
 ```console
+$ curl -fsSL https://ump.zhurko.de/get.sh | sh     # Linux or macOS, amd64 or arm64, into /usr/local/bin
+```
+
+Or from the source:
+
+```console
 $ git clone git@github.com:ofzhur/ump.git && cd ump
 $ make                  # builds ./ump; `make install` puts it into your Go bin directory
+```
+
+Then:
+
+```console
 $ ./ump config          # interactive: pick hetzner-robot, hetzner-cloud or ovh, enter credentials
 $ ./ump server list     # every server of every account; -o wide|json|yaml|name
 $ ./ump server show web-01   # everything the provider knows about one server
@@ -129,9 +140,14 @@ $ ./ump server rescue prod-web-01 --yes -- lsblk   # or run one command there
 $ ./ump config isp test     # re-check credentials any time
 ```
 
-Go 1.26 or newer builds it; an older `go` downloads the pinned toolchain
-automatically. `make check` runs gofmt, vet and the tests, `make dist`
-cross-compiles for Linux, macOS and Windows into `dist/`, and `make help`
+The install script checks the binary against the published `SHA256SUMS`;
+`UMP_VERSION=v1.2.3` picks a release, `UMP_INSTALL_DIR` another
+directory, and Windows users take `ump-windows-amd64.exe` from
+[`bin/latest/`](https://ump.zhurko.de/bin/latest/SHA256SUMS). Go 1.26 or
+newer builds it from the source; an older `go` downloads the pinned
+toolchain automatically. `make check` runs gofmt, vet and the tests,
+`make dist` cross-compiles for Linux, macOS and Windows into `dist/`,
+`make release` publishes a tagged build to the storage, and `make help`
 lists the targets.
 
 Credentials never land in `config.yaml` as plaintext: the wizard stores

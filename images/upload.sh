@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Publish what ump fetches onto machines to an S3-compatible store (or any
 # S3-compatible store): the rescue images and their entry script, the
-# installer, and the operating system images. The layout below the
+# installer, the operating system images, the profiles, and the ump
+# binaries with the script that installs them. The layout below the
 # prefix is the one the storage must serve (see images/rescue/README.md):
 #
+#   get.sh                                 curl -fsSL <storage>/get.sh | sh
+#   bin/latest/ump-<os>-<arch>, SHA256SUMS, VERSION
+#   bin/v/<version>/...                    (kept; UMP_VERSION= of get.sh)
 #   rescue/kexec-into-rescue.sh
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
@@ -15,7 +19,7 @@
 # Per image, manifest.json is uploaded last, so a reader never sees a
 # manifest that points to files which are not there yet.
 #
-# Usage: upload.sh [rescue|os|scripts|profiles]...     (default: everything that is built)
+# Usage: upload.sh [rescue|os|bin|scripts|profiles]...  (default: everything that is built)
 #
 # Environment:
 #   STORE_ACCOUNT_ID         account ID (makes the endpoint
@@ -37,7 +41,7 @@ PREFIX="${PREFIX%/}"
 DRY_RUN="${DRY_RUN:-0}"
 
 what=("$@")
-[ ${#what[@]} -gt 0 ] || what=(rescue os scripts profiles)
+[ ${#what[@]} -gt 0 ] || what=(rescue os bin scripts profiles)
 for v in STORE_ACCESS_KEY_ID STORE_SECRET_ACCESS_KEY STORE_BUCKET; do
 	[ -n "${!v:-}" ] || { echo "upload.sh: $v is not set (see the environment section of images/rescue/README.md)" >&2; exit 2; }
 done
@@ -59,7 +63,7 @@ fi
 content_type() {
 	case "$1" in
 	*.json) echo application/json ;;
-	*.txt|*.sh|SHA256SUMS) echo text/plain ;;
+	*.txt|*.sh|SHA256SUMS|VERSION) echo text/plain ;;
 	*.yaml|*.yml) echo application/yaml ;;
 	*) echo application/octet-stream ;;
 	esac
@@ -149,10 +153,25 @@ for w in "${what[@]}"; do
 			publish_image "${d%/}" os "$name"; built=1
 		done
 		;;
+	bin)
+		dist="$HERE/../dist"
+		[ -f "$dist/VERSION" ] || { [ "${#what[@]}" -gt 1 ] && continue; echo "upload.sh: no dist/VERSION; run make dist first" >&2; exit 2; }
+		version="$(cat "$dist/VERSION")"
+		case "$version" in
+		dev|*-dirty) [ "${FORCE:-0}" = 1 ] || { echo "upload.sh: the binaries are $version (no tag, or uncommitted changes); tag a release (git tag v1.2.3) or FORCE=1" >&2; exit 2; } ;;
+		esac
+		echo "==> uploading the binaries, version $version"
+		for f in "$dist"/ump-*; do put "$f" "$(key "bin/v/$version/$(basename "$f")")"; done
+		put "$dist/SHA256SUMS" "$(key "bin/v/$version/SHA256SUMS")"
+		put "$dist/VERSION" "$(key "bin/v/$version/VERSION")"
+		for f in "$dist"/ump-* "$dist/SHA256SUMS" "$dist/VERSION"; do copy "$(key "bin/v/$version/$(basename "$f")")" "$(key "bin/latest/$(basename "$f")")"; done
+		built=1
+		;;
 	scripts)
 		echo "==> uploading the scripts"
 		put "$HERE/rescue/kexec-into-rescue.sh" "$(key rescue/kexec-into-rescue.sh)"
 		put "$HERE/../install/install.sh" "$(key install/install.sh)"
+		put "$HERE/../install/get.sh" "$(key get.sh)"
 		built=1
 		;;
 	profiles)
@@ -160,8 +179,8 @@ for w in "${what[@]}"; do
 		for f in "$HERE"/../profiles/*.yaml; do put "$f" "$(key "profiles/$(basename "$f")")"; done
 		built=1
 		;;
-	*) echo "upload.sh: unknown item $w (rescue, os, scripts, profiles)" >&2; exit 2 ;;
+	*) echo "upload.sh: unknown item $w (rescue, os, bin, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
-[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build an image first (make rescue-image, make os-image)" >&2; exit 2; }
+[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist)" >&2; exit 2; }
 echo "==> done: the bucket's public base URL${PREFIX:+/$PREFIX} is the storage (ump's storage setting)"

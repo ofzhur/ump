@@ -4,6 +4,7 @@
 #   make install      install ump into $(go env GOBIN), else $(go env GOPATH)/bin
 #   make check        gofmt, go vet and the tests (what CI runs)
 #   make dist         cross-compile release binaries into dist/
+#   make release      check, dist, and publish the binaries and get.sh to the storage
 #   make help         list the targets
 #
 # VERSION is taken from `git describe` (tags v*) and compiled into the
@@ -29,7 +30,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help images rescue-image rescue-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check dist release clean help images rescue-image rescue-test os-image upload
 
 all: build
 
@@ -53,19 +54,25 @@ fmt-check:
 	if [ -n "$$out" ]; then echo "files need gofmt:"; echo "$$out"; exit 1; fi
 
 scripts-check: ## syntax-check the shell scripts of the rescue image
-	@for f in images/*.sh images/rescue/*.sh images/ubuntu/*.sh install/*.sh; do bash -n "$$f" || exit 1; done
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/ubuntu/finish.sh
+	@for f in images/*.sh images/rescue/*.sh images/ubuntu/*.sh install/install.sh; do bash -n "$$f" || exit 1; done
+	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/ubuntu/finish.sh install/get.sh
 
 check: fmt-check vet test scripts-check ## gofmt, go vet, the tests and the script syntax checks
 
-dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS)
-	@mkdir -p dist
+dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SUMS and VERSION
+	@rm -rf dist && mkdir -p dist
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; out=dist/$(BINARY)-$$os-$$arch; \
 		if [ "$$os" = windows ]; then out=$$out.exe; fi; \
 		echo "  $$out"; \
 		GOOS=$$os GOARCH=$$arch go build $(BUILDFLAGS) -ldflags '$(LDFLAGS)' -o $$out ./cmd/ump || exit 1; \
 	done
+	@cd dist && (command -v sha256sum >/dev/null && sha256sum $(BINARY)-* || shasum -a 256 $(BINARY)-*) > SHA256SUMS
+	@echo '$(VERSION)' > dist/VERSION
+	@echo "  dist/SHA256SUMS dist/VERSION ($(VERSION))"
+
+release: check dist ## check, dist, and publish the binaries (bin/) and get.sh to the storage (STORE_* from the environment)
+	images/upload.sh bin scripts
 
 clean: ## remove the binary and dist/
 	rm -rf $(BINARY) $(BINARY).exe dist
@@ -87,7 +94,7 @@ os-image: ## build the Ubuntu base image for OS_ARCH (default: amd64 and arm64) 
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(TEST_ARCH)
 
-upload: ## publish every built image (rescue and OS) and the scripts to R2 (STORE_* from the environment)
+upload: ## publish everything built (images, binaries) and the scripts and profiles to R2 (STORE_* from the environment)
 	images/upload.sh
 
 images/rescue/out/%/manifest.json:
