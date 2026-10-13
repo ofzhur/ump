@@ -52,7 +52,7 @@ other files. Publish the directory as is (`<base-url>/<arch>/...`);
 ## Publishing
 
 ```console
-$ make upload UPLOAD_TARGET=s3://my-bucket          # every built image, the binaries, the scripts and the profiles
+$ make upload UPLOAD_TARGET=s3://my-bucket/dl       # every built image, the binaries, the scripts and the profiles
 $ images/upload.sh rescue                           # one kind: rescue, os, index, bin, scripts or profiles
 ```
 
@@ -74,12 +74,16 @@ $ set -a; . ~/.config/ump/upload.env; set +a
 $ make upload
 ```
 
-Per image, `manifest.json` goes up last, so a reader never sees a
+A subfolder (`/dl` on this project's storage, under the hostname that
+also serves the project's pages) keeps the files apart from whatever
+else the hostname serves, so that a rule for `/dl/*` alone can let
+scripted clients through a bot protection. Per image, `manifest.json`
+goes up last, so a reader never sees a
 manifest whose files are not there yet, and every version uploaded is
 kept under `v/` for rollbacks (large files go up once and are copied
 on the target side). Whatever serves the target over HTTP is the
 storage, `storage` in the ump configuration; this project's is
-`https://ump.zhurko.de`, ump's default, and the rescue image's base URL
+`https://ump.zhurko.de/dl`, ump's default, and the rescue image's base URL
 is `<storage>/rescue`.
 
 ### Your own storage
@@ -186,8 +190,8 @@ Going through the provider's rescue system.
 Rescue system enabled for hetzner-cloud/123 (web-01, 203.0.113.10); rebooting into it.
 ...
 Waiting for SSH on 203.0.113.10 ..... up after 35s.
-Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/rescue.
-==> downloading the rescue image for amd64 from https://ump.zhurko.de/rescue
+Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/dl/rescue.
+==> downloading the rescue image for amd64 from https://ump.zhurko.de/dl/rescue
 ...
 ==> booting into the UMP rescue system; reconnect as root@203.0.113.10
 Waiting for the UMP rescue system on 203.0.113.10 ... up after 14s (ump-rescue 2026.10.12).

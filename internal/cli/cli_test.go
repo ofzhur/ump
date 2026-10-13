@@ -1668,7 +1668,7 @@ func TestRescueCommands(t *testing.T) {
 	// ... and the provider's rescue system was only the first hop
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\nGoing through the provider's rescue system.\n",
-		"Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/rescue.\n",
+		"Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/dl/rescue.\n",
 		"==> booting into the UMP rescue system",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
 	} {
@@ -1677,7 +1677,7 @@ func TestRescueCommands(t *testing.T) {
 		}
 	}
 	entries := e.entryCommands()
-	wantEntry := entryPrefix("https://ump.zhurko.de/rescue") + "-H web-01 -K 'ssh-ed25519 "
+	wantEntry := entryPrefix("https://ump.zhurko.de/dl/rescue") + "-H web-01 -K 'ssh-ed25519 "
 	if len(entries) != 1 || !strings.HasPrefix(entries[0], wantEntry) || !strings.HasSuffix(entries[0], "' -K 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 ops@example'") {
 		t.Errorf("entry script runs: %q", entries)
 	}
@@ -1897,7 +1897,7 @@ func TestRescueDirectAndRunning(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n",
-		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.\n",
+		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.\n",
 		"==> booting into the UMP rescue system",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
 		"Connecting to the UMP rescue system of web-01 as root; exit the shell to return.\n",
@@ -1913,7 +1913,7 @@ func TestRescueDirectAndRunning(t *testing.T) {
 		t.Errorf("stdout: %q", out)
 	}
 	entries := e.entryCommands()
-	if len(entries) != 1 || !strings.HasPrefix(entries[0], entryPrefix("https://ump.zhurko.de/rescue")+"-H web-01 -K 'ssh-ed25519 ") {
+	if len(entries) != 1 || !strings.HasPrefix(entries[0], entryPrefix("https://ump.zhurko.de/dl/rescue")+"-H web-01 -K 'ssh-ed25519 ") {
 		t.Errorf("entry: %q", entries)
 	}
 	// the probe and the entry offer UMP's key and the user's own, the
@@ -1994,7 +1994,7 @@ func TestRescueDirectWithSudo(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS, as ump with sudo).\n",
-		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.\n",
+		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.\n",
 		"Connecting to the UMP rescue system of web-01 as root; exit the shell to return.\n",
 	} {
 		if !strings.Contains(errOut, want) {
@@ -2005,7 +2005,7 @@ func TestRescueDirectWithSudo(t *testing.T) {
 		t.Errorf("the provider was used: %v", fakePower.actions)
 	}
 	entries := e.entryCommands()
-	if len(entries) != 1 || !strings.HasPrefix(entries[0], "sudo -n sh -c '"+entryPrefix("https://ump.zhurko.de/rescue")+"-H web-01 -K '\\''ssh-ed25519 ") {
+	if len(entries) != 1 || !strings.HasPrefix(entries[0], "sudo -n sh -c '"+entryPrefix("https://ump.zhurko.de/dl/rescue")+"-H web-01 -K '\\''ssh-ed25519 ") {
 		t.Errorf("entry: %q", entries)
 	}
 	users := []string{}
@@ -2068,7 +2068,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	resetFakePower()
 	e.rescueNoKey = true
 	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
-	if code != 5 || !strings.Contains(errOut, "did not accept UMP's key; connect by hand (ssh ") || !strings.Contains(errOut, "bash /tmp/kexec-into-rescue.sh -u https://ump.zhurko.de/rescue") {
+	if code != 5 || !strings.Contains(errOut, "did not accept UMP's key; connect by hand (ssh ") || !strings.Contains(errOut, "bash /tmp/kexec-into-rescue.sh -u https://ump.zhurko.de/dl/rescue") {
 		t.Errorf("rescue without key: code %d, %q", code, errOut)
 	}
 	e.rescueNoKey = false
@@ -2086,7 +2086,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 	resetFakePower()
 	e.entryNoScript = true
 	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes", "--account", "one")
-	if code != 1 || !strings.Contains(errOut, "curl: (22)") || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the entry script from https://ump.zhurko.de/rescue/kexec-into-rescue.sh (exit status 22); the server must reach the image's base URL") {
+	if code != 1 || !strings.Contains(errOut, "curl: (22)") || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the entry script from https://ump.zhurko.de/dl/rescue/kexec-into-rescue.sh (exit status 22); the server must reach the image's base URL") {
 		t.Errorf("no script: code %d, %q", code, errOut)
 	}
 	e.entryNoScript = false
@@ -2158,11 +2158,11 @@ func TestInstallServer(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout: %q", out)
 	}
-	if len(e.installs) != 1 || !strings.HasSuffix(e.installs[0], installerPrefix("https://ump.zhurko.de")) {
+	if len(e.installs) != 1 || !strings.HasSuffix(e.installs[0], installerPrefix("https://ump.zhurko.de/dl")) {
 		t.Errorf("installer command: %q", e.installs)
 	}
 	spec := e.lastSpec()
-	if spec["os"] != "ubuntu-26.04" || spec["hostname"] != "web-01" || spec["storage"] != "https://ump.zhurko.de" || spec["timezone"] != "UTC" {
+	if spec["os"] != "ubuntu-26.04" || spec["hostname"] != "web-01" || spec["storage"] != "https://ump.zhurko.de/dl" || spec["timezone"] != "UTC" {
 		t.Errorf("spec: %v", spec)
 	}
 	if k := spec["kernel"].(map[string]any); k["mitigations"] != false || k["ipv6"] != false {
@@ -2272,7 +2272,7 @@ func TestInstallServer(t *testing.T) {
 	resetFakePower()
 	e.installNoScript = true
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
-	if code != 1 || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the installer from https://ump.zhurko.de/install/install.sh (exit status 22); the server must reach the storage") {
+	if code != 1 || !strings.Contains(errOut, "ump: 203.0.113.10 could not fetch the installer from https://ump.zhurko.de/dl/install/install.sh (exit status 22); the server must reach the storage") {
 		t.Errorf("no installer: code %d, %q", code, errOut)
 	}
 	e.installNoScript = false
@@ -2685,7 +2685,7 @@ func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 	for _, want := range []string{
 		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls it with a stock Linux and UMP's key first",
 		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
-		"Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01.",
+		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01.",
 		"web-01 is up: Ubuntu 26.04.1 LTS",
 	} {
 		if !strings.Contains(errOut, want) {

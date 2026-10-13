@@ -19,7 +19,7 @@ every machine, whatever it is and wherever it runs, ready for Ansible or
 whatever configures it from there.
 
 ```console
-$ curl -fsSL https://ump.zhurko.de/get.sh | sh   # Linux or macOS, amd64 or arm64
+$ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or arm64
 $ ump config isp                                 # add a provider account (wizard)
 $ ump server list                                # every server of every account
 $ ump config os edit default                     # the profile: image, disks, users, firewall
@@ -93,7 +93,7 @@ from them (`ump config os create`, `ump config user create`, ...), and
 
 `--dry-run` stops after the plan. Everything the server fetches (the
 rescue image, the installer, the profiles, the OS image) comes from one
-**storage**, `https://ump.zhurko.de` by default, which can be [one of your
+**storage**, `https://ump.zhurko.de/dl` by default, which can be [one of your
 own](images/rescue/README.md#your-own-storage).
 
 ## Documentation

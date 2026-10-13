@@ -120,9 +120,9 @@ to `/root/.ssh/authorized_keys`, which is where `ump server rescue` put UMP's
 key and yours. By hand, from the rescue system:
 
 ```console
-# curl -fsSL https://ump.zhurko.de/install/install.sh -o /tmp/install.sh
-# bash /tmp/install.sh --storage https://ump.zhurko.de --hostname web-01 --dry-run
-# bash /tmp/install.sh --storage https://ump.zhurko.de --hostname web-01 && systemctl reboot
+# curl -fsSL https://ump.zhurko.de/dl/install/install.sh -o /tmp/install.sh
+# bash /tmp/install.sh --storage https://ump.zhurko.de/dl --hostname web-01 --dry-run
+# bash /tmp/install.sh --storage https://ump.zhurko.de/dl --hostname web-01 && systemctl reboot
 ```
 
 Exit status 0 means the machine is ready to reboot; 2 is a usage or

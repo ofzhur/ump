@@ -89,7 +89,7 @@ func ProfilesDir() string {
 }
 
 // DefaultStorage is where this project publishes its images and scripts.
-const DefaultStorage = "https://ump.zhurko.de"
+const DefaultStorage = "https://ump.zhurko.de/dl"
 
 // DefaultProfile is the profile taken when nothing else is set.
 const DefaultProfile = "ubuntu-26.04"

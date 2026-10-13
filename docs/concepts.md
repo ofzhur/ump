@@ -56,7 +56,7 @@ image](../images/rescue/README.md).
 The **storage** is one base URL that serves everything a server fetches:
 the rescue image and its entry script, the installer, the published
 profiles, the OS images, plus `get.sh` and the ump binaries. The default
-is `https://ump.zhurko.de`; any web server or object store with plain
+is `https://ump.zhurko.de/dl`; any web server or object store with plain
 `GET` does. See [configuration](configuration.md#storage).
 
 ## Profiles, layouts and firewalls

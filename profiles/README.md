@@ -2,7 +2,7 @@
 
 This directory holds the profile, the disk layouts and the firewalls that
 ump publishes: `make upload` puts them under `profiles/` of the storage
-(`https://ump.zhurko.de/profiles/` for this project's). The first
+(`https://ump.zhurko.de/dl/profiles/` for this project's). The first
 `ump config os`, `disk-layout` or `firewall` command downloads them into
 `~/.config/ump/profiles/`, where they are yours to edit; a profile that
 is not there is still fetched from the storage by name, so `ump server

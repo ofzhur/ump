@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install ump, the Unus Mundus Provisioner, from its storage:
 #
-#   curl -fsSL https://ump.zhurko.de/get.sh | sh
+#   curl -fsSL https://ump.zhurko.de/dl/get.sh | sh
 #
 # Downloads the binary for this machine (Linux or macOS, amd64 or arm64)
 # from bin/latest/ of the storage, checks it against SHA256SUMS and puts
@@ -14,7 +14,7 @@
 # Windows: take ump-windows-amd64.exe from bin/latest/ by hand.
 set -eu
 
-storage="${UMP_STORAGE:-https://ump.zhurko.de}"
+storage="${UMP_STORAGE:-https://ump.zhurko.de/dl}"
 storage="${storage%/}"
 version="${UMP_VERSION:-latest}"
 

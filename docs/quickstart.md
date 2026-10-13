@@ -8,7 +8,7 @@ machine. The server will be erased.
 ## 1. Install ump
 
 ```console
-$ curl -fsSL https://ump.zhurko.de/get.sh | sh
+$ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh
 ```
 
 Linux or macOS, amd64 or arm64, into `/usr/local/bin` (with `sudo` when
@@ -16,7 +16,7 @@ needed, else `~/.local/bin`); the script checks the binary against the
 published `SHA256SUMS`. `UMP_VERSION=v1.2.3` picks a release,
 `UMP_INSTALL_DIR` another directory. Windows users take
 `ump-windows-amd64.exe` from
-[`bin/latest/`](https://ump.zhurko.de/bin/latest/SHA256SUMS). Or build it
+[`bin/latest/`](https://ump.zhurko.de/dl/bin/latest/SHA256SUMS). Or build it
 yourself with Go 1.26 or newer:
 
 ```console
@@ -104,7 +104,7 @@ Going through the provider's rescue system.
 Waiting for the UMP rescue system on 198.51.100.22 ... up after 14s (ump-rescue 2026.10.13).
 Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01:
 ==> machine: amd64, BIOS firmware, 2 CPUs, 3915 MB RAM
-==> image: ubuntu-26.04 for amd64 from https://ump.zhurko.de/os/ubuntu-26.04/amd64 (profile ubuntu-26.04, layout lvm-linear)
+==> image: ubuntu-26.04 for amd64 from https://ump.zhurko.de/dl/os/ubuntu-26.04/amd64 (profile ubuntu-26.04, layout lvm-linear)
 ==> disks (1): /dev/sda (38.1G SSD)
 ==>   /dev/sda: 1: 1M bios, 2: 512M efi at /boot/efi, 3: 1G ext4 at /boot, 4: rest lvm (vg0)
 ==>   vg0/root: rest linear ext4 at /
@@ -187,7 +187,7 @@ uptime, memory, the root disk and the addresses.
   otherwise). See the [CLI reference](cli.md).
 - **A storage of your own.** Everything ump puts on a server (the rescue
   image, the installer, the profiles, the OS image) comes from one base
-  URL, `https://ump.zhurko.de` by default; [the rescue image's
+  URL, `https://ump.zhurko.de/dl` by default; [the rescue image's
   README](../images/rescue/README.md#your-own-storage) says what to serve
   to run your own, and `storage:` in the [configuration](configuration.md)
   points ump at it.

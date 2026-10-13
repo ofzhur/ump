@@ -50,7 +50,7 @@ order:
 1. the file itself, when `--profile` is a path (it contains a `/` or ends
    in `.yaml`);
 2. `~/.config/ump/profiles/NAME.yaml`;
-3. `profiles/NAME.yaml` on the storage (`https://ump.zhurko.de` by
+3. `profiles/NAME.yaml` on the storage (`https://ump.zhurko.de/dl` by
    default, see [configuration](configuration.md#storage)).
 
 Which profile a server is installed with: `--profile`, else the profile

@@ -58,7 +58,7 @@ accounts:                              # written by ump config isp; see docs/pro
     application_secret: { command: "pass show ovh/app-secret" }
     consumer_key: { file: ~/.config/ump/secrets/ovh.consumer_key }
 
-storage: https://ump.zhurko.de         # the base URL everything a server fetches comes from (the default)
+storage: https://ump.zhurko.de/dl         # the base URL everything a server fetches comes from (the default)
 
 updates: true                          # once a day, after a command, say when a newer ump is published (the default)
 default_profile: ubuntu-26.04          # what ump server reinstall takes without --profile and without a profile
@@ -66,7 +66,7 @@ default_profile: ubuntu-26.04          # what ump server reinstall takes without
 
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
-  image: https://ump.zhurko.de/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
+  image: https://ump.zhurko.de/dl/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
 
 servers:                               # written by ump server set
   hetzner-cloud/234567:
@@ -77,7 +77,7 @@ servers:                               # written by ump server set
 |---|---|
 | `defaults.output` | The format `ump server list` uses without `-o`: `table` (the default), `wide`, `json`, `yaml` or `name`. |
 | `accounts` | One entry per [provider account](providers.md): the `type` and the type's settings, each a plain value or a secret reference. `ump config isp types` lists the settings. |
-| `storage` | The base URL of the [storage](#storage), without a trailing slash. Default `https://ump.zhurko.de`. |
+| `storage` | The base URL of the [storage](#storage), without a trailing slash. Default `https://ump.zhurko.de/dl`. |
 | `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
 | `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage and says when a newer release is published, with the one-liner that installs it; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks. |
@@ -109,7 +109,7 @@ The storage is the one place a server fetches from during a rescue or an
 installation: the rescue image (`rescue/`), the entry script, the
 installer (`install/install.sh`), the published profiles (`profiles/`)
 and the OS images (`os/<os>/<arch>/`); `get.sh` and the ump binaries live
-there too. The default is this project's, `https://ump.zhurko.de`. A
+there too. The default is this project's, `https://ump.zhurko.de/dl`. A
 storage of your own is any web server or object store that answers plain
 `GET` requests and that the servers can reach; [the rescue image's
 README](../images/rescue/README.md#your-own-storage) lists what to serve,

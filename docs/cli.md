@@ -375,7 +375,7 @@ UMP's key and reports what came up:
 $ ump server reinstall web-01
 Install ubuntu-26.04 on hetzner-cloud/123 (web-01, 203.0.113.10) as web-01? Every disk of the server is erased. [y/N] y
 Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 24.04.3 LTS).
-Loading the UMP rescue image from https://ump.zhurko.de/rescue on web-01, without the provider's rescue system.
+Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.
 ...
 Waiting for the UMP rescue system on 203.0.113.10 ... up after 11s (ump-rescue 2026.10.13).
 Installing ubuntu-26.04 on web-01 as web-01 ...
