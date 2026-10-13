@@ -17,7 +17,7 @@ import (
 )
 
 // profileFiles are what a profiles directory starts with.
-var profileFiles = []string{"default.yaml", "layouts.yaml", "firewalls.yaml"}
+var profileFiles = []string{"default.yaml", "ubuntu-24.04.yaml", "ubuntu-22.04.yaml", "layouts.yaml", "firewalls.yaml"}
 
 // ensureProfiles makes sure the profiles directory exists with the
 // published default profile and layouts in it: the first run downloads
@@ -41,7 +41,7 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 			return err
 		}
 	}
-	fmt.Fprintf(a.stderr, "Downloaded the default profile, the layouts and the firewalls into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
+	fmt.Fprintf(a.stderr, "Downloaded the published profiles, the layouts and the firewalls into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
 	return nil
 }
 
@@ -239,8 +239,14 @@ func (a *app) newOSCreateCmd() *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
 		Use:   "create NAME [--from NAME]",
-		Short: "Create a profile from another one and open it in your editor",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Short: "Create a profile: guided on a terminal, or as a copy of another one",
+		Long: `On a terminal, ump config os create NAME asks what the profile should
+hold (the image from the storage, the disk layout, the firewall, the
+administrator with shell and keys, the kernel switches, the time zone,
+packages, the interface names, the provision step) and writes it.
+--from NAME copies another profile instead and opens it in your editor;
+without a terminal that is the only way.`,
+		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := a.prepareProfiles(cmd); err != nil {
 				return err
@@ -251,6 +257,11 @@ func (a *app) newOSCreateCmd() *cobra.Command {
 			}
 			if _, err := os.Stat(profilePath(name)); err == nil {
 				return fmt.Errorf("profile %s exists already (ump config os edit %s)", name, name)
+			}
+			if !cmd.Flags().Changed("from") {
+				if ui := a.resolverUI(cmd); ui != nil {
+					return a.profileWizard(cmd, ui, name)
+				}
 			}
 			data, err := os.ReadFile(profilePath(from))
 			if err != nil {
@@ -419,6 +430,16 @@ func (a *app) profilesWizard(cmd *cobra.Command) error {
 			if err := config.ValidateAccountName(name); err != nil {
 				ui.Printf("%v\n", err)
 				continue
+			}
+			how, err := ui.Choose("How?", []string{"answer a few questions (image, layout, firewall, users, ...)", "copy an existing profile"}, 0)
+			if err != nil {
+				return err
+			}
+			if how == 0 {
+				if err := a.profileWizard(cmd, ui, name); err != nil {
+					ui.Printf("%v\n", err)
+				}
+				break
 			}
 			from, err := ui.Choose("Start from", names, 0)
 			if err != nil {

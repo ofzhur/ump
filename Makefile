@@ -25,6 +25,8 @@ export CGO_ENABLED := 0
 IMAGE_ARCHS ?= amd64 arm64
 RESCUE_ARCH ?= $(IMAGE_ARCHS)
 OS_ARCH     ?= $(IMAGE_ARCHS)
+# the Ubuntu releases to build: OS_LIST="ubuntu-24.04 ubuntu-22.04" for others
+OS_LIST     ?= ubuntu-26.04
 TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 # the images carry the day they were built as their version
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
@@ -85,11 +87,11 @@ rescue-image: ## build the rescue image for RESCUE_ARCH (default: amd64 and arm6
 			-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch || exit 1; \
 	done
 
-os-image: ## build the Ubuntu base image for OS_ARCH (default: amd64 and arm64) in a privileged Debian container
-	@for arch in $(OS_ARCH); do \
+os-image: ## build the Ubuntu base image(s) of OS_LIST (default: ubuntu-26.04) for OS_ARCH (default: amd64 and arm64) in a privileged Debian container
+	@for os in $(OS_LIST); do for arch in $(OS_ARCH); do \
 		$(CONTAINER) run --rm --privileged \
-			-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch || exit 1; \
-	done
+			-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch $$os || exit 1; \
+	done; done
 
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(TEST_ARCH)

@@ -35,7 +35,9 @@ root and the keys of a file).
    signatures of the disks themselves.
 5. **Builds the layout:** GPT partitions (the one that takes the rest of
    a disk last), md arrays (`mdadm --create`, metadata 1.2), file systems
-   (ext4, xfs, btrfs, vfat, swap), physical volumes, volume groups and
+   (ext4 without the `orphan_file` and `metadata_csum_seed` features,
+   which the GRUB of Ubuntu 22.04 cannot read; xfs, btrfs, vfat, swap),
+   physical volumes, volume groups and
    logical volumes (striped, mirrored, raid5, raid6, raid10 or linear;
    striping over a single physical volume becomes linear). Mirrored and
    parity volumes synchronise in the background after the first boot.

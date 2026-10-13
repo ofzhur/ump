@@ -5,22 +5,32 @@
 # overlay/ and finish.sh. install.sh unpacks it onto a machine's disks and
 # does what depends on the machine; see README.md.
 #
-# Usage: build.sh [amd64|arm64]
+# Usage: build.sh [amd64|arm64] [ubuntu-26.04|ubuntu-24.04|ubuntu-22.04]
 #
 # Runs as root on Debian trixie (natively or in a privileged container,
 # see the Makefile's os-image target). The other architecture is built
-# from the same container through qemu-user-static. Environment: SUITE
-# (default: resolute, Ubuntu 26.04), OS (the name under which the image is
-# published, default: ubuntu-26.04), MIRROR, VERSION (default: today's
-# date), OUT (default: ./out/<arch>).
+# from the same container through qemu-user-static. Environment: OS (the
+# name under which the image is published, default: ubuntu-26.04; the
+# suite follows from it), SUITE (to override), MIRROR, VERSION (default:
+# today's date), OUT (default: ./out/<os>/<arch>).
+#
+# packages.txt lists the packages; a line may end with "@suite,suite" to
+# be taken for those suites only, or "!suite,suite" for all but those.
 set -euo pipefail
 
 ARCH="${1:-$(dpkg --print-architecture)}"
-SUITE="${SUITE:-resolute}"
-OS="${OS:-ubuntu-26.04}"
+OS="${2:-${OS:-ubuntu-26.04}}"
+case "$OS" in
+ubuntu-26.04) default_suite=resolute ;;
+ubuntu-24.04) default_suite=noble ;;
+ubuntu-22.04) default_suite=jammy ;;
+*) default_suite="" ;;
+esac
+SUITE="${SUITE:-$default_suite}"
+[ -n "$SUITE" ] || { echo "build.sh: unknown OS $OS; give SUITE= (ubuntu-26.04 resolute, ubuntu-24.04 noble, ubuntu-22.04 jammy)" >&2; exit 2; }
 VERSION="${VERSION:-$(date -u +%Y.%m.%d)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="${OUT:-$HERE/out/$ARCH}"
+OUT="${OUT:-$HERE/out/$OS/$ARCH}"
 WORK="$(mktemp -d /tmp/ump-ubuntu.XXXXXX)"
 ROOTFS="$WORK/rootfs"
 trap 'rm -rf "$WORK"' EXIT
@@ -55,9 +65,16 @@ if [ "$ARCH" != "$HOST_ARCH" ] && ! arch-test "$ARCH" >/dev/null 2>&1; then
 	exit 1
 fi
 
-packages="$(grep -vE '^[[:space:]]*(#|$)' "$HERE/packages.txt" | sed 's/[[:space:]]//g' | paste -sd, -),linux-image-generic,$boot"
+packages="$(awk -v suite="$SUITE" '
+	/^[[:space:]]*(#|$)/ { next }
+	{
+		pkg = $1; take = 1
+		if ($2 ~ /^@/) { take = 0; n = split(substr($2, 2), only, ","); for (i = 1; i <= n; i++) if (only[i] == suite) take = 1 }
+		if ($2 ~ /^!/) { n = split(substr($2, 2), not, ","); for (i = 1; i <= n; i++) if (not[i] == suite) take = 0 }
+		if (take) print pkg
+	}' "$HERE/packages.txt" | paste -sd, -),linux-image-generic,$boot"
 
-log "bootstrapping Ubuntu $SUITE for $ARCH from $MIRROR"
+log "bootstrapping $OS ($SUITE) for $ARCH from $MIRROR"
 mmdebstrap \
 	--arch="$ARCH" \
 	--variant=minbase \

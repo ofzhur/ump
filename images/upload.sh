@@ -13,13 +13,15 @@
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh
 #   profiles/default.yaml, profiles/layouts.yaml, profiles/firewalls.yaml
+#   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)
 #
 # Per image, manifest.json is uploaded last, so a reader never sees a
 # manifest that points to files which are not there yet.
 #
-# Usage: upload.sh [rescue|os|bin|scripts|profiles]...  (default: everything that is built)
+# Usage: upload.sh [rescue|os|index|bin|scripts|profiles]...  (default: everything that is built;
+#        index alone rewrites os/index.json from what the bucket holds)
 #
 # Environment:
 #   STORE_ACCOUNT_ID         account ID (makes the endpoint
@@ -136,6 +138,23 @@ publish_image() {
 	copy "$(key "$base/v/$version/$arch/manifest.json")" "$(key "$base/$arch/manifest.json")"
 }
 
+# publish_os_index writes os/index.json: the names of the images the
+# storage holds (the ump config os wizard offers them)
+publish_os_index() {
+	local names f
+	case "$tool" in
+	aws)
+		names="$(AWS_ACCESS_KEY_ID="$STORE_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$STORE_SECRET_ACCESS_KEY" AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}" \
+			aws s3 ls --endpoint-url "$endpoint" "s3://$STORE_BUCKET/$(key os/)" | sed -n 's|.*PRE \(.*\)/$|\1|p' | grep -v '^v$' | sort)"
+		;;
+	rclone) names="$(s3 lsd "upload:$STORE_BUCKET/$(key os/)" | awk '{print $NF}' | grep -v '^v$' | sort)" ;;
+	esac
+	f="$(mktemp)"
+	printf '{"images": [%s]}\n' "$(printf '%s\n' $names | sed 's/.*/"&"/' | paste -sd, - | sed 's/,/, /g')" > "$f"
+	put "$f" "$(key os/index.json)"
+	rm -f "$f"
+}
+
 built=0
 for w in "${what[@]}"; do
 	case "$w" in
@@ -146,12 +165,13 @@ for w in "${what[@]}"; do
 		done
 		;;
 	os)
-		for d in "$HERE"/ubuntu/out/*/; do
+		for d in "$HERE"/ubuntu/out/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }
 			publish_image "${d%/}" os "$name"; built=1
 		done
+		[ "$built" = 1 ] && publish_os_index
 		;;
 	bin)
 		dist="$HERE/../dist"
@@ -174,12 +194,16 @@ for w in "${what[@]}"; do
 		put "$HERE/../install/get.sh" "$(key get.sh)"
 		built=1
 		;;
+	index)
+		echo "==> uploading os/index.json"
+		publish_os_index; built=1
+		;;
 	profiles)
 		echo "==> uploading the profiles"
 		for f in "$HERE"/../profiles/*.yaml; do put "$f" "$(key "profiles/$(basename "$f")")"; done
 		built=1
 		;;
-	*) echo "upload.sh: unknown item $w (rescue, os, bin, scripts, profiles)" >&2; exit 2 ;;
+	*) echo "upload.sh: unknown item $w (rescue, os, index, bin, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
 [ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist)" >&2; exit 2; }

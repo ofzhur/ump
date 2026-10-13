@@ -448,7 +448,7 @@ func (e *testEnv) writeProfiles() {
 	e.t.Helper()
 	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.MkdirAll(dir, 0o700)
-	for _, name := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
+	for _, name := range profileFiles {
 		data, err := os.ReadFile(filepath.Join("..", "..", "profiles", name))
 		if err != nil {
 			e.t.Fatal(err)
@@ -2368,7 +2368,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/default.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml":
+		case "/profiles/default.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2380,10 +2380,10 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	profilesDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.RemoveAll(profilesDir)
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile, the layouts and the firewalls into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, the layouts and the firewalls into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
 		t.Errorf("published profile: code %d, %q", code, errOut)
 	}
-	for _, f := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
+	for _, f := range profileFiles {
 		if _, err := os.Stat(filepath.Join(profilesDir, f)); err != nil {
 			t.Errorf("first run did not download %s: %v", f, err)
 		}
@@ -2422,10 +2422,10 @@ func TestConfigOSAndServerSet(t *testing.T) {
 
 	// the first run downloads the published profile and layouts
 	out, errOut, code := e.run("", false, "config", "os", "list")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the default profile, the layouts and the firewalls into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(out, "default   ubuntu-26.04   lvm-linear   ump") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, the layouts and the firewalls into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "default ubuntu-26.04 lvm-linear ump default") || !strings.Contains(out, "ubuntu-22.04   ubuntu-22.04") {
 		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	for _, f := range []string{"default.yaml", "layouts.yaml", "firewalls.yaml"} {
+	for _, f := range profileFiles {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s not downloaded: %v", f, err)
 		}
@@ -2879,7 +2879,7 @@ func TestConfigOSUpdate(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(dir, ".published", "layouts.yaml")); err != nil || string(data) != published["layouts.yaml"] {
 		t.Errorf("published copy: %v", err)
 	}
-	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "default.yaml: up to date\nlayouts.yaml: up to date\nfirewalls.yaml: up to date\n") {
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "default.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\nlayouts.yaml: up to date\nfirewalls.yaml: up to date\n") {
 		t.Errorf("update when current: code %d\n%s", code, out)
 	}
 
@@ -2908,5 +2908,88 @@ func TestConfigOSUpdate(t *testing.T) {
 	}
 	if out, _, _ := e.run("", false, "config", "os", "list"); !strings.Contains(out, "mine") || strings.Contains(out, ".published") {
 		t.Errorf("list after update:\n%s", out)
+	}
+}
+
+func TestProfileWizard(t *testing.T) {
+	e := newTestEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/os/index.json":
+			io.WriteString(w, `{"images": ["ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"]}`)
+		case strings.HasSuffix(r.URL.Path, "/amd64/manifest.json"):
+			name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/os/"), "/amd64/manifest.json")
+			fmt.Fprintf(w, `{"version": "2026.10.13", "os": %q, "kernel": "7.0.0-14-generic"}`, name)
+		case strings.HasPrefix(r.URL.Path, "/profiles/"):
+			data, err := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write(data)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+
+	// image 2 (24.04), the default layout, the web firewall, admin ump with
+	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, two
+	// packages, renamed interfaces, no provision step, a description, no
+	// editor
+	script := "2\n\nweb\n\n2\nump\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
+	out, errOut, code := e.run(script, true, "config", "os", "create", "web")
+	if code != 0 {
+		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
+	}
+	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
+		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Administrator [ump]:",
+		"Shell of ump", "Keys of ump", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Extra Ubuntu packages", "Uniform interface names", "Provision step", "Description",
+		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("wizard output lacks %q:\n%s", want, errOut)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "web.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"# Profile web, made by ump config os create on 2026-10-12", "name: web\n", "description: Web servers\n", "os: ubuntu-24.04\n", "timezone: UTC\n",
+		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - name: ump\n    sudo: true\n    shell: /bin/bash\n    keys:\n      - ump\n",
+		"packages:\n  - htop\n  - nginx\n", "firewall: web\n", "provision:\n  type: none\n", "network:\n  rename: true\n"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("profile lacks %q:\n%s", want, text)
+		}
+	}
+	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump web Web servers") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	// the profile installs: the spec carries the choices
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "web", "--account", "one"); code != 0 {
+		t.Errorf("reinstall with the wizard's profile: code %d, %q", code, errOut)
+	}
+	spec := e.lastSpec()
+	if spec["os"] != "ubuntu-24.04" || spec["kernel"].(map[string]any)["ipv6"] != true || spec["firewall"].(map[string]any)["name"] != "web" || len(spec["packages"].([]any)) != 2 {
+		t.Errorf("spec: %v", spec)
+	}
+
+	// another name for the image, and the copy with --from stays
+	script = "4\ndebian-13\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+	if _, errOut, code := e.run(script, true, "config", "os", "create", "deb"); code != 0 || !strings.Contains(errOut, "Image name (os/<name>/ on the storage) [ubuntu-26.04]:") {
+		t.Errorf("another image: code %d\n%s", code, errOut)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "deb.yaml")); !strings.Contains(string(data), "os: debian-13\n") {
+		t.Errorf("deb profile:\n%s", data)
+	}
+	if _, errOut, code := e.run("", false, "config", "os", "create", "copy", "--from", "web"); code != 0 || strings.Contains(errOut, "Operating system image") {
+		t.Errorf("--from: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "os", "create", "plain"); code != 0 || strings.Contains(errOut, "Operating system image") {
+		t.Errorf("without a terminal: code %d, %q", code, errOut)
 	}
 }

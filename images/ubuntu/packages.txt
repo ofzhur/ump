@@ -1,11 +1,13 @@
 # Packages of the UMP Ubuntu base image, one per line. The kernel and the
 # boot loader packages of the architecture are added by build.sh.
-# Recommends are not installed.
+# Recommends are not installed. A line may end with "@suite,suite" to be
+# taken for those suites only, or "!suite" for all but that one
+# (resolute is 26.04, noble 24.04, jammy 22.04).
 
 # init and base system
 systemd
 systemd-sysv
-systemd-resolved
+systemd-resolved !jammy
 systemd-timesyncd
 udev
 dbus
@@ -52,6 +54,7 @@ nvme-cli
 hdparm
 
 # network
+netbase
 netplan.io
 nftables
 iproute2
@@ -87,8 +90,8 @@ zsh
 # history (sar, iostat, mpstat, pidstat; atop), what a process does
 # (strace, ltrace, lsof, pstree), disks (ncdu) and the network (dig,
 # traceroute, iftop, nethogs, socat)
-wtmpdb
-libpam-wtmpdb
+wtmpdb @resolute
+libpam-wtmpdb @resolute
 sysstat
 atop
 iotop-c

@@ -1,0 +1,282 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
+	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
+)
+
+// osImage is an operating system image the storage offers.
+type osImage struct {
+	Name    string
+	Version string
+	Kernel  string
+}
+
+// knownImages are tried when the storage publishes no os/index.json.
+var knownImages = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04"}
+
+// osImages lists the images of the storage: the names from
+// os/index.json (or the known ones that answer), with the version and
+// kernel of each from its amd64 manifest.
+func (a *app) osImages(ctx context.Context, storage string) []osImage {
+	var names []string
+	if data, err := a.fetch(ctx, storage+"/os/index.json"); err == nil {
+		var index struct {
+			Images []string `json:"images"`
+		}
+		if json.Unmarshal(data, &index) == nil {
+			names = index.Images
+		}
+	}
+	probe := names == nil
+	if probe {
+		names = knownImages
+	}
+	var images []osImage
+	for _, n := range names {
+		img := osImage{Name: n}
+		data, err := a.fetch(ctx, storage+"/os/"+n+"/amd64/manifest.json")
+		if err != nil && probe {
+			continue
+		}
+		if err == nil {
+			var m struct {
+				Version string `json:"version"`
+				Kernel  string `json:"kernel"`
+			}
+			if json.Unmarshal(data, &m) == nil {
+				img.Version, img.Kernel = m.Version, m.Kernel
+			}
+		}
+		images = append(images, img)
+	}
+	return images
+}
+
+func (i osImage) String() string {
+	s := i.Name
+	var details []string
+	if i.Kernel != "" {
+		details = append(details, "kernel "+strings.TrimSuffix(i.Kernel, "-generic"))
+	}
+	if i.Version != "" {
+		details = append(details, "built "+i.Version)
+	}
+	if len(details) > 0 {
+		s += "  (" + strings.Join(details, ", ") + ")"
+	}
+	return s
+}
+
+// profileWizard asks what a new profile should hold and writes it:
+// the image, the layout, the firewall, the administrator and the keys,
+// the kernel switches, the time zone, packages, the interface names and
+// the provision step. The defaults are those of the default profile.
+func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error {
+	ctx := cmd.Context()
+	cfg, _, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	storage := cfg.StorageURL()
+	if name == "" {
+		for {
+			if name, err = ui.Line("Name of the new profile", ""); err != nil {
+				return err
+			}
+			if err := config.ValidateAccountName(name); err != nil {
+				ui.Printf("%v\n", err)
+				continue
+			}
+			if _, err := os.Stat(profilePath(name)); err == nil {
+				ui.Printf("profile %s exists already\n", name)
+				continue
+			}
+			break
+		}
+	}
+	p := &profile.Profile{Name: name}
+
+	// the image
+	images := a.osImages(ctx, storage)
+	items := make([]string, 0, len(images)+1)
+	def := 0
+	for i, img := range images {
+		items = append(items, img.String())
+		if img.Name == "ubuntu-26.04" {
+			def = i
+		}
+	}
+	items = append(items, "another name")
+	i, err := ui.Choose("Operating system image (from "+storage+"/os/)", items, def)
+	if err != nil {
+		return err
+	}
+	if i < len(images) {
+		p.OS = images[i].Name
+	} else if p.OS, err = ui.Line("Image name (os/<name>/ on the storage)", "ubuntu-26.04"); err != nil {
+		return err
+	}
+
+	// the layout and the firewall, by name
+	layouts, err := a.loadLayouts(ctx, storage)
+	if err != nil {
+		return err
+	}
+	p.Disks.Name, err = chooseNamed(ui, "Disk layout (ump config disk-layout)", layouts, "lvm-linear", func(l *profile.Layout) string { return l.Description })
+	if err != nil {
+		return err
+	}
+	firewalls, err := a.loadFirewalls(ctx, storage)
+	if err != nil {
+		return err
+	}
+	fw, err := chooseNamed(ui, "Firewall (ump config firewall)", firewalls, "default", func(f *profile.Firewall) string { return f.Description })
+	if err != nil {
+		return err
+	}
+	p.Firewall = profile.FirewallRef{Name: fw}
+
+	// the administrator
+	ui.Printf("The administrator is the sudo user ump logs in as; root gets no SSH login unless you add it to the profile later.\n")
+	admin, err := ui.Line("Administrator", "ump")
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(admin, "/") && admin != "" {
+		if err := checkUserName(admin); err != nil {
+			return err
+		}
+	}
+	shells := []string{"/bin/zsh  (oh-my-zsh, theme crunch)", "/bin/bash  (colored prompt, completion)"}
+	si, err := ui.Choose("Shell of "+admin, shells, 0)
+	if err != nil {
+		return err
+	}
+	shell := strings.Fields(shells[si])[0]
+	keys, err := ui.Line("Keys of "+admin+" (ump: UMP's own; local: your ~/.ssh/id_*.pub; agent: ssh-add -L; a file; comma-separated)", "ump, local")
+	if err != nil {
+		return err
+	}
+	p.Users = []profile.User{{Name: admin, Sudo: admin != "root", Shell: shell, Keys: splitList(keys)}}
+
+	// the kernel, the time zone, packages, the interfaces, the provision step
+	mit, err := ui.Confirm("CPU vulnerability mitigations on? (they cost performance; mitigations=off otherwise)", false)
+	if err != nil {
+		return err
+	}
+	v6, err := ui.Confirm("IPv6 on? (ipv6.disable=1 otherwise)", false)
+	if err != nil {
+		return err
+	}
+	p.Kernel = profile.Kernel{Mitigations: &mit, IPv6: &v6}
+	if p.Timezone, err = ui.Line("Time zone", "UTC"); err != nil {
+		return err
+	}
+	pkgs, err := ui.Line("Extra Ubuntu packages (comma-separated, none by default)", "")
+	if err != nil {
+		return err
+	}
+	p.Packages = splitList(pkgs)
+	rename, err := ui.Confirm("Uniform interface names (ext01, int01, ... instead of the kernel's)?", true)
+	if err != nil {
+		return err
+	}
+	p.Network.Rename = &rename
+	prov := []string{"none", "ansible-pull  (recorded only; not run yet)", "ansible-bootstrap  (recorded only; not run yet)"}
+	pi, err := ui.Choose("Provision step after the first boot", prov, 0)
+	if err != nil {
+		return err
+	}
+	p.Provision.Type = strings.Fields(prov[pi])[0]
+	if p.Description, err = ui.Line("Description (one line)", ""); err != nil {
+		return err
+	}
+
+	// check it the way an installation would, without resolving keys
+	if _, err := p.Resolve(layouts, firewalls, func(ref string) ([]string, error) {
+		return []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN check"}, nil
+	}); err != nil {
+		return err
+	}
+	text, err := renderProfile(p, a.now().UTC().Format("2006-01-02"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(profilePath(name), []byte(text), 0o600); err != nil {
+		return err
+	}
+	ui.Printf("\n%s", text)
+	ui.Printf("Saved %s. Use it with ump server reinstall NAME --profile %s, or pin it with ump server set NAME --profile %s; ump config os edit %s refines it.\n", config.AbbreviateHome(profilePath(name)), name, name, name)
+	open, err := ui.Confirm("Open it in your editor now?", false)
+	if err != nil || !open {
+		return err
+	}
+	return a.editProfile(cmd, name)
+}
+
+// chooseNamed offers the entries of a named set, with their descriptions.
+func chooseNamed[V any](ui *prompter, label string, set map[string]V, def string, describe func(V) string) (string, error) {
+	names := make([]string, 0, len(set))
+	for n := range set {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	items := make([]string, len(names))
+	d := 0
+	for i, n := range names {
+		items[i] = n
+		if desc := describe(set[n]); desc != "" {
+			items[i] += "  (" + desc + ")"
+		}
+		if n == def {
+			d = i
+		}
+	}
+	i, err := ui.Choose(label, items, d)
+	if err != nil {
+		return "", err
+	}
+	return names[i], nil
+}
+
+func checkUserName(name string) error {
+	p := profile.Profile{Name: "x", OS: "x", Disks: profile.Disks{Name: "x"}, Users: []profile.User{{Name: name, Keys: []string{"ump"}, Sudo: true}}}
+	if err := p.Validate(); err != nil && strings.Contains(err.Error(), "user name") {
+		return fmt.Errorf("user name %q is not valid", name)
+	}
+	return nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// renderProfile writes a profile as YAML with a short header.
+func renderProfile(p *profile.Profile, date string) (string, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Profile %s, made by ump config os create on %s; profiles/README.md\n# describes the fields, ump config os edit %s opens this file.\n", p.Name, date, p.Name)
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(p); err != nil {
+		return "", err
+	}
+	enc.Close()
+	return b.String(), nil
+}

@@ -452,7 +452,9 @@ format() { # format DEV FS LABEL
 	local l=()
 	case "$2" in
 	efi|vfat) [ -n "$3" ] && l=(-n "$3"); mkfs.vfat -F 32 "${l[@]}" "$1" >/dev/null ;;
-	ext4) [ -n "$3" ] && l=(-L "$3"); mkfs.ext4 -q -F "${l[@]}" "$1" ;;
+	# without orphan_file and metadata_csum_seed, which a current mkfs.ext4
+	# turns on and the GRUB of older releases (Ubuntu 22.04) cannot read
+	ext4) [ -n "$3" ] && l=(-L "$3"); mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed "${l[@]}" "$1" ;;
 	xfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.xfs >/dev/null || die "mkfs.xfs is missing"; mkfs.xfs -f -q "${l[@]}" "$1" ;;
 	btrfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.btrfs >/dev/null || die "mkfs.btrfs is missing"; mkfs.btrfs -f -q "${l[@]}" "$1" >/dev/null ;;
 	swap) [ -n "$3" ] && l=(-L "$3"); mkswap -f "${l[@]}" "$1" >/dev/null ;;
@@ -708,13 +710,15 @@ if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
 	log "firewall: input drop, allowing $(jq -r '[.firewall.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)" end] | join(", ")' <<< "$spec"); the same for connections forwarded in from outside (containers' published ports)"
 	ext=""; for i in "${!IF_MAC[@]}"; do [ "${IF_KIND[$i]}" = ext ] && ext="${ext:+$ext, }\"${IF_NAME[$i]}\""; done
 	# the allowed entries, for the input chain (dport) and for the forward
+	# chain; ICMPv6 is protocol 58, by number because an older nft resolves
+	# the name through /etc/protocols only
 	# chain, where the destination port is the container's after the DNAT
 	# of a published port, so the original one is matched
 	allow() { # allow input|forward
 		if [ "$1" = input ]; then
-			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
 		else
-			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto ipv6-icmp accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + "meta l4proto " + .proto + " ct original proto-dst " + .port + " accept" end' <<< "$spec"
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + "meta l4proto " + .proto + " ct original proto-dst " + .port + " accept" end' <<< "$spec"
 		fi
 	}
 	{

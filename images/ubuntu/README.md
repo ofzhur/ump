@@ -1,6 +1,7 @@
 # The UMP Ubuntu base image
 
-A complete Ubuntu 26.04 LTS server system as a root file system archive,
+A complete Ubuntu LTS server system (26.04 by default; 24.04 and 22.04
+are built the same way) as a root file system archive,
 with the generic kernel and its firmware, LVM, netplan, SSH and the tools
 a server needs, plus the UMP defaults that do not depend on the machine.
 [`ump server reinstall`](../../docs/cli.md#install-ump-server-reinstall) unpacks it
@@ -11,8 +12,9 @@ machine. One archive per architecture, `amd64` and `arm64`.
 ## Building
 
 ```console
-$ make os-image                      # images/ubuntu/out/amd64/ and out/arm64/
-$ make os-image OS_ARCH=arm64        # one architecture
+$ make os-image                                   # ubuntu-26.04: images/ubuntu/out/ubuntu-26.04/{amd64,arm64}/
+$ make os-image OS_ARCH=arm64                     # one architecture
+$ make os-image OS_LIST="ubuntu-24.04 ubuntu-22.04"   # the other releases (noble, jammy)
 ```
 
 [`build.sh`](build.sh) runs as root in a privileged `debian:trixie`
@@ -22,7 +24,10 @@ bootstraps Ubuntu `resolute` from the archive with the packages of
 the architecture, copies [`overlay/`](overlay) in and runs
 [`finish.sh`](finish.sh) inside. The other architecture is built from the
 same container through `qemu-user-static`, which takes several times as
-long. The result:
+long. A line of `packages.txt` may end with `@suite,suite` (those
+releases only) or `!suite` (all but that one): `wtmpdb` exists from
+26.04 on, `systemd-resolved` as a package from 24.04 on. The result,
+per release and architecture:
 
 | File | What it is |
 |---|---|
@@ -77,7 +82,8 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   self-update; `git -C /usr/share/oh-my-zsh pull` as root updates it).
   Both are in `/root` too; the profile picks each user's shell.
 - **History:** `last` and `last reboot` work from the first boot
-  (`wtmpdb`, with its PAM module recording logins); `sar` has the load,
+  (`wtmpdb` on 26.04, with its PAM module recording logins; the classic
+  `wtmp` on the older releases); `sar` has the load,
   memory, disk and network history every 10 minutes (`sysstat`, enabled),
   and `atop -r` the per-process history (`atop`, logging to
   `/var/log/atop`).

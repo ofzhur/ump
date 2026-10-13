@@ -58,7 +58,7 @@ ump
 │   ├── os                                             interactive wizard over the profiles
 │   │   ├── list                                       the profiles in ~/.config/ump/profiles
 │   │   ├── get      <name>                            print one
-│   │   ├── create   <name> [--from <name>]            copy one and open it in your editor
+│   │   ├── create   <name> [--from <name>]            guided on a terminal (image, layout, firewall, users, ...); --from copies one
 │   │   ├── edit     <name>                            your editor, then a check
 │   │   ├── delete   <name> [--yes]
 │   │   └── update                                     refresh the published files; edited ones are kept
@@ -462,11 +462,15 @@ without a subcommand, and the subcommands for the non-interactive forms.
 `ump config os` is the [profiles](profiles.md): the first run
 downloads the published default profile, layouts and firewalls into
 `~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
-`create NAME` copies one (`--from`, default `default`) and opens it in
+`create NAME` asks on a terminal what the profile should hold (the
+image, from the storage's `os/index.json`; the disk layout; the
+firewall; the administrator with shell and keys; the kernel switches;
+the time zone; packages; the interface names; the provision step) and
+writes it, or with `--from NAME` copies another profile and opens it in
 your editor, `edit NAME` opens it and checks it afterwards (an invalid
 profile is kept, with the problem named), `delete NAME` removes it,
-`update` fetches the published `default.yaml`, `layouts.yaml` and
-`firewalls.yaml` again (a file still as published is replaced, one you
+`update` fetches the published profiles (`default`, `ubuntu-24.04`,
+`ubuntu-22.04`), `layouts.yaml` and `firewalls.yaml` again (a file still as published is replaced, one you
 edited is kept with the new version next to it in `.published/`), and
 without a subcommand it is a small wizard over these. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with

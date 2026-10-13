@@ -1,0 +1,49 @@
+# The default profile for Ubuntu 22.04: as default.yaml, with that image.
+#
+# ump server reinstall NAME --profile ubuntu-22.04 takes it (or ump server set NAME
+# --profile ubuntu-22.04 pins it to a server); a
+# file of the same name in ~/.config/ump/profiles/ wins over the published
+# one, so copy this file there and make it yours. Every field is described
+# in profiles/README.md.
+name: ubuntu-22.04
+description: Ubuntu 22.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+
+os: ubuntu-22.04
+timezone: UTC
+
+kernel:
+  mitigations: false   # the CPU vulnerability mitigations (mitigations=off when false); they cost performance
+  ipv6: false          # IPv6 (ipv6.disable=1 when false); turn it on when the server needs it
+  extra: ""            # anything else for the kernel command line
+
+# a layout from layouts.yaml (lvm-linear, lvm-striped, lvm-raid1, lvm-example), or an inline one
+disks: lvm-linear
+
+users:
+  # The administrator: ump logs in as this user afterwards (ump ssh), and
+  # so do you. Rename it or add yours; root keeps no SSH login unless it is
+  # listed here with keys (it stays the user of the rescue system).
+  - name: ump
+    sudo: true          # member of sudo, without a password (no passwords are set)
+    shell: /bin/zsh     # zsh with oh-my-zsh (theme crunch); /bin/bash is there too, with colors
+    keys: [ump, local]  # ump: UMP's own key; local: the public keys next to your ~/.ssh/id_* files;
+                        # agent: every key your ssh-agent holds; a file path; or a key line itself
+  # - name: ops
+  #   sudo: true
+  #   groups: [adm]
+  #   keys: [local, ~/.ssh/ops.pub]
+  # - name: root        # root over SSH, with keys only
+  #   keys: [ump, local]
+
+packages: []            # more Ubuntu packages, installed from the archive at installation
+
+# a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
+firewall: default
+
+provision:
+  type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
+                        # recorded in /etc/ump/install, not run yet
+
+network:
+  rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
+                        # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)

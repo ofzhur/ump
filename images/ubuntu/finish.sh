@@ -41,7 +41,10 @@ printf 'LANG=C.UTF-8\n' > /etc/default/locale
 # the boot and login records of last (wtmpdb); the activity history of
 # sar (sysstat, every 10 minutes) and atop (every 10 minutes, /var/log/atop)
 systemctl enable systemd-networkd.service systemd-resolved.service systemd-timesyncd.service ssh.service tuned.service >/dev/null
-systemctl enable wtmpdb-update-boot.service sysstat.service sysstat-collect.timer sysstat-summary.timer atop.service atop-rotate.timer >/dev/null
+for u in wtmpdb-update-boot.service sysstat.service sysstat-collect.timer sysstat-summary.timer atop.service atop-rotate.timer; do
+	[ -f "/usr/lib/systemd/system/$u" ] || [ -f "/lib/systemd/system/$u" ] || continue   # not every release has them all
+	systemctl enable "$u" >/dev/null
+done
 sed -i 's/^ENABLED=.*/ENABLED="true"/' /etc/default/sysstat
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 

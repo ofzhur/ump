@@ -11,6 +11,7 @@ reinstall NAME` works with the published `default` out of the box.
 | File | What it holds | Documentation |
 |---|---|---|
 | [`default.yaml`](default.yaml) | the `default` profile: Ubuntu 26.04 on every disk as one linear volume group, the sudo user `ump` with your keys, ICMP and SSH open | [OS profiles](../docs/profiles.md) |
+| [`ubuntu-24.04.yaml`](ubuntu-24.04.yaml), [`ubuntu-22.04.yaml`](ubuntu-22.04.yaml) | the same profile with the Ubuntu 24.04 and 22.04 images | [Choosing the operating system](../docs/profiles.md#choosing-the-operating-system) |
 | [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 

@@ -19,12 +19,15 @@ Profiles are files in the profiles directory next to the configuration,
 set), one `NAME.yaml` per profile, plus `layouts.yaml` with the named
 disk layouts and `firewalls.yaml` with the named firewalls. The first
 command that needs the directory creates it and downloads the published
-[`default.yaml`](../profiles/default.yaml),
+[`default.yaml`](../profiles/default.yaml) (with
+[`ubuntu-24.04.yaml`](../profiles/ubuntu-24.04.yaml) and
+[`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml), the same profile
+for those releases),
 [`layouts.yaml`](../profiles/layouts.yaml) and
 [`firewalls.yaml`](../profiles/firewalls.yaml) from the storage, so that
 there is always something to look at and start from. From then on the
 files are yours: ump never overwrites them on its own. `ump config os
-update` fetches the three published files again when you ask: a file
+update` fetches the published files again when you ask: a file
 still as published is replaced, one you edited is kept, with the new
 published version next to it in `.published/` for you to compare, and
 profiles under other names are never touched.
@@ -98,6 +101,36 @@ To make it yours, edit the copy: `ump config os edit default`. The usual
 first changes are the administrator's name and shell, a second user,
 `kernel.ipv6: true` for servers that need IPv6, and a firewall for the
 server's role.
+
+## Choosing the operating system
+
+The image is the profile's `os` field: the name of a directory under
+`os/` on the storage, which holds one archive per architecture (see
+[the Ubuntu base image](../images/ubuntu/README.md)). The storage
+publishes:
+
+| `os` | Release | Profile published with it |
+|---|---|---|
+| `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `default` |
+| `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` |
+| `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` |
+
+The three published profiles are the same apart from the image, so a
+release is chosen in one of three ways:
+
+- **A profile per release:** `ump server reinstall NAME --profile
+  ubuntu-24.04`, or `ump server set NAME --profile ubuntu-24.04` once,
+  after which every reinstall of that server takes it.
+- **Your own profile:** `ump config os create NAME` asks which image
+  (the list comes from the storage's `os/index.json`), or set `os:` in
+  a copy of `default.yaml`.
+- **For one installation:** `ump server reinstall NAME --os
+  ubuntu-22.04` overrides the profile's image and changes nothing else.
+
+More images come later; [the storage
+layout](../images/rescue/README.md#your-own-storage) says what an image
+directory must hold, and anything that follows it works with any `os`
+name (`ump config os create` takes "another name" for it).
 
 ## Fields
 
@@ -209,13 +242,25 @@ by MAC as before.
 ump config os                              # a small wizard over the commands below, on a terminal
 ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall
 ump config os get NAME                     # print one
-ump config os create NAME [--from NAME]    # copy one (default: default), rename it, open it in your editor
+ump config os create NAME                  # on a terminal: a few questions (below), then the file is written
+ump config os create NAME --from NAME      # copy one instead, rename it, open it in your editor
 ump config os edit NAME                    # your editor ($VISUAL, $EDITOR, else vi), then a check
 ump config os delete NAME [--yes]
-ump config os update                       # refresh default.yaml, layouts.yaml and firewalls.yaml from the storage; edited files are kept
+ump config os update                       # refresh the published profiles, layouts.yaml and firewalls.yaml from the storage; edited files are kept
 ```
 
-`edit` and `create` check the file when the editor returns: the YAML, the
+`create NAME` on a terminal asks, with the default profile's answers
+preselected: the image (listed from the storage with kernel and build
+date, or another name), the disk layout and the firewall by name, the
+administrator with shell (zsh or bash) and keys, the mitigations and
+IPv6 switches, the time zone, extra packages, the interface naming, the
+provision step and a description. It checks the result like an
+installation would, writes the file, prints it and offers your editor.
+`--from NAME` copies a profile instead, and without a terminal that is
+the only form. The same questions are behind "create a profile" in the
+`ump config os` wizard.
+
+`edit` and `create --from` check the file when the editor returns: the YAML, the
 fields, the layout (an inline one, or that the named one exists in
 `layouts.yaml` and is valid), the firewall likewise, and that an
 administrator and keys are there. An invalid profile is kept, with the
