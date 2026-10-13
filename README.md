@@ -150,10 +150,17 @@ own](images/rescue/README.md#your-own-storage).
 - Replacing Terraform for cloud resources. UMP is happy to take over
   instances that something else created.
 
-## Author
+## Author, support and services
 
-Oleg Zhurko <oleg@zhurko.de>
+UMP is made by Oleg Zhurko <oleg@zhurko.de>, a DevOps and infrastructure
+engineer. Issues and pull requests are welcome here. For paid work
+around it, such as setting UMP up for your fleet, a provider or an OS
+image of your own, profiles and the provisioning that follows, or
+running your infrastructure with it, write to the address above.
 
 ## License
 
-To be decided.
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Use it,
+change it, ship it, commercially or not; keep the license and the
+notice with copies, and name your changes. The images it installs stay
+under their own licenses (Ubuntu, Debian and the software in them).

@@ -162,7 +162,10 @@ dedicated servers, cloud VMs and boxes in your own rack.
 Everything happens to servers: ` + "`ump server list`" + ` lists the machines of every
 configured provider account, ` + "`ump server show NAME`" + ` shows one in detail,
 ` + "`ump server reinstall NAME`" + ` installs it the way a profile says, ` + "`ump ssh NAME`" + `
-logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.`,
+logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.
+
+UMP is made by Oleg Zhurko <oleg@zhurko.de>, https://ump.zhurko.de, and
+licensed under the Apache License 2.0.`,
 		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,

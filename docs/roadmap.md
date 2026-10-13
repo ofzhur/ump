@@ -64,4 +64,4 @@ As of October 2026, ump does what the [README](../README.md) and the
   less work to keep current. Possibly both, with the profile choosing.
 - **ZFS.** Popular on bare metal; licensing and distribution support
   differ. Possibly as an optional feature of a Debian or Ubuntu image.
-- **License.** To be decided before the first tagged release.
+- **License.** Apache License 2.0, since v0.3.0.

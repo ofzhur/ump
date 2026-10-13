@@ -1,0 +1,10 @@
+UMP (Unus Mundus Provisioner)
+Copyright 2026 Oleg Zhurko <oleg@zhurko.de>
+https://ump.zhurko.de
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The operating system images UMP builds and publishes (the Ubuntu base
+images, the Debian-based rescue image) and the software in them remain
+under their own licenses; this license covers UMP's code, scripts,
+documentation and the recipes the images are built with.
