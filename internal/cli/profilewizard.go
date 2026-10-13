@@ -147,28 +147,37 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	}
 	p.Firewall = profile.FirewallRef{Name: fw}
 
-	// the administrator
-	ui.Printf("The administrator is the sudo user ump logs in as; root gets no SSH login unless you add it to the profile later.\n")
-	admin, err := ui.Line("Administrator", "ump")
+	// the users, from users.yaml; a new name is defined now and kept there
+	users, err := a.loadUsers(ctx, storage)
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(admin, "/") && admin != "" {
-		if err := checkUserName(admin); err != nil {
+	ui.Printf("Users come from users.yaml (ump config user): %s. The first with sudo is the administrator, the one ump logs in as; root gets no SSH login unless listed.\n", strings.Join(sortedKeys(users), ", "))
+	for {
+		answer, err := ui.Line("Users (comma-separated; a new name is defined next)", "ump")
+		if err != nil {
 			return err
 		}
+		p.Users = nil
+		ok := true
+		for _, n := range splitList(answer) {
+			if _, known := users[n]; !known {
+				u, err := a.defineUser(ui, n)
+				if err != nil {
+					return err
+				}
+				if u == nil {
+					ok = false
+					break
+				}
+				users[n] = u
+			}
+			p.Users = append(p.Users, profile.UserRef{Name: n})
+		}
+		if ok && len(p.Users) > 0 {
+			break
+		}
 	}
-	shells := []string{"/bin/zsh  (oh-my-zsh, theme crunch)", "/bin/bash  (colored prompt, completion)"}
-	si, err := ui.Choose("Shell of "+admin, shells, 0)
-	if err != nil {
-		return err
-	}
-	shell := strings.Fields(shells[si])[0]
-	keys, err := ui.Line("Keys of "+admin+" (ump: UMP's own; local: your ~/.ssh/id_*.pub; agent: ssh-add -L; a file; comma-separated)", "ump, local")
-	if err != nil {
-		return err
-	}
-	p.Users = []profile.User{{Name: admin, Sudo: admin != "root", Shell: shell, Keys: splitList(keys)}}
 
 	// the kernel, the time zone, packages, the interfaces, the provision step
 	mit, err := ui.Confirm("CPU vulnerability mitigations on? (they cost performance; mitigations=off otherwise)", false)
@@ -204,9 +213,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	}
 
 	// check it the way an installation would, without resolving keys
-	if _, err := p.Resolve(layouts, firewalls, func(ref string) ([]string, error) {
-		return []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN check"}, nil
-	}); err != nil {
+	if _, err := p.Resolve(layouts, firewalls, users, checkKeys); err != nil {
 		return err
 	}
 	text, err := renderProfile(p, a.now().UTC().Format("2006-01-02"))
@@ -250,12 +257,55 @@ func chooseNamed[V any](ui *prompter, label string, set map[string]V, def string
 	return names[i], nil
 }
 
-func checkUserName(name string) error {
-	p := profile.Profile{Name: "x", OS: "x", Disks: profile.Disks{Name: "x"}, Users: []profile.User{{Name: name, Keys: []string{"ump"}, Sudo: true}}}
-	if err := p.Validate(); err != nil && strings.Contains(err.Error(), "user name") {
-		return fmt.Errorf("user name %q is not valid", name)
+// defineUser asks what a new user is and adds it to users.yaml; nil
+// when the name is not valid (the caller asks again).
+func (a *app) defineUser(ui *prompter, name string) (*profile.User, error) {
+	u := &profile.User{Name: name}
+	if err := (&profile.User{Name: name, Keys: []string{"ump"}}).Validate(); err != nil {
+		ui.Printf("%v\n", err)
+		return nil, nil
 	}
-	return nil
+	ui.Printf("%s is not in users.yaml yet; defining it now.\n", name)
+	var err error
+	if u.Sudo, err = ui.Confirm(name+": sudo without a password (an administrator)?", true); err != nil {
+		return nil, err
+	}
+	shells := []string{"/bin/zsh  (oh-my-zsh, theme crunch)", "/bin/bash  (colored prompt, completion)"}
+	si, err := ui.Choose("Shell of "+name, shells, 0)
+	if err != nil {
+		return nil, err
+	}
+	u.Shell = strings.Fields(shells[si])[0]
+	keys, err := ui.Line("Keys of "+name+" (ump: UMP's own; local: your ~/.ssh/id_*.pub; agent: ssh-add -L; a name from ump config key; a file; a key line; comma-separated)", "ump, local")
+	if err != nil {
+		return nil, err
+	}
+	u.Keys = splitList(keys)
+	if u.Description, err = ui.Line("Description of "+name+" (one line)", ""); err != nil {
+		return nil, err
+	}
+	if err := addUserToFile(u); err != nil {
+		return nil, err
+	}
+	ui.Printf("Added %s to %s.\n", name, config.AbbreviateHome(usersPath()))
+	return u, nil
+}
+
+// addUserToFile appends a user to users.yaml (which the first run put
+// there), keeping the file's comments.
+func addUserToFile(u *profile.User) error {
+	d, err := userSet.load()
+	if err != nil {
+		return err
+	}
+	entry := *u
+	entry.Name = ""
+	var n yaml.Node
+	if err := n.Encode(entry); err != nil {
+		return err
+	}
+	d.add(u.Name, &n)
+	return d.save()
 }
 
 func splitList(s string) []string {

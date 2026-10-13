@@ -64,12 +64,14 @@ each with its own `ump config` command and a small wizard:
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 
-The first use downloads the published defaults: the `default` profile
-(Ubuntu 26.04 on every disk as one volume group, the sudo user `ump` with
-your keys, ICMP and SSH open), the layouts `lvm-linear`, `lvm-striped`,
-`lvm-raid1` and `lvm-example`, and the firewalls `default`, `web` and
-`open`. They are yours to edit from then on; `ump config os update`
-fetches newer published versions later and keeps the files you changed.
+The first use downloads the published defaults: the profiles
+`ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
+group, the sudo user `ump` with your keys, ICMP and SSH open),
+`ubuntu-24.04` and `ubuntu-22.04`, the layouts `lvm-linear`,
+`lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
+`web` and `open`, and the user `ump`. They are templates: make your own
+from them (`ump config os create`, `ump config user create`, ...), and
+`ump config os update` refreshes the published ones while keeping yours.
 
 ## How an installation works
 

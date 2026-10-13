@@ -11,11 +11,14 @@ the rest is optional.
 ~/.config/ump/
 ├── config.yaml              accounts, storage, UMP's key, per-server settings, output default
 ├── profiles/
-│   ├── default.yaml         the default profile (downloaded on first use, then yours)
+│   ├── ubuntu-26.04.yaml    the published profiles (downloaded on first use; ump config os update replaces them)
+│   ├── ubuntu-24.04.yaml
+│   ├── ubuntu-22.04.yaml
 │   ├── NAME.yaml            your profiles
-│   ├── layouts.yaml         the named disk layouts
+│   ├── layouts.yaml         the named disk layouts: the published ones and yours
 │   ├── firewalls.yaml       the named firewalls
-│   └── .published/          the three files as published, for ump config os update to compare
+│   └── users.yaml           the named users
+├── keys.yaml                the named public keys (ump config key add)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)
 ├── staging_ed25519          UMP's own SSH key, generated on first use
 ├── staging_ed25519.pub
@@ -58,6 +61,8 @@ accounts:                              # written by ump config isp; see docs/pro
 storage: https://ump.zhurko.de         # the base URL everything a server fetches comes from (the default)
 
 updates: true                          # once a day, after a command, say when a newer ump is published (the default)
+default_profile: ubuntu-26.04          # what ump server reinstall takes without --profile and without a profile
+                                       # set for the server; ump config os default NAME changes it
 
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
@@ -137,14 +142,13 @@ provider.
 ## The profiles directory
 
 `~/.config/ump/profiles/` holds the [profiles](profiles.md) as
-`NAME.yaml`, the [disk layouts](disk-layouts.md) in `layouts.yaml` and the
-[firewalls](firewalls.md) in `firewalls.yaml`. The first command that
-needs the directory creates it and downloads the published
-`default.yaml`, `layouts.yaml` and `firewalls.yaml` from the storage; from
-then on the files are yours and never overwritten. A profile, layout or
-firewall is looked up locally first, then on the storage, so the
-published ones remain available until you shadow them with a file of the
-same name. `ump config os update` fetches the three published files
-again: a file still as published is replaced, one you edited is kept and
-the new published version is put next to it in `.published/` for you to
-compare; profiles under other names are never touched.
+`NAME.yaml`, the [disk layouts](disk-layouts.md) in `layouts.yaml`, the
+[firewalls](firewalls.md) in `firewalls.yaml` and the
+[users](profiles.md#users) in `users.yaml`. The first command that
+needs the directory creates it and downloads the published files from
+the storage. The published profiles (`ubuntu-26.04`, `ubuntu-24.04`,
+`ubuntu-22.04`) and the published entries of the named files are
+templates that `ump config os update` replaces; what you create under
+names of your own is yours and never touched. `default_profile` in
+`config.yaml` (set with `ump config os default NAME`) names the profile
+taken when nothing else says which; `ubuntu-26.04` when unset.

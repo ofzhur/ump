@@ -64,7 +64,7 @@ func (a *app) loginUsers(cfg *config.Config, m provider.Machine) []string {
 // the profiles directory (no storage is asked), else of the default one.
 func (a *app) profileAdmin(cfg *config.Config, name string) string {
 	if name == "" {
-		name = "default"
+		name = cfg.DefaultProfileName()
 	}
 	if strings.ContainsAny(name, "/\\") {
 		name = expandHome(name)
@@ -75,7 +75,10 @@ func (a *app) profileAdmin(cfg *config.Config, name string) string {
 	if err != nil {
 		return defaultAdmin
 	}
-	return p.Admin()
+	if u := p.Admin(localUsers()); u != "" {
+		return u
+	}
+	return defaultAdmin
 }
 
 // batchOptions make a non-interactive ssh run fail instead of asking.

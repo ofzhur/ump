@@ -189,7 +189,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		profileName = cfg.Servers[m.Ref()].Profile
 	}
 	if profileName == "" {
-		profileName = "default"
+		profileName = cfg.DefaultProfileName()
 	}
 	prof, from, err := a.loadProfile(ctx, profileName, storage)
 	if err != nil {
@@ -215,8 +215,16 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		t := true
 		prof.Kernel.Mitigations = &t
 	}
+	// the named users, when the profile refers to any (or --ssh-key must
+	// find the administrator)
+	var users map[string]*profile.User
+	if profile.HasUserRefs(prof) {
+		if users, err = a.loadUsers(ctx, storage); err != nil {
+			return err
+		}
+	}
 	if len(o.keyFiles) > 0 {
-		addAdminKeys(prof, o.keyFiles)
+		addAdminKeys(prof, users, o.keyFiles)
 	}
 	if len(o.sets) > 0 {
 		if prof, err = prof.Set(o.sets); err != nil {
@@ -235,7 +243,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return err
 		}
 	}
-	spec, err := prof.Resolve(layouts, firewalls, a.keyResolver(cfg))
+	spec, err := prof.Resolve(layouts, firewalls, users, a.keyResolver(cfg))
 	if err != nil {
 		return err
 	}
@@ -257,11 +265,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return err
 	}
 	// everything on the way is progress (stderr); stdout is for the result
-	users := a.loginUsers(cfg, m)
-	if u := prof.Admin(); u != "" && u != "root" {
-		users = append([]string{"root", u}, users[1:]...)
+	logins := a.loginUsers(cfg, m)
+	if u := prof.Admin(users); u != "" && u != "root" {
+		logins = append([]string{"root", u}, logins[1:]...)
 	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, users: dedupe(users)})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, users: dedupe(logins)})
 	if err != nil {
 		return err
 	}
@@ -444,6 +452,16 @@ func (a *app) keyResolver(cfg *config.Config) profile.KeyResolver {
 		if profile.IsKeyLine(ref) {
 			return []string{ref}, nil
 		}
+		if !strings.ContainsAny(ref, "/~ ") && !strings.HasSuffix(ref, ".pub") {
+			keys, err := namedKeys()
+			if err != nil {
+				return nil, err
+			}
+			if k, ok := keys[ref]; ok {
+				return []string{k}, nil
+			}
+			return nil, fmt.Errorf("not a key reference (ump, local, agent, a named key from ump config key list, a file, or a public key line)")
+		}
 		if strings.HasPrefix(ref, "~") || strings.Contains(ref, "/") || strings.HasSuffix(ref, ".pub") {
 			data, err := os.ReadFile(expandHome(ref))
 			if err != nil {
@@ -451,22 +469,30 @@ func (a *app) keyResolver(cfg *config.Config) profile.KeyResolver {
 			}
 			return strings.Split(string(data), "\n"), nil
 		}
-		return nil, errors.New("not a key reference (ump, local, agent, a file, or a public key line)")
+		return nil, errors.New("not a key reference (ump, local, agent, a named key, a file, or a public key line)")
 	}
 }
 
 // addAdminKeys adds --ssh-key files to the administrator's keys (the
 // first sudo user, else root), or a root user with them when the profile
-// has neither.
-func addAdminKeys(p *profile.Profile, files []string) {
-	admin := p.Admin()
+// has neither. A named administrator becomes an inline copy with the
+// keys added, so that users.yaml stays as it is.
+func addAdminKeys(p *profile.Profile, users map[string]*profile.User, files []string) {
+	admin := p.Admin(users)
 	for i := range p.Users {
-		if p.Users[i].Name == admin {
-			p.Users[i].Keys = append(p.Users[i].Keys, files...)
+		r := &p.Users[i]
+		switch {
+		case r.User != nil && r.User.Name == admin:
+			r.User.Keys = append(r.User.Keys, files...)
+			return
+		case r.User == nil && r.Name == admin && users[admin] != nil:
+			u := *users[admin]
+			u.Keys = append(append([]string{}, u.Keys...), files...)
+			*r = profile.UserRef{User: &u}
 			return
 		}
 	}
-	p.Users = append(p.Users, profile.User{Name: "root", Keys: append([]string{"ump"}, files...)})
+	p.Users = append(p.Users, profile.UserRef{User: &profile.User{Name: "root", Keys: append([]string{"ump"}, files...)}})
 }
 
 // dedupe keeps the first of every repeated string.

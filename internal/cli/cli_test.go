@@ -2145,7 +2145,7 @@ func TestInstallServer(t *testing.T) {
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\n",
 		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
-		"Installing ubuntu-26.04 (profile default from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "default.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
+		"Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "ubuntu-26.04.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
 		"==> installed: ubuntu-26.04 2026.10.12",
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
 		"Waiting for SSH on 203.0.113.10 to go down ...",
@@ -2368,7 +2368,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/default.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml":
+		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2380,7 +2380,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	profilesDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.RemoveAll(profilesDir)
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, the layouts and the firewalls into "+profilesDir+"; they are yours to edit (ump config os).") || !strings.Contains(errOut, "(profile default from "+filepath.Join(profilesDir, "default.yaml")+", layout lvm-striped)") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls and users into "+profilesDir+" (ump config os)") || !strings.Contains(errOut, "(profile ubuntu-26.04 from "+filepath.Join(profilesDir, "ubuntu-26.04.yaml")+", layout lvm-striped)") {
 		t.Errorf("published profile: code %d, %q", code, errOut)
 	}
 	for _, f := range profileFiles {
@@ -2422,7 +2422,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 
 	// the first run downloads the published profile and layouts
 	out, errOut, code := e.run("", false, "config", "os", "list")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, the layouts and the firewalls into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "default ubuntu-26.04 lvm-linear ump default") || !strings.Contains(out, "ubuntu-22.04   ubuntu-22.04") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls and users into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "* ubuntu-26.04 ubuntu-26.04 lvm-linear ump default published") || !strings.Contains(strings.Join(strings.Fields(out), " "), " ubuntu-22.04 ubuntu-22.04 lvm-linear ump default published") || !strings.Contains(out, "* the default (ump config os default NAME changes it)") {
 		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
 	}
 	for _, f := range profileFiles {
@@ -2436,13 +2436,13 @@ func TestConfigOSAndServerSet(t *testing.T) {
 	}
 
 	// get prints the file; create copies it with the name changed and, without a terminal, does not open an editor
-	out, _, code = e.run("", false, "config", "os", "get", "default")
-	if code != 0 || !strings.HasPrefix(out, "# The default profile") {
+	out, _, code = e.run("", false, "config", "os", "get", "ubuntu-26.04")
+	if code != 0 || !strings.HasPrefix(out, "# The profile for Ubuntu 26.04, the default") {
 		t.Errorf("get: code %d\n%s", code, out)
 	}
 	edited := []string{}
 	out, _, code = e.run("", false, "config", "os", "create", "db")
-	if code != 0 || !strings.Contains(out, "Created "+filepath.Join(dir, "db.yaml")+" from default.") || len(edited) != 0 {
+	if code != 0 || !strings.Contains(out, "Created "+filepath.Join(dir, "db.yaml")+" from ubuntu-26.04.") || len(edited) != 0 {
 		t.Errorf("create: code %d\n%s", code, out)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "db.yaml"))
@@ -2497,8 +2497,8 @@ func TestConfigOSAndServerSet(t *testing.T) {
 	if code != 0 || !strings.Contains(errOut, "(profile db from "+filepath.Join(dir, "db.yaml")+", layout lvm-raid1)") {
 		t.Errorf("reinstall with the set profile: code %d, %q", code, errOut)
 	}
-	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "default", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "(profile default from ") {
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "ubuntu-26.04", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "(profile ubuntu-26.04 from ") {
 		t.Errorf("--profile wins: code %d, %q", code, errOut)
 	}
 	out, _, code = e.run("", false, "server", "set", "web-01", "--clear", "--account", "one")
@@ -2872,42 +2872,70 @@ func TestConfigOSUpdate(t *testing.T) {
 	e.write(testConfig + "storage: " + srv.URL + "\n")
 	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 
-	// the first run downloads and keeps the published copies
 	if _, _, code := e.run("", false, "config", "os", "list"); code != 0 {
 		t.Fatal("first list failed")
 	}
-	if data, err := os.ReadFile(filepath.Join(dir, ".published", "layouts.yaml")); err != nil || string(data) != published["layouts.yaml"] {
-		t.Errorf("published copy: %v", err)
-	}
-	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "default.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\nlayouts.yaml: up to date\nfirewalls.yaml: up to date\n") {
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nusers.yaml: updated\n") {
 		t.Errorf("update when current: code %d\n%s", code, out)
 	}
 
-	// the user edits the default profile; new versions of everything are
-	// published: the edited file is kept, the others replaced
-	os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(published["default.yaml"]+"packages: [htop]\n"), 0o600)
-	os.WriteFile(filepath.Join(dir, "mine.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [ump]}\n"), 0o600)
+	// a published profile is not for editing; the user's own profile and
+	// entries survive an update, a changed published profile is replaced
+	if _, errOut, code := e.run("", false, "config", "os", "edit", "ubuntu-24.04"); code != 1 || !strings.Contains(errOut, "ubuntu-24.04 is a published profile, which ump config os update replaces; make your own from it: ump config os create NAME --from ubuntu-24.04") {
+		t.Errorf("edit of a published profile: code %d, %q", code, errOut)
+	}
+	os.WriteFile(filepath.Join(dir, "ubuntu-26.04.yaml"), []byte(published["ubuntu-26.04.yaml"]+"packages: [htop]\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "mine.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	if _, _, code := e.run("", false, "config", "dl", "create", "mine", "--from", "lvm-linear"); code != 0 {
+		t.Fatal("layout create failed")
+	}
+	if _, _, code := e.run("", false, "config", "user", "create", "ops", "--from", "ump"); code != 0 {
+		t.Fatal("user create failed")
+	}
 	for name := range published {
 		published[name] += "# newer\n"
 	}
 	out, _, code := e.run("", false, "config", "os", "update")
-	if code != 0 || !strings.Contains(out, "default.yaml: you changed it, so it is kept; the new published version is "+filepath.Join(dir, ".published", "default.yaml")) || !strings.Contains(out, "layouts.yaml: updated\nfirewalls.yaml: updated\n") {
+	if code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: updated\n") || !strings.Contains(out, "layouts.yaml: updated; your layouts kept: mine\n") || !strings.Contains(out, "users.yaml: updated; your users kept: ops\n") || !strings.Contains(out, "firewalls.yaml: updated\n") {
 		t.Errorf("update: code %d\n%s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(dir, "default.yaml")); !strings.HasSuffix(string(data), "packages: [htop]\n") {
-		t.Errorf("the edited profile was replaced:\n%s", data)
-	}
-	if data, _ := os.ReadFile(filepath.Join(dir, "layouts.yaml")); string(data) != published["layouts.yaml"] {
-		t.Error("layouts.yaml was not replaced")
-	}
-	if data, _ := os.ReadFile(filepath.Join(dir, ".published", "default.yaml")); string(data) != published["default.yaml"] {
-		t.Error("the new published default.yaml was not kept aside")
+	if data, _ := os.ReadFile(filepath.Join(dir, "ubuntu-26.04.yaml")); string(data) != published["ubuntu-26.04.yaml"] {
+		t.Errorf("the published profile was not replaced:\n%s", data)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mine.yaml")); err != nil {
 		t.Error("mine.yaml was touched")
 	}
-	if out, _, _ := e.run("", false, "config", "os", "list"); !strings.Contains(out, "mine") || strings.Contains(out, ".published") {
+	data, _ := os.ReadFile(filepath.Join(dir, "layouts.yaml"))
+	if !strings.Contains(string(data), "# newer") || !strings.Contains(string(data), "\n  mine:\n") || !strings.Contains(string(data), "\n  lvm-linear:\n") {
+		t.Errorf("layouts.yaml after update:\n%s", data)
+	}
+	if out, _, _ := e.run("", false, "config", "user", "list", "--no-headers"); !strings.Contains(out, "ops") || !strings.Contains(out, "ump") {
+		t.Errorf("users after update:\n%s", out)
+	}
+	if out, _, _ := e.run("", false, "config", "os", "list"); !strings.Contains(out, "mine") || strings.Contains(out, "users") {
 		t.Errorf("list after update:\n%s", out)
+	}
+
+	// the default profile can be changed, and is marked
+	if out, _, code := e.run("", false, "config", "os", "default"); code != 0 || out != "ubuntu-26.04\n" {
+		t.Errorf("default: code %d, %q", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "os", "default", "mine"); code != 0 || !strings.Contains(out, "The default profile is mine now") {
+		t.Errorf("set default: code %d, %q", code, out)
+	}
+	if out, _, _ := e.run("", false, "config", "os", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "* mine ubuntu-26.04") || strings.Contains(strings.Join(strings.Fields(out), " "), "* ubuntu-26.04") {
+		t.Errorf("list with the new default:\n%s", out)
+	}
+	if !strings.Contains(e.read(), "default_profile: mine\n") {
+		t.Errorf("config after default:\n%s", e.read())
+	}
+	if _, errOut, code := e.run("", false, "config", "os", "default", "nope"); code != 1 || !strings.Contains(errOut, `no profile "nope"`) {
+		t.Errorf("default to a missing profile: code %d, %q", code, errOut)
+	}
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 || !strings.Contains(errOut, "(profile mine from ") {
+		t.Errorf("reinstall takes the new default: code %d, %q", code, errOut)
 	}
 }
 
@@ -2939,14 +2967,14 @@ func TestProfileWizard(t *testing.T) {
 	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, two
 	// packages, renamed interfaces, no provision step, a description, no
 	// editor
-	script := "2\n\nweb\n\n2\nump\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
+	script := "2\n\nweb\nump, ops\ny\n2\nump\nOps people\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
 	out, errOut, code := e.run(script, true, "config", "os", "create", "web")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
 	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
-		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Administrator [ump]:",
-		"Shell of ump", "Keys of ump", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Extra Ubuntu packages", "Uniform interface names", "Provision step", "Description",
+		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Users come from users.yaml (ump config user): ump.",
+		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Extra Ubuntu packages", "Uniform interface names", "Provision step", "Description",
 		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, errOut)
@@ -2958,14 +2986,20 @@ func TestProfileWizard(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{"# Profile web, made by ump config os create on 2026-10-12", "name: web\n", "description: Web servers\n", "os: ubuntu-24.04\n", "timezone: UTC\n",
-		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - name: ump\n    sudo: true\n    shell: /bin/bash\n    keys:\n      - ump\n",
+		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - ump\n  - ops\n",
 		"packages:\n  - htop\n  - nginx\n", "firewall: web\n", "provision:\n  type: none\n", "network:\n  rename: true\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("profile lacks %q:\n%s", want, text)
 		}
 	}
-	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump web Web servers") {
+	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump,ops web yours Web servers") {
 		t.Errorf("list: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "user", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "ops yes /bin/bash ump ok Ops people") {
+		t.Errorf("user list: code %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "users.yaml")); !strings.Contains(string(data), "# Named users") || !strings.Contains(string(data), "\n  ops:\n") {
+		t.Errorf("users.yaml after the wizard:\n%s", data)
 	}
 	// the profile installs: the spec carries the choices
 	e.directRoot = true
@@ -2977,9 +3011,12 @@ func TestProfileWizard(t *testing.T) {
 	if spec["os"] != "ubuntu-24.04" || spec["kernel"].(map[string]any)["ipv6"] != true || spec["firewall"].(map[string]any)["name"] != "web" || len(spec["packages"].([]any)) != 2 {
 		t.Errorf("spec: %v", spec)
 	}
+	if users := spec["users"].([]any); len(users) != 2 || users[0].(map[string]any)["name"] != "ump" || users[1].(map[string]any)["name"] != "ops" || users[1].(map[string]any)["shell"] != "/bin/bash" {
+		t.Errorf("spec users: %v", spec["users"])
+	}
 
 	// another name for the image, and the copy with --from stays
-	script = "4\ndebian-13\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+	script = "4\ndebian-13\n\n\n\n\n\n\n\n\n\n\n\n"
 	if _, errOut, code := e.run(script, true, "config", "os", "create", "deb"); code != 0 || !strings.Contains(errOut, "Image name (os/<name>/ on the storage) [ubuntu-26.04]:") {
 		t.Errorf("another image: code %d\n%s", code, errOut)
 	}
@@ -3001,7 +3038,7 @@ func TestReinstallSet(t *testing.T) {
 	e.directRoot = true
 	resetFakePower()
 	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one",
-		"--set", "kernel.extra=quiet", "--set", "users[ump].shell=/bin/bash", "--set", "packages=[htop, nginx]", "--set", "network.rename=false")
+		"--set", "kernel.extra=quiet", "--set", "users[0]={name: ump, sudo: true, keys: [ump]}", "--set", "users[ump].shell=/bin/bash", "--set", "packages=[htop, nginx]", "--set", "network.rename=false")
 	if code != 0 {
 		t.Fatalf("reinstall --set: code %d, %q", code, errOut)
 	}
@@ -3011,5 +3048,69 @@ func TestReinstallSet(t *testing.T) {
 	}
 	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--set", "kernel.colour=blue"); code != 2 || !strings.Contains(errOut, "field colour not found") {
 		t.Errorf("unknown field: code %d, %q", code, errOut)
+	}
+}
+
+func TestConfigKeyNamed(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")
+	const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN oleg@laptop"
+	pub := filepath.Join(dir, "work.pub")
+	os.WriteFile(pub, []byte("# two keys\n"+line+"\n"+strings.Replace(line, "laptop", "desk", 1)+"\n"), 0o600)
+
+	if out, _, code := e.run("", false, "config", "key", "add", "laptop", "--line", line); code != 0 || !strings.Contains(out, "Added the key laptop (ssh-ed25519 oleg@laptop).") {
+		t.Errorf("add --line: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "key", "add", "work", "--file", pub); code != 0 || !strings.Contains(out, "Added the key work (ssh-ed25519 oleg@laptop).\nAdded the key work-2 (ssh-ed25519 oleg@desk).") {
+		t.Errorf("add --file: code %d\n%s", code, out)
+	}
+	e.agentKeys = []string{line}
+	if out, _, code := e.run("", false, "config", "key", "add", "agent-key", "--agent"); code != 0 || !strings.Contains(out, "Added the key agent-key") {
+		t.Errorf("add --agent: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "add", "laptop", "--line", line); code != 1 || !strings.Contains(errOut, "key laptop exists already") {
+		t.Errorf("add twice: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "add", "ump", "--line", line); code != 2 || !strings.Contains(errOut, "not ump, local or agent") {
+		t.Errorf("reserved name: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "add", "bad", "--line", "not a key"); code != 1 || !strings.Contains(errOut, "is not a public key line") {
+		t.Errorf("bad line: code %d, %q", code, errOut)
+	}
+	out, _, code := e.run("", false, "config", "key", "list")
+	flat := strings.Join(strings.Fields(out), " ")
+	if code != 0 || !strings.Contains(flat, "NAME TYPE COMMENT FINGERPRINT NOTE ump ssh-ed25519") || !strings.Contains(flat, "laptop ssh-ed25519 oleg@laptop SHA256:") || !strings.Contains(flat, "work-2 ssh-ed25519 oleg@desk") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "keys.yaml")); !strings.Contains(string(data), "  laptop: "+line+"\n") {
+		t.Errorf("keys.yaml:\n%s", data)
+	}
+
+	// a user names the keys; the spec carries the lines
+	os.WriteFile(filepath.Join(dir, "profiles", "p.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, sudo: true, keys: [laptop, work-2, ump]}\n"), 0o600)
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--account", "one"); code != 0 {
+		t.Fatalf("reinstall with named keys: code %d, %q", code, errOut)
+	}
+	keys := e.lastSpec()["users"].([]any)[0].(map[string]any)["keys"].([]any)
+	if len(keys) != 3 || keys[0] != line || !strings.HasSuffix(keys[1].(string), "oleg@desk") {
+		t.Errorf("spec keys: %v", keys)
+	}
+	os.WriteFile(filepath.Join(dir, "profiles", "p.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, sudo: true, keys: [nothing]}\n"), 0o600)
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--profile", "p", "--account", "one"); code != 1 || !strings.Contains(errOut, `key "nothing": not a key reference (ump, local, agent, a named key from ump config key list, a file, or a public key line)`) {
+		t.Errorf("unknown key name: code %d, %q", code, errOut)
+	}
+
+	if out, _, code := e.run("", false, "config", "key", "remove", "work-2"); code != 0 || !strings.Contains(out, "Removed the key work-2.") {
+		t.Errorf("remove: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "remove", "work-2"); code != 1 || !strings.Contains(errOut, `no key "work-2"`) {
+		t.Errorf("remove twice: code %d, %q", code, errOut)
+	}
+	if out, _, _ := e.run("", false, "config", "key"); !strings.Contains(out, "Public key:   ssh-ed25519") {
+		t.Errorf("plain key: %q", out)
 	}
 }

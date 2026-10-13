@@ -61,7 +61,8 @@ ump
 │   │   ├── create   <name> [--from <name>]            guided on a terminal (image, layout, firewall, users, ...); --from copies one
 │   │   ├── edit     <name>                            your editor, then a check
 │   │   ├── delete   <name> [--yes]
-│   │   └── update                                     refresh the published files; edited ones are kept
+│   │   ├── update                                     refresh the published profiles and entries; yours are kept
+│   │   └── default  [<name>]                          show or set the default profile
 │   ├── disk-layout (dl)                               interactive wizard over the named layouts of layouts.yaml
 │   │   ├── list                                       the layouts, with their parts and whether they are valid
 │   │   ├── get      <name>                            print one
@@ -74,8 +75,17 @@ ump
 │   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
 │   │   ├── edit     [<name>]                          your editor on firewalls.yaml, then a check of every firewall
 │   │   └── delete   <name> [--yes]
+│   ├── user (u)                                       interactive wizard over the named users of users.yaml
+│   │   ├── list                                       the users, with sudo, shell, keys
+│   │   ├── get      <name>                            print one
+│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── edit     [<name>]                          your editor on users.yaml, then a check of every user
+│   │   └── delete   <name> [--yes]
 │   ├── path                                           where the configuration lives
 │   └── key      [-o json|yaml]                        UMP's own SSH public key (generated on first use)
+│       ├── list                                       ump and the named keys, with fingerprints
+│       ├── add      <name> (--file <f>|--line <l>|--agent)   keep a public key under a name
+│       └── remove   <name>
 ├── completion
 └── version
 ```
@@ -454,28 +464,33 @@ keys and a returned password.
 
 ```
 ump config isp         [view|types|add|remove|test]
-ump config os          [list|get|create|edit|delete|update]
+ump config os          [list|get|create|edit|delete|update|default]
 ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
 ump config firewall    [list|get|create|edit|delete]      (alias: fw)
-ump config path | key
+ump config user        [list|get|create|edit|delete]      (alias: u)
+ump config key         [list|add|remove]
+ump config path
 ```
 
 `ump config isp` is the [provider accounts](providers.md): the wizard
 without a subcommand, and the subcommands for the non-interactive forms.
 `ump config os` is the [profiles](profiles.md): the first run
-downloads the published default profile, layouts and firewalls into
-`~/.config/ump/profiles`, `list` shows what is there, `get` prints one,
+downloads the published profiles, layouts, firewalls and users into
+`~/.config/ump/profiles`, `list` shows what is there (the default marked
+with `*`, and whether each is published or yours), `get` prints one,
 `create NAME` asks on a terminal what the profile should hold (the
 image, from the storage's `os/index.json`; the disk layout; the
-firewall; the administrator with shell and keys; the kernel switches;
-the time zone; packages; the interface names; the provision step) and
-writes it, or with `--from NAME` copies another profile and opens it in
-your editor, `edit NAME` opens it and checks it afterwards (an invalid
-profile is kept, with the problem named), `delete NAME` removes it,
-`update` fetches the published profiles (`default`, `ubuntu-24.04`,
-`ubuntu-22.04`), `layouts.yaml` and `firewalls.yaml` again (a file still as published is replaced, one you
-edited is kept with the new version next to it in `.published/`), and
-without a subcommand it is a small wizard over these. `ump server set
+firewall; the users from `users.yaml`, a new one defined on the spot;
+the kernel switches; the time zone; packages; the interface names; the
+provision step) and writes it, or with `--from NAME` copies another
+profile and opens it in your editor, `edit NAME` opens it and checks it
+afterwards (an invalid profile is kept, with the problem named; a
+published profile is refused, make your own from it), `delete NAME`
+removes it, `update` fetches the published profiles (`ubuntu-26.04`,
+`ubuntu-24.04`, `ubuntu-22.04`) and the published entries of
+`layouts.yaml`, `firewalls.yaml` and `users.yaml` again, replacing them
+and keeping yours, `default [NAME]` shows or sets the default profile,
+and without a subcommand it is a small wizard over these. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with
 (`servers:` in the configuration file), `--clear` forgets it.
 `ump config disk-layout` (`dl`) is the same for the named [disk
@@ -487,7 +502,10 @@ every layout afterwards, `delete` removes one. `ump config firewall`
 (`fw`) is the same for the named [firewalls](firewalls.md) in
 `firewalls.yaml` (`default`: ICMP and SSH; `web`: plus HTTP and HTTPS;
 `open`: none), which a profile names in its `firewall` field; `ump
-server reinstall --firewall NAME` picks one for an installation.
+server reinstall --firewall NAME` picks one for an installation. `ump
+config user` (`u`) is the same for the named [users](profiles.md#users)
+in `users.yaml` (`ump`, the administrator UMP provides), which a
+profile lists by name in `users`.
 
 Without a subcommand, `ump config isp` is an interactive wizard: it asks for
 the provider type, an account name and the credentials, asks where the
@@ -517,7 +535,12 @@ path set as `staging.key` in the configuration. It is what rescue
 systems and installed systems are reached with, so it works whatever
 personal keys are around. `ump config key` prints the public key and its
 fingerprints (`-o json` for scripts); put the public key wherever UMP
-should be able to log in.
+should be able to log in. The subcommands keep more public keys under
+names in `~/.config/ump/keys.yaml`, for the `keys` of
+[users](profiles.md#keys): `add NAME --file FILE` (every key line of the
+file; a second one becomes `NAME-2`), `add NAME --line 'ssh-... AAAA...'`,
+`add NAME --agent` (what `ssh-add -L` lists), `list` (with `ump`, UMP's
+own) and `remove NAME`. The names `ump`, `local` and `agent` are taken.
 
 ## Examples
 

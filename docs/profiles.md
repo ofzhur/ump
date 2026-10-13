@@ -8,29 +8,41 @@ happens after the first boot. It is one YAML file per profile.
 
 ```console
 $ ump config os list
-NAME      OS             DISKS        USERS   FIREWALL   DESCRIPTION
-default   ubuntu-26.04   lvm-linear   ump     default    Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+    NAME           OS             DISKS        USERS   FIREWALL   FROM        DESCRIPTION
+*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump     default    published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump     default    published   Ubuntu 24.04 on every disk ...
+    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump     default    published   Ubuntu 22.04 on every disk ...
+    web            ubuntu-26.04   lvm-raid1    ump,ops web        yours       Web servers
+* the default (ump config os default NAME changes it); published profiles are replaced by ump config os update, make your own with ump config os create NAME --from ubuntu-26.04
 ```
 
 ## Where profiles live
 
 Profiles are files in the profiles directory next to the configuration,
 `~/.config/ump/profiles/` (`$XDG_CONFIG_HOME/ump/profiles/` when that is
-set), one `NAME.yaml` per profile, plus `layouts.yaml` with the named
-disk layouts and `firewalls.yaml` with the named firewalls. The first
-command that needs the directory creates it and downloads the published
-[`default.yaml`](../profiles/default.yaml) (with
-[`ubuntu-24.04.yaml`](../profiles/ubuntu-24.04.yaml) and
-[`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml), the same profile
-for those releases),
-[`layouts.yaml`](../profiles/layouts.yaml) and
-[`firewalls.yaml`](../profiles/firewalls.yaml) from the storage, so that
-there is always something to look at and start from. From then on the
-files are yours: ump never overwrites them on its own. `ump config os
-update` fetches the published files again when you ask: a file
-still as published is replaced, one you edited is kept, with the new
-published version next to it in `.published/` for you to compare, and
-profiles under other names are never touched.
+set), one `NAME.yaml` per profile, plus three files of named entries
+the profiles refer to: `layouts.yaml` with the [disk
+layouts](disk-layouts.md), `firewalls.yaml` with the
+[firewalls](firewalls.md) and `users.yaml` with the [users](#users).
+The first command that needs the directory creates it and downloads
+the published files from the storage, so that there is always
+something to look at and start from.
+
+**Published and yours.** The published profiles
+([`ubuntu-26.04.yaml`](../profiles/ubuntu-26.04.yaml),
+[`ubuntu-24.04.yaml`](../profiles/ubuntu-24.04.yaml),
+[`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml): the same profile
+with each image) and the published entries of the named files (the
+layouts `lvm-*`, the firewalls `default`, `web` and `open`, the user
+`ump`) are templates: `ump config os update` fetches them again and
+replaces them, which is why `ump config os edit` refuses a published
+profile. Make your own instead: `ump config os create NAME` (guided) or
+`ump config os create NAME --from ubuntu-26.04` (a copy), `ump config
+disk-layout create`, `ump config firewall create`, `ump config user
+create`. Everything with a name of your own is yours and never touched
+by an update; `ump config os list` says which is which in its `FROM`
+column. (An entry of yours in a named file under a published name is
+replaced by the update too, so give yours their own names.)
 
 When `ump server reinstall` needs the profile `NAME`, it takes, in this
 order:
@@ -41,19 +53,19 @@ order:
 3. `profiles/NAME.yaml` on the storage (`https://ump.zhurko.de` by
    default, see [configuration](configuration.md#storage)).
 
-So `default` is the published default profile until you edit your copy,
-and a profile that only exists on a storage of your own works without a
-local copy. Which profile a server is installed with: `--profile`, else
-the profile set for the server with `ump server set NAME --profile NAME`
-(kept in the configuration file), else `default`.
+Which profile a server is installed with: `--profile`, else the profile
+set for the server with `ump server set NAME --profile NAME` (kept in
+the configuration file), else the **default profile**: `ubuntu-26.04`
+until you change it with `ump config os default NAME` (also in the `ump
+config os` wizard); `ump config os list` marks it with `*`.
 
 ## The default profile
 
-[`default.yaml`](../profiles/default.yaml) is what you get without
-changing anything:
+[`ubuntu-26.04.yaml`](../profiles/ubuntu-26.04.yaml) is what you get
+without changing anything:
 
 ```yaml
-name: default
+name: ubuntu-26.04
 description: Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
 
 os: ubuntu-26.04
@@ -66,11 +78,8 @@ kernel:
 
 disks: lvm-linear      # a layout from layouts.yaml, or an inline one
 
-users:
-  - name: ump          # the administrator: ump logs in as this user afterwards, and so do you
-    sudo: true         # member of sudo, without a password (no passwords are set)
-    shell: /bin/zsh    # zsh with oh-my-zsh; /bin/bash is there too
-    keys: [ump, local] # UMP's own key, and the public keys next to your ~/.ssh/id_* files
+users: [ump]           # users from users.yaml: ump is the administrator, sudo without a
+                       # password, zsh, UMP's key and the public keys next to your ~/.ssh/id_*
 
 packages: []
 
@@ -97,10 +106,10 @@ and a kernel command line with `mitigations=off`, `ipv6.disable=1` and
 profile, the `performance` CPU governor, no cloud-init and no snaps; its
 [README](../images/ubuntu/README.md#defaults) lists the rest.
 
-To make it yours, edit the copy: `ump config os edit default`. The usual
-first changes are the administrator's name and shell, a second user,
-`kernel.ipv6: true` for servers that need IPv6, and a firewall for the
-server's role.
+To make it yours, create a profile from it: `ump config os create mine
+--from ubuntu-26.04`, then `ump config os default mine`. The usual
+first changes are your own users (`ump config user create`), `kernel.ipv6:
+true` for servers that need IPv6, and a firewall for the server's role.
 
 ## Choosing the operating system
 
@@ -111,7 +120,7 @@ publishes:
 
 | `os` | Release | Profile published with it |
 |---|---|---|
-| `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `default` |
+| `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `ubuntu-26.04`, the default |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` |
 
@@ -123,7 +132,8 @@ release is chosen in one of three ways:
   after which every reinstall of that server takes it.
 - **Your own profile:** `ump config os create NAME` asks which image
   (the list comes from the storage's `os/index.json`), or set `os:` in
-  a copy of `default.yaml`.
+  a copy of a published profile; `ump config os default NAME` then
+  makes it the default.
 - **For one installation:** `ump server reinstall NAME --os
   ubuntu-22.04` overrides the profile's image and changes nothing else.
 
@@ -135,7 +145,7 @@ name (`ump config os create` takes "another name" for it).
 ## Fields
 
 ```yaml
-name: default                 # optional; the file name otherwise
+name: ubuntu-26.04            # optional; the file name otherwise
 description: ...              # optional; shown by ump config os list
 os: ubuntu-26.04              # the image: os/<os>/<arch>/ on the storage
 timezone: UTC                 # optional; UTC
@@ -145,8 +155,9 @@ kernel:                       # optional; both switches off unless set
   extra: ""                   # anything else for the kernel command line
 disks: lvm-linear             # a layout name from layouts.yaml, or an inline layout
 users:
-  - name: ump                 # the administrator: the first user with sudo (see below)
-    sudo: true                # member of sudo without a password
+  - ump                       # a user from users.yaml (ump config user), by name
+  - name: ops                 # or an inline user, with the same fields
+    sudo: true                # member of sudo without a password; the first such user is the administrator
     shell: /bin/zsh           # optional; /bin/bash
     groups: [adm]             # optional; created when missing
     keys: [ump, local]        # at least one key reference (see Keys)
@@ -172,8 +183,8 @@ network:                      # optional
 | `kernel.ipv6` | `true` keeps IPv6 on and configures the server's IPv6 address. Default off, `ipv6.disable=1`. |
 | `kernel.extra` | Anything else for the kernel command line, as one string. `kho=off` is always added: the kernel's kexec handover would reserve memory and keep ump from re-entering its rescue system. |
 | `disks` | The [disk layout](disk-layouts.md): a name from `layouts.yaml`, or a mapping with `parts` (an inline layout, with the same fields as a named one). Required. |
-| `users` | The accounts of the new system, in order. At least one, and one of them must be able to administer the system (below). |
-| `users[].name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special. |
+| `users` | The accounts of the new system, in order: names from `users.yaml`, inline users, or both. At least one, no name twice, and one of them must be able to administer the system (below). |
+| `users[].name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special. In `users.yaml` the entry's key is the name. |
 | `users[].sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in, since no passwords are set. |
 | `users[].shell` | A path. Default `/bin/bash`. The image ships `bash` and `zsh` with oh-my-zsh. |
 | `users[].groups` | Extra groups, created when missing. |
@@ -186,7 +197,33 @@ network:                      # optional
 Unknown fields are an error, so a typo in a field name is caught by
 `ump config os edit`, not at installation.
 
-### Users, the administrator and root
+### Users
+
+Users are objects of their own: [`users.yaml`](../profiles/users.yaml)
+next to the profiles holds them by name, with `description`, `sudo`,
+`groups`, `shell` and `keys`, and a profile lists the names it wants
+(`users: [ump, ops]`), so the same user goes into any number of
+profiles and is changed in one place. A profile may also carry inline
+users, with `name` and the same fields, for what belongs to that profile
+alone, and mix both. The published entry is `ump`, the administrator
+UMP provides (sudo without a password, zsh, `keys: [ump, local]`);
+`ump config os update` replaces it and keeps the users you added.
+
+```console
+$ ump config user list
+NAME   SUDO   SHELL      KEYS         STATE   DESCRIPTION
+ump    yes    /bin/zsh   ump, local   ok      the administrator UMP provides
+$ ump config user create ops --from ump      # then your editor on users.yaml
+$ ump config user get ops
+$ ump config user edit                       # the whole file, checked afterwards
+$ ump config user delete ops
+```
+
+`ump config user` (`u`) is a small wizard over these on a terminal, and
+`ump config os create` defines a user on the spot when you name one it
+does not know.
+
+### The administrator and root
 
 No passwords are set on an installed system, so every user needs at least
 one key, and SSH is the only way in. One user must be able to administer
@@ -210,8 +247,21 @@ A key reference in `users[].keys` is one of:
 | `ump` | UMP's own key (`ump config key`), which is how ump reaches the server afterwards. Give it to the administrator. |
 | `local` | the public keys next to your `~/.ssh/id_*` files (`id_ed25519.pub`, `id_rsa.pub`, ...); nothing when there are none |
 | `agent` | every key your ssh-agent holds (`ssh-add -L`); an error when it holds none |
+| a key name | a key kept under that name with `ump config key add NAME` (below) |
 | a path | a file with one key per line, `~` allowed (`~/.ssh/ops.pub`) |
-| a key line | `ssh-ed25519 AAAA... comment`, as it stands |
+| a key line | `ssh-ed25519 AAAA... comment`, as it stands, inlined |
+
+Named keys live in `~/.config/ump/keys.yaml`, so a user can carry
+several people's keys without files lying around, and the same key goes
+to any user by name:
+
+```console
+$ ump config key add oleg --file ~/.ssh/id_ed25519.pub
+$ ump config key add laptop --line 'ssh-ed25519 AAAA... oleg@laptop'
+$ ump config key add work --agent          # every key the agent holds: work, work-2, ...
+$ ump config key list                      # ump (UMP's own) and the named ones, with fingerprints
+$ ump config key remove laptop
+```
 
 References are resolved on your machine when the profile is used, so
 `local` and `agent` mean the keys of whoever runs `ump server reinstall`.
@@ -246,15 +296,17 @@ ump config os create NAME                  # on a terminal: a few questions (bel
 ump config os create NAME --from NAME      # copy one instead, rename it, open it in your editor
 ump config os edit NAME                    # your editor ($VISUAL, $EDITOR, else vi), then a check
 ump config os delete NAME [--yes]
-ump config os update                       # refresh the published profiles, layouts.yaml and firewalls.yaml from the storage; edited files are kept
+ump config os update                       # refresh the published profiles and the published entries of layouts.yaml, firewalls.yaml and users.yaml; yours are kept
+ump config os default [NAME]               # show or set the default profile
 ```
 
 `create NAME` on a terminal asks, with the default profile's answers
 preselected: the image (listed from the storage with kernel and build
 date, or another name), the disk layout and the firewall by name, the
-administrator with shell (zsh or bash) and keys, the mitigations and
-IPv6 switches, the time zone, extra packages, the interface naming, the
-provision step and a description. It checks the result like an
+users by name from `users.yaml` (a name it does not know is defined on
+the spot: sudo, shell, keys, description, and kept there), the
+mitigations and IPv6 switches, the time zone, extra packages, the
+interface naming, the provision step and a description. It checks the result like an
 installation would, writes the file, prints it and offers your editor.
 `--from NAME` copies a profile instead, and without a terminal that is
 the only form. The same questions are behind "create a profile" in the
@@ -277,8 +329,9 @@ A profile is valid when:
 - `os` is set and looks like an image name;
 - `disks` names a layout or holds one, and the layout passes [its
   checks](disk-layouts.md#rules);
-- there is at least one user, no user twice, every user has at least one
-  key reference, names and groups are valid, shells are paths;
+- there is at least one user, no user twice, every named user exists in
+  `users.yaml`, every user has at least one key reference, names and
+  groups are valid, shells are paths;
 - a user has `sudo: true`, or `root` is listed;
 - package names look like Debian package names;
 - an inline firewall passes [its checks](firewalls.md#fields); a named
@@ -288,7 +341,7 @@ A profile is valid when:
 ## Using a profile
 
 ```console
-$ ump server reinstall web-01                       # the profile set for web-01, else default
+$ ump server reinstall web-01                       # the profile set for web-01, else the default profile
 $ ump server reinstall web-01 --profile web         # a named profile
 $ ump server reinstall web-01 --profile ./web.yaml  # a file
 $ ump server set web-01 --profile web               # remember it: reinstall takes it from now on
@@ -332,7 +385,7 @@ $ ump config os create web
 
 ```yaml
 name: web
-description: like default, with a second administrator, HTTP and HTTPS open, and IPv6
+description: like ubuntu-26.04, with a second administrator, HTTP and HTTPS open, and IPv6
 
 os: ubuntu-26.04
 timezone: Europe/Berlin
@@ -343,12 +396,11 @@ kernel:
 disks: lvm-raid1               # mirrored root on the NVMe disks
 
 users:
-  - name: ops
-    sudo: true
-    keys: [ump, local]
-  - name: deploy
+  - ump                        # from users.yaml
+  - ops                        # yours in users.yaml: ump config user create ops --from ump
+  - name: deploy               # inline: only this profile has it
     groups: [www-data]
-    keys: [~/.ssh/deploy.pub]
+    keys: [deploy]             # a named key: ump config key add deploy --file ~/.ssh/deploy.pub
 
 packages: [nginx, certbot]
 

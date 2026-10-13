@@ -41,6 +41,10 @@ type Config struct {
 	// on the storage that says when a newer ump is published
 	// (UMP_NO_UPDATE_CHECK=1 does the same for one run).
 	Updates *bool `yaml:"updates,omitempty"`
+	// DefaultProfile is the profile ump server reinstall takes when
+	// --profile and the server's own setting say nothing; ump config os
+	// default sets it. Default: DefaultProfile (ubuntu-26.04).
+	DefaultProfile string `yaml:"default_profile,omitempty"`
 	// Servers holds what the user set for single servers (ump server set),
 	// keyed by the server's reference (provider/id).
 	Servers map[string]ServerSettings `yaml:"servers,omitempty"`
@@ -86,6 +90,18 @@ func ProfilesDir() string {
 
 // DefaultStorage is where this project publishes its images and scripts.
 const DefaultStorage = "https://ump.zhurko.de"
+
+// DefaultProfile is the profile taken when nothing else is set.
+const DefaultProfile = "ubuntu-26.04"
+
+// DefaultProfileName returns the configured default profile, else
+// DefaultProfile.
+func (c *Config) DefaultProfileName() string {
+	if c.DefaultProfile != "" {
+		return c.DefaultProfile
+	}
+	return DefaultProfile
+}
 
 // StorageURL returns the base URL of the storage, without a trailing
 // slash.

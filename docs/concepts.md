@@ -100,8 +100,8 @@ and [profiles](profiles.md#users-the-administrator-and-root).
 ## How a reinstall runs
 
 1. **Resolve.** Find the server at its provider; load the profile
-   (`--profile`, the one set for the server, or `default`), its layout and
-   firewall; resolve the key references on your machine. Ask for
+   (`--profile`, the one set for the server, or the default profile), its
+   layout, firewall and users; resolve the key references on your machine. Ask for
    confirmation.
 2. **Enter.** Bring the server into UMP's rescue system: as it is when it
    already runs it, by the direct way when the running system lets UMP

@@ -71,6 +71,11 @@ func (set *namedSet) load() (*namedDoc, error) {
 	if err != nil {
 		return nil, err
 	}
+	return set.parse(data)
+}
+
+// parse reads the file's content as a document with the entries.
+func (set *namedSet) parse(data []byte) (*namedDoc, error) {
 	d := &namedDoc{set: set}
 	if err := yaml.Unmarshal(data, &d.root); err != nil {
 		return nil, fmt.Errorf("%s: %w", set.path(), err)
@@ -372,6 +377,26 @@ func (set *namedSet) wizard(a *app, cmd *cobra.Command) error {
 			return err
 		}
 	}
+}
+
+// merge replaces the file with the published one, keeping the entries
+// of the local file that the published one does not have (the user's
+// own); it returns their names. A local file that does not parse is
+// replaced as it is.
+func (set *namedSet) merge(published []byte) (kept []string, err error) {
+	pub, err := set.parse(published)
+	if err != nil {
+		return nil, fmt.Errorf("the published %s: %w", set.file, err)
+	}
+	if local, err := set.load(); err == nil {
+		for _, n := range local.names() {
+			if pub.node(n) == nil {
+				pub.add(n, local.node(n))
+				kept = append(kept, n)
+			}
+		}
+	}
+	return kept, pub.save()
 }
 
 // loadNamed reads one of the files: the user's own in the profiles

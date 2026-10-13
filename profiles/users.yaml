@@ -1,0 +1,20 @@
+# Named users for the profiles' users field; docs/profiles.md describes
+# the fields. A profile lists names from here (users: [ump, ops]) or
+# inline users; the same user can be in many profiles. The first user
+# with sudo is the administrator, the one ump logs in as.
+#
+#   sudo     member of sudo without a password (no passwords are set)
+#   groups   extra groups, created when missing
+#   shell    /bin/zsh (oh-my-zsh, theme crunch) or /bin/bash; bash by default
+#   keys     ump (UMP's own key), local (your ~/.ssh/id_*.pub), agent
+#            (ssh-add -L), a key name from ump config key, a file, or a
+#            key line itself
+#
+# ump config user (u) lists, prints, creates, edits and deletes them.
+# ump config os update replaces the published entry ump and keeps yours.
+users:
+  ump:
+    description: the administrator UMP provides
+    sudo: true
+    shell: /bin/zsh
+    keys: [ump, local]

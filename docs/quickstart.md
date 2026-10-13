@@ -63,11 +63,14 @@ the last listing.
 
 ```console
 $ ump config os list
-Downloaded the default profile, the layouts and the firewalls into ~/.config/ump/profiles; they are yours to edit (ump config os).
-NAME      OS             DISKS        USERS   FIREWALL   DESCRIPTION
-default   ubuntu-26.04   lvm-linear   ump     default    Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+Downloaded the published profiles, layouts, firewalls and users into ~/.config/ump/profiles (ump config os); make your own from them.
+    NAME           OS             DISKS        USERS   FIREWALL   FROM        DESCRIPTION
+*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump     default    published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump     default    published   Ubuntu 24.04 on every disk ...
+    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump     default    published   Ubuntu 22.04 on every disk ...
+* the default (ump config os default NAME changes it); published profiles are replaced by ump config os update, make your own with ump config os create NAME --from ubuntu-26.04
 
-$ ump config os get default         # the profile itself
+$ ump config os get ubuntu-26.04    # the profile itself
 $ ump config disk-layout list       # the named disk layouts: lvm-linear, lvm-striped, lvm-raid1, lvm-example
 $ ump config firewall list          # the named firewalls: default, web, open
 ```
@@ -94,14 +97,14 @@ Common first edits: rename the `ump` user or add yourself, set
 
 ```console
 $ ump server reinstall web-01 --dry-run
-Bring hetzner-cloud/234567 (web-01, 198.51.100.22) into the rescue system and show the installation plan for ubuntu-26.04 (profile default from ~/.config/ump/profiles/default.yaml, layout lvm-linear)? (dry run: nothing is erased) [y/N] y
+Bring hetzner-cloud/234567 (web-01, 198.51.100.22) into the rescue system and show the installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear)? (dry run: nothing is erased) [y/N] y
 Checking root access to 198.51.100.22 over SSH ... no.
 Going through the provider's rescue system.
 ...
 Waiting for the UMP rescue system on 198.51.100.22 ... up after 14s (ump-rescue 2026.10.13).
-Installation plan for ubuntu-26.04 (profile default from ~/.config/ump/profiles/default.yaml, layout lvm-linear) on web-01:
+Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01:
 ==> machine: amd64, BIOS firmware, 2 CPUs, 3915 MB RAM
-==> image: ubuntu-26.04 for amd64 from https://ump.zhurko.de/os/ubuntu-26.04/amd64 (profile default, layout lvm-linear)
+==> image: ubuntu-26.04 for amd64 from https://ump.zhurko.de/os/ubuntu-26.04/amd64 (profile ubuntu-26.04, layout lvm-linear)
 ==> disks (1): /dev/sda (38.1G SSD)
 ==>   /dev/sda: 1: 1M bios, 2: 512M efi at /boot/efi, 3: 1G ext4 at /boot, 4: rest lvm (vg0)
 ==>   vg0/root: rest linear ext4 at /
@@ -122,9 +125,9 @@ again, and a real installation continues from the rescue system as it is.
 
 ```console
 $ ump server reinstall web-01
-Install ubuntu-26.04 (profile default from ~/.config/ump/profiles/default.yaml, layout lvm-linear) on hetzner-cloud/234567 (web-01, 198.51.100.22) as web-01? Every disk of the server is erased. [y/N] y
+Install ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on hetzner-cloud/234567 (web-01, 198.51.100.22) as web-01? Every disk of the server is erased. [y/N] y
 ...
-Installing ubuntu-26.04 (profile default from ~/.config/ump/profiles/default.yaml, layout lvm-linear) on web-01 as web-01 ...
+Installing ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01 as web-01 ...
 ==> machine: amd64, BIOS firmware, 2 CPUs, 3.8 GB RAM
 ==> disks (1): /dev/sda (38.1G SSD)
 ...

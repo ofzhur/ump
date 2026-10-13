@@ -33,12 +33,13 @@ func fakeResolver(ref string) ([]string, error) {
 }
 
 func TestDefaultProfileAndLayouts(t *testing.T) {
-	p, err := Parse(repoFile(t, "default.yaml"))
+	p, err := Parse(repoFile(t, "ubuntu-26.04.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	layouts, err := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, err := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	users, _ := ParseUsers(repoFile(t, "users.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 			t.Errorf("layout %s: %v", name, err)
 		}
 	}
-	spec, err := p.Resolve(layouts, firewalls, fakeResolver)
+	spec, err := p.Resolve(layouts, firewalls, users, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ provision:
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := p.Resolve(nil, nil, fakeResolver)
+	spec, err := p.Resolve(nil, nil, nil, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +148,7 @@ provision:
 func TestProfileErrors(t *testing.T) {
 	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	users, _ := ParseUsers(repoFile(t, "users.yaml"))
 	base := "name: t\nos: ubuntu-26.04\nusers:\n  - {name: root, keys: [ump]}\n"
 	cases := []struct {
 		name, src, want string
@@ -162,6 +164,8 @@ func TestProfileErrors(t *testing.T) {
 		{"bad policy", base + "disks: lvm-linear\nfirewall: {policy: deny}\n", `policy "deny" is not accept or drop`},
 		{"unknown firewall", base + "disks: lvm-linear\nfirewall: nope\n", `firewall "nope" is not in firewalls.yaml`},
 		{"no admin", "os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, keys: [ump]}\n", "no user has sudo and root is not listed"},
+		{"unknown user", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [nobody]\n", `user "nobody" is not in users.yaml (known: ump)`},
+		{"user twice", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump, {name: ump, sudo: true, keys: [ump]}]\n", "user ump is listed twice"},
 		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
 		{"bad package", base + "disks: lvm-linear\npackages: [\"rm -rf\"]\n", "is not a package name"},
 		{"two roots", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: ext4, mountpoint: /}\n    - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /}\n", "mountpoint / is used twice"},
@@ -175,7 +179,7 @@ func TestProfileErrors(t *testing.T) {
 	for _, c := range cases {
 		p, err := Parse([]byte(c.src))
 		if err == nil {
-			_, err = p.Resolve(layouts, firewalls, fakeResolver)
+			_, err = p.Resolve(layouts, firewalls, users, fakeResolver)
 		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
@@ -186,19 +190,20 @@ func TestProfileErrors(t *testing.T) {
 func TestSet(t *testing.T) {
 	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
-	p, err := Parse(repoFile(t, "default.yaml"))
+	users, _ := ParseUsers(repoFile(t, "users.yaml"))
+	p, err := Parse(repoFile(t, "ubuntu-26.04.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := p.Set([]string{"disks=lvm-striped", "kernel.ipv6=true", "kernel.extra=quiet splash", "users[0].shell=/bin/bash", "users[ump].keys=[ump, agent]",
+	q, err := p.Set([]string{"disks=lvm-striped", "kernel.ipv6=true", "kernel.extra=quiet splash", "users[0]={name: ump, sudo: true, keys: [ump, agent]}", "users[ump].shell=/bin/bash",
 		"packages=[htop, nginx]", "users[+]={name: ops, sudo: true, keys: [ump]}", "network.rename=false", "firewall={policy: drop, allow: [icmp, ssh, tcp/80]}", "timezone=Europe/Berlin"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Disks.Name != "lvm-linear" || *p.Kernel.IPv6 || len(p.Users) != 1 || p.Users[0].Shell != "/bin/zsh" {
+	if p.Disks.Name != "lvm-linear" || *p.Kernel.IPv6 || len(p.Users) != 1 || p.Users[0].Name != "ump" || p.Users[0].User != nil {
 		t.Errorf("the original changed: %+v", p)
 	}
-	spec, err := q.Resolve(layouts, firewalls, fakeResolver)
+	spec, err := q.Resolve(layouts, firewalls, users, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +221,7 @@ func TestSet(t *testing.T) {
 		{"kernel.colour=blue", "field colour not found"},
 		{"users[3].shell=/bin/sh", "users has 1 entries, no index 3"},
 		{"users[bob].shell=/bin/sh", `no entry of users named "bob"`},
+		{"users[0].shell=/bin/sh", "users[0] is not a mapping"},
 		{"disks", "expected FIELD=VALUE"},
 		{"packages=[a", "is not YAML"},
 		{"os.name=x", "os is not a mapping"},

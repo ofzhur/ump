@@ -17,12 +17,37 @@ import (
 )
 
 // profileFiles are what a profiles directory starts with.
-var profileFiles = []string{"default.yaml", "ubuntu-24.04.yaml", "ubuntu-22.04.yaml", "layouts.yaml", "firewalls.yaml"}
+// publishedProfiles are the profiles the storage publishes; the named
+// files next to them hold the published entries and the user's own.
+var publishedProfiles = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04"}
+
+var namedFiles = []*namedSet{layoutSet, firewallSet, userSet}
+
+// profileFiles are the files the first run downloads.
+var profileFiles = func() []string {
+	var files []string
+	for _, p := range publishedProfiles {
+		files = append(files, p+".yaml")
+	}
+	for _, set := range namedFiles {
+		files = append(files, set.file)
+	}
+	return files
+}()
+
+func isPublishedProfile(name string) bool {
+	for _, p := range publishedProfiles {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
 
 // ensureProfiles makes sure the profiles directory exists with the
-// published default profile and layouts in it: the first run downloads
-// them from the storage, so that there is always something to show and
-// edit. An existing directory is left as it is.
+// published profiles, layouts, firewalls and users in it: the first run
+// downloads them from the storage, so that there is always something to
+// show and start from. An existing directory is left as it is.
 func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 	dir := config.ProfilesDir()
 	if _, err := os.Stat(dir); err == nil {
@@ -37,37 +62,25 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 			os.Remove(dir)
 			return fmt.Errorf("the profiles directory %s is new and the published %s could not be fetched: %w", config.AbbreviateHome(dir), name, err)
 		}
-		if err := writePublished(dir, name, data); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(a.stderr, "Downloaded the published profiles, the layouts and the firewalls into %s; they are yours to edit (ump config os).\n", config.AbbreviateHome(dir))
+	fmt.Fprintf(a.stderr, "Downloaded the published profiles, layouts, firewalls and users into %s (ump config os); make your own from them.\n", config.AbbreviateHome(dir))
 	return nil
-}
-
-// publishedDir keeps a copy of each file as it was published, so that
-// an update can tell a file the user edited from one left as it was.
-const publishedDir = ".published"
-
-func writePublished(dir, name string, data []byte) error {
-	if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(dir, publishedDir), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600)
 }
 
 func (a *app) newOSUpdateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
-		Short: "Refresh the published profile, layouts and firewalls from the storage",
-		Long: `Fetch default.yaml, layouts.yaml and firewalls.yaml from the storage
-again. A local file that is still as it was published is replaced; one
-you edited is kept, and the new published version is put next to it in
-` + publishedDir + `/ for you to compare. Your own profiles (other names) are
-never touched.`,
+		Short: "Refresh the published profiles, layouts, firewalls and users from the storage",
+		Long: `Fetch the published files again. The published profiles (` + strings.Join(publishedProfiles, ", ") + `)
+are replaced, which is why they are not for editing: make your own
+from them (ump config os create NAME --from ` + publishedProfiles[0] + `) and those
+are never touched. In layouts.yaml, firewalls.yaml and users.yaml the
+published entries are replaced and the entries you added are kept
+(an entry of yours with a published name is replaced too, so give
+yours their own names).`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
@@ -75,34 +88,74 @@ never touched.`,
 				return err
 			}
 			dir := config.ProfilesDir()
-			for _, name := range profileFiles {
-				data, err := a.fetch(cmd.Context(), cfg.StorageURL()+"/profiles/"+name)
+			for _, name := range publishedProfiles {
+				data, err := a.fetch(cmd.Context(), cfg.StorageURL()+"/profiles/"+name+".yaml")
 				if err != nil {
-					return fmt.Errorf("the published %s could not be fetched: %w", name, err)
+					return fmt.Errorf("the published %s.yaml could not be fetched: %w", name, err)
 				}
-				local, _ := os.ReadFile(filepath.Join(dir, name))
-				published, _ := os.ReadFile(filepath.Join(dir, publishedDir, name))
-				switch {
-				case string(local) == string(data):
-					fmt.Fprintf(a.stdout, "%s: up to date\n", name)
-					os.MkdirAll(filepath.Join(dir, publishedDir), 0o700)
-					os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600)
-				case local == nil || string(local) == string(published):
-					if err := writePublished(dir, name, data); err != nil {
-						return err
-					}
-					fmt.Fprintf(a.stdout, "%s: updated\n", name)
-				default:
-					os.MkdirAll(filepath.Join(dir, publishedDir), 0o700)
-					if err := os.WriteFile(filepath.Join(dir, publishedDir, name), data, 0o600); err != nil {
-						return err
-					}
-					fmt.Fprintf(a.stdout, "%s: you changed it, so it is kept; the new published version is %s\n", name, config.AbbreviateHome(filepath.Join(dir, publishedDir, name)))
+				local, _ := os.ReadFile(filepath.Join(dir, name+".yaml"))
+				if string(local) == string(data) {
+					fmt.Fprintf(a.stdout, "%s.yaml: up to date\n", name)
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(dir, name+".yaml"), data, 0o600); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.stdout, "%s.yaml: updated\n", name)
+			}
+			for _, set := range namedFiles {
+				data, err := a.fetch(cmd.Context(), cfg.StorageURL()+"/profiles/"+set.file)
+				if err != nil {
+					return fmt.Errorf("the published %s could not be fetched: %w", set.file, err)
+				}
+				kept, err := set.merge(data)
+				if err != nil {
+					return err
+				}
+				if len(kept) > 0 {
+					fmt.Fprintf(a.stdout, "%s: updated; your %ss kept: %s\n", set.file, set.noun, strings.Join(kept, ", "))
+				} else {
+					fmt.Fprintf(a.stdout, "%s: updated\n", set.file)
 				}
 			}
 			return nil
 		},
 	}
+}
+
+func (a *app) newOSDefaultCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "default [NAME]",
+		Short: "Show or set the default profile (what ump server reinstall takes without --profile)",
+		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.prepareProfiles(cmd)
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				fmt.Fprintln(a.stdout, cfg.DefaultProfileName())
+				return nil
+			}
+			return a.setDefaultProfile(cfg, args[0])
+		},
+	}
+}
+
+func (a *app) setDefaultProfile(cfg *config.Config, name string) error {
+	if _, err := os.Stat(profilePath(name)); err != nil {
+		return fmt.Errorf("no profile %q in %s (ump config os list)", name, config.AbbreviateHome(config.ProfilesDir()))
+	}
+	cfg.DefaultProfile = name
+	if name == config.DefaultProfile {
+		cfg.DefaultProfile = ""
+	}
+	path := config.ResolvePath(a.configFlag)
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.stdout, "The default profile is %s now (ump server reinstall without --profile, and servers without a profile of their own).\n", name)
+	return nil
 }
 
 func (a *app) newConfigOSCmd() *cobra.Command {
@@ -131,7 +184,7 @@ over the subcommands below.`,
 			return a.profilesWizard(cmd)
 		},
 	}
-	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd(), a.newOSUpdateCmd())
+	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd(), a.newOSUpdateCmd(), a.newOSDefaultCmd())
 	return cmd
 }
 
@@ -149,7 +202,7 @@ func localProfiles() ([]string, error) {
 	var names []string
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || n == "layouts.yaml" || n == "firewalls.yaml" {
+		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || n == "layouts.yaml" || n == "firewalls.yaml" || n == "users.yaml" {
 			continue
 		}
 		names = append(names, strings.TrimSuffix(n, ".yaml"))
@@ -177,18 +230,24 @@ func (a *app) newOSListCmd() *cobra.Command {
 		Short:   "List the profiles",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := a.prepareProfiles(cmd); err != nil {
+			cfg, err := a.prepareProfiles(cmd)
+			if err != nil {
 				return err
 			}
 			names, err := localProfiles()
 			if err != nil {
 				return err
 			}
+			def := cfg.DefaultProfileName()
 			var rows [][]string
 			for _, n := range names {
+				mark := ""
+				if n == def {
+					mark = "*"
+				}
 				p, err := profile.Load(profilePath(n))
 				if err != nil {
-					rows = append(rows, []string{n, "-", "-", "-", "-", "invalid: " + err.Error()})
+					rows = append(rows, []string{mark, n, "-", "-", "-", "-", "invalid: " + err.Error()})
 					continue
 				}
 				disks := p.Disks.Name
@@ -196,8 +255,12 @@ func (a *app) newOSListCmd() *cobra.Command {
 					disks = "(inline)"
 				}
 				var users []string
-				for _, u := range p.Users {
-					users = append(users, u.Name)
+				for _, r := range p.Users {
+					if r.User != nil {
+						users = append(users, r.User.Name)
+					} else {
+						users = append(users, r.Name)
+					}
 				}
 				fw := p.Firewall.Name
 				switch {
@@ -206,9 +269,19 @@ func (a *app) newOSListCmd() *cobra.Command {
 				case fw == "":
 					fw = "none"
 				}
-				rows = append(rows, []string{n, p.OS, disks, strings.Join(users, ","), fw, p.Description})
+				kind := "published"
+				if !isPublishedProfile(n) {
+					kind = "yours"
+				}
+				rows = append(rows, []string{mark, n, p.OS, disks, strings.Join(users, ","), fw, kind, p.Description})
 			}
-			return writeTable(a.stdout, []string{"NAME", "OS", "DISKS", "USERS", "FIREWALL", "DESCRIPTION"}, rows, noHeaders)
+			if err := writeTable(a.stdout, []string{"", "NAME", "OS", "DISKS", "USERS", "FIREWALL", "FROM", "DESCRIPTION"}, rows, noHeaders); err != nil {
+				return err
+			}
+			if !noHeaders {
+				fmt.Fprintf(a.stdout, "* the default (ump config os default NAME changes it); published profiles are replaced by ump config os update, make your own with ump config os create NAME --from %s\n", def)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line")
@@ -263,6 +336,13 @@ without a terminal that is the only way.`,
 					return a.profileWizard(cmd, ui, name)
 				}
 			}
+			if from == "" {
+				cfg, _, err := a.loadConfig()
+				if err != nil {
+					return err
+				}
+				from = cfg.DefaultProfileName()
+			}
 			data, err := os.ReadFile(profilePath(from))
 			if err != nil {
 				return fmt.Errorf("no profile %q to start from", from)
@@ -279,7 +359,7 @@ without a terminal that is the only way.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "default", "the profile to copy")
+	cmd.Flags().StringVar(&from, "from", "", "the profile to copy (default: the default profile)")
 	return cmd
 }
 
@@ -297,6 +377,9 @@ named, so nothing is lost.`,
 			}
 			if _, err := os.Stat(profilePath(args[0])); err != nil {
 				return fmt.Errorf("no profile %q in %s (ump config os list)", args[0], config.AbbreviateHome(config.ProfilesDir()))
+			}
+			if isPublishedProfile(args[0]) {
+				return fmt.Errorf("%s is a published profile, which ump config os update replaces; make your own from it: ump config os create NAME --from %s", args[0], args[0])
 			}
 			return a.editProfile(cmd, args[0])
 		},
@@ -367,13 +450,23 @@ func (a *app) checkProfile(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if _, err := p.Resolve(layouts, firewalls, func(ref string) ([]string, error) {
-		return []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN check"}, nil
-	}); err != nil {
+	var users map[string]*profile.User
+	if profile.HasUserRefs(p) {
+		if users, err = a.loadUsers(ctx, cfg.StorageURL()); err != nil {
+			return err
+		}
+	}
+	if _, err := p.Resolve(layouts, firewalls, users, checkKeys); err != nil {
 		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)
 	}
 	fmt.Fprintf(a.stdout, "Profile %s is valid (%s, layout %s).\n", name, p.OS, layoutName(p))
 	return nil
+}
+
+// checkKeys stands in for the key resolver when a profile is only
+// checked: every reference yields a key.
+func checkKeys(ref string) ([]string, error) {
+	return []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN check"}, nil
 }
 
 func layoutName(p *profile.Profile) string {
@@ -416,7 +509,12 @@ func (a *app) profilesWizard(cmd *cobra.Command) error {
 			return err
 		}
 		ui.Printf("Profiles in %s: %s\n", config.AbbreviateHome(config.ProfilesDir()), strings.Join(names, ", "))
-		choice, err := ui.Choose("What now?", []string{"edit a profile", "create a profile", "delete a profile", "show a profile"}, -1)
+		cfg, _, err := a.loadConfig()
+		if err != nil {
+			return err
+		}
+		ui.Printf("The default profile is %s.\n", cfg.DefaultProfileName())
+		choice, err := ui.Choose("What now?", []string{"edit a profile", "create a profile", "delete a profile", "show a profile", "set the default profile"}, -1)
 		if err != nil {
 			return err
 		}
@@ -456,7 +554,7 @@ func (a *app) profilesWizard(cmd *cobra.Command) error {
 			if err := a.editProfile(cmd, name); err != nil {
 				ui.Printf("%v\n", err)
 			}
-		case 0, 2, 3:
+		case 0, 2, 3, 4:
 			i, err := ui.Choose("Which profile?", names, -1)
 			if err != nil {
 				return err
@@ -464,7 +562,15 @@ func (a *app) profilesWizard(cmd *cobra.Command) error {
 			name = names[i]
 			switch choice {
 			case 0:
+				if isPublishedProfile(name) {
+					ui.Printf("%s is a published profile, which ump config os update replaces; create your own from it instead.\n", name)
+					break
+				}
 				if err := a.editProfile(cmd, name); err != nil {
+					ui.Printf("%v\n", err)
+				}
+			case 4:
+				if err := a.setDefaultProfile(cfg, name); err != nil {
 					ui.Printf("%v\n", err)
 				}
 			case 2:

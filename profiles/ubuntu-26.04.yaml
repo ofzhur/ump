@@ -1,11 +1,10 @@
-# The default profile: what a server becomes when ump installs it.
-#
-# ump server reinstall NAME takes this profile (or --profile NAME|FILE, and
-# ubuntu-24.04 and ubuntu-22.04 are the same for those releases); a
-# file of the same name in ~/.config/ump/profiles/ wins over the published
-# one, so copy this file there and make it yours. Every field is described
-# in profiles/README.md.
-name: default
+# The profile for Ubuntu 26.04, the default: what a server becomes when
+# ump installs it unless --profile says otherwise (ump config os default
+# changes the default). Published profiles are replaced by ump config os
+# update, so make your own from this one (ump config os create NAME
+# --from ubuntu-26.04) instead of editing it. Every field is described in
+# docs/profiles.md.
+name: ubuntu-26.04
 description: Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
 
 os: ubuntu-26.04
@@ -19,15 +18,8 @@ kernel:
 # a layout from layouts.yaml (lvm-linear, lvm-striped, lvm-raid1, lvm-example), or an inline one
 disks: lvm-linear
 
-users:
-  # The administrator: ump logs in as this user afterwards (ump ssh), and
-  # so do you. Rename it or add yours; root keeps no SSH login unless it is
-  # listed here with keys (it stays the user of the rescue system).
-  - name: ump
-    sudo: true          # member of sudo, without a password (no passwords are set)
-    shell: /bin/zsh     # zsh with oh-my-zsh (theme crunch); /bin/bash is there too, with colors
-    keys: [ump, local]  # ump: UMP's own key; local: the public keys next to your ~/.ssh/id_* files;
-                        # agent: every key your ssh-agent holds; a file path; or a key line itself
+users: [ump]            # named users from users.yaml (ump config user): ump is the administrator,
+                        # the sudo user ump logs in as; add yours there, or inline one here:
   # - name: ops
   #   sudo: true
   #   groups: [adm]

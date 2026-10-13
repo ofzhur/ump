@@ -24,7 +24,7 @@ type Profile struct {
 	Timezone    string      `yaml:"timezone,omitempty"`
 	Kernel      Kernel      `yaml:"kernel,omitempty"`
 	Disks       Disks       `yaml:"disks"`
-	Users       []User      `yaml:"users"`
+	Users       []UserRef   `yaml:"users"`
 	Packages    []string    `yaml:"packages,omitempty"`
 	Firewall    FirewallRef `yaml:"firewall,omitempty"`
 	Provision   Provision   `yaml:"provision,omitempty"`
@@ -121,13 +121,120 @@ type Part struct {
 	Raid       *int     `yaml:"raid,omitempty" json:"raid,omitempty"`
 }
 
-// User is an account of the new system.
+// User is an account of the new system: inline in a profile (with its
+// name), or a named entry of users.yaml (the name is the key there).
 type User struct {
-	Name   string   `yaml:"name" json:"name"`
-	Groups []string `yaml:"groups,omitempty" json:"groups,omitempty"`
-	Sudo   bool     `yaml:"sudo,omitempty" json:"sudo,omitempty"`
-	Shell  string   `yaml:"shell,omitempty" json:"shell,omitempty"`
-	Keys   []string `yaml:"keys" json:"keys"`
+	Name        string   `yaml:"name,omitempty" json:"name"`
+	Description string   `yaml:"description,omitempty" json:"-"`
+	Groups      []string `yaml:"groups,omitempty" json:"groups,omitempty"`
+	Sudo        bool     `yaml:"sudo,omitempty" json:"sudo,omitempty"`
+	Shell       string   `yaml:"shell,omitempty" json:"shell,omitempty"`
+	Keys        []string `yaml:"keys" json:"keys"`
+}
+
+// Validate checks a user: the name, the groups, the shell, and that it
+// has key references (no passwords are set).
+func (u *User) Validate() error {
+	if !userName.MatchString(u.Name) {
+		return fmt.Errorf("user name %q is not valid", u.Name)
+	}
+	for _, g := range u.Groups {
+		if !userName.MatchString(g) {
+			return fmt.Errorf("user %s: group name %q is not valid", u.Name, g)
+		}
+	}
+	if u.Shell != "" && !strings.HasPrefix(u.Shell, "/") {
+		return fmt.Errorf("user %s: shell %q is not a path", u.Name, u.Shell)
+	}
+	if len(u.Keys) == 0 {
+		return fmt.Errorf("user %s has no keys (and no passwords are set)", u.Name)
+	}
+	return nil
+}
+
+// UserRef is either the name of a user from users.yaml or an inline
+// user.
+type UserRef struct {
+	Name string
+	User *User
+}
+
+func (r *UserRef) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Decode(&r.Name)
+	case yaml.MappingNode:
+		r.User = &User{}
+		return n.Decode(r.User)
+	}
+	return fmt.Errorf("users: a user name or a user, not a %s", kindName(n.Kind))
+}
+
+func (r UserRef) MarshalYAML() (any, error) {
+	if r.User != nil {
+		return r.User, nil
+	}
+	return r.Name, nil
+}
+
+// ParseUsers reads users.yaml: named users.
+func ParseUsers(data []byte) (map[string]*User, error) {
+	var file struct {
+		Users map[string]*User `yaml:"users"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&file); err != nil {
+		return nil, err
+	}
+	for name, u := range file.Users {
+		if u == nil {
+			return nil, fmt.Errorf("user %s is empty", name)
+		}
+		u.Name = name
+	}
+	return file.Users, nil
+}
+
+// HasUserRefs reports whether the profile names users from users.yaml.
+func HasUserRefs(p *Profile) bool {
+	for _, r := range p.Users {
+		if r.User == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveUsers turns the profile's user references into users: inline
+// ones as they are, names looked up in users.
+func (p *Profile) ResolveUsers(users map[string]*User) ([]User, error) {
+	var out []User
+	seen := map[string]bool{}
+	for i, r := range p.Users {
+		var u User
+		switch {
+		case r.User != nil:
+			u = *r.User
+		case r.Name != "":
+			def, ok := users[r.Name]
+			if !ok {
+				return nil, fmt.Errorf("profile %s: user %q is not in users.yaml (known: %s)", p.Name, r.Name, strings.Join(sortedKeys(users), ", "))
+			}
+			u = *def
+		default:
+			return nil, fmt.Errorf("profile %s: user %d is empty", p.Name, i+1)
+		}
+		if err := u.Validate(); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", p.Name, err)
+		}
+		if seen[u.Name] {
+			return nil, fmt.Errorf("profile %s: user %s is listed twice", p.Name, u.Name)
+		}
+		seen[u.Name] = true
+		out = append(out, u)
+	}
+	return out, nil
 }
 
 // Firewall is the input policy and what it lets in, on the host and
@@ -431,29 +538,12 @@ func (p *Profile) Validate() error {
 	if len(p.Users) == 0 {
 		return fmt.Errorf("profile %s: no users; a sudo user (or root) with a key is needed to reach the new system", p.Name)
 	}
-	seen := map[string]bool{}
-	for _, u := range p.Users {
-		if !userName.MatchString(u.Name) {
-			return fmt.Errorf("profile %s: user name %q is not valid", p.Name, u.Name)
-		}
-		if seen[u.Name] {
-			return fmt.Errorf("profile %s: user %s is listed twice", p.Name, u.Name)
-		}
-		seen[u.Name] = true
-		for _, g := range u.Groups {
-			if !userName.MatchString(g) {
-				return fmt.Errorf("profile %s: user %s: group name %q is not valid", p.Name, u.Name, g)
+	for _, r := range p.Users {
+		if r.User != nil {
+			if err := r.User.Validate(); err != nil {
+				return fmt.Errorf("profile %s: %w", p.Name, err)
 			}
 		}
-		if u.Shell != "" && !strings.HasPrefix(u.Shell, "/") {
-			return fmt.Errorf("profile %s: user %s: shell %q is not a path", p.Name, u.Name, u.Shell)
-		}
-		if len(u.Keys) == 0 {
-			return fmt.Errorf("profile %s: user %s has no keys (and no passwords are set)", p.Name, u.Name)
-		}
-	}
-	if p.Admin() == "" {
-		return fmt.Errorf("profile %s: no user has sudo and root is not listed; ump could not administer the new system", p.Name)
 	}
 	for _, pkg := range p.Packages {
 		if !regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`).MatchString(pkg) {
@@ -474,9 +564,19 @@ func (p *Profile) Validate() error {
 }
 
 // Admin is the user ump logs in as on the installed system: the first
-// user with sudo, else root when it is listed, else nothing.
-func (p *Profile) Admin() string {
-	return admin(p.Users)
+// user with sudo, else root when it is listed, else nothing. Named
+// users are looked up in users; an unknown name is skipped.
+func (p *Profile) Admin(users map[string]*User) string {
+	var list []User
+	for _, r := range p.Users {
+		switch {
+		case r.User != nil:
+			list = append(list, *r.User)
+		case users[r.Name] != nil:
+			list = append(list, *users[r.Name])
+		}
+	}
+	return admin(list)
 }
 
 func admin(users []User) string {
@@ -541,9 +641,16 @@ type ProfileInfo struct {
 // profile's inline ones, or by name from layouts and firewalls) and
 // resolves the key references, and returns the specification. The
 // caller fills in the hostname, storage and disks.
-func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, resolve KeyResolver) (*Spec, error) {
+func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, users map[string]*User, resolve KeyResolver) (*Spec, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
+	}
+	resolvedUsers, err := p.ResolveUsers(users)
+	if err != nil {
+		return nil, err
+	}
+	if admin(resolvedUsers) == "" {
+		return nil, fmt.Errorf("profile %s: no user has sudo and root is not listed; ump could not administer the new system", p.Name)
 	}
 	layout := p.Disks.Layout
 	if layout == nil {
@@ -591,7 +698,7 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 	if spec.Packages == nil {
 		spec.Packages = []string{}
 	}
-	for _, u := range p.Users {
+	for _, u := range resolvedUsers {
 		var keys []string
 		seen := map[string]bool{}
 		for _, ref := range u.Keys {
