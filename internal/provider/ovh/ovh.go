@@ -1,7 +1,7 @@
 // Package ovh integrates OVHcloud through its public API
-// (https://api.ovh.com/): dedicated servers (/dedicated/server) and Public
-// Cloud instances (/cloud/project/*/instance) are listed from one account,
-// because one set of API keys covers both.
+// (https://api.ovh.com/): dedicated servers (/dedicated/server), VPS
+// (/vps) and Public Cloud instances (/cloud/project/*/instance) are listed
+// from one account, because one set of API keys covers all three.
 //
 // The client is hand-written: request signing is a SHA-1 over a few
 // strings, and UMP needs only a few read calls. The setup wizard can
@@ -59,6 +59,12 @@ var DefaultAccessRules = []AccessRule{
 	{Method: "POST", Path: "/cloud/project/*/instance/*/rescueMode"},
 	{Method: "POST", Path: "/cloud/project/*/instance/*/start"},
 	{Method: "POST", Path: "/cloud/project/*/instance/*/stop"},
+	{Method: "GET", Path: "/vps"},
+	{Method: "GET", Path: "/vps/*"},
+	{Method: "PUT", Path: "/vps/*"},
+	{Method: "POST", Path: "/vps/*/reboot"},
+	{Method: "POST", Path: "/vps/*/start"},
+	{Method: "POST", Path: "/vps/*/stop"},
 }
 
 const listParallelism = 8
@@ -190,11 +196,21 @@ func (p *Provider) projectID(m provider.Machine) (string, error) {
 	return id, nil
 }
 
+// isVPS reports whether a machine is a VPS (the listing labels them).
+func isVPS(m provider.Machine) bool { return m.Labels["family"] == "vps" }
+
 var errDedicatedPower = &provider.APIError{Provider: TypeName,
 	Message: "dedicated servers cannot be switched on or off through the OVHcloud API; use the control panel (or reboot)"}
 
 // PowerState implements provider.Power.
 func (p *Provider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	if isVPS(m) {
+		v, err := p.client.GetVPS(ctx, m.ID)
+		if err != nil {
+			return provider.PowerUnknown, err
+		}
+		return vpsPower(v.State), nil
+	}
 	if m.Kind != provider.KindCloud {
 		s, err := p.client.GetDedicatedServer(ctx, m.ID)
 		if err != nil {
@@ -219,6 +235,16 @@ func (p *Provider) PowerState(ctx context.Context, m provider.Machine) (provider
 	return instancePower(in.Status), nil
 }
 
+func vpsPower(state string) provider.PowerState {
+	switch strings.ToLower(state) {
+	case "running", "rescued":
+		return provider.PowerOn
+	case "stopped":
+		return provider.PowerOff
+	}
+	return provider.PowerUnknown
+}
+
 func instancePower(status string) provider.PowerState {
 	switch strings.ToUpper(status) {
 	case "ACTIVE", "RESCUE", "RESCUED":
@@ -233,6 +259,17 @@ func instancePower(status string) provider.PowerState {
 // (a hardware reset, started as a task); instances reboot soft or hard,
 // and a power cycle is stop then start.
 func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	if isVPS(m) {
+		if mode == provider.RebootPowerCycle {
+			if _, err := p.client.VPSAction(ctx, m.ID, "stop"); err != nil {
+				return err
+			}
+			_, err := p.client.VPSAction(ctx, m.ID, "start")
+			return err
+		}
+		_, err := p.client.VPSAction(ctx, m.ID, "reboot")
+		return err
+	}
 	if m.Kind != provider.KindCloud {
 		_, err := p.client.RebootDedicated(ctx, m.ID)
 		return err
@@ -255,6 +292,10 @@ func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider
 
 // PowerOn implements provider.Power for instances.
 func (p *Provider) PowerOn(ctx context.Context, m provider.Machine) error {
+	if isVPS(m) {
+		_, err := p.client.VPSAction(ctx, m.ID, "start")
+		return err
+	}
 	if m.Kind != provider.KindCloud {
 		return errDedicatedPower
 	}
@@ -267,6 +308,10 @@ func (p *Provider) PowerOn(ctx context.Context, m provider.Machine) error {
 
 // PowerOff implements provider.Power for instances (OVH knows one stop).
 func (p *Provider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	if isVPS(m) {
+		_, err := p.client.VPSAction(ctx, m.ID, "stop")
+		return err
+	}
 	if m.Kind != provider.KindCloud {
 		return errDedicatedPower
 	}
@@ -280,6 +325,13 @@ func (p *Provider) PowerOff(ctx context.Context, m provider.Machine, hard bool) 
 // RescueEnabled implements provider.Rescue: a dedicated server whose boot
 // option is of type rescue, or an instance in a rescue status.
 func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	if isVPS(m) {
+		v, err := p.client.GetVPS(ctx, m.ID)
+		if err != nil {
+			return false, err
+		}
+		return v.NetbootMode == "rescue", nil
+	}
 	if m.Kind != provider.KindCloud {
 		s, err := p.client.GetDedicatedServer(ctx, m.ID)
 		if err != nil {
@@ -310,6 +362,15 @@ func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool,
 // password to the rescue mail otherwise); the caller reboots it. An
 // instance is put into rescue mode by OVH itself, which reboots it.
 func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	if isVPS(m) {
+		// a VPS boots its rescue system when its netboot mode says so; the
+		// API takes no key, OVH mails the password
+		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "rescue"}); err != nil {
+			return nil, err
+		}
+		return &provider.RescueInfo{Address: m.IPv4, User: "root",
+			Note: "OVHcloud mails the rescue password of a VPS; no SSH key can be set through the API, so UMP cannot log in by itself"}, nil
+	}
 	if m.Kind != provider.KindCloud {
 		ids, err := p.client.ListBoots(ctx, m.ID, "rescue")
 		if err != nil {
@@ -349,6 +410,9 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 // for a dedicated server, rescue mode off for an instance (which OVH
 // reboots).
 func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
+	if isVPS(m) {
+		return p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "local"})
+	}
 	if m.Kind != provider.KindCloud {
 		ids, err := p.client.ListBoots(ctx, m.ID, "harddisk")
 		if err != nil {
@@ -371,6 +435,27 @@ func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error 
 // API works with: a dedicated server's routed blocks, or /32 and /64
 // blocks around an instance's addresses.
 func (p *Provider) blocks(ctx context.Context, m provider.Machine) (primary string, blocks []string, err error) {
+	if isVPS(m) {
+		ips, err := p.client.VPSIPs(ctx, m.ID)
+		if err != nil {
+			return "", nil, err
+		}
+		for _, ip := range ips {
+			addr, err := netip.ParseAddr(ip)
+			if err != nil {
+				continue
+			}
+			if addr.Is4() {
+				if primary == "" {
+					primary = addr.String()
+				}
+				blocks = append(blocks, addr.String()+"/32")
+			} else if pfx, err := addr.Prefix(64); err == nil {
+				blocks = append(blocks, pfx.String())
+			}
+		}
+		return primary, blocks, nil
+	}
 	if m.Kind != provider.KindCloud {
 		s, err := p.client.GetDedicatedServer(ctx, m.ID)
 		if err != nil {
@@ -489,6 +574,16 @@ func isStatus(err error, status int) bool {
 // read-only in every public API model (the IAM resource included), so a
 // clear error is better than a call that changes nothing.
 func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
+	if isVPS(m) {
+		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"displayName": name}); err != nil {
+			return provider.Machine{}, err
+		}
+		v, err := p.client.GetVPS(ctx, m.ID)
+		if err != nil {
+			return provider.Machine{}, err
+		}
+		return p.vpsMachine(*v, []VPSIP{{IPAddress: m.IPv4, Version: 4}, {IPAddress: m.IPv6, Version: 6}}), nil
+	}
 	if m.Kind != provider.KindCloud {
 		return provider.Machine{}, &provider.APIError{Provider: TypeName,
 			Message: "dedicated servers cannot be renamed through the OVHcloud API (the display name is read-only there); set it in the OVHcloud control panel"}
@@ -511,6 +606,9 @@ func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) 
 // from its service name (the machine ID); a Public Cloud instance needs
 // the project, which the listing put into the "project_id" label.
 func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	if isVPS(m) {
+		return p.describeVPS(ctx, m.ID)
+	}
 	if m.Kind == provider.KindCloud {
 		projectID := m.Labels["project_id"]
 		if projectID == "" {
@@ -519,6 +617,78 @@ func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.
 		return p.describeInstance(ctx, projectID, m.Labels["project"], m.ID)
 	}
 	return p.describeDedicated(ctx, m.ID)
+}
+
+func (p *Provider) describeVPS(ctx context.Context, name string) (*provider.Details, error) {
+	v, err := p.client.GetVPS(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := p.vpsAddresses(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	d := &provider.Details{Machine: p.vpsMachine(*v, ips)}
+	server := provider.Section{Name: "Server"}
+	server.AddLabeled("name", "Name", v.Name)
+	server.AddLabeled("display_name", "Display name", v.DisplayName)
+	server.AddLabeled("state", "State", v.State)
+	server.AddLabeled("zone", "Zone", v.Zone)
+	server.AddLabeled("cluster", "Cluster", v.Cluster)
+	server.AddLabeled("netboot", "Netboot", v.NetbootMode)
+	server.AddLabeled("offer_type", "Offer type", v.OfferType)
+	d.Sections = append(d.Sections, server)
+	model := provider.Section{Name: "Model"}
+	model.AddLabeled("model", "Model", v.Model.Name)
+	model.AddLabeled("offer", "Offer", v.Model.Offer)
+	model.AddLabeled("version", "Version", v.Model.Version)
+	model.AddLabeled("vcores", "vCores", strconv.Itoa(v.Vcore))
+	model.AddLabeled("memory", "Memory", fmt.Sprintf("%d MB", v.MemoryLimit))
+	model.AddLabeled("disk", "Disk", fmt.Sprintf("%d GB", v.Model.Disk))
+	d.Sections = append(d.Sections, model)
+	addrs := provider.Section{Name: "Addresses"}
+	for _, ip := range ips {
+		what := ip.Type
+		if what == "" {
+			what = "address"
+		}
+		if ip.Reverse != "" {
+			what += ", reverse " + ip.Reverse
+		}
+		addrs.AddLabeled("ip_"+ip.IPAddress, ip.IPAddress, what)
+	}
+	d.Sections = append(d.Sections, addrs)
+	if si, err := p.client.GetVPSServiceInfos(ctx, name); err == nil {
+		svc := provider.Section{Name: "Service"}
+		svc.AddLabeled("created", "Created", si.Creation)
+		svc.AddLabeled("expires", "Expires", si.Expiration)
+		svc.AddLabeled("renewal", "Renewal", si.RenewalType)
+		d.Sections = append(d.Sections, svc)
+	}
+	return d, nil
+}
+
+// vpsAddresses returns the addresses of a VPS with their details.
+func (p *Provider) vpsAddresses(ctx context.Context, name string) ([]VPSIP, error) {
+	ips, err := p.client.VPSIPs(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]VPSIP, 0, len(ips))
+	for _, ip := range ips {
+		detail, err := p.client.GetVPSIP(ctx, name, ip)
+		if err != nil {
+			// the address alone is better than nothing
+			v := 4
+			if strings.Contains(ip, ":") {
+				v = 6
+			}
+			out = append(out, VPSIP{IPAddress: ip, Version: v})
+			continue
+		}
+		out = append(out, *detail)
+	}
+	return out, nil
 }
 
 func (p *Provider) describeDedicated(ctx context.Context, name string) (*provider.Details, error) {
@@ -669,12 +839,19 @@ func (p *Provider) describeInstance(ctx context.Context, projectID, projectName,
 // tolerated: that family is skipped, and mentioned in verbose output.
 func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	var (
-		wg                 sync.WaitGroup
-		dedicated, cloud   []provider.Machine
-		dedErr, cloudErr   error
-		skippedDed, skipCl bool
+		wg                          sync.WaitGroup
+		dedicated, cloud, vps       []provider.Machine
+		dedErr, cloudErr, vpsErr    error
+		skippedDed, skipCl, skipVPS bool
 	)
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		vps, vpsErr = p.listVPS(ctx)
+		if isNotGranted(vpsErr) {
+			skipVPS, vpsErr = true, nil
+		}
+	}()
 	go func() {
 		defer wg.Done()
 		dedicated, dedErr = p.listDedicated(ctx)
@@ -696,9 +873,12 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	if cloudErr != nil {
 		return nil, cloudErr
 	}
-	if skippedDed && skipCl {
+	if vpsErr != nil {
+		return nil, vpsErr
+	}
+	if skippedDed && skipCl && skipVPS {
 		return nil, &provider.APIError{Provider: TypeName, Status: http.StatusForbidden, Code: "NOT_GRANTED_CALL",
-			Message: "the consumer key may list neither dedicated servers nor Public Cloud projects (check its access rules)"}
+			Message: "the consumer key may list neither dedicated servers, VPS nor Public Cloud projects (check its access rules)"}
 	}
 	if p.logf != nil {
 		if skippedDed {
@@ -707,8 +887,89 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 		if skipCl {
 			p.logf("ovh: consumer key is not allowed to list Public Cloud projects; skipped")
 		}
+		if skipVPS {
+			p.logf("ovh: consumer key is not allowed to list VPS (GET /vps); skipped, request a key with the /vps rules (ump config)")
+		}
 	}
-	return append(dedicated, cloud...), nil
+	out := append(dedicated, vps...)
+	return append(out, cloud...), nil
+}
+
+func (p *Provider) listVPS(ctx context.Context) ([]provider.Machine, error) {
+	names, err := p.client.ListVPS(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]provider.Machine, len(names))
+	errs := make([]error, len(names))
+	sem := make(chan struct{}, listParallelism)
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			v, err := p.client.GetVPS(ctx, name)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			ips, err := p.vpsAddresses(ctx, name)
+			if err != nil && !isNotGranted(err) {
+				errs[i] = err
+				return
+			}
+			out[i] = p.vpsMachine(*v, ips)
+		}(i, name)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (p *Provider) vpsMachine(v VPS, ips []VPSIP) provider.Machine {
+	m := provider.Machine{
+		Provider: TypeName,
+		Account:  p.account,
+		ID:       v.Name,
+		Name:     v.Name,
+		Kind:     provider.KindCloud,
+		Location: strings.ToLower(v.Zone),
+		Product:  v.Model.Name,
+		Status:   strings.ToLower(v.State),
+		Labels:   map[string]string{"family": "vps"},
+	}
+	if strings.TrimSpace(v.DisplayName) != "" {
+		m.Name = v.DisplayName
+	} else if v.IAM != nil && strings.TrimSpace(v.IAM.DisplayName) != "" {
+		m.Name = v.IAM.DisplayName
+	}
+	if m.Product == "" {
+		m.Product = v.Model.Offer
+	}
+	if v.NetbootMode == "rescue" {
+		m.Status = "rescue"
+	}
+	// the primary address first, then any other
+	for _, pass := range []bool{true, false} {
+		for _, ip := range ips {
+			if ip.IPAddress == "" || (ip.Type == "primary") != pass {
+				continue
+			}
+			switch {
+			case ip.Version == 4 && m.IPv4 == "":
+				m.IPv4 = ip.IPAddress
+			case ip.Version == 6 && m.IPv6 == "":
+				m.IPv6 = ip.IPAddress
+			}
+		}
+	}
+	return m
 }
 
 func isNotGranted(err error) bool {
@@ -858,6 +1119,40 @@ func (p *Provider) instanceMachine(project CloudProject, in Instance) provider.M
 		}
 	}
 	return m
+}
+
+// VPS is GET /vps/{serviceName}.
+type VPS struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	State       string `json:"state"`
+	Zone        string `json:"zone"`
+	Cluster     string `json:"cluster"`
+	NetbootMode string `json:"netbootMode"`
+	OfferType   string `json:"offerType"`
+	Vcore       int    `json:"vcore"`
+	MemoryLimit int    `json:"memoryLimit"`
+	Model       struct {
+		Name    string `json:"name"`
+		Offer   string `json:"offer"`
+		Version string `json:"version"`
+		Vcore   int    `json:"vcore"`
+		Memory  int    `json:"memory"`
+		Disk    int    `json:"disk"`
+	} `json:"model"`
+	IAM *struct {
+		DisplayName string `json:"displayName"`
+	} `json:"iam"`
+}
+
+// VPSIP is GET /vps/{serviceName}/ips/{ipAddress}.
+type VPSIP struct {
+	IPAddress  string `json:"ipAddress"`
+	Version    int    `json:"version"`
+	Type       string `json:"type"`
+	Reverse    string `json:"reverse"`
+	Gateway    string `json:"gateway"`
+	MACAddress string `json:"macAddress"`
 }
 
 // DedicatedServer is GET /dedicated/server/{serviceName}.
@@ -1075,6 +1370,65 @@ func (c *Client) ListInstances(ctx context.Context, projectID string) ([]Instanc
 		return nil, err
 	}
 	return list, nil
+}
+
+// ListVPS returns the service names of all VPS.
+func (c *Client) ListVPS(ctx context.Context) ([]string, error) {
+	var names []string
+	if err := c.do(ctx, http.MethodGet, "/vps", nil, &names); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// GetVPS returns one VPS.
+func (c *Client) GetVPS(ctx context.Context, name string) (*VPS, error) {
+	var v VPS
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name), nil, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// VPSIPs returns the addresses of a VPS.
+func (c *Client) VPSIPs(ctx context.Context, name string) ([]string, error) {
+	var ips []string
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/ips", nil, &ips); err != nil {
+		return nil, err
+	}
+	return ips, nil
+}
+
+// GetVPSIP returns one address of a VPS with its details.
+func (c *Client) GetVPSIP(ctx context.Context, name, ip string) (*VPSIP, error) {
+	var v VPSIP
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/ips/"+url.PathEscape(ip), nil, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// GetVPSServiceInfos returns the contract information of a VPS.
+func (c *Client) GetVPSServiceInfos(ctx context.Context, name string) (*ServiceInfos, error) {
+	var si ServiceInfos
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/serviceInfos", nil, &si); err != nil {
+		return nil, err
+	}
+	return &si, nil
+}
+
+// VPSAction runs reboot, start or stop on a VPS.
+func (c *Client) VPSAction(ctx context.Context, name, action string) (*Task, error) {
+	var t Task
+	if err := c.do(ctx, http.MethodPost, "/vps/"+url.PathEscape(name)+"/"+action, struct{}{}, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// UpdateVPS changes fields of a VPS (displayName, netbootMode, ...).
+func (c *Client) UpdateVPS(ctx context.Context, name string, fields map[string]any) error {
+	return c.do(ctx, http.MethodPut, "/vps/"+url.PathEscape(name), fields, nil)
 }
 
 // GetServiceInfos returns the contract information of a dedicated server.

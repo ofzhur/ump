@@ -35,6 +35,10 @@ type fakeAPI struct {
 	srv          *httptest.Server
 	denyCloud    bool
 	denyDedicate bool
+	denyVPS      bool
+	vpsActions   []string
+	vpsNetboot   string
+	vpsName      string
 	renamed      string
 	reverse      map[string]map[string]string
 	calls        atomic.Int32
@@ -200,6 +204,46 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"name":"ns2.ip-203-0-113.eu","ip":"203.0.113.21","datacenter":"rbx8","state":"ok","powerState":"poweredOff","commercialRange":"advance-2"}`))
 	case "/dedicated/server/ns2.ip-203-0-113.eu/ips":
 		w.Write([]byte(`["203.0.113.21/32"]`))
+	case "/vps":
+		if f.denyVPS {
+			f.deny(w)
+			return
+		}
+		w.Write([]byte(`["vps-00000000.vps.ovh.net"]`))
+	case "/vps/vps-00000000.vps.ovh.net":
+		if r.Method == http.MethodPut {
+			var req map[string]string
+			json.Unmarshal(body, &req)
+			if v, ok := req["netbootMode"]; ok {
+				f.vpsNetboot = v
+				f.vpsActions = append(f.vpsActions, "netboot:"+v)
+			}
+			if v, ok := req["displayName"]; ok {
+				f.vpsName = v
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		netboot, name := f.vpsNetboot, f.vpsName
+		if netboot == "" {
+			netboot = "local"
+		}
+		if name == "" {
+			name = "edge-01"
+		}
+		w.Write([]byte(`{"name":"vps-00000000.vps.ovh.net","displayName":"` + name + `","state":"running","zone":"gra","cluster":"c-42","netbootMode":"` + netboot + `","offerType":"ssd","vcore":2,"memoryLimit":4096,
+		  "model":{"name":"vps-2024-le-2","offer":"VPS Le-2","version":"2024v1","vcore":2,"memory":4096,"disk":80},"iam":{"displayName":"ignored"}}`))
+	case "/vps/vps-00000000.vps.ovh.net/ips":
+		w.Write([]byte(`["2001:db8:9::1","203.0.113.99"]`))
+	case "/vps/vps-00000000.vps.ovh.net/ips/203.0.113.99":
+		w.Write([]byte(`{"ipAddress":"203.0.113.99","version":4,"type":"primary","reverse":"edge-01.example.net.","gateway":"203.0.113.1"}`))
+	case "/vps/vps-00000000.vps.ovh.net/ips/2001:db8:9::1":
+		w.Write([]byte(`{"ipAddress":"2001:db8:9::1","version":6,"type":"additional","reverse":""}`))
+	case "/vps/vps-00000000.vps.ovh.net/serviceInfos":
+		w.Write([]byte(`{"creation":"2026-09-01","expiration":"2026-11-01","status":"ok","renewalType":"automaticV2016"}`))
+	case "/vps/vps-00000000.vps.ovh.net/reboot", "/vps/vps-00000000.vps.ovh.net/start", "/vps/vps-00000000.vps.ovh.net/stop":
+		f.vpsActions = append(f.vpsActions, strings.TrimPrefix(r.URL.Path, "/vps/vps-00000000.vps.ovh.net/"))
+		w.Write([]byte(`{"id":7,"type":"rebootVm","state":"todo"}`))
 	case "/cloud/project":
 		if f.denyCloud {
 			f.deny(w)
@@ -286,8 +330,8 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 3 {
-		t.Fatalf("got %d machines, want 3: %+v", len(ms), ms)
+	if len(ms) != 4 {
+		t.Fatalf("got %d machines, want 4: %+v", len(ms), ms)
 	}
 	byID := map[string]provider.Machine{}
 	for _, m := range ms {
@@ -317,14 +361,87 @@ func TestNotGrantedFamilyIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 2 {
-		t.Errorf("got %d machines, want the 2 dedicated ones", len(ms))
+	if len(ms) != 3 {
+		t.Errorf("got %d machines, want the 2 dedicated ones and the VPS", len(ms))
+	}
+	f.denyVPS = true
+	if ms, err = f.provider(t).List(context.Background()); err != nil || len(ms) != 2 {
+		t.Errorf("VPS denied: %v, %d machines", err, len(ms))
 	}
 	f.denyDedicate = true
 	_, err = f.provider(t).List(context.Background())
 	var apiErr *provider.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != "NOT_GRANTED_CALL" {
-		t.Errorf("both families denied should fail, got %v", err)
+		t.Errorf("all families denied should fail, got %v", err)
+	}
+}
+
+func TestVPS(t *testing.T) {
+	f := newFakeAPI(t)
+	p := f.provider(t)
+	ms, err := p.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vps provider.Machine
+	for _, m := range ms {
+		if m.ID == "vps-00000000.vps.ovh.net" {
+			vps = m
+		}
+	}
+	want := provider.Machine{Provider: "ovh", Account: "ovh", ID: "vps-00000000.vps.ovh.net", Name: "edge-01", Kind: provider.KindCloud,
+		IPv4: "203.0.113.99", IPv6: "2001:db8:9::1", Location: "gra", Product: "vps-2024-le-2", Status: "running", Labels: map[string]string{"family": "vps"}}
+	if !reflect.DeepEqual(vps, want) {
+		t.Errorf("vps:\n got %+v\nwant %+v", vps, want)
+	}
+
+	pw := p.(provider.Power)
+	if st, err := pw.PowerState(context.Background(), vps); err != nil || st != provider.PowerOn {
+		t.Errorf("power state: %v %v", st, err)
+	}
+	if err := pw.Reboot(context.Background(), vps, provider.RebootPowerCycle); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Reboot(context.Background(), vps, provider.RebootSoft); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.PowerOff(context.Background(), vps, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.vpsActions, ","); got != "stop,start,reboot,stop" {
+		t.Errorf("actions: %s", got)
+	}
+
+	rs := p.(provider.Rescue)
+	f.vpsActions = nil
+	info, err := rs.EnableRescue(context.Background(), vps, provider.RescueOptions{Keys: []provider.PublicKey{{Data: "ssh-ed25519 AAAA x"}}})
+	if err != nil || info.Address != "203.0.113.99" || info.User != "root" || !strings.Contains(info.Note, "mails the rescue password") || info.Reboots {
+		t.Errorf("enable rescue: %+v %v", info, err)
+	}
+	if on, err := rs.RescueEnabled(context.Background(), vps); err != nil || !on {
+		t.Errorf("rescue enabled: %v %v", on, err)
+	}
+	if err := rs.DisableRescue(context.Background(), vps); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := rs.RescueEnabled(context.Background(), vps); on || strings.Join(f.vpsActions, ",") != "netboot:rescue,netboot:local" {
+		t.Errorf("rescue off: on=%v actions %v", on, f.vpsActions)
+	}
+
+	got, err := p.(provider.Renamer).Rename(context.Background(), vps, "edge-02")
+	if err != nil || got.Name != "edge-02" || got.ID != vps.ID || got.IPv4 != "203.0.113.99" || !isVPS(got) {
+		t.Errorf("rename: %+v %v", got, err)
+	}
+
+	d, err := p.(provider.Describer).Describe(context.Background(), vps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := fmt.Sprintf("%+v", d.Sections)
+	for _, want := range []string{"Server", "Model", "Addresses", "Service", "vps-2024-le-2", "4096 MB", "80 GB", "203.0.113.99", "reverse edge-01.example.net.", "2026-11-01"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("describe lacks %q:\n%s", want, text)
+		}
 	}
 }
 

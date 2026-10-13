@@ -22,7 +22,7 @@ that needs one the provider lacks says so instead of failing half-way.
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
 | `hetzner-robot` | bare metal | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
 | `hetzner-cloud` | cloud | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
-| `ovh` | bare metal + cloud | ✓ | instances | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
+| `ovh` | bare metal + VPS + cloud | ✓ | VPS, instances | ✓ | ✓ | – | ✓ | ✓ | – | rescue |
 | `scaleway-baremetal` | bare metal | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – | rescue |
 | `aws-ec2` | cloud | ✓ | ✓ | ✓ | – | ✓ | – | ✓ | – | kexec |
 | `gcp-compute` | cloud | ✓ | – | ✓ | – | ✓ | – | ✓ | – | kexec |
@@ -119,6 +119,15 @@ SSH as root. It is also the provider used by the integration test suite.
   instance the `/32` of each IPv4 and the `/64` of each IPv6. OVH
   requires the name to resolve to the address before it accepts the
   entry. The instance path is untested against the live API.
+- VPS (`/vps`) are listed next to dedicated servers and Public Cloud
+  instances, labelled `family: vps`: reboot, start, stop, rename (the
+  display name), reverse DNS on the `/32` and `/64` of their addresses,
+  and rescue through the netboot mode (`rescue` until `unrescue`, the
+  machine boots it at the next reboot). The VPS API takes no rescue SSH
+  key and OVH mails the password, so UMP cannot log into a VPS rescue
+  system by itself; `ump rescue --no-image` with the mailed password is
+  the way in. A consumer key made before VPS support lacks the `/vps`
+  rules and shows no VPS; `ump config add` requests a new key with them.
 - The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
 
 ### Clouds without rescue (AWS, GCP, ...)
