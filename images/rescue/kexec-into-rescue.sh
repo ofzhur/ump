@@ -58,7 +58,7 @@ fetch() { # fetch URL FILE: download, and say what went wrong when it did not
 		curl -fsSL -o "$2" "$1" && return 0
 		status="$(curl -sL -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)"
 		echo "download failed: $1 (HTTP ${status:-?})" >&2
-		if curl -sIL "$1" 2>/dev/null | grep -qi '^content-type: text/html'; then
+		if curl -sIL "$1" 2>/dev/null | grep -qiE '^(content-type: text/html)'; then
 			echo "the storage answered with a web page instead of the file: a bot protection or a login page in front of it must let scripted clients through (see the README)" >&2
 		fi
 	else

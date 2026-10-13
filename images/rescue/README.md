@@ -52,39 +52,35 @@ other files. Publish the directory as is (`<base-url>/<arch>/...`);
 ## Publishing
 
 ```console
-$ make upload                              # every built image (rescue and OS) and the scripts
-$ images/upload.sh rescue                  # one kind: rescue, os or scripts
+$ make upload UPLOAD_TARGET=s3://my-bucket          # every built image, the binaries, the scripts and the profiles
+$ images/upload.sh rescue                           # one kind: rescue, os, index, bin, scripts or profiles
 ```
 
-[`images/upload.sh`](../upload.sh) puts the files into an S3-compatible bucket
-through its S3 API (any S3-compatible store works the same), using the
-AWS CLI or rclone, whichever is installed. The settings come from the
-environment, so that nothing is written down in the repository:
+[`images/upload.sh`](../upload.sh) writes the storage layout below to a
+target named by `UPLOAD_TARGET`:
 
-| Variable | Meaning |
+| Target | What it needs |
 |---|---|
-| `STORE_ACCOUNT_ID` | the account ID; the endpoint becomes `https://<id>.storage.example.net` |
-| `STORE_ENDPOINT` | the S3 endpoint URL, instead of `STORE_ACCOUNT_ID` |
-| `STORE_ACCESS_KEY_ID`, `STORE_SECRET_ACCESS_KEY` | an API token with object read and write on the bucket (from the store's console) |
-| `STORE_BUCKET` | the bucket |
-| `STORE_PREFIX` | key prefix in the bucket, default none (the bucket root is the storage) |
-| `DRY_RUN=1` | print what would be uploaded |
+| `s3://bucket[/prefix]` | an S3 bucket, or any S3-compatible store with `S3_ENDPOINT=https://...`; the AWS CLI or rclone, and the credentials the way they take them (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or a profile) |
+| `scp://[user@]host/abs/path` | a directory on a web server, reached over SSH with your keys (`UPLOAD_SSH_OPTIONS="-i KEY -p PORT"` for anything else); rsync when both sides have it, scp otherwise |
+| `file:///abs/path` | a local directory, for example a mounted web root |
 
-Keep them in a file the shell sources, for example `~/.config/ump/r2.env`
-with mode 0600, or in `pass`/`op` and export them for the command:
+`DRY_RUN=1` prints what would be done. Keep the credentials out of the
+repository: in a file the shell sources (mode 0600), or in `pass`/`op`,
+exported for the command:
 
 ```console
-$ set -a; . ~/.config/ump/r2.env; set +a
+$ set -a; . ~/.config/ump/upload.env; set +a
 $ make upload
 ```
 
-The layout in the bucket is the storage layout below; per image,
-`manifest.json` goes up last, so a reader never sees a manifest whose
-files are not there yet, and every version uploaded is kept under `v/`
-for rollbacks. Give the bucket a public hostname (an R2 custom domain or
-`r2.dev`) and that hostname is the storage, `storage` in the ump
-configuration; this project's is `https://ump.zhurko.de`, ump's default,
-and the rescue image's base URL is `<storage>/rescue`.
+Per image, `manifest.json` goes up last, so a reader never sees a
+manifest whose files are not there yet, and every version uploaded is
+kept under `v/` for rollbacks (large files go up once and are copied
+on the target side). Whatever serves the target over HTTP is the
+storage, `storage` in the ump configuration; this project's is
+`https://ump.zhurko.de`, ump's default, and the rescue image's base URL
+is `<storage>/rescue`.
 
 ### Your own storage
 
@@ -121,15 +117,15 @@ commit), and
 that is not S3-compatible.
 
 The clients of that hostname are rescue systems with `curl`, not
-browsers, and they come from datacenter address space. A bot protection in
-front of the storage (a JavaScript challenge, a login page) answers
-such requests with a web page that no script can pass, so the hostname
-needs a rule that lets scripted clients through, and a test from a
-server, not from a laptop, before relying on it. Blocked, the entry
-script stops at its first download with HTTP 403 and boots nothing, so
-a later `ump ssh --staging` lands in the provider's rescue system, not
-in UMP's; the `-o file &&` form of the one-liner below fails the same
-way instead of feeding an empty download to `bash`.
+browsers, and they come from datacenter address space. A bot protection
+in front of the storage (a JavaScript challenge, a login page) answers such requests with a web
+page that no script can pass, so the hostname needs a rule that lets
+scripted clients through, and a test from a server, not from a laptop,
+before relying on it. Blocked, the entry script stops at its first
+download (it says so, with the HTTP status) and boots nothing, so a
+later `ump ssh --staging` lands in the provider's rescue system, not in
+UMP's; the `-o file &&` form of the one-liner below fails the same way
+instead of feeding an empty download to `bash`.
 
 ## What is in it
 

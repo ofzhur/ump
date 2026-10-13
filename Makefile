@@ -73,7 +73,7 @@ dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SU
 	@echo '$(VERSION)' > dist/VERSION
 	@echo "  dist/SHA256SUMS dist/VERSION ($(VERSION))"
 
-release: check dist ## check, dist, and publish the binaries (bin/) and get.sh to the storage (STORE_* from the environment)
+release: check dist ## check, dist, and publish the binaries (bin/) and get.sh to UPLOAD_TARGET (s3://, scp:// or file://)
 	images/upload.sh bin scripts
 
 clean: ## remove the binary and dist/
@@ -96,7 +96,7 @@ os-image: ## build the Ubuntu base image(s) of OS_LIST (default: ubuntu-26.04) f
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(TEST_ARCH)
 
-upload: ## publish everything built (images, binaries) and the scripts and profiles to R2 (STORE_* from the environment)
+upload: ## publish everything built (images, binaries), the scripts and the profiles to UPLOAD_TARGET (s3://bucket, scp://host/path or file:///path)
 	images/upload.sh
 
 images/rescue/out/%/manifest.json:
