@@ -304,6 +304,9 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if !canReboot {
 		return nil, fmt.Errorf("account %s: provider type %s cannot reboot; use ump server rescue --no-reboot and reboot the server yourself", m.Account, m.Provider)
 	}
+	if kr, ok := prov.(provider.KeylessRescue); ok && kr.RescueTakesNoKey(m) {
+		return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself; give UMP root access to the running system (UMP's key in root's authorized_keys, see ump config key) for the direct way, or use ump server rescue --no-image with the mailed password", m.Name))
+	}
 	if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))); err != nil {
 		return nil, err
 	}

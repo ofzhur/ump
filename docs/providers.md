@@ -125,9 +125,16 @@ SSH as root. It is also the provider used by the integration test suite.
   and rescue through the netboot mode (`rescue` until `unrescue`, the
   machine boots it at the next reboot). The VPS API takes no rescue SSH
   key and OVH mails the password, so UMP cannot log into a VPS rescue
-  system by itself; `ump server rescue --no-image` with the mailed password is
-  the way in. A consumer key made before VPS support lacks the `/vps`
-  rules and shows no VPS; `ump config isp add` requests a new key with them.
+  system by itself: `ump server reinstall` and `ump server rescue` refuse
+  the provider's way for a VPS before enabling anything, and say so.
+  The direct way works when the running system lets UMP in as root
+  (UMP's key in root's `authorized_keys`); `ump server rescue --no-image`
+  with the mailed password is the way into the provider's rescue system.
+  Every change to a VPS is a task at OVH, and OVH refuses the next action
+  while one runs, so ump waits for the tasks before it reboots or
+  changes the netboot mode. A consumer key made before VPS support lacks
+  the `/vps` rules and shows no VPS; `ump config isp add` requests a new
+  key with them.
 - The endpoint is `ovh-eu`, `ovh-ca` or `ovh-us` (or a URL).
 
 ### Clouds without rescue (AWS, GCP, ...)

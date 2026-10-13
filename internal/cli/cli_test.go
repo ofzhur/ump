@@ -83,6 +83,11 @@ func (f *fakeProvider) RescueEnabled(ctx context.Context, m provider.Machine) (b
 	return fakePower.rescue[m.Ref()], nil
 }
 
+// fakeKeyless makes the fake rescue system one that takes no key.
+var fakeKeyless bool
+
+func (f *fakeProvider) RescueTakesNoKey(m provider.Machine) bool { return fakeKeyless }
+
 func (f *fakeProvider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
 	fakePower.rescue[m.Ref()] = true
 	fakePower.keys = nil
@@ -2527,5 +2532,26 @@ func TestListAccountsSameTypeInSequence(t *testing.T) {
 	}
 	if !overlap {
 		t.Error("different types should run at the same time, but did not overlap")
+	}
+}
+
+func TestRescueKeylessIsRefusedEarly(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	resetFakePower()
+	fakeKeyless = true
+	defer func() { fakeKeyless = false }()
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one")
+	if code != 5 || !strings.Contains(errOut, "the provider's rescue system of web-01 takes no SSH key (the password goes by mail)") || !strings.Contains(errOut, "ump server rescue --no-image") {
+		t.Errorf("keyless: code %d, %q", code, errOut)
+	}
+	if len(fakePower.actions) != 0 {
+		t.Errorf("nothing may be enabled or rebooted: %v", fakePower.actions)
+	}
+	// --no-image still works, it is the way in with the mailed password
+	_, _, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--no-image", "--account", "one")
+	if code != 0 || strings.Join(fakePower.actions, ",") != "rescue,reboot:hard" {
+		t.Errorf("--no-image: code %d, actions %v", code, fakePower.actions)
 	}
 }

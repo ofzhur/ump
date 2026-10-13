@@ -65,6 +65,8 @@ var DefaultAccessRules = []AccessRule{
 	{Method: "POST", Path: "/vps/*/reboot"},
 	{Method: "POST", Path: "/vps/*/start"},
 	{Method: "POST", Path: "/vps/*/stop"},
+	{Method: "GET", Path: "/vps/*/tasks"},
+	{Method: "GET", Path: "/vps/*/tasks/*"},
 }
 
 const listParallelism = 8
@@ -199,6 +201,50 @@ func (p *Provider) projectID(m provider.Machine) (string, error) {
 // isVPS reports whether a machine is a VPS (the listing labels them).
 func isVPS(m provider.Machine) bool { return m.Labels["family"] == "vps" }
 
+// RescueTakesNoKey implements provider.KeylessRescue: a VPS boots its
+// rescue system with a password OVH mails, nothing else.
+func (p *Provider) RescueTakesNoKey(m provider.Machine) bool { return isVPS(m) }
+
+// vpsTaskWait is how long a VPS gets to finish its running tasks before
+// an action; OVH refuses actions while a task runs.
+var vpsTaskWait = 3 * time.Minute
+
+// vpsTaskPoll is how often the tasks are looked at while waiting.
+var vpsTaskPoll = 3 * time.Second
+
+// waitVPSIdle waits until the VPS has no task in progress.
+func (p *Provider) waitVPSIdle(ctx context.Context, name string) error {
+	deadline := time.Now().Add(vpsTaskWait)
+	for {
+		ids, err := p.client.VPSTasks(ctx, name)
+		if err != nil {
+			return err
+		}
+		busy := false
+		for _, id := range ids {
+			t, err := p.client.GetVPSTask(ctx, name, id)
+			if err != nil {
+				return err
+			}
+			switch t.State {
+			case "todo", "doing", "waitingAck", "paused":
+				busy = true
+			}
+		}
+		if !busy {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return &provider.APIError{Provider: TypeName, Message: "VPS " + name + " still has tasks running after " + vpsTaskWait.String()}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(vpsTaskPoll):
+		}
+	}
+}
+
 var errDedicatedPower = &provider.APIError{Provider: TypeName,
 	Message: "dedicated servers cannot be switched on or off through the OVHcloud API; use the control panel (or reboot)"}
 
@@ -260,8 +306,14 @@ func instancePower(status string) provider.PowerState {
 // and a power cycle is stop then start.
 func (p *Provider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
 	if isVPS(m) {
+		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+			return err
+		}
 		if mode == provider.RebootPowerCycle {
 			if _, err := p.client.VPSAction(ctx, m.ID, "stop"); err != nil {
+				return err
+			}
+			if err := p.waitVPSIdle(ctx, m.ID); err != nil {
 				return err
 			}
 			_, err := p.client.VPSAction(ctx, m.ID, "start")
@@ -364,8 +416,15 @@ func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool,
 func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
 	if isVPS(m) {
 		// a VPS boots its rescue system when its netboot mode says so; the
-		// API takes no key, OVH mails the password
+		// change is a task, and nothing else is accepted until it is done;
+		// the API takes no key, OVH mails the password
+		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+			return nil, err
+		}
 		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "rescue"}); err != nil {
+			return nil, err
+		}
+		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
 			return nil, err
 		}
 		return &provider.RescueInfo{Address: m.IPv4, User: "root",
@@ -411,7 +470,13 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 // reboots).
 func (p *Provider) DisableRescue(ctx context.Context, m provider.Machine) error {
 	if isVPS(m) {
-		return p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "local"})
+		if err := p.waitVPSIdle(ctx, m.ID); err != nil {
+			return err
+		}
+		if err := p.client.UpdateVPS(ctx, m.ID, map[string]any{"netbootMode": "local"}); err != nil {
+			return err
+		}
+		return p.waitVPSIdle(ctx, m.ID)
 	}
 	if m.Kind != provider.KindCloud {
 		ids, err := p.client.ListBoots(ctx, m.ID, "harddisk")
@@ -1424,6 +1489,32 @@ func (c *Client) GetVPSServiceInfos(ctx context.Context, name string) (*ServiceI
 		return nil, err
 	}
 	return &si, nil
+}
+
+// VPSTask is GET /vps/{serviceName}/tasks/{id}.
+type VPSTask struct {
+	ID       int64  `json:"id"`
+	Type     string `json:"type"`
+	State    string `json:"state"`
+	Progress int    `json:"progress"`
+}
+
+// VPSTasks returns the ids of the tasks of a VPS.
+func (c *Client) VPSTasks(ctx context.Context, name string) ([]int64, error) {
+	var ids []int64
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/tasks", nil, &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// GetVPSTask returns one task of a VPS.
+func (c *Client) GetVPSTask(ctx context.Context, name string, id int64) (*VPSTask, error) {
+	var t VPSTask
+	if err := c.do(ctx, http.MethodGet, "/vps/"+url.PathEscape(name)+"/tasks/"+strconv.FormatInt(id, 10), nil, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // VPSAction runs reboot, start or stop on a VPS.

@@ -50,3 +50,12 @@ type Rescue interface {
 	EnableRescue(ctx context.Context, m Machine, opts RescueOptions) (*RescueInfo, error)
 	DisableRescue(ctx context.Context, m Machine) error
 }
+
+// KeylessRescue is implemented by providers whose rescue system, for some
+// machines, cannot be given an SSH key (the password goes by mail), so
+// that the caller can say so before enabling it.
+type KeylessRescue interface {
+	// RescueTakesNoKey reports whether the machine's rescue system can
+	// only be entered with a password UMP does not get.
+	RescueTakesNoKey(m Machine) bool
+}

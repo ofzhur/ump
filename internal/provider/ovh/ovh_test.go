@@ -31,17 +31,19 @@ const (
 // fakeAPI is an OVH API stand-in that checks request signatures the way
 // the real one does.
 type fakeAPI struct {
-	t            *testing.T
-	srv          *httptest.Server
-	denyCloud    bool
-	denyDedicate bool
-	denyVPS      bool
-	vpsActions   []string
-	vpsNetboot   string
-	vpsName      string
-	renamed      string
-	reverse      map[string]map[string]string
-	calls        atomic.Int32
+	t             *testing.T
+	srv           *httptest.Server
+	denyCloud     bool
+	denyDedicate  bool
+	denyVPS       bool
+	taskLooks     int
+	taskBusyUntil int
+	vpsActions    []string
+	vpsNetboot    string
+	vpsName       string
+	renamed       string
+	reverse       map[string]map[string]string
+	calls         atomic.Int32
 
 	bootID          int
 	rescueKey       string
@@ -217,6 +219,7 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 			if v, ok := req["netbootMode"]; ok {
 				f.vpsNetboot = v
 				f.vpsActions = append(f.vpsActions, "netboot:"+v)
+				f.taskBusyUntil = f.taskLooks + 2
 			}
 			if v, ok := req["displayName"]; ok {
 				f.vpsName = v
@@ -233,6 +236,16 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write([]byte(`{"name":"vps-00000000.vps.ovh.net","displayName":"` + name + `","state":"running","zone":"Region OpenStack: gra","cluster":"c-42","netbootMode":"` + netboot + `","offerType":"ssd","vcore":2,"memoryLimit":4096,
 		  "model":{"name":"vps-2024-le-2","offer":"VPS Le-2","version":"2024v1","vcore":2,"memory":4096,"disk":80},"iam":{"displayName":"ignored"}}`))
+	case "/vps/vps-00000000.vps.ovh.net/tasks":
+		// one task runs for the first two looks after a netboot change
+		f.taskLooks++
+		if f.taskBusyUntil > f.taskLooks {
+			w.Write([]byte(`[5]`))
+			return
+		}
+		w.Write([]byte(`[]`))
+	case "/vps/vps-00000000.vps.ovh.net/tasks/5":
+		w.Write([]byte(`{"id":5,"type":"setNetboot","state":"doing","progress":50}`))
 	case "/vps/vps-00000000.vps.ovh.net/ips":
 		w.Write([]byte(`["2001:db8:9::1","203.0.113.99"]`))
 	case "/vps/vps-00000000.vps.ovh.net/ips/203.0.113.99":
@@ -378,6 +391,9 @@ func TestNotGrantedFamilyIsSkipped(t *testing.T) {
 
 func TestVPS(t *testing.T) {
 	f := newFakeAPI(t)
+	old := vpsTaskPoll
+	vpsTaskPoll = time.Millisecond
+	t.Cleanup(func() { vpsTaskPoll = old })
 	p := f.provider(t)
 	ms, err := p.List(context.Background())
 	if err != nil {
@@ -413,8 +429,15 @@ func TestVPS(t *testing.T) {
 	}
 
 	rs := p.(provider.Rescue)
+	if !p.(provider.KeylessRescue).RescueTakesNoKey(vps) {
+		t.Error("a VPS rescue system must be known to take no key")
+	}
 	f.vpsActions = nil
+	looks := f.taskLooks
 	info, err := rs.EnableRescue(context.Background(), vps, provider.RescueOptions{Keys: []provider.PublicKey{{Data: "ssh-ed25519 AAAA x"}}})
+	if f.taskLooks < looks+3 {
+		t.Errorf("enable rescue must wait for the netboot task: %d looks at the tasks", f.taskLooks-looks)
+	}
 	if err != nil || info.Address != "203.0.113.99" || info.User != "root" || !strings.Contains(info.Note, "mails the rescue password") || info.Reboots {
 		t.Errorf("enable rescue: %+v %v", info, err)
 	}
