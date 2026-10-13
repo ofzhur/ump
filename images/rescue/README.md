@@ -21,8 +21,8 @@ Needs Docker or Podman; the build runs as root in a privileged Debian
 container (mmdebstrap mounts `/proc` and `/sys` into the chroot):
 
 ```console
-$ make rescue-image RESCUE_ARCH=arm64
-$ make rescue-image RESCUE_ARCH=amd64
+$ make rescue-image                  # out/amd64/ and out/arm64/
+$ make rescue-image RESCUE_ARCH=arm64  # one architecture
 ```
 
 or, on a Debian trixie host as root, `images/rescue/build.sh arm64`.
@@ -215,7 +215,7 @@ instead of waiting for the TCP timeout.
 ## Testing
 
 ```console
-$ make rescue-test RESCUE_ARCH=arm64
+$ make rescue-test TEST_ARCH=arm64     # default: this machine's architecture
 ```
 
 boots the built image in QEMU (`-kernel`/`-initrd`, 2 GB, a virtio disk

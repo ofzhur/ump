@@ -11,8 +11,8 @@ machine. One archive per architecture, `amd64` and `arm64`.
 ## Building
 
 ```console
-$ make os-image OS_ARCH=amd64        # images/ubuntu/out/amd64/
-$ make os-image OS_ARCH=arm64
+$ make os-image                      # images/ubuntu/out/amd64/ and out/arm64/
+$ make os-image OS_ARCH=arm64        # one architecture
 ```
 
 [`build.sh`](build.sh) runs as root in a privileged `debian:trixie`

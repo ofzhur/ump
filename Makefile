@@ -19,13 +19,17 @@ PLATFORMS  ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 export CGO_ENABLED := 0
 
-RESCUE_ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-OS_ARCH     ?= $(RESCUE_ARCH)
+# the images are built for both architectures; RESCUE_ARCH=amd64 or
+# OS_ARCH=arm64 limits a target to one, and the QEMU test takes one
+IMAGE_ARCHS ?= amd64 arm64
+RESCUE_ARCH ?= $(IMAGE_ARCHS)
+OS_ARCH     ?= $(IMAGE_ARCHS)
+TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 # the images carry the day they were built as their version
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help rescue-image rescue-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check dist clean help images rescue-image rescue-test os-image upload
 
 all: build
 
@@ -66,16 +70,22 @@ dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS)
 clean: ## remove the binary and dist/
 	rm -rf $(BINARY) $(BINARY).exe dist
 
-rescue-image: ## build the rescue image for RESCUE_ARCH (amd64|arm64) in a privileged Debian container
-	$(CONTAINER) run --rm --privileged \
-		-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $(RESCUE_ARCH)
+images: rescue-image os-image ## build every image for every architecture
 
-os-image: ## build the Ubuntu base image for OS_ARCH (amd64|arm64) in a privileged Debian container
-	$(CONTAINER) run --rm --privileged \
-		-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $(OS_ARCH)
+rescue-image: ## build the rescue image for RESCUE_ARCH (default: amd64 and arm64) in a privileged Debian container
+	@for arch in $(RESCUE_ARCH); do \
+		$(CONTAINER) run --rm --privileged \
+			-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch || exit 1; \
+	done
 
-rescue-test: ## boot the built rescue image for RESCUE_ARCH in QEMU and check it over SSH
-	images/rescue/test-boot.sh $(RESCUE_ARCH)
+os-image: ## build the Ubuntu base image for OS_ARCH (default: amd64 and arm64) in a privileged Debian container
+	@for arch in $(OS_ARCH); do \
+		$(CONTAINER) run --rm --privileged \
+			-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch || exit 1; \
+	done
+
+rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
+	images/rescue/test-boot.sh $(TEST_ARCH)
 
 upload: ## publish every built image (rescue and OS) and the scripts to R2 (STORE_* from the environment)
 	images/upload.sh
