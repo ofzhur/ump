@@ -64,7 +64,6 @@ keys:
 ```
 
 ```
-ump config key                                # = list
 ump config key show [-o json|yaml]            # UMP's own public key and its fingerprints
 ump config key list                           # ump and the named keys, with type, comment and fingerprint
 ump config key add                            # on a terminal: asks for the name and a file, a line or the agent

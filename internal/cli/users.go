@@ -17,7 +17,7 @@ func usersPath() string { return filepath.Join(config.ProfilesDir(), "users.yaml
 var userSet = &namedSet{
 	file: "users.yaml", key: "users", noun: "user",
 	use:     "user",
-	aliases: []string{"u", "users"},
+	aliases: []string{"u"},
 	short:   "The named users the profiles refer to",
 	long: `The users live in users.yaml next to the profiles
 (` + config.AbbreviateHome(usersPath()) + `), one named entry each; a profile
@@ -29,8 +29,8 @@ has sudo, groups, a shell and key references (ump, local, agent, a key
 name from ump config key, a file, or a key line); docs/profiles.md
 describes the fields.
 
-Without a subcommand, ump config user lists them; on a terminal,
-create without a name asks for one.`,
+On a terminal, create without a name asks for one and for the
+user to start from.`,
 	example: `  ump config user list
   ump config user get ump
   ump config user create ops --from ump   # then your editor

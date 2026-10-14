@@ -16,7 +16,7 @@ import (
 func (a *app) newServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "server",
-		Aliases: []string{"s", "servers", "srv", "machine", "machines"},
+		Aliases: []string{"s", "srv"},
 		Short:   "List, inspect, install and control servers",
 		Long: `Everything that happens to a server: listing and showing them, installing
 an operating system the way a profile says, the rescue system, power,

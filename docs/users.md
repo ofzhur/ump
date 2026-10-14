@@ -86,7 +86,6 @@ own with other users.
 ## Managing users
 
 ```
-ump config user                               # = list (alias: u)
 ump config user list                          # the users, with sudo, shell and keys
 ump config user get NAME                      # print one
 ump config user create [NAME] [--from NAME]   # copy an entry (default: ump), open the file in your editor; asks on a terminal

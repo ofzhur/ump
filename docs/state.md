@@ -93,7 +93,6 @@ an ump that died left behind.
 ## Commands
 
 ```
-ump config state                       # = view
 ump config state view                  # where the home is, the mirror, what it holds
 ump config state set                   # the wizard, on a terminal: pick a backend, copy the home there
 ump config state set --url URL [...]   # point ump at a backend as it is (the home there is used)

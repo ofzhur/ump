@@ -64,8 +64,9 @@ func saveNamedKeys(keys map[string]string) error {
 
 func (a *app) newConfigKeyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "key",
-		Short: "UMP's own SSH key (generated on first use) and the named keys of the users",
+		Use:     "key",
+		Aliases: []string{"k"},
+		Short:   "UMP's own SSH key (generated on first use) and the named keys of the users",
 		Long: `UMP has its own SSH key pair, which rescue systems and installed
 systems are reached with. It is generated on first use at the path in
 the configuration (staging.key), by default ~/.config/ump/staging_ed25519,
@@ -77,10 +78,9 @@ More public keys are kept under names in ` + config.AbbreviateHome(keysPath()) +
 a user's keys may name them (keys: [ump, oleg, laptop]) next to local,
 agent, a file or a key line.
 
-Without a subcommand, ump config key lists the keys, UMP's own first;
-on a terminal, ump config key add without arguments asks for a name
+On a terminal, ump config key add without arguments asks for a name
 and where the key comes from.`,
-		Example: `  ump config key                        # the list, UMP's own key first
+		Example: `  ump config key list                   # UMP's own key first, then the named ones
   ump config key show                   # UMP's own public key and its fingerprints
   ump config key add                    # asks for a name and a file, a line or the agent
   ump config key add oleg --file ~/.ssh/id_ed25519.pub
@@ -88,10 +88,6 @@ and where the key comes from.`,
   ump config key add work --agent        # the keys ssh-add -L lists, one name each (work, work-2, ...)
   ump config key list
   ump config key remove laptop`,
-		Args: usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubcommand(cmd, "list")
-		},
 	}
 	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyRemoveCmd())
 	return cmd
@@ -128,9 +124,10 @@ func (a *app) showUMPKey(cmd *cobra.Command, output string) error {
 func (a *app) newKeyShowCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
-		Use:   "show",
-		Short: "Show UMP's own public key and its fingerprints",
-		Args:  usageArgs(cobra.NoArgs),
+		Use:     "show",
+		Aliases: verbAliases("show"),
+		Short:   "Show UMP's own public key and its fingerprints",
+		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.showUMPKey(cmd, output)
 		},
@@ -185,7 +182,7 @@ func (a *app) newKeyListCmd() *cobra.Command {
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
-		Aliases: []string{"ls"},
+		Aliases: verbAliases("list"),
 		Short:   "List the named keys (and ump, UMP's own)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -224,9 +221,10 @@ func (a *app) newKeyAddCmd() *cobra.Command {
 	var file, line string
 	var agent bool
 	cmd := &cobra.Command{
-		Use:   "add [NAME] (--file FILE | --line 'ssh-... AAAA...' | --agent)",
-		Short: "Keep a public key under a name (asks on a terminal)",
-		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		Use:     "add [NAME] (--file FILE | --line 'ssh-... AAAA...' | --agent)",
+		Aliases: verbAliases("add"),
+		Short:   "Keep a public key under a name (asks on a terminal)",
+		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			var lines []string
@@ -292,7 +290,7 @@ func (a *app) newKeyAddCmd() *cobra.Command {
 func (a *app) newKeyRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "remove NAME",
-		Aliases: []string{"rm", "delete"},
+		Aliases: verbAliases("remove"),
 		Short:   "Forget a named key",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {

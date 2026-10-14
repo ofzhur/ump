@@ -18,8 +18,9 @@ func (a *app) newServerAddCmd() *cobra.Command {
 	var s provider.ManualServer
 	var kind string
 	cmd := &cobra.Command{
-		Use:   "add NAME --ipv4 ADDRESS [--ipv6 ADDRESS] [--location NAME] [--product NAME] [--kind bare-metal|cloud] [--note TEXT]",
-		Short: "Add a server by hand, without a provider API",
+		Use:     "add NAME --ipv4 ADDRESS [--ipv6 ADDRESS] [--location NAME] [--product NAME] [--kind bare-metal|cloud] [--note TEXT]",
+		Aliases: verbAliases("add"),
+		Short:   "Add a server by hand, without a provider API",
 		Long: `Add a server no configured provider lists: a machine in your own rack, at
 a provider ump has no support for, or anything with an address. It goes
 into the state (manual:) and is listed by the account "manual" of
@@ -100,8 +101,9 @@ before it erases anything. ump server remove forgets the server again.`,
 func (a *app) newServerRemoveCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "remove NAME [--yes]",
-		Short: "Forget a server added by hand",
+		Use:     "remove NAME [--yes]",
+		Aliases: verbAliases("remove"),
+		Short:   "Forget a server added by hand",
 		Long: `Remove a manual server from the state (and what ump server set
 remembered about it). The machine itself is not touched. Servers a
 provider lists cannot be removed here: they are the provider's.`,

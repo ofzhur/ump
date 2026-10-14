@@ -22,7 +22,7 @@ func (a *app) newServerShowCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:     "show NAME|ID|IP|PROVIDER/ID ...",
-		Aliases: []string{"describe", "info"},
+		Aliases: []string{"v", "view", "describe", "info"},
 		Short:   "Show details of one or more servers",
 		Long: `Show the common fields of a server and everything else its provider
 reports about it: contract and rescue state at Hetzner Robot, type, image,

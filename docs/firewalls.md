@@ -90,7 +90,6 @@ boot.
 ## Managing firewalls
 
 ```
-ump config firewall                               # = list (alias: fw)
 ump config firewall list                          # the firewalls, their policy and what they allow
 ump config firewall get NAME                      # print one
 ump config firewall create [NAME] [--from NAME]   # copy an entry (default: default), open the file in your editor; asks on a terminal
@@ -100,8 +99,9 @@ ump config firewall delete NAME [--yes]
 
 `create` and `delete` edit `firewalls.yaml` in place; its comments
 survive. `edit` checks every firewall when the editor returns and keeps
-the file either way, naming the problem. The command has the aliases
-`fw` and `firewalls`.
+the file either way, naming the problem. The command is also `fw`, and
+the verbs have the short forms of every `ump config` entity (`ump c fw
+ls`); see the [CLI reference](cli.md#ump-config).
 
 ## Using a firewall
 

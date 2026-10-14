@@ -219,9 +219,8 @@ $ ump config user edit                       # the whole file, checked afterward
 $ ump config user delete ops
 ```
 
-`ump config user` (`u`) alone is the list; `ump config user create`
-alone asks for the name and the user to start from on a terminal, and
-`ump config os create` defines a user on the spot when you name one it
+`ump config user create` alone asks for the name and the user to start
+from on a terminal, and `ump config os create` defines a user on the spot when you name one it
 does not know.
 
 ### The administrator and root
@@ -290,7 +289,6 @@ by MAC as before.
 ## Managing profiles
 
 ```
-ump config os                              # = list
 ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall
 ump config os get NAME                     # print one
 ump config os create [NAME]                # on a terminal: the wizard (the name, then the questions below), then the file is written
@@ -320,7 +318,9 @@ problem named, so nothing is lost; fix it with another `edit`. What is
 not checked until an installation: that the key references yield keys,
 and that the image exists on the storage.
 
-`ump config os` has the aliases `profile` and `profiles`.
+`ump config os` is also `o` or `profile`, and the verbs have the short
+forms of every `ump config` entity (`ump c o ls`); see the [CLI
+reference](cli.md#ump-config).
 
 ### Checks
 

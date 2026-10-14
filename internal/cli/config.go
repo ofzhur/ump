@@ -19,52 +19,56 @@ import (
 
 func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user) and keys (key)",
+		Use:     "config",
+		Aliases: []string{"c", "cfg"},
+		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), keys (key) and the home (state)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
-what a server becomes under os, UMP's own SSH key, and where it all lives.`,
-		Example: `  ump config isp                  # the account wizard
+what a server becomes under os, the named disk layouts, firewalls and
+users they refer to, UMP's own SSH key and the named keys, and where it
+all lives (state).
+
+Every entity has the same verbs with the same short forms: list (ls, l),
+get (g, show), view (v, show), create (c, new, add), add (a, new,
+create), edit (e), delete (d, rm, remove), remove (rm, d, delete),
+update (up), default (def), test (t). The entities: isp (i, provider,
+account), os (o, profile), disk-layout (dl, layout), firewall (fw),
+user (u), key (k), state (st); config itself is c or cfg.`,
+		Example: `  ump config isp add              # the account wizard
   ump config isp view             # the accounts, secrets redacted
-  ump config os                   # the profile wizard
-  ump config os edit default      # a profile in your editor
-  ump config disk-layout list     # the named disk layouts (alias: dl)
-  ump config firewall list        # the named firewalls (alias: fw)
-  ump config user list            # the named users (alias: u)
+  ump config os create            # the profile wizard
+  ump config os edit db           # a profile in your editor
+  ump config disk-layout list     # the named disk layouts
+  ump config firewall list        # the named firewalls
+  ump config user list            # the named users
   ump config key list             # UMP's own key and the named keys
-  ump config key                  # UMP's SSH key
-  ump config path`,
+  ump config state view           # where the home is
+  ump c o ls                      # the short form of ump config os list`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigStateCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigStateCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 
 func (a *app) newConfigISPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "isp",
-		Aliases: []string{"provider", "providers", "account", "accounts"},
+		Aliases: []string{"i", "provider", "account"},
 		Short:   "Set up provider accounts",
-		Long: `Set up provider accounts. Without a subcommand, ump config isp shows the
-configuration with the secrets redacted (view). On a terminal, ump config
+		Long: `Set up provider accounts. On a terminal, ump config
 isp add without arguments is a wizard that asks for a provider type, a
 name and the credentials, tests them and writes them to the
 configuration file. Secrets are stored as references (a file readable
 only by you, an environment variable or a command), never as plaintext.`,
-		Example: `  ump config isp                      # the configuration, secrets redacted
-  ump config isp add                  # the wizard, on a terminal
+		Example: `  ump config isp add                  # the wizard, on a terminal
   ump config isp test                 # check every account's credentials
   ump config isp add hetzner-robot main --set login=#ws+AbCdEfGh --set password=env:HROBOT_PASSWORD
   ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
   ump config isp add ovh ovh --set endpoint=ovh-eu --set application_key=... \
       --set application_secret=command:"pass show ovh/app-secret" --set consumer_key=env:OVH_CK
   ump config isp remove main`,
-		Args: usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubcommand(cmd, "view")
-		},
 	}
 	cmd.AddCommand(
 		a.newConfigViewCmd(),
@@ -78,9 +82,10 @@ only by you, an environment variable or a command), never as plaintext.`,
 
 func (a *app) newConfigViewCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "view",
-		Short: "Show the configuration with secrets redacted",
-		Args:  usageArgs(cobra.NoArgs),
+		Use:     "view",
+		Aliases: verbAliases("view"),
+		Short:   "Show the configuration with secrets redacted",
+		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := a.loadConfig()
 			if err != nil {
@@ -121,18 +126,6 @@ func redactConfig(cfg *config.Config) *config.Config {
 		out.Accounts[name] = copied
 	}
 	return out
-}
-
-func (a *app) newConfigPathCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "path",
-		Short: "Print the configuration file path",
-		Args:  usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(a.stdout, config.ResolvePath(a.configFlag))
-			return nil
-		},
-	}
 }
 
 func (a *app) newConfigTypesCmd() *cobra.Command {
@@ -199,8 +192,9 @@ func (a *app) newConfigAddCmd() *cobra.Command {
 		noTest bool
 	)
 	cmd := &cobra.Command{
-		Use:   "add [TYPE NAME --set KEY=VALUE ...]",
-		Short: "Add or replace an account: a wizard on a terminal, or from flags",
+		Use:     "add [TYPE NAME --set KEY=VALUE ...]",
+		Aliases: verbAliases("add"),
+		Short:   "Add or replace an account: a wizard on a terminal, or from flags",
 		Long: `Add an account. Without arguments and on a terminal, a wizard asks for
 the provider type, a name and the credentials, tests them and saves
 them. With TYPE and NAME, the settings are given with --set; a VALUE may
@@ -322,7 +316,7 @@ func (a *app) testSettings(cmd *cobra.Command, t provider.Type, name string, val
 func (a *app) newConfigRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "remove NAME",
-		Aliases: []string{"rm", "delete"},
+		Aliases: verbAliases("remove"),
 		Short:   "Remove an account and the secret files the wizard created for it",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -362,8 +356,9 @@ func (a *app) newConfigRemoveCmd() *cobra.Command {
 
 func (a *app) newConfigTestCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test [NAME...]",
-		Short: "Check that the accounts' credentials work",
+		Use:     "test [NAME...]",
+		Aliases: verbAliases("test"),
+		Short:   "Check that the accounts' credentials work",
 		Long: `Resolve each account's secrets, call its provider API once and report
 the result. All accounts are tested when no name is given.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -421,13 +416,34 @@ func secretFilePath(account, key string) string {
 	return filepath.Join(config.SecretsDir(), account+"."+key)
 }
 
-// runSubcommand runs the subcommand of cmd called name with no arguments
-// and its flags at their defaults: what a command does when called bare.
-func runSubcommand(cmd *cobra.Command, name string) error {
-	for _, c := range cmd.Commands() {
-		if c.Name() == name {
-			return c.RunE(c, nil)
-		}
+// verbAliases are the short forms of a subcommand verb, the same under
+// every entity of ump config (docs/cli.md lists them).
+func verbAliases(verb string) []string {
+	switch verb {
+	case "list":
+		return []string{"ls", "l"}
+	case "get":
+		return []string{"g", "show"}
+	case "view":
+		return []string{"v", "show"}
+	case "show":
+		return []string{"v", "view"}
+	case "create":
+		return []string{"c", "new", "add"}
+	case "add":
+		return []string{"a", "new", "create"}
+	case "edit":
+		return []string{"e"}
+	case "delete":
+		return []string{"d", "rm", "remove"}
+	case "remove":
+		return []string{"rm", "d", "delete"}
+	case "update":
+		return []string{"up"}
+	case "default":
+		return []string{"def"}
+	case "test":
+		return []string{"t"}
 	}
-	return fmt.Errorf("%s has no subcommand %s", cmd.CommandPath(), name)
+	return nil
 }

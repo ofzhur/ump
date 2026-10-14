@@ -17,7 +17,7 @@ func firewallsPath() string { return filepath.Join(config.ProfilesDir(), "firewa
 var firewallSet = &namedSet{
 	file: "firewalls.yaml", key: "firewalls", noun: "firewall",
 	use:     "firewall",
-	aliases: []string{"fw", "firewalls"},
+	aliases: []string{"fw"},
 	short:   "The named firewalls the profiles refer to",
 	long: `The firewalls live in firewalls.yaml next to the profiles
 (` + config.AbbreviateHome(firewallsPath()) + `), one named entry each; a profile
@@ -28,8 +28,8 @@ from}); the same list holds for connections forwarded in from outside,
 so a port a container publishes is reachable only when it is allowed.
 docs/firewalls.md in the repository describes the fields.
 
-Without a subcommand, ump config firewall lists them; on a terminal,
-create without a name asks for one.`,
+On a terminal, create without a name asks for one and for the
+firewall to start from.`,
 	example: `  ump config fw list
   ump config fw get web
   ump config fw create mail --from default   # then your editor

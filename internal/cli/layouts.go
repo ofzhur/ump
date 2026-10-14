@@ -17,7 +17,7 @@ func layoutsPath() string { return filepath.Join(config.ProfilesDir(), "layouts.
 var layoutSet = &namedSet{
 	file: "layouts.yaml", key: "layouts", noun: "layout",
 	use:     "disk-layout",
-	aliases: []string{"dl", "layout", "layouts"},
+	aliases: []string{"dl", "layout"},
 	short:   "The named disk layouts the profiles refer to",
 	long: `The disk layouts live in layouts.yaml next to the profiles
 (` + config.AbbreviateHome(layoutsPath()) + `), one named entry each; a profile
@@ -26,8 +26,8 @@ published layouts there. A layout is a list of parts (slices on matching
 disks, md arrays, logical volumes); docs/disk-layouts.md in the repository
 describes the fields.
 
-Without a subcommand, ump config disk-layout lists them; on a terminal,
-create without a name asks for one.`,
+On a terminal, create without a name asks for one and for the
+layout to start from.`,
 	example: `  ump config dl list
   ump config dl get lvm-raid1
   ump config dl create nvme-raid1 --from lvm-raid1   # then your editor

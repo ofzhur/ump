@@ -36,7 +36,7 @@ configuration file (a directory means `config.yaml` inside it); a team can
 keep its accounts, as references, in a repository and point ump at it.
 The profiles directory, the secret files and UMP's key stay under your own
 `~/.config/ump/` whatever `--config` says, so a shared configuration never
-carries secrets. `ump config path` prints the file in use.
+carries secrets. `ump config isp view` names the file in use.
 
 ## `config.yaml`
 

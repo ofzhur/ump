@@ -49,10 +49,6 @@ func (set *namedSet) newCmd(a *app) *cobra.Command {
 		Short:   set.short,
 		Long:    set.long,
 		Example: set.example,
-		Args:    usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubcommand(cmd, "list")
-		},
 	}
 	cmd.AddCommand(set.newListCmd(a), set.newGetCmd(a), set.newCreateCmd(a), set.newEditCmd(a), set.newDeleteCmd(a))
 	return cmd
@@ -162,7 +158,7 @@ func (set *namedSet) newListCmd(a *app) *cobra.Command {
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
-		Aliases: []string{"ls"},
+		Aliases: verbAliases("list"),
 		Short:   "List the " + set.noun + "s",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -185,7 +181,7 @@ func (set *namedSet) newListCmd(a *app) *cobra.Command {
 func (set *namedSet) newGetCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:     "get NAME",
-		Aliases: []string{"show", "cat"},
+		Aliases: verbAliases("get"),
 		Short:   "Print a " + set.noun,
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -205,9 +201,10 @@ func (set *namedSet) newGetCmd(a *app) *cobra.Command {
 func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use:   "create [NAME] [--from NAME]",
-		Short: "Create a " + set.noun + " from another one and open the file in your editor (asks on a terminal)",
-		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		Use:     "create [NAME] [--from NAME]",
+		Aliases: verbAliases("create"),
+		Short:   "Create a " + set.noun + " from another one and open the file in your editor (asks on a terminal)",
+		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
 			if err != nil {
@@ -267,9 +264,10 @@ func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 
 func (set *namedSet) newEditCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "edit [NAME]",
-		Short: "Open " + set.file + " in your editor and check every " + set.noun + " afterwards",
-		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		Use:     "edit [NAME]",
+		Aliases: verbAliases("edit"),
+		Short:   "Open " + set.file + " in your editor and check every " + set.noun + " afterwards",
+		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
 			if err != nil {
@@ -287,7 +285,7 @@ func (set *namedSet) newDeleteCmd(a *app) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:     "delete NAME",
-		Aliases: []string{"rm", "remove"},
+		Aliases: verbAliases("delete"),
 		Short:   "Delete a " + set.noun,
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {

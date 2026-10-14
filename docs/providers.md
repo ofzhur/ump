@@ -133,7 +133,6 @@ a repository, so a shared configuration carries references only.
 ## Managing accounts
 
 ```
-ump config isp                   # = view
 ump config isp view              # the configuration, plaintext secrets redacted
 ump config isp types             # the provider types, their capabilities and settings
 ump config isp add               # the wizard, on a terminal
@@ -142,8 +141,9 @@ ump config isp test [NAME...]    # resolve the secrets and list once; all accoun
 ump config isp remove NAME       # the account and the secret files the wizard created for it
 ```
 
-`ump config isp` has the aliases `provider`, `providers`, `account` and
-`accounts`. Every command that touches servers takes `--account NAME`
+`ump config isp` is also `i`, `provider` or `account`, and the verbs
+have the short forms of every `ump config` entity (`ump c i v`); see
+the [CLI reference](cli.md#ump-config). Every command that touches servers takes `--account NAME`
 (repeatable) to work with some accounts only; without it, every account
 is used, queried in parallel, and an account whose API fails is reported
 on stderr while the others are still listed (exit code 4).

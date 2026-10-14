@@ -188,7 +188,6 @@ parts:
 ## Managing layouts
 
 ```
-ump config disk-layout                               # = list (alias: dl)
 ump config disk-layout list                          # the layouts, their parts and whether they are valid
 ump config disk-layout get NAME                      # print one
 ump config disk-layout create [NAME] [--from NAME]   # copy an entry (default: lvm-linear), open the file in your editor; asks on a terminal
@@ -198,8 +197,9 @@ ump config disk-layout delete NAME [--yes]
 
 `create` and `delete` edit `layouts.yaml` in place; its comments survive.
 `edit` checks every layout when the editor returns and keeps the file
-either way, naming the problem. The command has the aliases `dl`,
-`layout` and `layouts`.
+either way, naming the problem. The command is also `dl` or `layout`,
+and the verbs have the short forms of every `ump config` entity (`ump
+c dl ls`); see the [CLI reference](cli.md#ump-config).
 
 ## Using a layout
 

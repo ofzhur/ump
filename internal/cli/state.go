@@ -215,26 +215,22 @@ this command writes; else the local directory. Backends:
   consul://host:8500/prefix        Consul KV (token); http+consul:// for plain http
   vault://host:8200/mount/prefix   Vault KV v2 (token); http+vault:// for plain http
 
-Without a subcommand, ump config state shows where the home is (view).
 On a terminal, ump config state set without flags is a wizard that asks
 for a backend and offers to copy the home there.`
 
 func (a *app) newConfigStateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "state",
-		Short: "Where UMP's home lives: the local directory, or a backend shared by a team",
-		Long:  stateLong,
-		Example: `  ump config state                 # where the home is
+		Use:     "state",
+		Aliases: []string{"st"},
+		Short:   "Where UMP's home lives: the local directory, or a backend shared by a team",
+		Long:    stateLong,
+		Example: `  ump config state view            # where the home is
   ump config state set             # the wizard: pick a backend, copy the home there
   ump config state migrate --to file:///srv/fleet/ump
   ump config state set --url s3://fleet/ump --region eu-central-1 --access-key env:FLEET_KEY --secret-key file:~/.fleet.secret
   ump config state pull
   ump config state locks
   UMP_STATE=r2://account/bucket/ump ump server list`,
-		Args: usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubcommand(cmd, "view")
-		},
 	}
 	cmd.AddCommand(a.newStateViewCmd(), a.newStateSetCmd(), a.newStateClearCmd(), a.newStateMigrateCmd(), a.newStatePullCmd(), a.newStatePushCmd(), a.newStateTestCmd(), a.newStateLocksCmd(), a.newStateUnlockCmd())
 	return cmd
@@ -243,7 +239,7 @@ func (a *app) newConfigStateCmd() *cobra.Command {
 func (a *app) newStateViewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "view",
-		Aliases: []string{"show"},
+		Aliases: verbAliases("view"),
 		Short:   "Where the home is, and what it holds",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -551,9 +547,10 @@ mirror's copy over the backend's.`,
 
 func (a *app) newStateTestCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test",
-		Short: "Check that the backend answers",
-		Args:  usageArgs(cobra.NoArgs),
+		Use:     "test",
+		Aliases: verbAliases("test"),
+		Short:   "Check that the backend answers",
+		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.home.Backend == nil {
 				fmt.Fprintf(a.stdout, "No backend configured; the home is %s.\n", config.AbbreviateHome(a.home.Dir))

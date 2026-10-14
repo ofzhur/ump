@@ -745,10 +745,6 @@ func TestConfigTypesAndPath(t *testing.T) {
 			t.Errorf("trailing whitespace in %q", line)
 		}
 	}
-	out, _, _ = e.run("", false, "config", "path")
-	if out != e.cfgPath+"\n" {
-		t.Errorf("path: %q", out)
-	}
 }
 
 func TestWizardNeedsTTY(t *testing.T) {
@@ -757,9 +753,12 @@ func TestWizardNeedsTTY(t *testing.T) {
 	if code != 3 || !strings.Contains(errOut, "needs a terminal") {
 		t.Errorf("code %d, %q", code, errOut)
 	}
-	// bare, it is the view
-	if out, _, code := e.run("", true, "config", "isp"); code != 0 || !strings.Contains(out, "does not exist yet") {
+	// bare, it is the help; the short forms work
+	if out, _, code := e.run("", true, "config", "isp"); code != 0 || !strings.Contains(out, "Available Commands:") {
 		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if out, _, code := e.run("", true, "c", "i", "v"); code != 0 || !strings.Contains(out, "does not exist yet") {
+		t.Errorf("short form: code %d, %q", code, out)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "--set", "a=b"); code != 2 || !strings.Contains(errOut, "the flags need TYPE and NAME") {
 		t.Errorf("flags without arguments: code %d, %q", code, errOut)
@@ -1771,8 +1770,8 @@ func TestSSHCommandAndKey(t *testing.T) {
 	e.write(testConfig)
 	umpKey := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
 
-	// config key generates once and lists it; show prints the public key
-	out, errOut, code := e.run("", false, "config", "key")
+	// config key list generates once and lists it; show prints the public key
+	out, errOut, code := e.run("", false, "config", "key", "list")
 	if code != 0 || !strings.Contains(errOut, "Generated UMP's SSH key") || !strings.Contains(out, "ump    ssh-ed25519") || !strings.Contains(out, "UMP's own key (") {
 		t.Errorf("config key: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -2509,9 +2508,12 @@ func TestConfigOSAndServerSet(t *testing.T) {
 		t.Error("db.yaml still there")
 	}
 
-	// bare, it is the list; create without a name needs a terminal
-	if out, _, code = e.run("", false, "config", "os"); code != 0 || !strings.Contains(out, "NAME") {
+	// bare, it is the help; create without a name needs a terminal
+	if out, _, code = e.run("", false, "config", "os"); code != 0 || !strings.Contains(out, "Available Commands:") {
 		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if out, _, code = e.run("", false, "c", "o", "ls"); code != 0 || !strings.Contains(out, "NAME") {
+		t.Errorf("short form: code %d, %q", code, out)
 	}
 	if _, errOut, code = e.run("", false, "config", "os", "create"); code != 2 || !strings.Contains(errOut, "a profile name is needed without a terminal") {
 		t.Errorf("create without a name: code %d, %q", code, errOut)
@@ -2599,8 +2601,11 @@ func TestConfigDiskLayout(t *testing.T) {
 	if out, _, _ := e.run("", false, "config", "dl", "list", "--no-headers"); strings.Contains(out, "lvm-example") {
 		t.Errorf("still listed:\n%s", out)
 	}
-	if out, _, code := e.run("", false, "config", "dl"); code != 0 || !strings.Contains(out, "NAME") {
+	if out, _, code := e.run("", false, "config", "dl"); code != 0 || !strings.Contains(out, "Available Commands:") {
 		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if out, _, code := e.run("", false, "cfg", "layout", "l"); code != 0 || !strings.Contains(out, "NAME") {
+		t.Errorf("short form: code %d, %q", code, out)
 	}
 	if _, errOut, code := e.run("", false, "config", "dl", "create"); code != 2 || !strings.Contains(errOut, "a layout name is needed without a terminal") {
 		t.Errorf("create without a name: code %d, %q", code, errOut)
@@ -2801,28 +2806,28 @@ func TestUpdateHint(t *testing.T) {
 	defer func() { Version = was }()
 
 	// a successful command checks once and says what is new
-	_, errOut, code := e.run("", false, "config", "path")
+	_, errOut, code := e.run("", false, "config", "isp", "view")
 	if code != 0 || !strings.Contains(errOut, "ump v0.2.0 is available (this is v0.1.0): curl -fsSL "+srv.URL+"/get.sh | sh") || hits != 1 {
 		t.Errorf("first run: code %d, hits %d, %q", code, hits, errOut)
 	}
 	// not again the same day; again the next day
-	if _, errOut, _ := e.run("", false, "config", "path"); strings.Contains(errOut, "available") || hits != 1 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); strings.Contains(errOut, "available") || hits != 1 {
 		t.Errorf("second run: hits %d, %q", hits, errOut)
 	}
 	e.now = e.now.Add(25 * time.Hour)
-	if _, errOut, _ := e.run("", false, "config", "path"); !strings.Contains(errOut, "available") || hits != 2 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); !strings.Contains(errOut, "available") || hits != 2 {
 		t.Errorf("next day: hits %d, %q", hits, errOut)
 	}
 	// nothing when up to date, off, for version, or for a development build
 	e.now = e.now.Add(25 * time.Hour)
 	Version = "v0.2.0"
-	if _, errOut, _ := e.run("", false, "config", "path"); strings.Contains(errOut, "available") || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); strings.Contains(errOut, "available") || hits != 3 {
 		t.Errorf("up to date: hits %d, %q", hits, errOut)
 	}
 	e.now = e.now.Add(25 * time.Hour)
 	Version = "v0.1.0"
 	t.Setenv("UMP_NO_UPDATE_CHECK", "1")
-	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
 		t.Errorf("env off: hits %d, %q", hits, errOut)
 	}
 	t.Setenv("UMP_NO_UPDATE_CHECK", "")
@@ -2830,12 +2835,12 @@ func TestUpdateHint(t *testing.T) {
 		t.Errorf("version: hits %d, %q", hits, errOut)
 	}
 	e.write(testConfig + "storage: " + srv.URL + "\nupdates: false\n")
-	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
 		t.Errorf("config off: hits %d, %q", hits, errOut)
 	}
 	e.write(testConfig + "storage: " + srv.URL + "\n")
 	Version = "dev"
-	if _, errOut, _ := e.run("", false, "config", "path"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
 		t.Errorf("dev: hits %d, %q", hits, errOut)
 	}
 	// a failed command does not check
@@ -3117,8 +3122,8 @@ func TestConfigKeyNamed(t *testing.T) {
 	if _, errOut, code := e.run("", false, "config", "key", "remove", "work-2"); code != 1 || !strings.Contains(errOut, `no key "work-2"`) {
 		t.Errorf("remove twice: code %d, %q", code, errOut)
 	}
-	if out, _, _ := e.run("", false, "config", "key"); !strings.Contains(out, "laptop      ssh-ed25519   oleg@laptop") {
-		t.Errorf("bare lists the keys: %q", out)
+	if out, _, _ := e.run("", false, "c", "k", "ls"); !strings.Contains(out, "laptop      ssh-ed25519   oleg@laptop") {
+		t.Errorf("short form lists the keys: %q", out)
 	}
 }
 
@@ -3284,8 +3289,8 @@ func TestConfigState(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Home:      "+local+" (local; no backend configured)") || !strings.Contains(out, "Accounts:  2") {
 		t.Errorf("view: code %d\n%s", code, out)
 	}
-	if bare, _, code := e.run("", false, "config", "state"); code != 0 || bare != out {
-		t.Errorf("bare is not the view: code %d\n%s", code, bare)
+	if short, _, code := e.run("", false, "c", "st", "v"); code != 0 || short != out {
+		t.Errorf("short form is not the view: code %d\n%s", code, short)
 	}
 	if _, errOut, code := e.run("", false, "config", "state", "pull"); code != 1 || !strings.Contains(errOut, "no backend configured") {
 		t.Errorf("pull without a backend: code %d, %q", code, errOut)

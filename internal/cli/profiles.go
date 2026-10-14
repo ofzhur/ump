@@ -71,8 +71,9 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 
 func (a *app) newOSUpdateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "update",
-		Short: "Refresh the published profiles, layouts, firewalls and users from the storage",
+		Use:     "update",
+		Aliases: verbAliases("update"),
+		Short:   "Refresh the published profiles, layouts, firewalls and users from the storage",
 		Long: `Fetch the published files again. The published profiles (` + strings.Join(publishedProfiles, ", ") + `)
 are replaced, which is why they are not for editing: make your own
 from them (ump config os create NAME --from ` + publishedProfiles[0] + `) and those
@@ -124,9 +125,10 @@ yours their own names).`,
 
 func (a *app) newOSDefaultCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "default [NAME]",
-		Short: "Show or set the default profile (what ump server reinstall takes without --profile)",
-		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		Use:     "default [NAME]",
+		Aliases: verbAliases("default"),
+		Short:   "Show or set the default profile (what ump server reinstall takes without --profile)",
+		Args:    usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
 			if err != nil {
@@ -160,7 +162,7 @@ func (a *app) setDefaultProfile(cfg *config.Config, name string) error {
 func (a *app) newConfigOSCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "os",
-		Aliases: []string{"profile", "profiles"},
+		Aliases: []string{"o", "profile"},
 		Short:   "The profiles that say what a server becomes",
 		Long: `Profiles are YAML files in the profiles directory next to the
 configuration (` + config.AbbreviateHome(config.ProfilesDir()) + `), one per name,
@@ -171,19 +173,15 @@ and the provision step; docs/profiles.md in the repository describes
 every field. ump server reinstall NAME --profile NAME installs with one,
 ump server set NAME --profile NAME remembers it for a server.
 
-Without a subcommand, ump config os lists the profiles. On a terminal,
-ump config os create is a wizard that asks what a new profile holds.`,
-		Example: `  ump config os                     # the list
+On a terminal, ump config os create is a wizard that asks what a new
+profile holds.`,
+		Example: `  ump config os list
   ump config os get ubuntu-26.04
   ump config os create              # the wizard: a name and a few questions
   ump config os create db --from ubuntu-26.04   # a copy, then your editor
   ump config os edit db
   ump config os default db
   ump config os delete db`,
-		Args: usageArgs(cobra.NoArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubcommand(cmd, "list")
-		},
 	}
 	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd(), a.newOSUpdateCmd(), a.newOSDefaultCmd())
 	return cmd
@@ -227,7 +225,7 @@ func (a *app) newOSListCmd() *cobra.Command {
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
-		Aliases: []string{"ls"},
+		Aliases: verbAliases("list"),
 		Short:   "List the profiles",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -292,7 +290,7 @@ func (a *app) newOSListCmd() *cobra.Command {
 func (a *app) newOSGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "get NAME",
-		Aliases: []string{"show", "cat"},
+		Aliases: verbAliases("get"),
 		Short:   "Print a profile",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -312,8 +310,9 @@ func (a *app) newOSGetCmd() *cobra.Command {
 func (a *app) newOSCreateCmd() *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use:   "create [NAME] [--from NAME]",
-		Short: "Create a profile: a wizard on a terminal, or a copy of another one",
+		Use:     "create [NAME] [--from NAME]",
+		Aliases: verbAliases("create"),
+		Short:   "Create a profile: a wizard on a terminal, or a copy of another one",
 		Long: `On a terminal, ump config os create is a wizard: it asks for the name
 when none is given, then what the profile should hold (the image from
 the storage, the disk layout, the firewall, the administrator with shell
@@ -381,8 +380,9 @@ the only way.`,
 
 func (a *app) newOSEditCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "edit NAME",
-		Short: "Open a profile in your editor and check it afterwards",
+		Use:     "edit NAME",
+		Aliases: verbAliases("edit"),
+		Short:   "Open a profile in your editor and check it afterwards",
 		Long: `Open the profile in $VISUAL or $EDITOR (vi otherwise). The file is checked
 when the editor returns: an invalid profile is kept, with the problem
 named, so nothing is lost.`,
@@ -406,7 +406,7 @@ func (a *app) newOSDeleteCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:     "delete NAME",
-		Aliases: []string{"rm", "remove"},
+		Aliases: verbAliases("delete"),
 		Short:   "Delete a profile",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
