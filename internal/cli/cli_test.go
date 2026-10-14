@@ -708,7 +708,7 @@ func TestConfigAddRejects(t *testing.T) {
 		{[]string{"config", "isp", "add", "fake", "Bad Name", "--set", "login=a"}, 2, "invalid account name"},
 		{[]string{"config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=bad"}, 4, "not saved"},
 		{[]string{"config", "isp", "add", "fake", "x", "--set", "login=a", "--set", "password=env:UMP_TEST_UNSET"}, 1, "UMP_TEST_UNSET is not set"},
-		{[]string{"config", "isp", "add", "fake"}, 2, "accepts 2 arg(s)"},
+		{[]string{"config", "isp", "add", "fake"}, 2, "either no arguments (the wizard) or TYPE NAME"},
 	}
 	for _, c := range cases {
 		_, errOut, code := e.run("", false, c.args...)
@@ -753,16 +753,23 @@ func TestConfigTypesAndPath(t *testing.T) {
 
 func TestWizardNeedsTTY(t *testing.T) {
 	e := newTestEnv(t)
-	_, errOut, code := e.run("", false, "config", "isp")
+	_, errOut, code := e.run("", false, "config", "isp", "add")
 	if code != 3 || !strings.Contains(errOut, "needs a terminal") {
 		t.Errorf("code %d, %q", code, errOut)
+	}
+	// bare, it is the view
+	if out, _, code := e.run("", true, "config", "isp"); code != 0 || !strings.Contains(out, "does not exist yet") {
+		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "isp", "add", "--set", "a=b"); code != 2 || !strings.Contains(errOut, "the flags need TYPE and NAME") {
+		t.Errorf("flags without arguments: code %d, %q", code, errOut)
 	}
 }
 
 func TestWizardFileStorage(t *testing.T) {
 	e := newTestEnv(t)
 	script := "\nfake\nacc\ncarol\ns3cret\n\nn\n"
-	out, errOut, code := e.run(script, true, "config", "isp")
+	out, errOut, code := e.run(script, true, "config", "isp", "add")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
@@ -792,7 +799,7 @@ func TestWizardFileStorage(t *testing.T) {
 	}
 
 	// replacing an existing account asks first; declining asks for another name
-	out, _, code = e.run("fake\nacc\nn\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp")
+	out, _, code = e.run("fake\nacc\nn\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, `Account "acc" (fake) exists. Replace it? [y/N]:`) || !strings.Contains(out, "Saved account acc2") {
 		t.Errorf("replace prompt: code %d\n%s", code, out)
 	}
@@ -800,7 +807,7 @@ func TestWizardFileStorage(t *testing.T) {
 
 func TestWizardFailedTestIsNotSaved(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("\nfake\nacc\ncarol\nbad\n\nn\nn\n", true, "config", "isp")
+	out, _, code := e.run("\nfake\nacc\ncarol\nbad\n\nn\nn\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "failed\n  fake: authentication failed") ||
 		!strings.Contains(out, "Save the account anyway? [y/N]:") || !strings.Contains(out, "Not saved.") {
 		t.Errorf("code %d\n%s", code, out)
@@ -812,7 +819,7 @@ func TestWizardFailedTestIsNotSaved(t *testing.T) {
 		t.Error("secret file was written although the account was not saved")
 	}
 	// closing stdin aborts cleanly
-	_, errOut, code := e.run("\nfake\n", true, "config", "isp")
+	_, errOut, code := e.run("\nfake\n", true, "config", "isp", "add")
 	if code != 3 || !strings.Contains(errOut, "input closed") {
 		t.Errorf("EOF: code %d, %q", code, errOut)
 	}
@@ -821,7 +828,7 @@ func TestWizardFailedTestIsNotSaved(t *testing.T) {
 func TestWizardQuit(t *testing.T) {
 	e := newTestEnv(t)
 	// q at the provider menu: nothing to add
-	out, errOut, code := e.run("\nq\n", true, "config", "isp")
+	out, errOut, code := e.run("\nq\n", true, "config", "isp", "add")
 	if code != 0 || errOut != "" || !strings.Contains(out, "  q) quit\n") || !strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit at menu: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -829,7 +836,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("config file was created")
 	}
 	// q in the middle of adding an account (at the region choice): nothing saved
-	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nq\n", true, "config", "isp")
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nq\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") || !strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit mid-account: code %d\n%s", code, out)
 	}
@@ -837,7 +844,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("config file was created")
 	}
 	// "exit" at a choice field, after the secret was typed
-	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nexit\n", true, "config", "isp")
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nexit\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") {
 		t.Errorf("exit at choice: code %d\n%s", code, out)
 	}
@@ -845,7 +852,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("secret file was written although the account was not saved")
 	}
 	// q at the yes/no question after a save keeps what was saved
-	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\n\nq\n", true, "config", "isp")
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\n\nq\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "Saved account acc (fake)") || !strings.Contains(out, "Done. Try: ump server list") ||
 		strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit after save: code %d\n%s", code, out)
@@ -854,7 +861,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Errorf("config:\n%s", e.read())
 	}
 	// q at the replace question
-	out, _, code = e.run("fake\nacc\nq\n", true, "config", "isp")
+	out, _, code = e.run("fake\nacc\nq\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "Replace it? [y/N]: ") || !strings.Contains(out, "Nothing saved for this account.") {
 		t.Errorf("quit at replace: code %d\n%s", code, out)
 	}
@@ -870,7 +877,7 @@ func TestWizardInterrupted(t *testing.T) {
 	defer pw.Close()
 	var out, errOut bytes.Buffer
 	a := &app{stdin: pr, stdout: &out, stderr: &errOut, isTTY: func() bool { return true }}
-	code := a.run(ctx, []string{"--config", e.cfgPath, "config", "isp"})
+	code := a.run(ctx, []string{"--config", e.cfgPath, "config", "isp", "add"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" {
 		t.Errorf("interrupted at prompt: code %d, stderr %q\n%s", code, errOut.String(), out.String())
 	}
@@ -896,7 +903,7 @@ func TestWizardInterrupted(t *testing.T) {
 		},
 		saveTerm: func() func() { return func() { restored = true } },
 	}
-	code = a.run(ctx, []string{"--config", e.cfgPath, "config", "isp"})
+	code = a.run(ctx, []string{"--config", e.cfgPath, "config", "isp", "add"})
 	if code != 3 || errOut.String() != "ump: interrupted\n" || !restored {
 		t.Errorf("interrupted in secret: code %d, stderr %q, restored %v\n%s", code, errOut.String(), restored, out.String())
 	}
@@ -1764,12 +1771,16 @@ func TestSSHCommandAndKey(t *testing.T) {
 	e.write(testConfig)
 	umpKey := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
 
-	// config key generates once and prints the public key
+	// config key generates once and lists it; show prints the public key
 	out, errOut, code := e.run("", false, "config", "key")
-	if code != 0 || !strings.Contains(errOut, "Generated UMP's SSH key") || !strings.Contains(out, "Public key:   ssh-ed25519 AAAA") || !strings.Contains(out, "Fingerprint:  SHA256:") {
+	if code != 0 || !strings.Contains(errOut, "Generated UMP's SSH key") || !strings.Contains(out, "ump    ssh-ed25519") || !strings.Contains(out, "UMP's own key (") {
 		t.Errorf("config key: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	out, errOut, code = e.run("", false, "config", "key", "-o", "json")
+	out, errOut, code = e.run("", false, "config", "key", "show")
+	if code != 0 || errOut != "" || !strings.Contains(out, "Public key:   ssh-ed25519 AAAA") || !strings.Contains(out, "Fingerprint:  SHA256:") {
+		t.Errorf("config key show: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	out, errOut, code = e.run("", false, "config", "key", "show", "-o", "json")
 	if code != 0 || errOut != "" || !strings.Contains(out, `"path": "`+umpKey+`"`) || !strings.Contains(out, `"fingerprint_md5"`) {
 		t.Errorf("config key json: code %d, stderr %q\n%s", code, errOut, out)
 	}
@@ -2498,9 +2509,12 @@ func TestConfigOSAndServerSet(t *testing.T) {
 		t.Error("db.yaml still there")
 	}
 
-	// the wizard needs a terminal; config alone prints help
-	if _, errOut, code = e.run("", false, "config", "os"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
-		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	// bare, it is the list; create without a name needs a terminal
+	if out, _, code = e.run("", false, "config", "os"); code != 0 || !strings.Contains(out, "NAME") {
+		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if _, errOut, code = e.run("", false, "config", "os", "create"); code != 2 || !strings.Contains(errOut, "a profile name is needed without a terminal") {
+		t.Errorf("create without a name: code %d, %q", code, errOut)
 	}
 	if out, _, code = e.run("", false, "config"); code != 0 || !strings.Contains(out, "isp") || !strings.Contains(out, "os") {
 		t.Errorf("config help: code %d\n%s", code, out)
@@ -2585,8 +2599,16 @@ func TestConfigDiskLayout(t *testing.T) {
 	if out, _, _ := e.run("", false, "config", "dl", "list", "--no-headers"); strings.Contains(out, "lvm-example") {
 		t.Errorf("still listed:\n%s", out)
 	}
-	if _, errOut, code := e.run("", false, "config", "dl"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
-		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	if out, _, code := e.run("", false, "config", "dl"); code != 0 || !strings.Contains(out, "NAME") {
+		t.Errorf("bare: code %d, %q", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "dl", "create"); code != 2 || !strings.Contains(errOut, "a layout name is needed without a terminal") {
+		t.Errorf("create without a name: code %d, %q", code, errOut)
+	}
+	// on a terminal, create asks for the name and what to start from
+	e.editorHook = func(path string) error { return nil }
+	if out, errOut, code := e.run("asked\n1\n", true, "config", "dl", "create"); code != 0 || !strings.Contains(out+errOut, "Name of the new layout:") || !strings.Contains(out+errOut, "Start from") || !strings.Contains(out, "Created the layout asked from ") {
+		t.Errorf("create asks: code %d\n%s%s", code, out, errOut)
 	}
 }
 
@@ -2976,6 +2998,10 @@ func TestProfileWizard(t *testing.T) {
 	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump,ops web yours Web servers") {
 		t.Errorf("list: code %d\n%s", code, out)
 	}
+	// without a name, the wizard asks for it first
+	if _, errOut, code := e.run("web2\n2\n\nweb\nump\n\ny\n\nhtop\n\n\nMore web\n\n", true, "config", "os", "create"); code != 0 || !strings.Contains(errOut, "Profiles in "+dir+": ") || !strings.Contains(errOut, "Name of the new profile:") || !strings.Contains(errOut, "Saved "+dir+"/web2.yaml") {
+		t.Errorf("create without a name: code %d\n%s", code, errOut)
+	}
 	if out, _, code := e.run("", false, "config", "user", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "ops yes /bin/bash ump ok Ops people") {
 		t.Errorf("user list: code %d\n%s", code, out)
 	}
@@ -3091,39 +3117,41 @@ func TestConfigKeyNamed(t *testing.T) {
 	if _, errOut, code := e.run("", false, "config", "key", "remove", "work-2"); code != 1 || !strings.Contains(errOut, `no key "work-2"`) {
 		t.Errorf("remove twice: code %d, %q", code, errOut)
 	}
-	if out, _, _ := e.run("", false, "config", "key"); !strings.Contains(out, "Public key:   ssh-ed25519") {
-		t.Errorf("plain key: %q", out)
+	if out, _, _ := e.run("", false, "config", "key"); !strings.Contains(out, "laptop      ssh-ed25519   oleg@laptop") {
+		t.Errorf("bare lists the keys: %q", out)
 	}
 }
 
-func TestConfigKeyWizard(t *testing.T) {
+func TestConfigKeyAddAsks(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
 	const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN oleg@laptop"
-	// add a line under a name, then remove it; the wizard shows UMP's key first
-	script := "2\nlaptop\n" + line + "\ny\n4\n1\nn\n"
-	out, errOut, code := e.run(script, true, "config", "key")
+	// add without arguments on a terminal: name, where from, the line
+	out, errOut, code := e.run("laptop\n2\n"+line+"\n", true, "config", "key", "add")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
-	for _, want := range []string{"Public key:   ssh-ed25519", "No named keys yet", "1) add a key from a file", "Name for the key:", "Public key line", "Added the key laptop (ssh-ed25519 oleg@laptop).", "Named keys in", "laptop       ssh-ed25519 oleg@laptop", "Which key?", "Removed the key laptop."} {
+	for _, want := range []string{"Name for the key:", "Where from?", "1) a public key file", "Public key line", "Added the key laptop (ssh-ed25519 oleg@laptop)."} {
 		if !strings.Contains(out+errOut, want) {
-			t.Errorf("wizard output lacks %q:\n%s%s", want, out, errOut)
+			t.Errorf("output lacks %q:\n%s%s", want, out, errOut)
 		}
 	}
-	// a reserved name is refused and the wizard goes on
-	if out, errOut, code := e.run("2\nump\nn\n", true, "config", "key"); code != 0 || !strings.Contains(out+errOut, `key name "ump"`) {
-		t.Errorf("reserved name: code %d\n%s%s", code, out, errOut)
+	// a flag given: only the name is asked
+	pub := filepath.Join(t.TempDir(), "k.pub")
+	os.WriteFile(pub, []byte(line+"\n"), 0o600)
+	if out, errOut, code := e.run("desk\n", true, "config", "key", "add", "--file", pub); code != 0 || strings.Contains(out+errOut, "Where from?") || !strings.Contains(out, "Added the key desk") {
+		t.Errorf("with --file: code %d\n%s%s", code, out, errOut)
 	}
-	// without a terminal: UMP's key, as show does
-	if out, _, code := e.run("", false, "config", "key"); code != 0 || !strings.HasPrefix(out, "Path:") {
-		t.Errorf("without a terminal: code %d, %q", code, out)
+	// a reserved name is refused
+	if _, errOut, code := e.run("ump\n2\n"+line+"\n", true, "config", "key", "add"); code != 2 || !strings.Contains(errOut, `key name "ump"`) {
+		t.Errorf("reserved name: code %d, %q", code, errOut)
+	}
+	// without a terminal the name is required
+	if _, errOut, code := e.run("", false, "config", "key", "add"); code != 2 || !strings.Contains(errOut, "a key name is needed without a terminal") {
+		t.Errorf("without a terminal: code %d, %q", code, errOut)
 	}
 	if out, _, code := e.run("", true, "config", "key", "show", "-o", "json"); code != 0 || !strings.Contains(out, `"public_key": "ssh-ed25519`) {
 		t.Errorf("show -o json: code %d, %q", code, out)
-	}
-	if out, _, code := e.run("", true, "config", "key", "-o", "yaml"); code != 0 || !strings.Contains(out, "public_key: ssh-ed25519") {
-		t.Errorf("-o yaml on a terminal: code %d, %q", code, out)
 	}
 }
 
@@ -3255,6 +3283,9 @@ func TestConfigState(t *testing.T) {
 	out, _, code := e.run("", false, "config", "state", "view")
 	if code != 0 || !strings.Contains(out, "Home:      "+local+" (local; no backend configured)") || !strings.Contains(out, "Accounts:  2") {
 		t.Errorf("view: code %d\n%s", code, out)
+	}
+	if bare, _, code := e.run("", false, "config", "state"); code != 0 || bare != out {
+		t.Errorf("bare is not the view: code %d\n%s", code, bare)
 	}
 	if _, errOut, code := e.run("", false, "config", "state", "pull"); code != 1 || !strings.Contains(errOut, "no backend configured") {
 		t.Errorf("pull without a backend: code %d, %q", code, errOut)
@@ -3398,8 +3429,8 @@ func TestConfigState(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(local, "backend.token")); string(data) != "t0ken\n" {
 		t.Errorf("secret file: %q", data)
 	}
-	if _, errOut, code := e.run("", false, "config", "state"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
-		t.Errorf("wizard without a terminal: code %d, %q", code, errOut)
+	if _, errOut, code := e.run("", false, "config", "state", "set"); code != 2 || !strings.Contains(errOut, "--url is required without a terminal") {
+		t.Errorf("set without a terminal: code %d, %q", code, errOut)
 	}
 }
 
@@ -3407,7 +3438,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	e := newTestEnv(t)
 	// a fresh system: the wizard asks about the home first; "n" runs the
 	// backend wizard, where "none" keeps the local directory
-	out, _, code := e.run("n\n8\nfake\nacc\ncarol\ns3cret\n\nn\n", true, "config", "isp")
+	out, _, code := e.run("n\n8\nfake\nacc\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add")
 	if code != 0 || !strings.Contains(out, "No backend is configured: everything ump keeps, this account's secrets included, stays in") || !strings.Contains(out, "Keep it on this machine? [Y/n]:") || !strings.Contains(out, "Where should the home live?") || !strings.Contains(out, "No backend; the home is") || !strings.Contains(out, "Saved account acc (fake)") {
 		t.Errorf("fresh system: code %d\n%s", code, out)
 	}
@@ -3415,7 +3446,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 		t.Errorf("manual offered as a provider type:\n%s", out)
 	}
 	// with a file there, no question
-	if out, _, code := e.run("fake\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp"); code != 0 || strings.Contains(out, "Keep it on this machine?") || !strings.Contains(out, "Home:      "+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")) == false && !strings.Contains(out, "Home: ") {
+	if out, _, code := e.run("fake\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add"); code != 0 || strings.Contains(out, "Keep it on this machine?") || !strings.Contains(out, "Home:      "+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")) == false && !strings.Contains(out, "Home: ") {
 		t.Errorf("second run: code %d\n%s", code, out)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "manual", "x"); code != 2 || !strings.Contains(errOut, "manual servers are not an account to add") {
@@ -3425,7 +3456,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	// behind a backend the secrets go into the home without a question
 	remote := filepath.Join(t.TempDir(), "fleet")
 	t.Setenv("UMP_STATE", "file://"+remote)
-	out, _, code = e.run("fake\nacc3\ncarol\ns3cret\n\nn\n", true, "config", "isp")
+	out, _, code = e.run("fake\nacc3\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add")
 	if code != 0 || strings.Contains(out, "Where should this account's secrets be kept?") || !strings.Contains(out, "The secrets are kept as files in the home (file://"+remote+")") || !strings.Contains(out, "Home: file://"+remote) || !strings.Contains(out, "Saved account acc3 (fake)") {
 		t.Errorf("behind a backend: code %d\n%s", code, out)
 	}

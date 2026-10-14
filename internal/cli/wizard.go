@@ -218,10 +218,10 @@ func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 	}
 }
 
-// runWizard is `ump config` without a subcommand.
+// runWizard is `ump config isp add` without arguments.
 func (a *app) runWizard(cmd *cobra.Command) error {
 	if a.isTTY == nil || !a.isTTY() {
-		return withExit(exitAborted, errors.New("ump config isp is interactive and needs a terminal; use `ump config isp add TYPE NAME --set KEY=VALUE ...` instead"))
+		return withExit(exitAborted, errors.New("ump config isp add without arguments is interactive and needs a terminal; use `ump config isp add TYPE NAME --set KEY=VALUE ...` instead"))
 	}
 	cfg, path, err := a.loadConfig()
 	if err != nil {
@@ -235,7 +235,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 	// who forgot UMP_STATE wants to notice now
 	if a.home.Backend == nil {
 		if _, err := os.Stat(path); err != nil {
-			ui.Printf("No backend is configured: everything ump keeps, this account's secrets included, stays in %s on this machine (a team, another machine or CI shares a backend instead; UMP_STATE or ump config state).\n", config.AbbreviateHome(config.LocalDir()))
+			ui.Printf("No backend is configured: everything ump keeps, this account's secrets included, stays in %s on this machine (a team, another machine or CI shares a backend instead; UMP_STATE or ump config state set).\n", config.AbbreviateHome(config.LocalDir()))
 			local, err := ui.Confirm("Keep it on this machine?", true)
 			if err != nil {
 				return err
@@ -267,7 +267,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 			ui.Printf("  %-20s %s\n", n, cfg.Accounts[n].Type)
 		}
 	}
-	ui.Printf("Type q at a menu or press Ctrl-C to quit. To test or remove accounts: ump config test, ump config remove NAME.\n\n")
+	ui.Printf("Type q at a menu or press Ctrl-C to quit. To test or remove accounts: ump config isp test, ump config isp remove NAME.\n\n")
 
 	var types []provider.Type
 	for _, t := range provider.Types() {

@@ -18,7 +18,7 @@ var userSet = &namedSet{
 	file: "users.yaml", key: "users", noun: "user",
 	use:     "user",
 	aliases: []string{"u", "users"},
-	short:   "The named users the profiles refer to (interactive wizard)",
+	short:   "The named users the profiles refer to",
 	long: `The users live in users.yaml next to the profiles
 (` + config.AbbreviateHome(usersPath()) + `), one named entry each; a profile
 lists names from it in its users field (users: [ump, ops]), or carries
@@ -29,8 +29,8 @@ has sudo, groups, a shell and key references (ump, local, agent, a key
 name from ump config key, a file, or a key line); docs/profiles.md
 describes the fields.
 
-Without a subcommand and on a terminal, ump config user is a small
-wizard over the subcommands below.`,
+Without a subcommand, ump config user lists them; on a terminal,
+create without a name asks for one.`,
 	example: `  ump config user list
   ump config user get ump
   ump config user create ops --from ump   # then your editor

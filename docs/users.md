@@ -86,10 +86,10 @@ own with other users.
 ## Managing users
 
 ```
-ump config user                               # a small wizard, on a terminal (alias: u)
+ump config user                               # = list (alias: u)
 ump config user list                          # the users, with sudo, shell and keys
 ump config user get NAME                      # print one
-ump config user create NAME [--from NAME]     # copy an entry (default: ump), open the file in your editor
+ump config user create [NAME] [--from NAME]   # copy an entry (default: ump), open the file in your editor; asks on a terminal
 ump config user edit [NAME]                   # your editor on users.yaml, then a check of every user
 ump config user delete NAME [--yes]
 ```

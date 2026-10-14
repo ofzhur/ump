@@ -51,7 +51,7 @@ func (set *namedSet) newCmd(a *app) *cobra.Command {
 		Example: set.example,
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return set.wizard(a, cmd)
+			return runSubcommand(cmd, "list")
 		},
 	}
 	cmd.AddCommand(set.newListCmd(a), set.newGetCmd(a), set.newCreateCmd(a), set.newEditCmd(a), set.newDeleteCmd(a))
@@ -205,15 +205,41 @@ func (set *namedSet) newGetCmd(a *app) *cobra.Command {
 func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use:   "create NAME [--from NAME]",
-		Short: "Create a " + set.noun + " from another one and open the file in your editor",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Use:   "create [NAME] [--from NAME]",
+		Short: "Create a " + set.noun + " from another one and open the file in your editor (asks on a terminal)",
+		Args:  usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
 			if err != nil {
 				return err
 			}
-			name := args[0]
+			var name string
+			if len(args) > 0 {
+				name = args[0]
+			} else {
+				ui := a.resolverUI(cmd)
+				if ui == nil {
+					return usageErrorf(cmd, "a %s name is needed without a terminal: ump config %s create NAME --from NAME", set.noun, set.use)
+				}
+				names := d.names()
+				ui.Printf("%ss in %s: %s\n", strings.ToUpper(set.noun[:1])+set.noun[1:], config.AbbreviateHome(set.path()), strings.Join(names, ", "))
+				if name, err = ui.Line("Name of the new "+set.noun, ""); err != nil {
+					return err
+				}
+				if !cmd.Flags().Changed("from") {
+					def := 0
+					for i, n := range names {
+						if n == from {
+							def = i
+						}
+					}
+					i, err := ui.Choose("Start from", names, def)
+					if err != nil {
+						return err
+					}
+					from = names[i]
+				}
+			}
 			if err := config.ValidateAccountName(name); err != nil {
 				return usageErrorf(cmd, "%s name: %v", set.noun, err)
 			}
@@ -307,76 +333,6 @@ func (set *namedSet) edit(a *app, ctx context.Context) error {
 	names := d.names()
 	fmt.Fprintf(a.stdout, "%d %ss, all valid: %s.\n", len(names), set.noun, strings.Join(names, ", "))
 	return nil
-}
-
-// wizard is the command without a subcommand, on a terminal.
-func (set *namedSet) wizard(a *app, cmd *cobra.Command) error {
-	ui := a.resolverUI(cmd)
-	if ui == nil {
-		return withExit(exitAborted, fmt.Errorf("ump config %s is interactive and needs a terminal; use its subcommands (list, get, create, edit, delete) instead", set.use))
-	}
-	for {
-		d, err := set.prepare(a, cmd)
-		if err != nil {
-			return err
-		}
-		names := d.names()
-		ui.Printf("%ss in %s: %s\n", strings.ToUpper(set.noun[:1])+set.noun[1:], config.AbbreviateHome(set.path()), strings.Join(names, ", "))
-		choice, err := ui.Choose("What now?", []string{"edit the " + set.noun + "s", "create a " + set.noun, "delete a " + set.noun, "show a " + set.noun}, -1)
-		if err != nil {
-			return err
-		}
-		switch choice {
-		case 0:
-			if err := set.edit(a, cmd.Context()); err != nil {
-				ui.Printf("%v\n", err)
-			}
-		case 1:
-			name, err := ui.Line("Name of the new "+set.noun, "")
-			if err != nil {
-				return err
-			}
-			if err := config.ValidateAccountName(name); err != nil || d.node(name) != nil {
-				ui.Printf("%s is not a free, valid name\n", name)
-				continue
-			}
-			from, err := ui.Choose("Start from", names, 0)
-			if err != nil {
-				return err
-			}
-			d.add(name, d.node(names[from]))
-			if err := d.save(); err != nil {
-				return err
-			}
-			if err := set.edit(a, cmd.Context()); err != nil {
-				ui.Printf("%v\n", err)
-			}
-		case 2, 3:
-			i, err := ui.Choose("Which "+set.noun+"?", names, -1)
-			if err != nil {
-				return err
-			}
-			if choice == 3 {
-				ui.Printf("%s\n", d.render(names[i]))
-				break
-			}
-			ok, err := ui.Confirm(fmt.Sprintf("Delete %s?", names[i]), false)
-			if err != nil {
-				return err
-			}
-			if ok {
-				d.remove(names[i])
-				if err := d.save(); err != nil {
-					return err
-				}
-				ui.Printf("Deleted %s.\n", names[i])
-			}
-		}
-		again, err := ui.Confirm("Anything else?", false)
-		if err != nil || !again {
-			return err
-		}
-	}
 }
 
 // merge replaces the file with the published one, keeping the entries

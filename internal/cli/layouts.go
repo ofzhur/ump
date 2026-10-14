@@ -18,7 +18,7 @@ var layoutSet = &namedSet{
 	file: "layouts.yaml", key: "layouts", noun: "layout",
 	use:     "disk-layout",
 	aliases: []string{"dl", "layout", "layouts"},
-	short:   "The named disk layouts the profiles refer to (interactive wizard)",
+	short:   "The named disk layouts the profiles refer to",
 	long: `The disk layouts live in layouts.yaml next to the profiles
 (` + config.AbbreviateHome(layoutsPath()) + `), one named entry each; a profile
 names one in its disks field, or carries its own. The first use puts the
@@ -26,8 +26,8 @@ published layouts there. A layout is a list of parts (slices on matching
 disks, md arrays, logical volumes); docs/disk-layouts.md in the repository
 describes the fields.
 
-Without a subcommand and on a terminal, ump config disk-layout is a
-small wizard over the subcommands below.`,
+Without a subcommand, ump config disk-layout lists them; on a terminal,
+create without a name asks for one.`,
 	example: `  ump config dl list
   ump config dl get lvm-raid1
   ump config dl create nvme-raid1 --from lvm-raid1   # then your editor

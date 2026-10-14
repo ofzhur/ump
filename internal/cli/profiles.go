@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -162,7 +161,7 @@ func (a *app) newConfigOSCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "os",
 		Aliases: []string{"profile", "profiles"},
-		Short:   "The profiles that say what a server becomes (interactive wizard)",
+		Short:   "The profiles that say what a server becomes",
 		Long: `Profiles are YAML files in the profiles directory next to the
 configuration (` + config.AbbreviateHome(config.ProfilesDir()) + `), one per name,
 plus layouts.yaml with the named disk layouts. The first run puts the
@@ -172,16 +171,18 @@ and the provision step; docs/profiles.md in the repository describes
 every field. ump server reinstall NAME --profile NAME installs with one,
 ump server set NAME --profile NAME remembers it for a server.
 
-Without a subcommand and on a terminal, ump config os is a small wizard
-over the subcommands below.`,
-		Example: `  ump config os list
-  ump config os get default
-  ump config os create db           # from default, then your editor
+Without a subcommand, ump config os lists the profiles. On a terminal,
+ump config os create is a wizard that asks what a new profile holds.`,
+		Example: `  ump config os                     # the list
+  ump config os get ubuntu-26.04
+  ump config os create              # the wizard: a name and a few questions
+  ump config os create db --from ubuntu-26.04   # a copy, then your editor
   ump config os edit db
+  ump config os default db
   ump config os delete db`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.profilesWizard(cmd)
+			return runSubcommand(cmd, "list")
 		},
 	}
 	cmd.AddCommand(a.newOSListCmd(), a.newOSGetCmd(), a.newOSCreateCmd(), a.newOSEditCmd(), a.newOSDeleteCmd(), a.newOSUpdateCmd(), a.newOSDefaultCmd())
@@ -311,30 +312,45 @@ func (a *app) newOSGetCmd() *cobra.Command {
 func (a *app) newOSCreateCmd() *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use:   "create NAME [--from NAME]",
-		Short: "Create a profile: guided on a terminal, or as a copy of another one",
-		Long: `On a terminal, ump config os create NAME asks what the profile should
-hold (the image from the storage, the disk layout, the firewall, the
-administrator with shell and keys, the kernel switches, the time zone,
-packages, the interface names, the provision step) and writes it.
---from NAME copies another profile instead and opens it in your editor;
-without a terminal that is the only way.`,
-		Args: usageArgs(cobra.ExactArgs(1)),
+		Use:   "create [NAME] [--from NAME]",
+		Short: "Create a profile: a wizard on a terminal, or a copy of another one",
+		Long: `On a terminal, ump config os create is a wizard: it asks for the name
+when none is given, then what the profile should hold (the image from
+the storage, the disk layout, the firewall, the administrator with shell
+and keys, the kernel switches, the time zone, packages, the interface
+names, the provision step) and writes it. --from NAME copies another
+profile instead and opens it in your editor; without a terminal that is
+the only way.`,
+		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := a.prepareProfiles(cmd); err != nil {
 				return err
 			}
-			name := args[0]
+			ui := a.resolverUI(cmd)
+			var name string
+			if len(args) > 0 {
+				name = args[0]
+			} else {
+				if ui == nil {
+					return usageErrorf(cmd, "a profile name is needed without a terminal: ump config os create NAME --from NAME")
+				}
+				names, err := localProfiles()
+				if err != nil {
+					return err
+				}
+				ui.Printf("Profiles in %s: %s\n", config.AbbreviateHome(config.ProfilesDir()), strings.Join(names, ", "))
+				if name, err = ui.Line("Name of the new profile", ""); err != nil {
+					return err
+				}
+			}
 			if err := config.ValidateAccountName(name); err != nil {
 				return usageErrorf(cmd, "profile name: %v", err)
 			}
 			if _, err := os.Stat(profilePath(name)); err == nil {
 				return fmt.Errorf("profile %s exists already (ump config os edit %s)", name, name)
 			}
-			if !cmd.Flags().Changed("from") {
-				if ui := a.resolverUI(cmd); ui != nil {
-					return a.profileWizard(cmd, ui, name)
-				}
+			if !cmd.Flags().Changed("from") && ui != nil {
+				return a.profileWizard(cmd, ui, name)
 			}
 			if from == "" {
 				cfg, _, err := a.loadConfig()
@@ -491,110 +507,4 @@ func runEditor(path string) error {
 		return fmt.Errorf("editor %s: %w", editor, err)
 	}
 	return nil
-}
-
-// profilesWizard is ump config os on a terminal: what is there, and what
-// to do with it.
-func (a *app) profilesWizard(cmd *cobra.Command) error {
-	ui := a.resolverUI(cmd)
-	if ui == nil {
-		return withExit(exitAborted, errors.New("ump config os is interactive and needs a terminal; use its subcommands (list, get, create, edit, delete) instead"))
-	}
-	if _, err := a.prepareProfiles(cmd); err != nil {
-		return err
-	}
-	for {
-		names, err := localProfiles()
-		if err != nil {
-			return err
-		}
-		ui.Printf("Profiles in %s: %s\n", config.AbbreviateHome(config.ProfilesDir()), strings.Join(names, ", "))
-		cfg, _, err := a.loadConfig()
-		if err != nil {
-			return err
-		}
-		ui.Printf("The default profile is %s.\n", cfg.DefaultProfileName())
-		choice, err := ui.Choose("What now?", []string{"edit a profile", "create a profile", "delete a profile", "show a profile", "set the default profile"}, -1)
-		if err != nil {
-			return err
-		}
-		var name string
-		switch choice {
-		case 1: // create
-			name, err = ui.Line("Name of the new profile", "")
-			if err != nil {
-				return err
-			}
-			if err := config.ValidateAccountName(name); err != nil {
-				ui.Printf("%v\n", err)
-				continue
-			}
-			how, err := ui.Choose("How?", []string{"answer a few questions (image, layout, firewall, users, ...)", "copy an existing profile"}, 0)
-			if err != nil {
-				return err
-			}
-			if how == 0 {
-				if err := a.profileWizard(cmd, ui, name); err != nil {
-					ui.Printf("%v\n", err)
-				}
-				break
-			}
-			from, err := ui.Choose("Start from", names, 0)
-			if err != nil {
-				return err
-			}
-			data, err := os.ReadFile(profilePath(names[from]))
-			if err != nil {
-				return err
-			}
-			text := strings.Replace(string(data), "\nname: "+names[from]+"\n", "\nname: "+name+"\n", 1)
-			if err := os.WriteFile(profilePath(name), []byte(text), 0o600); err != nil {
-				return err
-			}
-			if err := a.editProfile(cmd, name); err != nil {
-				ui.Printf("%v\n", err)
-			}
-		case 0, 2, 3, 4:
-			i, err := ui.Choose("Which profile?", names, -1)
-			if err != nil {
-				return err
-			}
-			name = names[i]
-			switch choice {
-			case 0:
-				if isPublishedProfile(name) {
-					ui.Printf("%s is a published profile, which ump config os update replaces; create your own from it instead.\n", name)
-					break
-				}
-				if err := a.editProfile(cmd, name); err != nil {
-					ui.Printf("%v\n", err)
-				}
-			case 4:
-				if err := a.setDefaultProfile(cfg, name); err != nil {
-					ui.Printf("%v\n", err)
-				}
-			case 2:
-				ok, err := ui.Confirm(fmt.Sprintf("Delete %s?", name), false)
-				if err != nil {
-					return err
-				}
-				if ok {
-					if err := os.Remove(profilePath(name)); err != nil {
-						return err
-					}
-					ui.Printf("Deleted %s.\n", name)
-				}
-			case 3:
-				data, err := os.ReadFile(profilePath(name))
-				if err != nil {
-					return err
-				}
-				ui.Printf("%s\n", data)
-			}
-		}
-		again, err := ui.Confirm("Anything else?", false)
-		if err != nil || !again {
-			return err
-		}
-	}
 }

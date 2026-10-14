@@ -32,7 +32,7 @@ that a team shares, mirrored on each machine and locked per server.
 
 ```console
 $ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or arm64
-$ ump config isp                                 # add a provider account (wizard)
+$ ump config isp add                             # add a provider account (wizard)
 $ ump server list                                # every server of every account
 $ ump config os edit default                     # the profile: image, disks, users, firewall
 $ ump server reinstall web-01 --dry-run          # the plan on that machine, nothing erased
@@ -69,7 +69,8 @@ alike, booting from UEFI and, on amd64, from legacy BIOS.
 ## The objects
 
 Six kinds of things are configured, all as YAML in `~/.config/ump/`,
-each with its own `ump config` command and a small wizard:
+each with its own `ump config` command (`list`, `get`, `create`,
+`edit`, `delete`; `create` and `add` ask their questions on a terminal):
 
 | Object | Command | What it is |
 |---|---|---|

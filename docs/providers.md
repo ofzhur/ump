@@ -51,7 +51,7 @@ behind it and does what SSH allows.
 On a terminal, the wizard:
 
 ```console
-$ ump config isp
+$ ump config isp add
 UMP configuration wizard
 Configuration file: ~/.config/ump/config.yaml
 No accounts configured yet.
@@ -133,9 +133,10 @@ a repository, so a shared configuration carries references only.
 ## Managing accounts
 
 ```
-ump config isp                   # the wizard
+ump config isp                   # = view
 ump config isp view              # the configuration, plaintext secrets redacted
 ump config isp types             # the provider types, their capabilities and settings
+ump config isp add               # the wizard, on a terminal
 ump config isp add TYPE NAME --set KEY=VALUE ... [--no-test]
 ump config isp test [NAME...]    # resolve the secrets and list once; all accounts without names
 ump config isp remove NAME       # the account and the secret files the wizard created for it

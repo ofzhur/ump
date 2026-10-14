@@ -215,15 +215,17 @@ this command writes; else the local directory. Backends:
   consul://host:8500/prefix        Consul KV (token); http+consul:// for plain http
   vault://host:8200/mount/prefix   Vault KV v2 (token); http+vault:// for plain http
 
-Without a subcommand and on a terminal, ump config state is a small
-wizard that sets a backend up and offers to move the home there.`
+Without a subcommand, ump config state shows where the home is (view).
+On a terminal, ump config state set without flags is a wizard that asks
+for a backend and offers to copy the home there.`
 
 func (a *app) newConfigStateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "state",
-		Short: "Where UMP's home lives: the local directory, or a backend shared by a team (interactive wizard)",
+		Short: "Where UMP's home lives: the local directory, or a backend shared by a team",
 		Long:  stateLong,
-		Example: `  ump config state view
+		Example: `  ump config state                 # where the home is
+  ump config state set             # the wizard: pick a backend, copy the home there
   ump config state migrate --to file:///srv/fleet/ump
   ump config state set --url s3://fleet/ump --region eu-central-1 --access-key env:FLEET_KEY --secret-key file:~/.fleet.secret
   ump config state pull
@@ -231,11 +233,7 @@ func (a *app) newConfigStateCmd() *cobra.Command {
   UMP_STATE=r2://account/bucket/ump ump server list`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ui := a.resolverUI(cmd)
-			if ui == nil {
-				return withExit(exitAborted, errors.New("ump config state is interactive and needs a terminal; use its subcommands (view, set, migrate, clear, pull, push, locks, unlock) instead"))
-			}
-			return a.stateWizard(cmd, ui)
+			return runSubcommand(cmd, "view")
 		},
 	}
 	cmd.AddCommand(a.newStateViewCmd(), a.newStateSetCmd(), a.newStateClearCmd(), a.newStateMigrateCmd(), a.newStatePullCmd(), a.newStatePushCmd(), a.newStateTestCmd(), a.newStateLocksCmd(), a.newStateUnlockCmd())
@@ -369,15 +367,21 @@ func (a *app) newStateSetCmd() *cobra.Command {
 	var f pointerFlags
 	var noTest bool
 	cmd := &cobra.Command{
-		Use:   "set --url URL [--endpoint URL] [--region R] [--access-key REF] [--secret-key REF] [--token REF] [--user REF] [--password REF]",
-		Short: "Point the home at a backend (without moving anything; migrate does both)",
-		Long: `Write backend.yaml: the backend ump works on from now on. The home there
-is used as it is; to carry the current home over, use migrate. The
-backend is listed once to check that it answers, unless --no-test.`,
+		Use:   "set [--url URL] [--endpoint URL] [--region R] [--access-key REF] [--secret-key REF] [--token REF] [--user REF] [--password REF]",
+		Short: "Point the home at a backend: a wizard on a terminal, or from flags",
+		Long: `Write backend.yaml: the backend ump works on from now on. Without flags
+and on a terminal, a wizard asks for the backend and offers to copy the
+current home there. With --url, the home there is used as it is (to
+carry the current home over, use migrate), and the backend is listed
+once to check that it answers, unless --no-test.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.url == "" {
-				return usageErrorf(cmd, "--url is required")
+				ui := a.resolverUI(cmd)
+				if ui == nil {
+					return usageErrorf(cmd, "--url is required without a terminal")
+				}
+				return a.stateWizard(cmd, ui)
 			}
 			p, err := f.pointer(nil)
 			if err != nil {
@@ -603,8 +607,9 @@ func (a *app) newStateUnlockCmd() *cobra.Command {
 	}
 }
 
-// stateWizard is ump config state on a terminal, over the prompter of
-// the caller (the account wizard runs it on a fresh system).
+// stateWizard is ump config state set without flags on a terminal, over
+// the prompter of the caller (the account wizard runs it on a fresh
+// system).
 func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
 	if a.home.Backend != nil {
 		ui.Printf("The home is %s (mirror %s).\n", a.home.Backend, config.AbbreviateHome(a.home.Dir))

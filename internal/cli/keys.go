@@ -63,10 +63,9 @@ func saveNamedKeys(keys map[string]string) error {
 }
 
 func (a *app) newConfigKeyCmd() *cobra.Command {
-	var output string
 	cmd := &cobra.Command{
 		Use:   "key",
-		Short: "UMP's own SSH key (generated on first use) and the named keys of the users (interactive wizard)",
+		Short: "UMP's own SSH key (generated on first use) and the named keys of the users",
 		Long: `UMP has its own SSH key pair, which rescue systems and installed
 systems are reached with. It is generated on first use at the path in
 the configuration (staging.key), by default ~/.config/ump/staging_ed25519,
@@ -78,11 +77,12 @@ More public keys are kept under names in ` + config.AbbreviateHome(keysPath()) +
 a user's keys may name them (keys: [ump, oleg, laptop]) next to local,
 agent, a file or a key line.
 
-Without a subcommand and on a terminal, ump config key is a small
-wizard over the subcommands below; without a terminal, or with -o, it
-prints UMP's own public key (ump config key show does that always).`,
-		Example: `  ump config key                        # the wizard
+Without a subcommand, ump config key lists the keys, UMP's own first;
+on a terminal, ump config key add without arguments asks for a name
+and where the key comes from.`,
+		Example: `  ump config key                        # the list, UMP's own key first
   ump config key show                   # UMP's own public key and its fingerprints
+  ump config key add                    # asks for a name and a file, a line or the agent
   ump config key add oleg --file ~/.ssh/id_ed25519.pub
   ump config key add laptop --line 'ssh-ed25519 AAAA... oleg@laptop'
   ump config key add work --agent        # the keys ssh-add -L lists, one name each (work, work-2, ...)
@@ -90,15 +90,9 @@ prints UMP's own public key (ump config key show does that always).`,
   ump config key remove laptop`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if output == "" {
-				if ui := a.resolverUI(cmd); ui != nil {
-					return a.keysWizard(cmd, ui)
-				}
-			}
-			return a.showUMPKey(cmd, output)
+			return runSubcommand(cmd, "list")
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", "", "print UMP's own key as json or yaml")
 	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyRemoveCmd())
 	return cmd
 }
@@ -187,95 +181,6 @@ func checkKeyName(name string) error {
 	return nil
 }
 
-// keysWizard is ump config key on a terminal.
-func (a *app) keysWizard(cmd *cobra.Command, ui *prompter) error {
-	for {
-		if err := a.showUMPKey(cmd, ""); err != nil {
-			return err
-		}
-		keys, err := namedKeys()
-		if err != nil {
-			return err
-		}
-		names := make([]string, 0, len(keys))
-		for n := range keys {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		if len(names) == 0 {
-			ui.Printf("No named keys yet in %s; users refer to keys as ump, local, agent, a name from here, a file or a key line.\n", config.AbbreviateHome(keysPath()))
-		} else {
-			ui.Printf("Named keys in %s:\n", config.AbbreviateHome(keysPath()))
-			for _, n := range names {
-				ui.Printf("  %-12s %s %s\n", n, keyType(keys[n]), keyComment(keys[n]))
-			}
-		}
-		choice, err := ui.Choose("What now?", []string{"add a key from a file", "add a key as a line", "add the keys of the ssh-agent", "remove a key"}, -1)
-		if err != nil {
-			return err
-		}
-		switch choice {
-		case 0, 1, 2:
-			name, err := ui.Line("Name for the key", "")
-			if err != nil {
-				return err
-			}
-			if err := checkKeyName(name); err != nil {
-				ui.Printf("%v\n", err)
-				break
-			}
-			var lines []string
-			switch choice {
-			case 0:
-				file, err := ui.Line("Public key file", "~/.ssh/id_ed25519.pub")
-				if err != nil {
-					return err
-				}
-				data, err := os.ReadFile(expandHome(file))
-				if err != nil {
-					ui.Printf("%v\n", err)
-					break
-				}
-				lines = strings.Split(string(data), "\n")
-			case 1:
-				line, err := ui.Line("Public key line (ssh-ed25519 AAAA... comment)", "")
-				if err != nil {
-					return err
-				}
-				lines = []string{line}
-			case 2:
-				if lines, err = a.agentKeys(); err != nil {
-					ui.Printf("%v\n", err)
-					break
-				}
-			}
-			if len(lines) > 0 {
-				if err := a.addKeys(name, lines); err != nil {
-					ui.Printf("%v\n", err)
-				}
-			}
-		case 3:
-			if len(names) == 0 {
-				ui.Printf("nothing to remove\n")
-				break
-			}
-			i, err := ui.Choose("Which key?", names, -1)
-			if err != nil {
-				return err
-			}
-			delete(keys, names[i])
-			if err := saveNamedKeys(keys); err != nil {
-				return err
-			}
-			ui.Printf("Removed the key %s.\n", names[i])
-		}
-		again, err := ui.Confirm("Anything else?", false)
-		if err != nil || !again {
-			return err
-		}
-	}
-}
-
 func (a *app) newKeyListCmd() *cobra.Command {
 	var noHeaders bool
 	cmd := &cobra.Command{
@@ -319,15 +224,45 @@ func (a *app) newKeyAddCmd() *cobra.Command {
 	var file, line string
 	var agent bool
 	cmd := &cobra.Command{
-		Use:   "add NAME (--file FILE | --line 'ssh-... AAAA...' | --agent)",
-		Short: "Keep a public key under a name",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Use:   "add [NAME] (--file FILE | --line 'ssh-... AAAA...' | --agent)",
+		Short: "Keep a public key under a name (asks on a terminal)",
+		Args:  usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			var name string
+			var lines []string
+			if len(args) > 0 {
+				name = args[0]
+			} else {
+				ui := a.resolverUI(cmd)
+				if ui == nil {
+					return usageErrorf(cmd, "a key name is needed without a terminal: ump config key add NAME --file FILE")
+				}
+				var err error
+				if name, err = ui.Line("Name for the key", ""); err != nil {
+					return err
+				}
+				if file == "" && line == "" && !agent {
+					how, err := ui.Choose("Where from?", []string{"a public key file", "a public key line", "the keys of the ssh-agent"}, 0)
+					if err != nil {
+						return err
+					}
+					switch how {
+					case 0:
+						if file, err = ui.Line("Public key file", "~/.ssh/id_ed25519.pub"); err != nil {
+							return err
+						}
+					case 1:
+						if line, err = ui.Line("Public key line (ssh-ed25519 AAAA... comment)", ""); err != nil {
+							return err
+						}
+					case 2:
+						agent = true
+					}
+				}
+			}
 			if err := checkKeyName(name); err != nil {
 				return usageErrorf(cmd, "%v", err)
 			}
-			var lines []string
 			switch {
 			case file != "" && line == "" && !agent:
 				data, err := os.ReadFile(expandHome(file))

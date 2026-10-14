@@ -39,7 +39,7 @@ HTTP service, Consul or Vault. Everyone using the same backend shares
 the whole home, UMP's key included, and so reaches the same servers.
 
 ```console
-$ ump config state                                      # the wizard: pick a backend, move the home there
+$ ump config state set                                  # the wizard: pick a backend, copy the home there
 $ ump config state migrate --to file:///srv/fleet/ump   # or in one line
 $ ump config state view
 Home:      file:///srv/fleet/ump (backend.yaml)
@@ -57,14 +57,13 @@ home and its backend](state.md).
 ## 3. Add a provider account
 
 ```console
-$ ump config isp
+$ ump config isp add
 ```
 
-The wizard asks for the provider type, a name for the account, where to
-keep the secrets (files only you can read, environment variables, or a
-command such as `pass show ...`), and the credentials; it tests them with
-one API call and saves the account to `~/.config/ump/config.yaml`.
-Without a terminal:
+The wizard asks for the provider type, a name for the account and the
+credentials; it tests them with one API call and saves the account to
+`~/.config/ump/config.yaml`, the secrets as files under `secrets/`
+there, readable only by you. Without a terminal, or in a script:
 
 ```console
 $ ump config isp add hetzner-cloud hcloud --set token=env:HCLOUD_TOKEN
@@ -207,7 +206,8 @@ uptime, memory, the root disk and the addresses.
   [firewalls](firewalls.md) and [users](users.md).
 - **Keys under names.** `ump config key add oleg --file
   ~/.ssh/id_ed25519.pub` keeps a public key as `oleg`, for any user's
-  `keys`; `ump config key` is a wizard over them. See [keys](keys.md).
+  `keys`; `ump config key add` alone asks for the name and the key. See
+  [keys](keys.md).
 - **The rescue system by itself.** `ump server rescue web-01` boots a
   server into UMP's rescue system and hands you a root shell there, with
   the disks untouched; `ump server rescue web-01 --yes -- lsblk` runs one

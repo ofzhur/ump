@@ -17,7 +17,7 @@ overwritten in silence. `state.yaml` and the per-server locks of `ump
 server reinstall` and `rescue` go through the backend directly.
 
 ```console
-$ ump config state                              # the wizard: pick a backend, move the home there
+$ ump config state set                          # the wizard: pick a backend, copy the home there
 $ ump config state view                         # where the home is, the mirror, what it holds
 $ ump config state migrate --to file:///srv/fleet/ump
 $ UMP_STATE=r2://account/bucket/ump ump server list
@@ -93,8 +93,9 @@ an ump that died left behind.
 ## Commands
 
 ```
-ump config state                       # the wizard, on a terminal
+ump config state                       # = view
 ump config state view                  # where the home is, the mirror, what it holds
+ump config state set                   # the wizard, on a terminal: pick a backend, copy the home there
 ump config state set --url URL [...]   # point ump at a backend as it is (the home there is used)
 ump config state migrate --to URL [...] [--force]   # copy the current home there, then point ump at it
 ump config state clear                 # no backend: the local directory again

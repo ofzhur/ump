@@ -20,7 +20,7 @@ As of October 2026, ump does what the [README](../README.md) and the
   command line, UEFI and BIOS boot; `--dry-run`; the Ubuntu 26.04 base
   image; `ump ssh`.
 - **Configuration objects:** `ump config os`, `disk-layout` and
-  `firewall` with list, get, create, edit, delete and a wizard each; the
+  `firewall` with list, get, create, edit and delete each; the
   published defaults downloaded on first use.
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
   Windows on the storage, `make release`.

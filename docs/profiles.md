@@ -56,8 +56,8 @@ order:
 Which profile a server is installed with: `--profile`, else the profile
 set for the server with `ump server set NAME --profile NAME` (kept in
 the configuration file), else the **default profile**: `ubuntu-26.04`
-until you change it with `ump config os default NAME` (also in the `ump
-config os` wizard); `ump config os list` marks it with `*`.
+until you change it with `ump config os default NAME`; `ump config os
+list` marks it with `*`.
 
 ## The default profile
 
@@ -219,7 +219,8 @@ $ ump config user edit                       # the whole file, checked afterward
 $ ump config user delete ops
 ```
 
-`ump config user` (`u`) is a small wizard over these on a terminal, and
+`ump config user` (`u`) alone is the list; `ump config user create`
+alone asks for the name and the user to start from on a terminal, and
 `ump config os create` defines a user on the spot when you name one it
 does not know.
 
@@ -289,10 +290,10 @@ by MAC as before.
 ## Managing profiles
 
 ```
-ump config os                              # a small wizard over the commands below, on a terminal
+ump config os                              # = list
 ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall
 ump config os get NAME                     # print one
-ump config os create NAME                  # on a terminal: a few questions (below), then the file is written
+ump config os create [NAME]                # on a terminal: the wizard (the name, then the questions below), then the file is written
 ump config os create NAME --from NAME      # copy one instead, rename it, open it in your editor
 ump config os edit NAME                    # your editor ($VISUAL, $EDITOR, else vi), then a check
 ump config os delete NAME [--yes]
@@ -300,8 +301,8 @@ ump config os update                       # refresh the published profiles and 
 ump config os default [NAME]               # show or set the default profile
 ```
 
-`create NAME` on a terminal asks, with the default profile's answers
-preselected: the image (listed from the storage with kernel and build
+`create [NAME]` on a terminal asks for the name when none is given,
+then, with the default profile's answers preselected: the image (listed from the storage with kernel and build
 date, or another name), the disk layout and the firewall by name, the
 users by name from `users.yaml` (a name it does not know is defined on
 the spot: sudo, shell, keys, description, and kept there), the
@@ -309,8 +310,7 @@ mitigations and IPv6 switches, the time zone, extra packages, the
 interface naming, the provision step and a description. It checks the result like an
 installation would, writes the file, prints it and offers your editor.
 `--from NAME` copies a profile instead, and without a terminal that is
-the only form. The same questions are behind "create a profile" in the
-`ump config os` wizard.
+the only form.
 
 `edit` and `create --from` check the file when the editor returns: the YAML, the
 fields, the layout (an inline one, or that the named one exists in

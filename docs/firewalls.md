@@ -90,10 +90,10 @@ boot.
 ## Managing firewalls
 
 ```
-ump config firewall                               # a small wizard, on a terminal (alias: fw)
+ump config firewall                               # = list (alias: fw)
 ump config firewall list                          # the firewalls, their policy and what they allow
 ump config firewall get NAME                      # print one
-ump config firewall create NAME [--from NAME]     # copy an entry (default: default), open the file in your editor
+ump config firewall create [NAME] [--from NAME]   # copy an entry (default: default), open the file in your editor; asks on a terminal
 ump config firewall edit [NAME]                   # your editor on firewalls.yaml, then a check of every firewall
 ump config firewall delete NAME [--yes]
 ```

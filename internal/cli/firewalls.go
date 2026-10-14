@@ -18,7 +18,7 @@ var firewallSet = &namedSet{
 	file: "firewalls.yaml", key: "firewalls", noun: "firewall",
 	use:     "firewall",
 	aliases: []string{"fw", "firewalls"},
-	short:   "The named firewalls the profiles refer to (interactive wizard)",
+	short:   "The named firewalls the profiles refer to",
 	long: `The firewalls live in firewalls.yaml next to the profiles
 (` + config.AbbreviateHome(firewallsPath()) + `), one named entry each; a profile
 names one in its firewall field, or carries its own. The first use puts
@@ -28,8 +28,8 @@ from}); the same list holds for connections forwarded in from outside,
 so a port a container publishes is reachable only when it is allowed.
 docs/firewalls.md in the repository describes the fields.
 
-Without a subcommand and on a terminal, ump config firewall is a small
-wizard over the subcommands below.`,
+Without a subcommand, ump config firewall lists them; on a terminal,
+create without a name asks for one.`,
 	example: `  ump config fw list
   ump config fw get web
   ump config fw create mail --from default   # then your editor

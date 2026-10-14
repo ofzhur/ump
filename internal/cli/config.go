@@ -46,16 +46,15 @@ func (a *app) newConfigISPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "isp",
 		Aliases: []string{"provider", "providers", "account", "accounts"},
-		Short:   "Set up provider accounts (interactive wizard)",
-		Long: `Set up provider accounts. Without a subcommand, ump config isp starts an
-interactive wizard that asks for a provider type, a name and the
-credentials, tests them and writes them to the configuration file.
-Secrets are stored as references (a file readable only by you, an
-environment variable or a command), never as plaintext.
-
-Without a terminal, use ` + "`ump config isp add`" + ` instead.`,
-		Example: `  ump config isp                      # the wizard
-  ump config isp view                 # the configuration, secrets redacted
+		Short:   "Set up provider accounts",
+		Long: `Set up provider accounts. Without a subcommand, ump config isp shows the
+configuration with the secrets redacted (view). On a terminal, ump config
+isp add without arguments is a wizard that asks for a provider type, a
+name and the credentials, tests them and writes them to the
+configuration file. Secrets are stored as references (a file readable
+only by you, an environment variable or a command), never as plaintext.`,
+		Example: `  ump config isp                      # the configuration, secrets redacted
+  ump config isp add                  # the wizard, on a terminal
   ump config isp test                 # check every account's credentials
   ump config isp add hetzner-robot main --set login=#ws+AbCdEfGh --set password=env:HROBOT_PASSWORD
   ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
@@ -64,7 +63,7 @@ Without a terminal, use ` + "`ump config isp add`" + ` instead.`,
   ump config isp remove main`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runWizard(cmd)
+			return runSubcommand(cmd, "view")
 		},
 	}
 	cmd.AddCommand(
@@ -88,7 +87,7 @@ func (a *app) newConfigViewCmd() *cobra.Command {
 				return err
 			}
 			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(a.stdout, "# %s (does not exist yet; run `ump config` to create it)\n", config.AbbreviateHome(path))
+				fmt.Fprintf(a.stdout, "# %s (does not exist yet; run `ump config isp add` to create it)\n", config.AbbreviateHome(path))
 			} else {
 				fmt.Fprintf(a.stdout, "# %s\n", config.AbbreviateHome(path))
 			}
@@ -200,10 +199,12 @@ func (a *app) newConfigAddCmd() *cobra.Command {
 		noTest bool
 	)
 	cmd := &cobra.Command{
-		Use:   "add TYPE NAME --set KEY=VALUE ...",
-		Short: "Add or replace an account without the wizard",
-		Long: `Add an account non-interactively. Settings are given with --set; a
-VALUE may be plain text or a secret reference:
+		Use:   "add [TYPE NAME --set KEY=VALUE ...]",
+		Short: "Add or replace an account: a wizard on a terminal, or from flags",
+		Long: `Add an account. Without arguments and on a terminal, a wizard asks for
+the provider type, a name and the credentials, tests them and saves
+them. With TYPE and NAME, the settings are given with --set; a VALUE may
+be plain text or a secret reference:
 
   env:NAME        an environment variable
   file:PATH       the content of a file (trailing newline stripped)
@@ -212,8 +213,19 @@ VALUE may be plain text or a secret reference:
 ` + "`ump config types`" + ` lists the settings of every provider type. The
 credentials are tested before the account is saved unless --no-test is
 given. An existing account of the same name is replaced.`,
-		Args: usageArgs(cobra.ExactArgs(2)),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 && len(args) != 2 {
+				return usageErrorf(cmd, "either no arguments (the wizard) or TYPE NAME, got %d arguments", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				if len(sets) > 0 || noTest {
+					return usageErrorf(cmd, "the flags need TYPE and NAME")
+				}
+				return a.runWizard(cmd)
+			}
 			return a.configAdd(cmd, args[0], args[1], sets, noTest)
 		},
 	}
@@ -407,4 +419,15 @@ func plural(n int, noun string) string {
 // secretFilePath is where the wizard stores one secret of an account.
 func secretFilePath(account, key string) string {
 	return filepath.Join(config.SecretsDir(), account+"."+key)
+}
+
+// runSubcommand runs the subcommand of cmd called name with no arguments
+// and its flags at their defaults: what a command does when called bare.
+func runSubcommand(cmd *cobra.Command, name string) error {
+	for _, c := range cmd.Commands() {
+		if c.Name() == name {
+			return c.RunE(c, nil)
+		}
+	}
+	return fmt.Errorf("%s has no subcommand %s", cmd.CommandPath(), name)
 }

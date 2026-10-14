@@ -188,10 +188,10 @@ parts:
 ## Managing layouts
 
 ```
-ump config disk-layout                               # a small wizard, on a terminal (alias: dl)
+ump config disk-layout                               # = list (alias: dl)
 ump config disk-layout list                          # the layouts, their parts and whether they are valid
 ump config disk-layout get NAME                      # print one
-ump config disk-layout create NAME [--from NAME]     # copy an entry (default: lvm-linear), open the file in your editor
+ump config disk-layout create [NAME] [--from NAME]   # copy an entry (default: lvm-linear), open the file in your editor; asks on a terminal
 ump config disk-layout edit [NAME]                   # your editor on layouts.yaml, then a check of every layout
 ump config disk-layout delete NAME [--yes]
 ```

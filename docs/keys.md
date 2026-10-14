@@ -64,9 +64,10 @@ keys:
 ```
 
 ```
-ump config key                                # a small wizard, on a terminal
+ump config key                                # = list
 ump config key show [-o json|yaml]            # UMP's own public key and its fingerprints
 ump config key list                           # ump and the named keys, with type, comment and fingerprint
+ump config key add                            # on a terminal: asks for the name and a file, a line or the agent
 ump config key add NAME --file FILE           # every key line of the file; a second one becomes NAME-2, ...
 ump config key add NAME --line 'ssh-... AAAA... comment'
 ump config key add NAME --agent               # what ssh-add -L lists, one name each

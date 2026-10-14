@@ -53,41 +53,41 @@ ump
 │   └── remove       <name> [--yes]                    forget a server added by hand
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config
-│   ├── isp                                            interactive wizard: add an account, test it, save it
+│   ├── isp                                            the accounts (= view)
 │   │   ├── view                                       the configuration, secrets redacted
 │   │   ├── types                                      provider types and their settings
-│   │   ├── add      <type> <name> --set k=v ...       non-interactive form (CI, agents)
+│   │   ├── add      [<type> <name> --set k=v ...]     the wizard on a terminal: type, name, credentials, test; with arguments the non-interactive form (CI, agents)
 │   │   ├── remove   <name>
 │   │   └── test     [<name>...]                       check credentials and API access
-│   ├── os                                             interactive wizard over the profiles
+│   ├── os                                             the profiles (= list)
 │   │   ├── list                                       the profiles in ~/.config/ump/profiles
 │   │   ├── get      <name>                            print one
-│   │   ├── create   <name> [--from <name>]            guided on a terminal (image, layout, firewall, users, ...); --from copies one
+│   │   ├── create   [<name>] [--from <name>]          the wizard on a terminal (name, image, layout, firewall, users, ...); --from copies one
 │   │   ├── edit     <name>                            your editor, then a check
 │   │   ├── delete   <name> [--yes]
 │   │   ├── update                                     refresh the published profiles and entries; yours are kept
 │   │   └── default  [<name>]                          show or set the default profile
-│   ├── disk-layout (dl)                               interactive wizard over the named layouts of layouts.yaml
+│   ├── disk-layout (dl)                               the named layouts of layouts.yaml (= list)
 │   │   ├── list                                       the layouts, with their parts and whether they are valid
 │   │   ├── get      <name>                            print one
-│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── create   [<name>] [--from <name>]          copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     [<name>]                          your editor on layouts.yaml, then a check of every layout
 │   │   └── delete   <name> [--yes]
-│   ├── firewall (fw)                                  interactive wizard over the named firewalls of firewalls.yaml
+│   ├── firewall (fw)                                  the named firewalls of firewalls.yaml (= list)
 │   │   ├── list                                       the firewalls, with their policy and what they allow
 │   │   ├── get      <name>                            print one
-│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── create   [<name>] [--from <name>]          copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     [<name>]                          your editor on firewalls.yaml, then a check of every firewall
 │   │   └── delete   <name> [--yes]
-│   ├── user (u)                                       interactive wizard over the named users of users.yaml
+│   ├── user (u)                                       the named users of users.yaml (= list)
 │   │   ├── list                                       the users, with sudo, shell, keys
 │   │   ├── get      <name>                            print one
-│   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
+│   │   ├── create   [<name>] [--from <name>]          copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     [<name>]                          your editor on users.yaml, then a check of every user
 │   │   └── delete   <name> [--yes]
-│   ├── state                                          interactive wizard: where the home lives (local, or a backend shared by a team)
+│   ├── state                                          where the home lives: local, or a backend shared by a team (= view)
 │   │   ├── view                                       where the home is, the mirror, what it holds
-│   │   ├── set      --url <url> [backend flags]       point ump at a backend
+│   │   ├── set      [--url <url> [backend flags]]     point ump at a backend; without flags the wizard on a terminal (pick one, copy the home there)
 │   │   ├── migrate  --to <url> [backend flags] [--force]   copy the home there and point ump at it
 │   │   ├── clear                                      the local directory again
 │   │   ├── pull | push [--force]                      the mirror and the backend, by hand
@@ -95,10 +95,10 @@ ump
 │   │   ├── locks                                      the per-server locks held
 │   │   └── unlock   <server>                          release one
 │   ├── path                                           where the configuration lives
-│   └── key      [-o json|yaml]                        interactive wizard over the keys; prints UMP's own key without a terminal or with -o
+│   └── key                                            the keys, UMP's own first (= list)
 │       ├── show     [-o json|yaml]                    UMP's own SSH public key (generated on first use)
 │       ├── list                                       ump and the named keys, with fingerprints
-│       ├── add      <name> (--file <f>|--line <l>|--agent)   keep a public key under a name
+│       ├── add      [<name>] (--file <f>|--line <l>|--agent)   keep a public key under a name; asks on a terminal
 │       └── remove   <name>
 ├── completion
 └── version
@@ -514,14 +514,15 @@ ump config state       [view|set|migrate|clear|pull|push|test|locks|unlock]
 ump config path
 ```
 
-`ump config isp` is the [provider accounts](providers.md): the wizard
-without a subcommand, and the subcommands for the non-interactive forms.
+`ump config isp` is the [provider accounts](providers.md): `add` is
+the wizard on a terminal and the non-interactive form with arguments,
+and without a subcommand it is `view`.
 `ump config os` is the [profiles](profiles.md): the first run
 downloads the published profiles, layouts, firewalls and users into
 `~/.config/ump/profiles`, `list` shows what is there (the default marked
 with `*`, and whether each is published or yours), `get` prints one,
-`create NAME` asks on a terminal what the profile should hold (the
-image, from the storage's `os/index.json`; the disk layout; the
+`create [NAME]` asks on a terminal what the profile should hold (the
+name when none is given; the image, from the storage's `os/index.json`; the disk layout; the
 firewall; the users from `users.yaml`, a new one defined on the spot;
 the kernel switches; the time zone; packages; the interface names; the
 provision step) and writes it, or with `--from NAME` copies another
@@ -532,15 +533,17 @@ removes it, `update` fetches the published profiles (`ubuntu-26.04`,
 `ubuntu-24.04`, `ubuntu-22.04`) and the published entries of
 `layouts.yaml`, `firewalls.yaml` and `users.yaml` again, replacing them
 and keeping yours, `default [NAME]` shows or sets the default profile,
-and without a subcommand it is a small wizard over these. `ump server set
+and without a subcommand it is `list`. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with
 (`servers:` in the configuration file), `--clear` forgets it.
 `ump config disk-layout` (`dl`) is the same for the named [disk
 layouts](disk-layouts.md) in `layouts.yaml` that profiles refer to:
-`list` shows each with its parts and whether it is valid, `get` prints
-one, `create NAME --from NAME` copies an entry (the file's comments
-survive) and opens the file in your editor, `edit` opens it and checks
-every layout afterwards, `delete` removes one. `ump config firewall`
+`list` shows each with its parts and whether it is valid (and is what
+the command does without a subcommand), `get` prints one, `create NAME
+--from NAME` copies an entry (the file's comments survive) and opens
+the file in your editor (on a terminal it asks for the name and the
+entry to start from when they are not given), `edit` opens it and
+checks every layout afterwards, `delete` removes one. `ump config firewall`
 (`fw`) is the same for the named [firewalls](firewalls.md) in
 `firewalls.yaml` (`default`: ICMP and SSH; `web`: plus HTTP and HTTPS;
 `open`: none), which a profile names in its `firewall` field; `ump
@@ -549,11 +552,11 @@ config user` (`u`) is the same for the named [users](profiles.md#users)
 in `users.yaml` (`ump`, the administrator UMP provides), which a
 profile lists by name in `users`.
 
-Without a subcommand, `ump config isp` is an interactive wizard. On a
-fresh system it first asks whether everything should stay in
-`~/.config/ump` on this machine, and runs the backend wizard (`ump config
-state`) when the answer is no, so that a team's first account lands in
-the shared home. Then it asks for the provider type, an account name and
+Without arguments and on a terminal, `ump config isp add` is an
+interactive wizard. On a fresh system it first asks whether everything
+should stay in `~/.config/ump` on this machine, and runs the backend
+wizard (`ump config state set`) when the answer is no, so that a team's
+first account lands in the shared home. Then it asks for the provider type, an account name and
 the credentials; the secrets become files under `secrets/` in the home,
 readable only by you, wherever the home lives (environment variables or
 a command such as `pass show ...` are for the non-interactive form
@@ -564,8 +567,8 @@ wizard, and Ctrl-C aborts at any prompt; an account is written only after
 its test passed (or you chose to save it anyway), so leaving never saves a
 half-entered account. Without a terminal it refuses with exit code 3.
 
-`ump config isp add <type> <name> --set KEY=VALUE ...` is the non-interactive
-form. A value is plain text or a secret reference: `env:NAME`,
+`ump config isp add <type> <name> --set KEY=VALUE ...` is the
+non-interactive form. A value is plain text or a secret reference: `env:NAME`,
 `file:PATH`, `command:CMD`. The credentials are tested before saving
 unless `--no-test` is given; `ump config isp types` lists the settings of
 every provider type. `view` shows the configuration with plaintext
@@ -575,9 +578,11 @@ wizard created for it.
 
 ### `ump config state`
 
-Where [the home](state.md) lives: the wizard without a subcommand
-(pick a backend, move the home there), `view`, `set --url URL` (use a
-backend as it is), `migrate --to URL` (copy the home there first),
+Where [the home](state.md) lives: `view` (what the command does
+without a subcommand), `set` (without flags, on a terminal, a wizard
+that picks a backend and offers to copy the home there; `set --url
+URL` uses a backend as it is), `migrate --to URL` (copy the home there
+first),
 `clear` (the local directory again), `pull` and `push` for the mirror
 by hand, `test`, and `locks` and `unlock SERVER` for the per-server
 locks that `reinstall` and `rescue` take. `UMP_STATE` in the
@@ -590,21 +595,20 @@ or the first `ump server rescue`) at `~/.config/ump/staging_ed25519`, or at the
 path set as `staging.key` in the configuration. It is what rescue
 systems and installed systems are reached with, so it works whatever
 personal keys are around. `ump config key show` prints the public key and
-its fingerprints (`-o json` for scripts; `ump config key` alone does the
-same without a terminal, and is a small wizard over the subcommands on
-one); put the public key wherever UMP should be able to log in. The
-subcommands keep more public keys under
-names in `~/.config/ump/keys.yaml`, for the `keys` of
+its fingerprints (`-o json` for scripts); put the public key wherever
+UMP should be able to log in. The subcommands keep more public keys
+under names in `~/.config/ump/keys.yaml`, for the `keys` of
 [users](keys.md): `add NAME --file FILE` (every key line of the
 file; a second one becomes `NAME-2`), `add NAME --line 'ssh-... AAAA...'`,
-`add NAME --agent` (what `ssh-add -L` lists), `list` (with `ump`, UMP's
-own) and `remove NAME`. The names `ump`, `local` and `agent` are taken.
+`add NAME --agent` (what `ssh-add -L` lists), `add` alone on a terminal
+(asks for the name and where the key comes from), `list` (with `ump`, UMP's
+own; what the command does without a subcommand) and `remove NAME`. The names `ump`, `local` and `agent` are taken.
 
 ## Examples
 
 ```console
 # set up provider accounts interactively, or without a terminal:
-$ ump config isp
+$ ump config isp add
 $ ump config isp add hetzner-robot main --set login=env:HROBOT_USER --set password=env:HROBOT_PASS
 $ ump config isp test main
 
