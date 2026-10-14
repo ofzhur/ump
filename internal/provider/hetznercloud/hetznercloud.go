@@ -388,7 +388,6 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	return out, nil
 }
 
-
 func (p *Provider) machine(s Server) provider.Machine {
 	m := provider.Machine{
 		Provider: TypeName,
