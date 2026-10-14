@@ -79,7 +79,10 @@ done
 command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old md arrays cannot be stopped and md parts cannot be made" >&2
 
 log() { printf '==> %s\n' "$*"; }
-die() { echo "install.sh: $*" >&2; exit 1; }
+die() { dying=1; echo "install.sh: $*" >&2; exit 1; }
+# a command that fails under set -e names its line, so that a failure is
+# never silent (die says why on its own)
+trap 'rc=$?; [ "$rc" = 0 ] || [ -n "${dying:-}" ] || echo "install.sh: failed at line $LINENO (exit status $rc)" >&2' ERR
 warn() { echo "install.sh: warning: $*" >&2; }
 TARGET=/mnt/target
 
@@ -363,7 +366,12 @@ for k in "${!L_VG[@]}"; do
 	log "  ${L_VG[$k]}/${L_NAME[$k]}: ${L_SIZE[$k]} $r ${L_FS[$k]}${L_MOUNT[$k]:+ at ${L_MOUNT[$k]}}"
 done
 log "network: $uplink ($mac) $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS $dns; hostname $hostname; time zone $timezone"
-ifs=""; for i in "${!IF_MAC[@]}"; do ifs="${ifs:+$ifs, }${IF_NAME[$i]} (${IF_KIND[$i]}, ${IF_MAC[$i]}$([ "${IF_OLD[$i]}" != "${IF_NAME[$i]}" ] && printf ', now %s' "${IF_OLD[$i]}"))"; done
+ifs=""
+for i in "${!IF_MAC[@]}"; do
+	was=""
+	if [ "${IF_OLD[$i]}" != "${IF_NAME[$i]}" ]; then was=", now ${IF_OLD[$i]}"; fi
+	ifs="${ifs:+$ifs, }${IF_NAME[$i]} (${IF_KIND[$i]}, ${IF_MAC[$i]}$was)"
+done
 log "interfaces: $ifs$([ "$rename" = yes ] || printf '; kernel names kept')"
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
 log "packages: $(jq -r '.packages | if length == 0 then "none" else join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
