@@ -116,7 +116,7 @@ own](images/rescue/README.md#your-own-storage).
 
 | Document | Contents |
 |---|---|
-| [Quickstart](docs/quickstart.md) | install ump, add an account, look at the defaults, dry-run and reinstall a server, log in |
+| [Quickstart](docs/quickstart.md) | install ump, decide where it keeps its things, add an account, look at the defaults, dry-run and reinstall a server, log in |
 | [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
 | [The home and its backend](docs/state.md) | everything ump keeps in one place: the local directory, or a backend shared by a team (a directory, SSH, S3, R2, HTTP, Consul, Vault), the mirror, locks per server |
 | [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets, what each provider can do |

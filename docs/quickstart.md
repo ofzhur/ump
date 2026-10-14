@@ -23,7 +23,38 @@ yourself with Go 1.26 or newer:
 $ git clone git@github.com:ofzhur/ump.git && cd ump && make     # ./ump; make install puts it into your Go bin directory
 ```
 
-## 2. Add a provider account
+## 2. Decide where ump keeps its things
+
+Everything ump keeps is one directory, its home: the accounts and their
+secrets, the profiles, UMP's own SSH key, what it knows about your
+servers, the listing cache. By default that is `~/.config/ump`, and for
+one person on one machine that is all there is to it: skip to the next
+step.
+
+Decide now if the home should be somewhere shared instead, because the
+account you add next lands wherever the home is. A team, a second
+machine, or CI wants a **backend**: a directory in the fleet's git
+repository, a directory on a jump host over SSH, an S3 or R2 bucket, an
+HTTP service, Consul or Vault. Everyone using the same backend shares
+the whole home, UMP's key included, and so reaches the same servers.
+
+```console
+$ ump config state                                      # the wizard: pick a backend, move the home there
+$ ump config state migrate --to file:///srv/fleet/ump   # or in one line
+$ ump config state view
+Home:      file:///srv/fleet/ump (backend.yaml)
+Mirror:    ~/.cache/ump/homes/3f9a1c2b7e4d
+```
+
+From then on ump works on a mirror of the backend: pulled before every
+command, pushed after it, with conflicts named rather than overwritten.
+`UMP_STATE=s3://fleet/ump` in the environment names a backend ahead of
+the file, which is how CI gets the same home without anything on disk.
+Mind that the home holds secrets in clear text: choose a backend that
+only your team can read. Moving later is the same `migrate`; see [the
+home and its backend](state.md).
+
+## 3. Add a provider account
 
 ```console
 $ ump config isp
@@ -43,7 +74,7 @@ $ ump config isp test
 Where the credentials come from and what each provider can do is in
 [provider accounts](providers.md).
 
-## 3. Look at your servers
+## 4. Look at your servers
 
 ```console
 $ ump server list
@@ -59,7 +90,7 @@ Servers are addressed by name, provider ID, IP address or `provider/id`,
 across every account. `ump server list --diff` shows what changed since
 the last listing.
 
-## 4. Look at what an installation gives you
+## 5. Look at what an installation gives you
 
 ```console
 $ ump config os list
@@ -98,7 +129,7 @@ or firewall (`web`). [Profiles](profiles.md), [disk
 layouts](disk-layouts.md), [firewalls](firewalls.md), [users](users.md)
 and [keys](keys.md) describe every field and the published ones.
 
-## 5. See the plan, then install
+## 6. See the plan, then install
 
 ```console
 $ ump server reinstall web-01 --dry-run
@@ -149,7 +180,7 @@ another), and the address, gateway and interface it had are carried over.
 `--profile NAME`, `--layout NAME` and `--firewall NAME` pick others for
 this installation; without a terminal, add `--yes`.
 
-## 6. Log in
+## 7. Log in
 
 ```console
 $ ump ssh web-01
@@ -196,11 +227,10 @@ uptime, memory, the root disk and the addresses.
   `ump server set NAME --price 89 --attr owner=alice` records what the
   API does not know, `ump server add` a machine no provider lists. See
   [inventory](inventory.md).
-- **A shared home.** Everything ump keeps is one directory,
-  `~/.config/ump`; `ump config state migrate --to file:///srv/fleet/ump`
-  (or SSH, S3, R2, HTTP, Consul, Vault) moves it to a backend a team
-  shares, mirrored on each machine, and `UMP_STATE` points CI at it.
-  See [the home and its backend](state.md).
+- **A shared home, later.** If you skipped step 2, `ump config state
+  migrate --to URL` moves the home to a backend at any time, with
+  everything in it, and `clear` brings it back. See [the home and its
+  backend](state.md).
 - **Scripts and agents.** Every command has `-o json`; nothing prompts
   without a terminal (`--yes` where something is destructive, exit code 3
   otherwise). See the [CLI reference](cli.md).
