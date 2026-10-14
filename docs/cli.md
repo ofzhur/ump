@@ -549,12 +549,16 @@ config user` (`u`) is the same for the named [users](profiles.md#users)
 in `users.yaml` (`ump`, the administrator UMP provides), which a
 profile lists by name in `users`.
 
-Without a subcommand, `ump config isp` is an interactive wizard: it asks for
-the provider type, an account name and the credentials, asks where the
-secrets should be kept (files under `~/.config/ump/secrets/` readable only
-by you, environment variables, or a command such as `pass show ...`),
-tests the credentials with one API call and writes the account to the
-configuration. For OVHcloud it can request a consumer key for you and hand
+Without a subcommand, `ump config isp` is an interactive wizard. On a
+fresh system it first asks whether everything should stay in
+`~/.config/ump` on this machine, and runs the backend wizard (`ump config
+state`) when the answer is no, so that a team's first account lands in
+the shared home. Then it asks for the provider type, an account name and
+the credentials, and where the secrets should be kept (files under
+`secrets/` in the home readable only by you, environment variables, or a
+command such as `pass show ...`; behind a backend they are files in the
+home, no question asked), tests the credentials with one API call and
+writes the account to the configuration. For OVHcloud it can request a consumer key for you and hand
 you the validation URL. `q` at any menu or yes/no question leaves the
 wizard, and Ctrl-C aborts at any prompt; an account is written only after
 its test passed (or you chose to save it anyway), so leaving never saves a

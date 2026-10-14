@@ -14,6 +14,7 @@ import (
 
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/provider/manual"
 )
 
 // prompter implements provider.Prompter on the app's stdin and stdout.
@@ -237,7 +238,35 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	ui := a.newPrompter(ctx)
 	ui.Printf("UMP configuration wizard\n")
-	ui.Printf("Configuration file: %s\n", config.AbbreviateHome(path))
+	// a fresh system: everything is about to be written to this machine;
+	// a team, another machine or CI wants a backend first, and someone
+	// who forgot UMP_STATE wants to notice now
+	if a.home.Backend == nil {
+		if _, err := os.Stat(path); err != nil {
+			ui.Printf("No backend is configured: everything ump keeps, this account's secrets included, stays in %s on this machine (a team, another machine or CI shares a backend instead; UMP_STATE or ump config state).\n", config.AbbreviateHome(config.LocalDir()))
+			local, err := ui.Confirm("Keep it on this machine?", true)
+			if err != nil {
+				return err
+			}
+			if !local {
+				if err := a.stateWizard(cmd, ui); err != nil {
+					return err
+				}
+				if err := a.resolveHome(ctx); err != nil {
+					return err
+				}
+				if cfg, path, err = a.loadConfig(); err != nil {
+					return err
+				}
+			}
+			ui.Printf("\n")
+		}
+	}
+	if a.home.Backend != nil {
+		ui.Printf("Home: %s (mirror %s)\n", a.home.Backend, config.AbbreviateHome(a.home.Dir))
+	} else {
+		ui.Printf("Home: %s\n", config.AbbreviateHome(a.home.Dir))
+	}
 	if len(cfg.Accounts) == 0 {
 		ui.Printf("No accounts configured yet.\n")
 	} else {
@@ -248,7 +277,12 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 	}
 	ui.Printf("Type q at a menu or press Ctrl-C to quit. To test or remove accounts: ump config test, ump config remove NAME.\n\n")
 
-	types := provider.Types()
+	var types []provider.Type
+	for _, t := range provider.Types() {
+		if t.Name != manual.TypeName { // manual servers come with ump server add
+			types = append(types, t)
+		}
+	}
 	items := make([]string, len(types))
 	for i, t := range types {
 		items[i] = fmt.Sprintf("%-14s %s", t.Name, t.Description)
@@ -324,10 +358,14 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		}
 	}
 	storage := storeFile
-	if hasSecrets {
+	switch {
+	case hasSecrets && a.home.Backend != nil:
+		// the home is the backend's: secrets are files there, like all the rest
+		ui.Printf("\nThe secrets are kept as files in the home, which lives in %s.\n", a.home.Backend)
+	case hasSecrets:
 		ui.Printf("\n")
 		i, err := ui.Choose("Where should this account's secrets be kept?", []string{
-			fmt.Sprintf("files under %s, readable only by you", config.AbbreviateHome(config.SecretsDir())),
+			fmt.Sprintf("files under %s on this machine, readable only by you", config.AbbreviateHome(config.SecretsDir())),
 			"environment variables that you set in your shell",
 			"a command that prints the secret (pass, op, sops, vault, ...)",
 		}, 0)

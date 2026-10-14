@@ -14,6 +14,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/provider/manual"
 )
 
 func (a *app) newConfigCmd() *cobra.Command {
@@ -222,6 +223,9 @@ given. An existing account of the same name is replaced.`,
 }
 
 func (a *app) configAdd(cmd *cobra.Command, typeName, name string, sets []string, noTest bool) error {
+	if typeName == manual.TypeName {
+		return usageErrorf(cmd, "manual servers are not an account to add: ump server add NAME --ipv4 ADDRESS puts one into the inventory")
+	}
 	t, ok := provider.Lookup(typeName)
 	if !ok {
 		return usageErrorf(cmd, "unknown provider type %q (known: %s)", typeName, strings.Join(provider.TypeNames(), ", "))

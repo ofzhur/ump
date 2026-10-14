@@ -83,10 +83,15 @@ Add another account? [y/N]
 Done. Try: ump server list
 ```
 
-It asks for the provider type, an account name, where the account's
-secrets should be kept, and the credentials (secrets are read without
-echo), tests them with one API call (a listing) and writes the account to
-the configuration. An account is written only after its test passed, or
+On a fresh system it first asks whether everything should stay in
+`~/.config/ump` on this machine, and runs `ump config state` when the
+answer is no, so that a team's first account lands in the shared home.
+It then asks for the provider type, an account name, where the account's
+secrets should be kept (files in the home, environment variables, or a
+command; behind a backend they are files in the home, no question
+asked), and the credentials (secrets are read without echo), tests them
+with one API call (a listing) and writes the account to the
+configuration. An account is written only after its test passed, or
 you chose to save it anyway, so leaving with `q` or Ctrl-C never saves a
 half-entered account. With environment variables that are not set in the
 current shell, the test is skipped and the wizard prints the `export`

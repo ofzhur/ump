@@ -231,7 +231,11 @@ func (a *app) newConfigStateCmd() *cobra.Command {
   UMP_STATE=r2://account/bucket/ump ump server list`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.stateWizard(cmd)
+			ui := a.resolverUI(cmd)
+			if ui == nil {
+				return withExit(exitAborted, errors.New("ump config state is interactive and needs a terminal; use its subcommands (view, set, migrate, clear, pull, push, locks, unlock) instead"))
+			}
+			return a.stateWizard(cmd, ui)
 		},
 	}
 	cmd.AddCommand(a.newStateViewCmd(), a.newStateSetCmd(), a.newStateClearCmd(), a.newStateMigrateCmd(), a.newStatePullCmd(), a.newStatePushCmd(), a.newStateTestCmd(), a.newStateLocksCmd(), a.newStateUnlockCmd())
@@ -599,12 +603,9 @@ func (a *app) newStateUnlockCmd() *cobra.Command {
 	}
 }
 
-// stateWizard is ump config state on a terminal.
-func (a *app) stateWizard(cmd *cobra.Command) error {
-	ui := a.resolverUI(cmd)
-	if ui == nil {
-		return withExit(exitAborted, errors.New("ump config state is interactive and needs a terminal; use its subcommands (view, set, migrate, clear, pull, push, locks, unlock) instead"))
-	}
+// stateWizard is ump config state on a terminal, over the prompter of
+// the caller (the account wizard runs it on a fresh system).
+func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
 	if a.home.Backend != nil {
 		ui.Printf("The home is %s (mirror %s).\n", a.home.Backend, config.AbbreviateHome(a.home.Dir))
 	} else {
