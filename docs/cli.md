@@ -51,6 +51,14 @@ ump
 │   ├── add          <name> --ipv4 <addr> [--ipv6 <addr>] [--location <s>] [--product <s>] [--kind bare-metal|cloud] [--note <s>]
 │   │                                                  a server by hand, without a provider API (account "manual")
 │   └── remove       <name> [--yes]                    forget a server added by hand
+├── state                                              where the state lives, its version, what it holds
+│   ├── show                                           the document
+│   ├── edit                                           your editor, then a checked write
+│   ├── pull     <file>                                the document to a file, with its version
+│   ├── push     <file> [--force]                      a file as the state; refused when it moved on
+│   ├── migrate  --to <url> [--force]                  copy to another backend and switch to it
+│   ├── locks                                          the per-server locks held
+│   └── unlock   <server>                              release one
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config
 │   ├── isp                                            interactive wizard: add an account, test it, save it
@@ -453,7 +461,7 @@ ump server remove NAME [--yes]
 ```
 
 `set` writes what ump cannot learn from the provider into the
-configuration file (`servers:`): the profile a server is reinstalled
+[state](state.md) (`servers:`): the profile a server is reinstalled
 with (`--clear` forgets it), its price where the API does not say
 (`--price`, default currency `EUR` and period `month`; it wins over the
 API's price; `--clear-price` forgets it), and attributes of your own
@@ -461,12 +469,28 @@ API's price; `--clear-price` forgets it), and attributes of your own
 and attributes show in `ump server list -o wide` and `ump server show`
 and travel in `-o json`.
 
-`add` puts a server no provider lists into the configuration file
+`add` puts a server no provider lists into the [state](state.md)
 (`manual:`), listed by the account `manual` of provider type `manual`;
 `remove` forgets it. Such a server has no rescue system behind it: `ump
 server rescue` and `reinstall` work when its running system lets UMP in
 over SSH, and a failed installation is yours to recover, which ump says
 before erasing anything. See [inventory](inventory.md).
+
+## `ump state`
+
+```
+ump state
+ump state show | edit | pull FILE | push FILE [--force] | migrate --to URL [--force] | locks | unlock SERVER
+```
+
+The [state](state.md): what ump knows about the fleet beyond the
+providers' word, behind a backend named by `UMP_STATE`, else `state.url`
+in the configuration, else the local state file. `ump state` says which,
+with the version and what the document holds; `show` prints it; `edit`,
+`pull` and `push` change it by hand with the version checked; `migrate`
+copies it to another backend and switches the configuration; `locks`
+and `unlock` manage the per-server locks that `reinstall` and `rescue`
+take.
 
 ## `ump ssh`
 

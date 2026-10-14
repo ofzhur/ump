@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/provider/manual"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 // Manual servers: machines no configured provider knows, added by hand
@@ -22,8 +22,8 @@ func (a *app) newServerAddCmd() *cobra.Command {
 		Short: "Add a server by hand, without a provider API",
 		Long: `Add a server no configured provider lists: a machine in your own rack, at
 a provider ump has no support for, or anything with an address. It goes
-into the configuration file (manual:) and is listed by the account
-"manual" of provider type manual, next to the others, with the status
+into the state (manual:) and is listed by the account "manual" of
+provider type manual, next to the others, with the status
 "manual"; ump server set gives it a price and attributes like any other.
 
 What ump can do with it is what SSH allows: ump server rescue and ump
@@ -68,23 +68,19 @@ before it erases anything. ump server remove forgets the server again.`,
 			if err != nil {
 				return err
 			}
-			if _, exists := cfg.Manual[name]; exists {
-				return fmt.Errorf("manual server %s exists already (ump server remove %s first)", name, name)
-			}
 			if acct, ok := cfg.Accounts[manual.AccountName]; ok && acct.Type != manual.TypeName {
 				return fmt.Errorf("the account name %q is taken by a %s account; manual servers need it", manual.AccountName, acct.Type)
 			}
-			if cfg.Accounts == nil {
-				cfg.Accounts = map[string]config.Account{}
+			if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+				return err
 			}
-			if _, ok := cfg.Accounts[manual.AccountName]; !ok {
-				cfg.Accounts[manual.AccountName] = config.Account{Type: manual.TypeName, Settings: map[string]config.Value{}}
-			}
-			if cfg.Manual == nil {
-				cfg.Manual = map[string]provider.ManualServer{}
-			}
-			cfg.Manual[name] = s
-			if err := config.Save(path, cfg); err != nil {
+			if err := a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+				if _, exists := d.Manual[name]; exists {
+					return fmt.Errorf("manual server %s exists already (ump server remove %s first)", name, name)
+				}
+				d.Manual[name] = s
+				return nil
+			}); err != nil {
 				return err
 			}
 			m := manual.Machine(manual.AccountName, name, s)
@@ -106,7 +102,7 @@ func (a *app) newServerRemoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove NAME [--yes]",
 		Short: "Forget a server added by hand",
-		Long: `Remove a manual server from the configuration (and what ump server set
+		Long: `Remove a manual server from the state (and what ump server set
 remembered about it). The machine itself is not touched. Servers a
 provider lists cannot be removed here: they are the provider's.`,
 		Args: usageArgs(cobra.ExactArgs(1)),
@@ -115,8 +111,12 @@ provider lists cannot be removed here: they are the provider's.`,
 			if err != nil {
 				return err
 			}
+			doc, err := a.loadState(cmd.Context(), cfg, path)
+			if err != nil {
+				return err
+			}
 			name := args[0]
-			s, ok := cfg.Manual[name]
+			s, ok := doc.Manual[name]
 			if !ok {
 				if _, isAccount := cfg.Accounts[name]; isAccount {
 					return fmt.Errorf("%s is an account, not a manual server (ump config isp remove %s)", name, name)
@@ -127,18 +127,14 @@ provider lists cannot be removed here: they are the provider's.`,
 			if err := a.confirm(cmd, yes, fmt.Sprintf("Forget %s? The machine itself is not touched.", describeRef(m))); err != nil {
 				return err
 			}
-			delete(cfg.Manual, name)
-			delete(cfg.Servers, m.Ref())
-			if len(cfg.Manual) == 0 {
-				cfg.Manual = nil
-				if acct, ok := cfg.Accounts[manual.AccountName]; ok && acct.Type == manual.TypeName {
-					delete(cfg.Accounts, manual.AccountName)
-				}
-			}
-			if err := config.Save(path, cfg); err != nil {
+			if err := a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+				delete(d.Manual, name)
+				delete(d.Servers, m.Ref())
+				return nil
+			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stdout, "Removed %s from the configuration.\n", describeRef(m))
+			fmt.Fprintf(a.stdout, "Removed %s from the state.\n", describeRef(m))
 			return nil
 		},
 	}

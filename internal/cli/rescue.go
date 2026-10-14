@@ -200,6 +200,15 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 		return err
 	}
 	a.warnNoRescue(m, prov)
+	doc, err := a.loadState(cmd.Context(), cfg, "")
+	if err != nil {
+		return err
+	}
+	unlock, err := a.lockServer(cmd.Context(), cfg, m, "rescue")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if providerOnly {
 		return a.providerRescueOnly(cmd, m, prov, keys, keyPath, keyPaths, command, o, format)
 	}
@@ -207,7 +216,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if imageURL == "" {
 		imageURL = cfg.StagingImage()
 	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != "", users: a.loginUsers(cfg, m)})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != "", users: a.loginUsers(cfg, m, doc)})
 	if err != nil {
 		return err
 	}

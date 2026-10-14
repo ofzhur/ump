@@ -16,6 +16,7 @@ import (
 	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 // imageWaitTimeout is how long the UMP rescue system has to answer after
@@ -49,9 +50,13 @@ const defaultAdmin = "ump"
 // loginUsers are the users ump tries, in order, to reach the running
 // system of m: root, the administrator of the profile set for the server
 // (a sudo user, where root cannot log in), and the default one.
-func (a *app) loginUsers(cfg *config.Config, m provider.Machine) []string {
+func (a *app) loginUsers(cfg *config.Config, m provider.Machine, doc *state.Document) []string {
 	users := []string{"root"}
-	if u := a.profileAdmin(cfg, cfg.Servers[m.Ref()].Profile); u != "" && u != "root" {
+	pinned := ""
+	if doc != nil {
+		pinned = doc.Servers[m.Ref()].Profile
+	}
+	if u := a.profileAdmin(cfg, pinned); u != "" && u != "root" {
 		users = append(users, u)
 	}
 	if users[len(users)-1] != defaultAdmin {

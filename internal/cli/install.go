@@ -19,6 +19,7 @@ import (
 	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 type installOptions struct {
@@ -185,9 +186,13 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	ctx := cmd.Context()
 	// the profile, resolved to the specification the installer takes:
 	// --profile, else the one set for the server, else default
+	doc, err := a.loadState(ctx, cfg, "")
+	if err != nil {
+		return err
+	}
 	profileName := o.profile
 	if profileName == "" {
-		profileName = cfg.Servers[m.Ref()].Profile
+		profileName = doc.Servers[m.Ref()].Profile
 	}
 	if profileName == "" {
 		profileName = cfg.DefaultProfileName()
@@ -268,8 +273,15 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err := a.confirm(cmd, o.yes, question); err != nil {
 		return err
 	}
+	// the server is locked for the whole installation: another ump must
+	// not reinstall or rescue it meanwhile; other servers are free
+	unlock, err := a.lockServer(ctx, cfg, m, "reinstall")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	// everything on the way is progress (stderr); stdout is for the result
-	logins := a.loginUsers(cfg, m)
+	logins := a.loginUsers(cfg, m, doc)
 	if u := prof.Admin(users); u != "" && u != "root" {
 		logins = append([]string{"root", u}, logins[1:]...)
 	}
@@ -356,11 +368,47 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	result.System = sys
 	result.Admin = admin
+	// what was installed goes into the state, for the inventory
+	record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, sys.Details, a.now())
+	if err := a.updateState(ctx, cfg, func(d *state.Document) error {
+		s := d.Servers[m.Ref()]
+		s.Installed = &record
+		d.Servers[m.Ref()] = s
+		return nil
+	}); err != nil {
+		fmt.Fprintf(a.stderr, "ump: the installation is not recorded in the state: %v\n", err)
+	}
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, hostname, sys.Root, admin, m.Name)
 	if spec.Provision.Type != "none" {
 		fmt.Fprintf(a.stderr, "The provision step %s is recorded in /etc/ump/install on the server; running it is not implemented yet.\n", spec.Provision.Type)
 	}
 	return a.installReport(result, format)
+}
+
+// installRecord is what the state keeps of an installation: the facts
+// of /etc/ump/install that the verification read (key=value pairs).
+func installRecord(os, profile, layout, hostname, admin, details string, now time.Time) state.Install {
+	r := state.Install{OS: os, Profile: profile, Layout: layout, Hostname: hostname, Admin: admin, At: now.UTC().Truncate(time.Second)}
+	for _, f := range strings.Fields(details) {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "image_version":
+			r.ImageVersion = v
+		case "image_kernel":
+			r.Kernel = v
+		case "interfaces":
+			r.Interfaces = map[string]string{}
+			for _, pair := range strings.Split(v, ",") {
+				if n, mac, ok := strings.Cut(pair, "="); ok {
+					r.Interfaces[n] = mac
+				}
+			}
+		}
+	}
+	return r
 }
 
 // loadProfile finds a profile: a file when the name is a path, else

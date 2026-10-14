@@ -13,6 +13,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 var describeResources = []string{"server"}
@@ -51,8 +52,11 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 	if err != nil {
 		return err
 	}
+	if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+		return err
+	}
 	if len(cfg.Accounts) == 0 {
-		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one", config.AbbreviateHome(path))
+		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one, or ump server add for a server by hand", config.AbbreviateHome(path))
 	}
 	names, err := a.selectAccounts(cmd, cfg)
 	if err != nil {
@@ -104,7 +108,8 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 		}
 		d, err := describeMachine(ctx, byAccount[m.Account].prov, m)
 		if err == nil {
-			d.Sections = append(d.Sections, umpSection(cfg, m)...)
+			doc, _ := a.loadState(ctx, cfg, "")
+			d.Sections = append(d.Sections, umpSection(doc, m)...)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -135,11 +140,17 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 // listing's view when the provider cannot describe machines.
 // umpSection is what ump itself knows about a server: the profile set
 // for it, its price and the user's attributes.
-func umpSection(cfg *config.Config, m provider.Machine) []provider.Section {
-	s := cfg.Servers[m.Ref()]
+func umpSection(doc *state.Document, m provider.Machine) []provider.Section {
+	var s state.Server
+	if doc != nil {
+		s = doc.Servers[m.Ref()]
+	}
 	var items []provider.Item
 	if s.Profile != "" {
 		items = append(items, provider.Item{Key: "profile", Value: s.Profile})
+	}
+	if s.Note != "" {
+		items = append(items, provider.Item{Key: "note", Value: s.Note})
 	}
 	if m.Price != nil {
 		v := m.Price.String() + " (" + m.Price.Source
@@ -150,6 +161,23 @@ func umpSection(cfg *config.Config, m provider.Machine) []provider.Section {
 	}
 	if len(m.Attributes) > 0 {
 		items = append(items, provider.Item{Key: "attributes", Value: m.Attributes})
+	}
+	if in := s.Installed; in != nil {
+		v := in.OS
+		if in.ImageVersion != "" {
+			v += " " + in.ImageVersion
+		}
+		v += " (profile " + in.Profile
+		if in.Layout != "" {
+			v += ", layout " + in.Layout
+		}
+		if in.Admin != "" {
+			v += ", administrator " + in.Admin
+		}
+		items = append(items, provider.Item{Key: "installed", Value: v + ") on " + in.At.Format("2006-01-02 15:04 MST")})
+		if len(in.Interfaces) > 0 {
+			items = append(items, provider.Item{Key: "interfaces", Value: in.Interfaces})
+		}
 	}
 	if len(items) == 0 {
 		return nil

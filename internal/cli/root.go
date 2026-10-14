@@ -24,6 +24,7 @@ import (
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	_ "github.com/ofzhur/ump/internal/provider/all"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 // Version is the release version, set at build time with
@@ -55,9 +56,13 @@ type app struct {
 	saveTerm func() func()
 	// httpClient overrides the HTTP client handed to providers (tests).
 	httpClient *http.Client
-	// manual holds the servers added by hand, from the configuration
-	// loaded last, for the manual provider type.
+	// manual holds the servers added by hand, from the state loaded
+	// last, for the manual provider type.
 	manual map[string]provider.ManualServer
+	// store is the state's backend, opened once per run, and doc the
+	// document read last (nil after a change).
+	store *state.Store
+	doc   *state.Document
 	// now is the clock, for cache timestamps; nil means time.Now.
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.
@@ -193,6 +198,7 @@ licensed under the Apache License 2.0.`,
 	root.AddCommand(a.newServerCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
+	root.AddCommand(a.newStateCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root
 }
@@ -307,7 +313,6 @@ func (a *app) loadConfig() (*config.Config, string, error) {
 	if err != nil {
 		return nil, path, err
 	}
-	a.manual = cfg.Manual
 	return cfg, path, nil
 }
 
@@ -327,6 +332,10 @@ func (a *app) buildProvider(name string, acct config.Account) (provider.Provider
 // selectAccounts returns the account names to use: those given with
 // --account, or all configured ones.
 func (a *app) selectAccounts(cmd *cobra.Command, cfg *config.Config) ([]string, error) {
+	// the state's manual servers bring their account along
+	if _, err := a.loadState(cmd.Context(), cfg, config.ResolvePath(a.configFlag)); err != nil {
+		return nil, err
+	}
 	if len(a.accounts) == 0 {
 		return cfg.AccountNames(), nil
 	}

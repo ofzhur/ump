@@ -80,8 +80,11 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	if err != nil {
 		return usageErrorf(cmd, "%v", err)
 	}
+	if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+		return err
+	}
 	if len(cfg.Accounts) == 0 {
-		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one", config.AbbreviateHome(path))
+		return fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one, or ump server add for a server by hand", config.AbbreviateHome(path))
 	}
 	names, err := a.selectAccounts(cmd, cfg)
 	if err != nil {
@@ -325,6 +328,7 @@ func parseSince(s string, now time.Time, loc *time.Location) (time.Time, error) 
 
 // cachedListings serves the last recorded listing of each account.
 func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []string) ([]listResult, []string) {
+	doc, _ := a.loadState(context.Background(), cfg, "")
 	results := make([]listResult, 0, len(names))
 	var notes []string
 	for _, n := range names {
@@ -337,32 +341,12 @@ func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []str
 			r.err = fmt.Errorf("account %s: not in the cache yet (run `ump server list` without --cached first)", n)
 		default:
 			r.machines = snap.Machines
-			applyServerSettings(cfg, r.machines)
+			applyState(doc, r.machines)
 			notes = append(notes, n+" ("+a.fmtTime(snap.SeenAt)+")")
 		}
 		results = append(results, r)
 	}
 	return results, notes
-}
-
-// applyServerSettings puts what the user set for a server (ump server
-// set) onto the listed machine: a price set by hand wins over the
-// provider's, and the attributes are the user's alone.
-func applyServerSettings(cfg *config.Config, ms []provider.Machine) {
-	for i := range ms {
-		s, ok := cfg.Servers[ms[i].Ref()]
-		if !ok {
-			continue
-		}
-		if s.Price != nil {
-			p := *s.Price
-			p.Source = "manual"
-			ms[i].Price = &p
-		}
-		if len(s.Attributes) > 0 {
-			ms[i].Attributes = s.Attributes
-		}
-	}
 }
 
 // selectMachines keeps the machines matching any of refs, in listing
@@ -407,6 +391,10 @@ type listResult struct {
 // API never sees several of our accounts at once (rate limits are per
 // API, and some count every account against the same client).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store) []listResult {
+	doc, err := a.loadState(ctx, cfg, "")
+	if err != nil {
+		fmt.Fprintf(a.stderr, "ump: %v\n", err)
+	}
 	results := make([]listResult, len(names))
 	byType := map[string][]int{}
 	var types []string
@@ -424,7 +412,7 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 			defer wg.Done()
 			for _, i := range indexes {
 				results[i] = a.listAccount(ctx, names[i], cfg.Accounts[names[i]], store)
-				applyServerSettings(cfg, results[i].machines)
+				applyState(doc, results[i].machines)
 			}
 		}(byType[t])
 	}

@@ -24,6 +24,9 @@ last look, with the servers' prices (from the API where it tells, set by
 hand where it does not) and facts of your own, and with servers no
 provider lists added by hand. A provisioner that already knows every
 machine needs no second tool to count them. See [inventory](docs/inventory.md).
+What ump decides and does about a server, as opposed to what the
+provider reports, lives in the [state](docs/state.md): one document
+behind a backend of your choice, shared by a team, locked per server.
 
 ```console
 $ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or arm64
@@ -113,6 +116,7 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Quickstart](docs/quickstart.md) | install ump, add an account, look at the defaults, dry-run and reinstall a server, log in |
 | [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
+| [State](docs/state.md) | what ump knows beyond the providers: where it lives (local, a file, SSH, S3, R2, HTTP, Consul, Vault), how it is written and locked per server, moving it |
 | [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets, what each provider can do |
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |

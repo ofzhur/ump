@@ -21,6 +21,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 func init() { provider.Register(fakeType) }
@@ -281,6 +282,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	os.MkdirAll(filepath.Join(dir, "home"), 0o700)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "xdgstate"))
+	t.Setenv("UMP_STATE", "")
 	t.Setenv("UMP_CONFIG", "")
 	t.Setenv("FAKE_PASS", "s3cret")
 	// the fake probe always answers, so the "wait for SSH to go down" phase
@@ -296,6 +299,15 @@ func (e *testEnv) write(text string) {
 	if err := os.WriteFile(e.cfgPath, []byte(text), 0o600); err != nil {
 		e.t.Fatal(err)
 	}
+}
+
+// readState returns the local state file.
+func (e *testEnv) readState() string {
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_STATE_HOME"), "ump", "state.yaml"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (e *testEnv) read() string {
@@ -2483,8 +2495,8 @@ func TestConfigOSAndServerSet(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "fake/1 (web-01, 203.0.113.10): profile db; ump server reinstall web-01 uses it.") {
 		t.Errorf("set: code %d\n%s", code, out)
 	}
-	if cfg := e.read(); !strings.Contains(cfg, "servers:\n  fake/1:\n    profile: db\n") {
-		t.Errorf("config after set:\n%s", cfg)
+	if st := e.readState(); !strings.Contains(st, "servers:\n  fake/1:\n    profile: db\n") || strings.Contains(e.read(), "profile: db") {
+		t.Errorf("state after set:\n%s\nconfig:\n%s", st, e.read())
 	}
 	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--profile", "nope", "--account", "one"); code != 1 || !strings.Contains(errOut, `profile "nope"`) {
 		t.Errorf("set unknown profile: code %d, %q", code, errOut)
@@ -2502,7 +2514,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 		t.Errorf("--profile wins: code %d, %q", code, errOut)
 	}
 	out, _, code = e.run("", false, "server", "set", "web-01", "--clear", "--account", "one")
-	if code != 0 || !strings.Contains(out, "no profile set; reinstall uses the default profile (ubuntu-26.04).") || strings.Contains(e.read(), "profile: db") {
+	if code != 0 || !strings.Contains(out, "no profile set; reinstall uses the default profile (ubuntu-26.04).") || strings.Contains(e.readState(), "profile: db") {
 		t.Errorf("clear: code %d\n%s\n%s", code, out, e.read())
 	}
 
@@ -3153,8 +3165,8 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "fake/1 (web-01, 203.0.113.10): price 39.90 EUR/mo; attributes owner=alice,role=web.") {
 		t.Errorf("set: code %d\n%s", code, out)
 	}
-	if cfg := e.read(); !strings.Contains(cfg, "    price:\n      amount: 39.9\n      currency: EUR\n      period: month\n") || !strings.Contains(cfg, "    attributes:\n      owner: alice\n      role: web\n") {
-		t.Errorf("config after set:\n%s", cfg)
+	if st := e.readState(); !strings.Contains(st, "    price:\n      amount: 39.9\n      currency: EUR\n      period: month\n") || !strings.Contains(st, "    attributes:\n      owner: alice\n      role: web\n") {
+		t.Errorf("state after set:\n%s", st)
 	}
 	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
 	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
@@ -3188,8 +3200,8 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 		t.Errorf("set again: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", false, "server", "set", "web-01", "--clear-price", "--unset-attr", "owner", "--account", "one")
-	if code != 0 || !strings.Contains(out, "no price set; no attributes.") || strings.Contains(e.read(), "fake/1") {
-		t.Errorf("clear all: code %d\n%s\n%s", code, out, e.read())
+	if code != 0 || !strings.Contains(out, "no price set; no attributes.") || strings.Contains(e.readState(), "fake/1") {
+		t.Errorf("clear all: code %d\n%s\n%s", code, out, e.readState())
 	}
 }
 
@@ -3206,8 +3218,8 @@ func TestManualServers(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Added manual/rack-07 (rack-07, 203.0.113.10). No provider API stands behind it") {
 		t.Errorf("add: code %d\n%s", code, out)
 	}
-	if cfg := e.read(); !strings.Contains(cfg, "  manual:\n    type: manual\n") || !strings.Contains(cfg, "manual:\n  rack-07:\n    ipv4: 203.0.113.10\n    location: basement\n    product: Dell R640\n    kind: bare-metal\n    note: KVM at 192.0.2.250\n") {
-		t.Errorf("config after add:\n%s", cfg)
+	if st := e.readState(); !strings.Contains(st, "manual:\n  rack-07:\n    ipv4: 203.0.113.10\n    location: basement\n    product: Dell R640\n    kind: bare-metal\n    note: KVM at 192.0.2.250\n") || strings.Contains(e.read(), "manual") {
+		t.Errorf("state after add:\n%s\nconfig:\n%s", st, e.read())
 	}
 	if _, errOut, code := e.run("", false, "server", "add", "rack-07", "--ipv4", "203.0.113.10"); code != 1 || !strings.Contains(errOut, "manual server rack-07 exists already") {
 		t.Errorf("add twice: code %d, %q", code, errOut)
@@ -3255,10 +3267,161 @@ func TestManualServers(t *testing.T) {
 		t.Errorf("remove without --yes: code %d, %q", code, errOut)
 	}
 	out, _, code = e.run("", false, "server", "remove", "rack-07", "--yes")
-	if code != 0 || !strings.Contains(out, "Removed manual/rack-07 (rack-07, 203.0.113.10) from the configuration.") {
+	if code != 0 || !strings.Contains(out, "Removed manual/rack-07 (rack-07, 203.0.113.10) from the state.") {
 		t.Errorf("remove: code %d\n%s", code, out)
 	}
-	if cfg := e.read(); strings.Contains(cfg, "manual") {
-		t.Errorf("config after remove:\n%s", cfg)
+	if st := e.readState(); strings.Contains(st, "rack-07") {
+		t.Errorf("state after remove:\n%s", st)
+	}
+}
+
+func TestStateCommands(t *testing.T) {
+	e := newTestEnv(t)
+	// a configuration from before the state: its servers and manual
+	// entries move into the state on the first command, and the file
+	// loses them
+	e.write(testConfig + "servers:\n  fake/1:\n    profile: db\n    attributes: {owner: alice}\nmanual:\n  rack-07:\n    ipv4: 203.0.113.77\n    note: old\n")
+	e.writeProfiles()
+	os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "db.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	out, errOut, code := e.run("", false, "state")
+	if code != 0 || !strings.Contains(errOut, "Moved the per-server settings and the manual servers from the configuration file into the state (file://") || !strings.Contains(out, "State:     file://"+filepath.Join(os.Getenv("XDG_STATE_HOME"), "ump", "state.yaml")+" (the default, the local state file)") || !strings.Contains(out, "Servers:   1 with settings, 0 with an installation recorded, 1 added by hand") {
+		t.Errorf("state: code %d\n%s\n%s", code, out, errOut)
+	}
+	if cfg := e.read(); strings.Contains(cfg, "servers:") || strings.Contains(cfg, "rack-07") {
+		t.Errorf("config still holds state:\n%s", cfg)
+	}
+	if st := e.readState(); !strings.Contains(st, "# UMP state") || !strings.Contains(st, "    profile: db\n") || !strings.Contains(st, "  rack-07:\n") {
+		t.Errorf("state after migration:\n%s", st)
+	}
+	out, _, code = e.run("", false, "state", "show")
+	if code != 0 || !strings.HasPrefix(out, "# UMP state") || !strings.Contains(out, "version: 1\n") {
+		t.Errorf("show: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "server", "list", "--account", "manual", "-o", "name"); code != 0 || out != "manual/rack-07\n" {
+		t.Errorf("manual servers from the state: code %d, %q", code, out)
+	}
+
+	// an installation is recorded in the state and shown
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 {
+		t.Fatalf("reinstall: code %d, %q", code, errOut)
+	}
+	if st := e.readState(); !strings.Contains(st, "    installed:\n      os: ubuntu-26.04\n") || !strings.Contains(st, "      profile: db\n") || !strings.Contains(st, "      hostname: web-01\n      admin: ump\n") {
+		t.Errorf("state after reinstall:\n%s", st)
+	}
+	if out, _, _ := e.run("", false, "server", "show", "web-01", "--account", "one"); !strings.Contains(out, "\nUMP:\n  Profile:     db\n") || !strings.Contains(out, "  Installed:   ubuntu-26.04 (profile db, layout lvm-linear, administrator ump) on 2026-10-12 09:00 UTC") {
+		t.Errorf("show after reinstall:\n%s", out)
+	}
+	if out, _, _ := e.run("", false, "state"); !strings.Contains(out, "1 with settings, 1 with an installation recorded, 1 added by hand") {
+		t.Errorf("state after reinstall:\n%s", out)
+	}
+
+	// pull, edit by hand, push; a push over a newer state is refused
+	pulled := filepath.Join(t.TempDir(), "pulled.yaml")
+	if out, _, code := e.run("", false, "state", "pull", pulled); code != 0 || !strings.Contains(out, "Wrote the state to "+pulled) {
+		t.Errorf("pull: code %d\n%s", code, out)
+	}
+	data, _ := os.ReadFile(pulled)
+	if !strings.HasPrefix(string(data), "# pulled from file://") || !strings.Contains(string(data), ", version ") {
+		t.Errorf("pulled file lacks the version line:\n%s", data)
+	}
+	os.WriteFile(pulled, []byte(strings.Replace(string(data), "owner: alice", "owner: bob", 1)), 0o600)
+	if out, _, code := e.run("", false, "state", "push", pulled); code != 0 || !strings.Contains(out, "Wrote the state to file://") {
+		t.Errorf("push: code %d\n%s", code, out)
+	}
+	if st := e.readState(); !strings.Contains(st, "owner: bob") {
+		t.Errorf("state after push:\n%s", st)
+	}
+	if _, _, code := e.run("", false, "server", "set", "db-01", "--attr", "role=db", "--account", "one"); code != 0 {
+		t.Fatal("set failed")
+	}
+	if _, errOut, code := e.run("", false, "state", "push", pulled); code != 1 || !strings.Contains(errOut, "the state was written after this file was pulled") {
+		t.Errorf("push of a stale file: code %d, %q", code, errOut)
+	}
+	if _, _, code := e.run("", false, "state", "push", pulled, "--force"); code != 0 {
+		t.Errorf("push --force: code %d", code)
+	}
+	os.WriteFile(pulled, []byte("version: 1\nservers:\n  fake/1:\n    price: {amount: 3}\n"), 0o600)
+	if _, errOut, code := e.run("", false, "state", "push", pulled, "--force"); code != 1 || !strings.Contains(errOut, "the state is not valid, nothing was written: servers.fake/1.price") {
+		t.Errorf("push of a broken file: code %d, %q", code, errOut)
+	}
+	// edit through the editor
+	e.editorHook = func(path string) error {
+		data, _ := os.ReadFile(path)
+		return os.WriteFile(path, []byte(strings.Replace(string(data), "owner: bob", "owner: carol", 1)), 0o600)
+	}
+	if out, _, code := e.run("", true, "state", "edit"); code != 0 || !strings.Contains(out, "Wrote the state to file://") || !strings.Contains(e.readState(), "owner: carol") {
+		t.Errorf("edit: code %d\n%s\n%s", code, out, e.readState())
+	}
+	e.editorHook = func(path string) error { return nil }
+	if out, _, code := e.run("", true, "state", "edit"); code != 0 || !strings.Contains(out, "No change.") {
+		t.Errorf("edit without change: code %d\n%s", code, out)
+	}
+	e.editorHook = nil
+
+	// migrate to a file backend: the copy is written, the configuration
+	// points at it, the old copy stays
+	dest := filepath.Join(t.TempDir(), "fleet", "state.yaml")
+	out, _, code = e.run("", false, "state", "migrate", "--to", "file://"+dest)
+	if code != 0 || !strings.Contains(out, "Copied the state to file://"+dest+" and set state.url in ") {
+		t.Errorf("migrate: code %d\n%s", code, out)
+	}
+	if cfg := e.read(); !strings.Contains(cfg, "state:\n  url: file://"+dest+"\n") {
+		t.Errorf("config after migrate:\n%s", cfg)
+	}
+	if data, err := os.ReadFile(dest); err != nil || !strings.Contains(string(data), "owner: carol") {
+		t.Errorf("migrated copy: %v", err)
+	}
+	if out, _, _ := e.run("", false, "state"); !strings.Contains(out, "State:     file://"+dest+" (state.url in the configuration)") {
+		t.Errorf("state after migrate:\n%s", out)
+	}
+	if _, errOut, code := e.run("", false, "state", "migrate", "--to", "file://"+dest); code != 1 || !strings.Contains(errOut, "is at file://"+dest+" already") {
+		t.Errorf("migrate to the same: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "state", "migrate", "--to", "file://"+filepath.Join(os.Getenv("XDG_STATE_HOME"), "ump", "state.yaml")); code != 1 || !strings.Contains(errOut, "holds a state already; --force overwrites it") {
+		t.Errorf("migrate onto an existing state: code %d, %q", code, errOut)
+	}
+	// the environment wins over the configuration
+	env := filepath.Join(t.TempDir(), "env-state.yaml")
+	t.Setenv("UMP_STATE", "file://"+env)
+	if out, _, _ := e.run("", false, "state"); !strings.Contains(out, "State:     file://"+env+" (UMP_STATE in the environment)") || !strings.Contains(out, "Version:   none yet (a fresh system") {
+		t.Errorf("state from the environment:\n%s", out)
+	}
+	if out, _, code := e.run("", false, "state", "migrate", "--to", "file://"+filepath.Join(t.TempDir(), "x.yaml")); code != 0 || !strings.Contains(out, "UMP_STATE still points at") {
+		t.Errorf("migrate with UMP_STATE: code %d\n%s", code, out)
+	}
+	t.Setenv("UMP_STATE", "")
+
+	// locks: a reinstall locks the server; a second ump is refused;
+	// unlock forces it
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 {
+		t.Fatalf("reinstall: code %d, %q", code, errOut)
+	}
+	if out, _, code := e.run("", false, "state", "locks", "--no-headers"); code != 0 || strings.TrimSpace(out) != "" {
+		t.Errorf("locks after a reinstall: %q", out)
+	}
+	st := &state.Store{Backend: &state.Local{Path: dest}}
+	unlock, err := st.Lock(context.Background(), "fake/1", "reinstall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 3 || !strings.Contains(errOut, "fake/1 is locked by") || !strings.Contains(errOut, "(reinstall); ump state unlock fake/1 forces it") {
+		t.Errorf("reinstall of a locked server: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "rescue", "db-01", "--yes", "--account", "one"); code == 3 && strings.Contains(errOut, "locked") {
+		t.Errorf("another server is locked too: %q", errOut)
+	}
+	if out, _, code := e.run("", false, "state", "locks"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "SERVER OPERATION HELD BY SINCE fake/1 reinstall") {
+		t.Errorf("locks: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "state", "unlock", "fake/1"); code != 0 || !strings.Contains(out, "Unlocked fake/1.") {
+		t.Errorf("unlock: code %d\n%s", code, out)
+	}
+	unlock()
+	if _, _, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 {
+		t.Errorf("reinstall after unlock: code %d", code)
 	}
 }

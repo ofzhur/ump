@@ -46,8 +46,8 @@ and `source`):
 | OVHcloud | not in the API: set it by hand |
 | manual servers | set it by hand |
 
-Set by hand, a price wins over the API's and stays in the configuration
-file:
+Set by hand, a price wins over the API's and stays in the
+[state](state.md):
 
 ```console
 $ ump server set rack-07 --price 89                       # EUR per month
@@ -63,7 +63,7 @@ inventory still needs a number for.
 
 Attributes are facts of your own about a server, for the inventory and
 for scripts: an owner, a role, a cost center, a ticket. They live in the
-configuration file, show in `-o wide` and `ump server show`, and come
+[state](state.md), show in `-o wide` and `ump server show`, and come
 along in `-o json` as `attributes`.
 
 ```console
@@ -91,8 +91,18 @@ $ ump server remove vps-x
 Manual servers are listed by the account `manual` of provider type
 `manual`, with the status `manual`, and `ump server set` gives them a
 profile, a price and attributes like any other. They live in the
-configuration file under `manual:`; `ump server remove` forgets one (the
-machine itself is not touched).
+[state](state.md) under `manual:`, so a team sharing a state backend
+sees them all; `ump server remove` forgets one (the machine itself is
+not touched).
+
+## What ump installed
+
+After `ump server reinstall`, the state records what the server got
+(OS and image version, kernel, profile, layout, hostname, administrator,
+the interface names with their MAC addresses, when), and `ump server
+show` prints it under `UMP:`. Configuration management that reads the
+state, or `ump server list -o json` once that carries it, knows what
+every machine is without asking it.
 
 What ump can do with a manual server is what SSH allows. `ump server
 rescue` and `ump server reinstall` work when the running system lets UMP

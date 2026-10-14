@@ -223,7 +223,7 @@ set; instances carry their project as labels; VPS are labelled
 Not a provider at all, but the way machines no provider lists get into
 the inventory: `ump server add NAME --ipv4 ADDRESS [--ipv6 ...]
 [--location ...] [--product ...] [--kind bare-metal|cloud] [--note ...]`
-puts a server into the configuration file (`manual:`), and the account
+puts a server into the [state](state.md) (`manual:`), and the account
 `manual` of this type lists them next to the others, with the status
 `manual`. `ump server remove NAME` forgets one. Prices and attributes
 work as for any server; power control, renaming and reverse DNS do not

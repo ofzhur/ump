@@ -46,12 +46,15 @@ type Config struct {
 	// --profile and the server's own setting say nothing; ump config os
 	// default sets it. Default: DefaultProfile (ubuntu-26.04).
 	DefaultProfile string `yaml:"default_profile,omitempty"`
-	// Servers holds what the user set for single servers (ump server set),
-	// keyed by the server's reference (provider/id).
-	Servers map[string]ServerSettings `yaml:"servers,omitempty"`
-	// Manual holds the servers added by hand (ump server add), by name;
-	// they are listed by the account "manual" of type manual.
-	Manual map[string]provider.ManualServer `yaml:"manual,omitempty"`
+	// State says where the state (what ump knows about the fleet beyond
+	// the providers' word) lives; UMP_STATE in the environment wins, and
+	// the local state file is the default. See internal/state.
+	State StateSettings `yaml:"state,omitempty"`
+	// Servers and Manual are where the per-server settings and the
+	// manual servers lived before the state; a command moves them into
+	// the state and drops them from here.
+	Servers map[string]ServerSettings        `yaml:"servers,omitempty"`
+	Manual  map[string]provider.ManualServer `yaml:"manual,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -73,6 +76,26 @@ type ServerSettings struct {
 	// Attributes are the user's own facts about the server (ump server
 	// set --attr): owner, role, cost center, anything.
 	Attributes map[string]string `yaml:"attributes,omitempty"`
+}
+
+// StateSettings say where the state lives and how to reach it. The
+// secrets are references like an account's (a file, an environment
+// variable, a command).
+type StateSettings struct {
+	// URL is local (the default), file:///path, ssh://[user@]host/path,
+	// s3://bucket/key, r2://account/bucket/key, http(s)://host/path,
+	// consul://host:8500/path or vault://host:8200/mount/path.
+	URL string `yaml:"url,omitempty"`
+	// Endpoint is the S3-compatible endpoint for s3://.
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// Region is the S3 region.
+	Region    string `yaml:"region,omitempty"`
+	AccessKey Value  `yaml:"access_key,omitempty"`
+	SecretKey Value  `yaml:"secret_key,omitempty"`
+	// Token is for http(s)://, consul:// and vault://.
+	Token    Value `yaml:"token,omitempty"`
+	User     Value `yaml:"user,omitempty"`
+	Password Value `yaml:"password,omitempty"`
 }
 
 // Staging configures how UMP reaches staging environments (rescue

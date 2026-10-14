@@ -9,7 +9,7 @@ the rest is optional.
 
 ```
 ~/.config/ump/
-├── config.yaml              accounts, storage, UMP's key, per-server settings (profile, price, attributes), manual servers, output default
+├── config.yaml              accounts, storage, UMP's key, where the state is, output default
 ├── profiles/
 │   ├── ubuntu-26.04.yaml    the published profiles (downloaded on first use; ump config os update replaces them)
 │   ├── ubuntu-24.04.yaml
@@ -68,18 +68,11 @@ staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
   image: https://ump.zhurko.de/dl/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
 
-servers:                               # written by ump server set
-  hetzner-cloud/234567:
-    profile: web
-    price: {amount: 39.9, currency: EUR, period: month}   # where the API does not say; wins over it
-    attributes: {owner: alice, role: web}
-manual:                                # written by ump server add; listed by the account "manual"
-  rack-07:
-    ipv4: 192.0.2.7
-    location: basement
-    product: Dell R640
-    kind: bare-metal
-    note: KVM at 192.0.2.250
+state:                                 # where the state lives (ump state); UMP_STATE in the environment wins
+  url: s3://fleet/ump/state.yaml       # local (the default), file://, ssh://, s3://, r2://, http(s)://, consul://, vault://
+  region: eu-central-1                 # for s3://; endpoint: for S3-compatible stores
+  access_key: {env: FLEET_STATE_KEY}   # secrets as references, like an account's
+  secret_key: {file: ~/.config/ump/secrets/state.secret}
 ```
 
 | Section | Meaning |
@@ -90,8 +83,7 @@ manual:                                # written by ump server add; listed by th
 | `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
 | `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage and says when a newer release is published, with the one-liner that installs it; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks. |
-| `servers` | Per-server settings, keyed by `provider/id`, written by `ump server set`: the `profile` the server is reinstalled with, a `price` set by hand (`amount`, `currency`, `period`), and `attributes` of your own. |
-| `manual` | The servers added by hand with `ump server add`, by name: `ipv4`, `ipv6`, `location`, `product`, `kind`, `note`; listed by the account `manual`. |
+| `state` | Where the [state](state.md) lives: `url`, and for the backends that need them `endpoint`, `region`, `access_key`, `secret_key`, `token`, `user`, `password` (secrets as references). The environment overrides all of it (`UMP_STATE`, `AWS_ACCESS_KEY_ID`, `UMP_STATE_TOKEN`, ...). `servers:` and `manual:` of older files are moved into the state by the first command. |
 
 Sections this version of ump does not know are kept when the file is
 saved. The file is written with mode 0600, atomically.

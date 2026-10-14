@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 // newServerCmd groups everything that happens to a server.
@@ -128,7 +128,7 @@ locally or on the storage.`,
 				}
 				newAttrs[k] = strings.TrimSpace(v)
 			}
-			cfg, path, err := a.loadConfig()
+			cfg, _, err := a.loadConfig()
 			if err != nil {
 				return err
 			}
@@ -141,50 +141,47 @@ locally or on the storage.`,
 					return err
 				}
 			}
-			if cfg.Servers == nil {
-				cfg.Servers = map[string]config.ServerSettings{}
-			}
-			st := cfg.Servers[m.Ref()]
 			var said []string
-			switch {
-			case clear:
-				st.Profile = ""
-				said = append(said, fmt.Sprintf("no profile set; reinstall uses the default profile (%s)", cfg.DefaultProfileName()))
-			case profile != "":
-				st.Profile = profile
-				said = append(said, fmt.Sprintf("profile %s; ump server reinstall %s uses it", profile, m.Name))
-			}
-			switch {
-			case clearPrice:
-				st.Price = nil
-				said = append(said, "no price set")
-			case newPrice != nil:
-				st.Price = newPrice
-				said = append(said, "price "+newPrice.String())
-			}
-			if len(newAttrs) > 0 || len(unset) > 0 {
-				if st.Attributes == nil {
-					st.Attributes = map[string]string{}
+			err = a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+				st := d.Servers[m.Ref()]
+				said = nil
+				switch {
+				case clear:
+					st.Profile = ""
+					said = append(said, fmt.Sprintf("no profile set; reinstall uses the default profile (%s)", cfg.DefaultProfileName()))
+				case profile != "":
+					st.Profile = profile
+					said = append(said, fmt.Sprintf("profile %s; ump server reinstall %s uses it", profile, m.Name))
 				}
-				for k, v := range newAttrs {
-					st.Attributes[k] = v
+				switch {
+				case clearPrice:
+					st.Price = nil
+					said = append(said, "no price set")
+				case newPrice != nil:
+					st.Price = newPrice
+					said = append(said, "price "+newPrice.String())
 				}
-				for _, k := range unset {
-					delete(st.Attributes, k)
+				if len(newAttrs) > 0 || len(unset) > 0 {
+					if st.Attributes == nil {
+						st.Attributes = map[string]string{}
+					}
+					for k, v := range newAttrs {
+						st.Attributes[k] = v
+					}
+					for _, k := range unset {
+						delete(st.Attributes, k)
+					}
+					if len(st.Attributes) == 0 {
+						st.Attributes = nil
+						said = append(said, "no attributes")
+					} else {
+						said = append(said, "attributes "+joinMap(st.Attributes))
+					}
 				}
-				if len(st.Attributes) == 0 {
-					st.Attributes = nil
-					said = append(said, "no attributes")
-				} else {
-					said = append(said, "attributes "+joinMap(st.Attributes))
-				}
-			}
-			if st.Profile == "" && st.Price == nil && len(st.Attributes) == 0 {
-				delete(cfg.Servers, m.Ref())
-			} else {
-				cfg.Servers[m.Ref()] = st
-			}
-			if err := config.Save(path, cfg); err != nil {
+				d.Servers[m.Ref()] = st
+				return nil
+			})
+			if err != nil {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "%s: %s.\n", describeRef(m), strings.Join(said, "; "))

@@ -196,6 +196,10 @@ uptime, memory, the root disk and the addresses.
   `ump server set NAME --price 89 --attr owner=alice` records what the
   API does not know, `ump server add` a machine no provider lists. See
   [inventory](inventory.md).
+- **A shared state.** What ump decides and does about servers lives in
+  the [state](state.md), a local file by default; `ump state migrate
+  --to file:///srv/fleet/ump/state.yaml` (or S3, R2, HTTP, Consul,
+  Vault) shares it with a team, and `UMP_STATE` points CI at it.
 - **Scripts and agents.** Every command has `-o json`; nothing prompts
   without a terminal (`--yes` where something is destructive, exit code 3
   otherwise). See the [CLI reference](cli.md).
