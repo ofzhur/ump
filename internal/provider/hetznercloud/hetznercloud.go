@@ -381,58 +381,13 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	// the prices come with the server types, per location; a failure
-	// there costs the price column, not the listing
-	prices, _ := p.client.ServerTypePrices(ctx)
 	out := make([]provider.Machine, 0, len(servers))
 	for _, s := range servers {
-		m := p.machine(s)
-		if pr, ok := prices[s.ServerType.Name+"@"+strings.ToLower(s.location().Name)]; ok {
-			m.Price = &provider.Price{Amount: pr, Currency: "EUR", Period: "month", Source: "provider", Note: "net"}
-		}
-		out = append(out, m)
+		out = append(out, p.machine(s))
 	}
 	return out, nil
 }
 
-// ServerTypePrices returns the monthly net price (EUR) of every server
-// type per location, keyed "type@location".
-func (c *Client) ServerTypePrices(ctx context.Context) (map[string]float64, error) {
-	out := map[string]float64{}
-	for page := 1; page > 0; {
-		var resp struct {
-			ServerTypes []struct {
-				Name   string `json:"name"`
-				Prices []struct {
-					Location     string `json:"location"`
-					PriceMonthly struct {
-						Net string `json:"net"`
-					} `json:"price_monthly"`
-				} `json:"prices"`
-			} `json:"server_types"`
-			Meta struct {
-				Pagination struct {
-					NextPage *int `json:"next_page"`
-				} `json:"pagination"`
-			} `json:"meta"`
-		}
-		if err := c.get(ctx, "/server_types?page="+strconv.Itoa(page)+"&per_page="+strconv.Itoa(perPage), &resp); err != nil {
-			return nil, err
-		}
-		for _, t := range resp.ServerTypes {
-			for _, pr := range t.Prices {
-				if v, err := strconv.ParseFloat(pr.PriceMonthly.Net, 64); err == nil {
-					out[t.Name+"@"+strings.ToLower(pr.Location)] = v
-				}
-			}
-		}
-		if resp.Meta.Pagination.NextPage == nil || *resp.Meta.Pagination.NextPage <= page {
-			break
-		}
-		page = *resp.Meta.Pagination.NextPage
-	}
-	return out, nil
-}
 
 func (p *Provider) machine(s Server) provider.Machine {
 	m := provider.Machine{
@@ -458,6 +413,15 @@ func (p *Provider) machine(s Server) provider.Machine {
 		m.Labels = make(map[string]string, len(s.Labels))
 		for k, v := range s.Labels {
 			m.Labels[k] = v
+		}
+	}
+	// the server's record carries its type's prices per location, for
+	// retired types too (which the catalog no longer lists)
+	for _, pr := range s.ServerType.Prices {
+		if strings.EqualFold(pr.Location, m.Location) {
+			if v, err := strconv.ParseFloat(pr.PriceMonthly.Net, 64); err == nil {
+				m.Price = &provider.Price{Amount: v, Currency: "EUR", Period: "month", Source: "provider", Note: "net"}
+			}
 		}
 	}
 	return m
@@ -491,6 +455,12 @@ type Server struct {
 		Disk         int     `json:"disk"`
 		CPUType      string  `json:"cpu_type"`
 		Architecture string  `json:"architecture"`
+		Prices       []struct {
+			Location     string `json:"location"`
+			PriceMonthly struct {
+				Net string `json:"net"`
+			} `json:"price_monthly"`
+		} `json:"prices"`
 	} `json:"server_type"`
 	// Datacenter is null in current API responses; Location carries the
 	// place. Both are read so that older responses still work.

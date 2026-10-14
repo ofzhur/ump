@@ -41,7 +41,7 @@ and `source`):
 
 | Provider | Where the price comes from |
 |---|---|
-| Hetzner Cloud | the API: the server type's monthly price at the server's location, net, EUR (`"source": "provider"`; retired server types the API no longer prices show none) |
+| Hetzner Cloud | the API: the server type's monthly price at the server's location, net, EUR (`"source": "provider"`), for retired types too |
 | Hetzner Robot | not in the API: set it by hand |
 | OVHcloud | not in the API: set it by hand |
 | manual servers | set it by hand |

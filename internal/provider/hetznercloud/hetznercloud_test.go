@@ -19,7 +19,7 @@ import (
 func page(id int, name string, next string) string {
 	return fmt.Sprintf(`{"servers":[{"id":%d,"name":"%s","status":"running",
       "public_net":{"ipv4":{"ip":"198.51.100.%d"},"ipv6":{"ip":"2001:db8:c0ff:ee%d::/64"}},
-      "server_type":{"name":"cx22","architecture":"x86"},
+      "server_type":{"name":"cx22","architecture":"x86","deprecated":false,"prices":[{"location":"fsn1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}},{"location":"nbg1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}}]},
       "datacenter":null,"location":{"name":"fsn1","description":"Falkenstein DC Park 1","city":"Falkenstein","country":"DE","network_zone":"eu-central"},
       "labels":{"env":"prod"},"rescue_enabled":false}],
       "meta":{"pagination":{"page":%d,"per_page":50,"next_page":%s,"total_entries":2}}}`, id, name, id, id, id, next)
@@ -31,10 +31,6 @@ func TestListServersPaginates(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":{"code":"unauthorized","message":"unable to authenticate"}}`))
-			return
-		}
-		if r.URL.Path == "/server_types" {
-			w.Write([]byte(`{"server_types":[{"name":"cx22","prices":[{"location":"fsn1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}},{"location":"nbg1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}}]}],"meta":{"pagination":{"page":1,"per_page":50,"next_page":null}}}`))
 			return
 		}
 		if r.URL.Path != "/servers" {
