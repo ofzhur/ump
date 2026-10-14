@@ -761,13 +761,13 @@ func TestWizardNeedsTTY(t *testing.T) {
 
 func TestWizardFileStorage(t *testing.T) {
 	e := newTestEnv(t)
-	script := "\nfake\nacc\n1\ncarol\ns3cret\n\nn\n"
+	script := "\nfake\nacc\ncarol\ns3cret\n\nn\n"
 	out, errOut, code := e.run(script, true, "config", "isp")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
 	for _, want := range []string{"No accounts configured yet.", "Provider type", "1) fake", "Account name [fake]:",
-		"Where should this account's secrets be kept?", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
+		"The secrets are kept as files in the home (", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
 		"Saved account acc (fake)", "Done. Try: ump server list"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, out)
@@ -792,45 +792,15 @@ func TestWizardFileStorage(t *testing.T) {
 	}
 
 	// replacing an existing account asks first; declining asks for another name
-	out, _, code = e.run("fake\nacc\nn\nacc2\n1\ncarol\ns3cret\n\nn\n", true, "config", "isp")
+	out, _, code = e.run("fake\nacc\nn\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, `Account "acc" (fake) exists. Replace it? [y/N]:`) || !strings.Contains(out, "Saved account acc2") {
 		t.Errorf("replace prompt: code %d\n%s", code, out)
 	}
 }
 
-func TestWizardEnvStorage(t *testing.T) {
-	e := newTestEnv(t)
-	out, _, code := e.run("\nfake\nacc\n2\ncarol\nFAKE_PASS\n\nn\n", true, "config", "isp")
-	if code != 0 || !strings.Contains(out, "Environment variable holding the password [UMP_ACC_PASSWORD]:") ||
-		!strings.Contains(out, "Testing acc ... ok (2 servers)") || strings.Contains(out, "export") {
-		t.Errorf("env storage: code %d\n%s", code, out)
-	}
-	if !strings.Contains(e.read(), "password: {env: FAKE_PASS}") {
-		t.Errorf("config:\n%s", e.read())
-	}
-	// an unset variable skips the test and still saves
-	out, _, code = e.run("fake\nacc2\n2\ncarol\nUMP_TEST_UNSET_VAR\n\nn\n", true, "config", "isp")
-	if code != 0 || !strings.Contains(out, "UMP_TEST_UNSET_VAR is not set in this shell") ||
-		!strings.Contains(out, "Skipping the connection test") || !strings.Contains(out, "Saved account acc2") ||
-		!strings.Contains(out, "export UMP_TEST_UNSET_VAR=<password>") {
-		t.Errorf("unset env: code %d\n%s", code, out)
-	}
-}
-
-func TestWizardCommandStorage(t *testing.T) {
-	e := newTestEnv(t)
-	out, _, code := e.run("\nfake\nacc\n3\ncarol\nfalse\ny\nprintf s3cret\n\nn\n", true, "config", "isp")
-	if code != 0 || !strings.Contains(out, "Try another command? [Y/n]:") || !strings.Contains(out, "Testing acc ... ok (2 servers)") {
-		t.Errorf("command storage: code %d\n%s", code, out)
-	}
-	if !strings.Contains(e.read(), "password: {command: printf s3cret}") {
-		t.Errorf("config:\n%s", e.read())
-	}
-}
-
 func TestWizardFailedTestIsNotSaved(t *testing.T) {
 	e := newTestEnv(t)
-	out, _, code := e.run("\nfake\nacc\n1\ncarol\nbad\n\nn\nn\n", true, "config", "isp")
+	out, _, code := e.run("\nfake\nacc\ncarol\nbad\n\nn\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "failed\n  fake: authentication failed") ||
 		!strings.Contains(out, "Save the account anyway? [y/N]:") || !strings.Contains(out, "Not saved.") {
 		t.Errorf("code %d\n%s", code, out)
@@ -858,8 +828,8 @@ func TestWizardQuit(t *testing.T) {
 	if _, err := os.Stat(e.cfgPath); !os.IsNotExist(err) {
 		t.Error("config file was created")
 	}
-	// q in the middle of adding an account: nothing saved
-	out, _, code = e.run("\nfake\nacc\nq\n", true, "config", "isp")
+	// q in the middle of adding an account (at the region choice): nothing saved
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nq\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") || !strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit mid-account: code %d\n%s", code, out)
 	}
@@ -867,7 +837,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("config file was created")
 	}
 	// "exit" at a choice field, after the secret was typed
-	out, _, code = e.run("\nfake\nacc\n1\ncarol\ns3cret\nexit\n", true, "config", "isp")
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\nexit\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Nothing saved for this account.") {
 		t.Errorf("exit at choice: code %d\n%s", code, out)
 	}
@@ -875,7 +845,7 @@ func TestWizardQuit(t *testing.T) {
 		t.Error("secret file was written although the account was not saved")
 	}
 	// q at the yes/no question after a save keeps what was saved
-	out, _, code = e.run("\nfake\nacc\n1\ncarol\ns3cret\n\nq\n", true, "config", "isp")
+	out, _, code = e.run("\nfake\nacc\ncarol\ns3cret\n\nq\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "Saved account acc (fake)") || !strings.Contains(out, "Done. Try: ump server list") ||
 		strings.Contains(out, "Nothing changed.") {
 		t.Errorf("quit after save: code %d\n%s", code, out)
@@ -916,7 +886,7 @@ func TestWizardInterrupted(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	a = &app{
-		stdin:  strings.NewReader("\nfake\nacc\n1\ncarol\n"),
+		stdin:  strings.NewReader("\nfake\nacc\ncarol\n"),
 		stdout: &out,
 		stderr: &errOut,
 		isTTY:  func() bool { return true },
@@ -3437,7 +3407,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	e := newTestEnv(t)
 	// a fresh system: the wizard asks about the home first; "n" runs the
 	// backend wizard, where "none" keeps the local directory
-	out, _, code := e.run("n\n8\nfake\nacc\n1\ncarol\ns3cret\n\nn\n", true, "config", "isp")
+	out, _, code := e.run("n\n8\nfake\nacc\ncarol\ns3cret\n\nn\n", true, "config", "isp")
 	if code != 0 || !strings.Contains(out, "No backend is configured: everything ump keeps, this account's secrets included, stays in") || !strings.Contains(out, "Keep it on this machine? [Y/n]:") || !strings.Contains(out, "Where should the home live?") || !strings.Contains(out, "No backend; the home is") || !strings.Contains(out, "Saved account acc (fake)") {
 		t.Errorf("fresh system: code %d\n%s", code, out)
 	}
@@ -3445,7 +3415,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 		t.Errorf("manual offered as a provider type:\n%s", out)
 	}
 	// with a file there, no question
-	if out, _, code := e.run("fake\nacc2\n1\ncarol\ns3cret\n\nn\n", true, "config", "isp"); code != 0 || strings.Contains(out, "Keep it on this machine?") || !strings.Contains(out, "Home:      "+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")) == false && !strings.Contains(out, "Home: ") {
+	if out, _, code := e.run("fake\nacc2\ncarol\ns3cret\n\nn\n", true, "config", "isp"); code != 0 || strings.Contains(out, "Keep it on this machine?") || !strings.Contains(out, "Home:      "+filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")) == false && !strings.Contains(out, "Home: ") {
 		t.Errorf("second run: code %d\n%s", code, out)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "manual", "x"); code != 2 || !strings.Contains(errOut, "manual servers are not an account to add") {
@@ -3456,7 +3426,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "fleet")
 	t.Setenv("UMP_STATE", "file://"+remote)
 	out, _, code = e.run("fake\nacc3\ncarol\ns3cret\n\nn\n", true, "config", "isp")
-	if code != 0 || strings.Contains(out, "Where should this account's secrets be kept?") || !strings.Contains(out, "The secrets are kept as files in the home, which lives in file://"+remote) || !strings.Contains(out, "Home: file://"+remote) || !strings.Contains(out, "Saved account acc3 (fake)") {
+	if code != 0 || strings.Contains(out, "Where should this account's secrets be kept?") || !strings.Contains(out, "The secrets are kept as files in the home (file://"+remote+")") || !strings.Contains(out, "Home: file://"+remote) || !strings.Contains(out, "Saved account acc3 (fake)") {
 		t.Errorf("behind a backend: code %d\n%s", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(remote, "secrets", "acc3.password")); err != nil {

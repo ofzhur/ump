@@ -218,14 +218,6 @@ func (p *prompter) Choose(label string, items []string, def int) (int, error) {
 	}
 }
 
-type secretStorage int
-
-const (
-	storeFile secretStorage = iota
-	storeEnv
-	storeCommand
-)
-
 // runWizard is `ump config` without a subcommand.
 func (a *app) runWizard(cmd *cobra.Command) error {
 	if a.isTTY == nil || !a.isTTY() {
@@ -357,22 +349,15 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 			hasSecrets = true
 		}
 	}
-	storage := storeFile
-	switch {
-	case hasSecrets && a.home.Backend != nil:
-		// the home is the backend's: secrets are files there, like all the rest
-		ui.Printf("\nThe secrets are kept as files in the home, which lives in %s.\n", a.home.Backend)
-	case hasSecrets:
-		ui.Printf("\n")
-		i, err := ui.Choose("Where should this account's secrets be kept?", []string{
-			fmt.Sprintf("files under %s on this machine, readable only by you", config.AbbreviateHome(config.SecretsDir())),
-			"environment variables that you set in your shell",
-			"a command that prints the secret (pass, op, sops, vault, ...)",
-		}, 0)
-		if err != nil {
-			return false, err
+	if hasSecrets {
+		// the secrets are files in the home, wherever it lives, like all
+		// the rest; env:NAME and command:CMD references are for
+		// ump config isp add --set
+		where := config.AbbreviateHome(config.SecretsDir())
+		if a.home.Backend != nil {
+			where = a.home.Backend.String()
 		}
-		storage = secretStorage(i)
+		ui.Printf("\nThe secrets are kept as files in the home (%s), readable only by you.\n", where)
 	}
 	ui.Printf("\n")
 
@@ -420,71 +405,23 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 				break
 			}
 		default:
-			switch storage {
-			case storeFile:
-				for {
-					v, err := ui.Secret(f.Label)
-					if err != nil {
-						return false, err
-					}
-					if v == "" && f.Required && !f.Deferrable {
-						ui.Printf("A value is required.\n")
-						continue
-					}
-					if v == "" {
-						if f.Deferrable {
-							deferred = append(deferred, f.Key)
-						}
-						break
-					}
-					values[f.Key] = v
-					break
-				}
-			case storeEnv:
-				env, err := ui.Line("Environment variable holding the "+strings.ToLower(f.Label), envVarName(name, f.Key))
+			for {
+				v, err := ui.Secret(f.Label)
 				if err != nil {
 					return false, err
 				}
-				acct.Settings[f.Key] = config.Value{Env: env}
-				switch v, ok := os.LookupEnv(env); {
-				case ok && v != "":
-					values[f.Key] = v
-				case f.Deferrable:
-					deferred = append(deferred, f.Key)
-				default:
-					untestable = append(untestable, env)
-					unresolved[f.Key] = true
-					ui.Printf("  %s is not set in this shell; the connection test will be skipped.\n", env)
+				if v == "" && f.Required && !f.Deferrable {
+					ui.Printf("A value is required.\n")
+					continue
 				}
-			case storeCommand:
-				for {
-					c, err := ui.Line("Command that prints the "+strings.ToLower(f.Label), "")
-					if err != nil {
-						return false, err
+				if v == "" {
+					if f.Deferrable {
+						deferred = append(deferred, f.Key)
 					}
-					if c == "" {
-						ui.Printf("A command is required.\n")
-						continue
-					}
-					v, err := config.Value{Command: c}.Resolve()
-					if err == nil && v == "" {
-						err = fmt.Errorf("command %q printed nothing", c)
-					}
-					if err != nil {
-						ui.Printf("  %v\n", err)
-						retry, err := ui.Confirm("Try another command?", true)
-						if err != nil {
-							return false, err
-						}
-						if retry {
-							continue
-						}
-						return false, errQuit
-					}
-					acct.Settings[f.Key] = config.Value{Command: c}
-					values[f.Key] = v
 					break
 				}
+				values[f.Key] = v
+				break
 			}
 		}
 	}
@@ -534,43 +471,21 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		}
 	}
 
-	if storage == storeFile {
-		for _, f := range t.Fields {
-			if !f.Secret || f.Hidden || values[f.Key] == "" {
-				continue
-			}
-			p := secretFilePath(name, f.Key)
-			if err := config.WriteSecretFile(p, values[f.Key]); err != nil {
-				return false, err
-			}
-			acct.Settings[f.Key] = config.Value{File: config.AbbreviateHome(p)}
+	for _, f := range t.Fields {
+		if !f.Secret || f.Hidden || values[f.Key] == "" {
+			continue
 		}
+		p := secretFilePath(name, f.Key)
+		if err := config.WriteSecretFile(p, values[f.Key]); err != nil {
+			return false, err
+		}
+		acct.Settings[f.Key] = config.Value{File: config.AbbreviateHome(p)}
 	}
 	cfg.Accounts[name] = acct
 	if err := config.Save(path, cfg); err != nil {
 		return false, err
 	}
 	ui.Printf("Saved account %s (%s) to %s\n", name, t.Name, config.AbbreviateHome(path))
-	if storage == storeEnv {
-		var lines []string
-		for _, f := range t.Fields {
-			if !f.Secret || f.Hidden {
-				continue
-			}
-			env := acct.Settings[f.Key].Env
-			switch {
-			case containsString(generated, f.Key):
-				// The value was just issued by the provider and exists nowhere
-				// else; the user has to see it once to keep it.
-				lines = append(lines, fmt.Sprintf("  export %s=%s", env, shellQuote(values[f.Key])))
-			case containsString(untestable, env):
-				lines = append(lines, fmt.Sprintf("  export %s=<%s>", env, strings.ToLower(f.Label)))
-			}
-		}
-		if len(lines) > 0 {
-			ui.Printf("Before running ump, set in your shell:\n%s\n", strings.Join(lines, "\n"))
-		}
-	}
 	return true, nil
 }
 
