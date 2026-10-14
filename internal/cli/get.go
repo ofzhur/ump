@@ -337,11 +337,32 @@ func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []str
 			r.err = fmt.Errorf("account %s: not in the cache yet (run `ump server list` without --cached first)", n)
 		default:
 			r.machines = snap.Machines
+			applyServerSettings(cfg, r.machines)
 			notes = append(notes, n+" ("+a.fmtTime(snap.SeenAt)+")")
 		}
 		results = append(results, r)
 	}
 	return results, notes
+}
+
+// applyServerSettings puts what the user set for a server (ump server
+// set) onto the listed machine: a price set by hand wins over the
+// provider's, and the attributes are the user's alone.
+func applyServerSettings(cfg *config.Config, ms []provider.Machine) {
+	for i := range ms {
+		s, ok := cfg.Servers[ms[i].Ref()]
+		if !ok {
+			continue
+		}
+		if s.Price != nil {
+			p := *s.Price
+			p.Source = "manual"
+			ms[i].Price = &p
+		}
+		if len(s.Attributes) > 0 {
+			ms[i].Attributes = s.Attributes
+		}
+	}
 }
 
 // selectMachines keeps the machines matching any of refs, in listing
@@ -403,6 +424,7 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 			defer wg.Done()
 			for _, i := range indexes {
 				results[i] = a.listAccount(ctx, names[i], cfg.Accounts[names[i]], store)
+				applyServerSettings(cfg, results[i].machines)
 			}
 		}(byType[t])
 	}

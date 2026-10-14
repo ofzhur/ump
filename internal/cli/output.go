@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -56,6 +57,25 @@ var serverColumns = []column{
 	{header: "IPV6", wide: true, value: func(m provider.Machine) string { return m.IPv6 }},
 	{header: "PRODUCT", wide: true, value: func(m provider.Machine) string { return m.Product }},
 	{header: "KIND", wide: true, value: func(m provider.Machine) string { return string(m.Kind) }},
+	{header: "PRICE", wide: true, value: func(m provider.Machine) string { return m.Price.String() }},
+	{header: "ATTRIBUTES", wide: true, value: func(m provider.Machine) string { return joinMap(m.Attributes) }},
+}
+
+// joinMap renders a map as k=v pairs, sorted.
+func joinMap(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + m[k]
+	}
+	return strings.Join(parts, ",")
 }
 
 // printMachines writes machines in the requested format. JSON output is a

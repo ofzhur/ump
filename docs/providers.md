@@ -29,6 +29,7 @@ TYPE            KIND         CAPABILITIES                                       
 hetzner-cloud   cloud        inventory, describe, rename, rdns, power, rescue      Hetzner Cloud servers
 hetzner-robot   bare-metal   inventory, describe, rename, rdns, power, rescue      Hetzner dedicated servers (Robot web service)
 ovh             mixed        inventory, describe, rename, rdns, power, rescue      OVHcloud dedicated servers and Public Cloud instances
+manual          mixed        inventory, describe                                   servers added by hand (ump server add): no API, no rescue system; reached over SSH alone
 ```
 
 | Type | Lists | Credentials | Where to get them |
@@ -36,12 +37,14 @@ ovh             mixed        inventory, describe, rename, rdns, power, rescue   
 | `hetzner-robot` | Hetzner dedicated servers | `login` (`#ws+...`), `password` | Robot → Settings → Web service and app settings |
 | `hetzner-cloud` | the servers of one Hetzner Cloud project | `token` | Cloud Console → the project → Security → API tokens; read permission is enough for listing, read and write for everything else |
 | `ovh` | OVHcloud dedicated servers, VPS and Public Cloud instances of one account | `endpoint` (`ovh-eu`, `ovh-ca`, `ovh-us`, or a URL), `application_key`, `application_secret`, `consumer_key` | an application at `https://eu.api.ovh.com/createApp/` (`ca.`/`us.` for the other endpoints) gives key and secret; the wizard requests the consumer key for you |
+| `manual` | the servers added with `ump server add` | none | the account `manual` appears by itself with the first server added; see [manual servers](#manual-servers-manual) |
 
 `ump config isp types` prints the settings of every type below the table,
-with which are required and which are secret. The three types implement
-every capability UMP has today, so every command of `ump server` works
-with every account; the differences are in the details, see [per
-provider](#per-provider) below.
+with which are required and which are secret. The three API types
+implement every capability UMP has today, so every command of `ump
+server` works with every account; the differences are in the details,
+see [per provider](#per-provider) below. The `manual` type has no API
+behind it and does what SSH allows.
 
 ## Adding an account
 
@@ -214,6 +217,23 @@ set; instances carry their project as labels; VPS are labelled
 - `ump server show` adds, for a dedicated server, the boot option, the
   addresses, the service dates and the hardware; for an instance, the
   flavor, image, addresses, SSH key and project.
+
+### Manual servers (`manual`)
+
+Not a provider at all, but the way machines no provider lists get into
+the inventory: `ump server add NAME --ipv4 ADDRESS [--ipv6 ...]
+[--location ...] [--product ...] [--kind bare-metal|cloud] [--note ...]`
+puts a server into the configuration file (`manual:`), and the account
+`manual` of this type lists them next to the others, with the status
+`manual`. `ump server remove NAME` forgets one. Prices and attributes
+work as for any server; power control, renaming and reverse DNS do not
+exist, and `ump server rescue` and `ump server reinstall` work only
+through SSH: when the running system lets UMP in (as root or a sudo
+user, with UMP's key or yours), the rescue image is loaded and entered
+with kexec. Nothing stands behind that: a failed installation or a
+system that does not boot is yours to recover, with a console or the
+provider's own means, and ump says so before erasing anything. See
+[inventory](inventory.md#servers-added-by-hand).
 
 ## Adding a provider type
 

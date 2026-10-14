@@ -191,6 +191,11 @@ uptime, memory, the root disk and the addresses.
   they are current without a new binary, and `ump config os update`
   refreshes the published profiles, layouts, firewalls and users while
   keeping what you made.
+- **The inventory.** `ump server list -o wide` shows prices and your
+  attributes, `-o json` feeds anything, `--diff` shows what changed;
+  `ump server set NAME --price 89 --attr owner=alice` records what the
+  API does not know, `ump server add` a machine no provider lists. See
+  [inventory](inventory.md).
 - **Scripts and agents.** Every command has `-o json`; nothing prompts
   without a terminal (`--yes` where something is destructive, exit code 3
   otherwise). See the [CLI reference](cli.md).

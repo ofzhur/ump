@@ -166,6 +166,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if m.IPv4 == "" && m.IPv6 == "" {
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}
+	a.warnNoRescue(m, prov)
 	storage := strings.TrimRight(o.storage, "/")
 	rescueURL := cfg.StagingImage()
 	if storage == "" {
@@ -258,6 +259,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	what := fmt.Sprintf("%s (profile %s from %s, layout %s)", spec.OS, prof.Name, from, spec.Layout.Name)
 	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", what, describeRef(m), hostname)
+	if noRescueWarning(m, prov) != "" {
+		question += " There is no rescue system to fall back on: a failed installation is yours to recover."
+	}
 	if o.dryRun {
 		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), what)
 	}

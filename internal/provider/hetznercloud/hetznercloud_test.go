@@ -33,6 +33,10 @@ func TestListServersPaginates(t *testing.T) {
 			w.Write([]byte(`{"error":{"code":"unauthorized","message":"unable to authenticate"}}`))
 			return
 		}
+		if r.URL.Path == "/server_types" {
+			w.Write([]byte(`{"server_types":[{"name":"cx22","prices":[{"location":"fsn1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}},{"location":"nbg1","price_monthly":{"net":"3.7900000000","gross":"4.5101000000"}}]}],"meta":{"pagination":{"page":1,"per_page":50,"next_page":null}}}`))
+			return
+		}
 		if r.URL.Path != "/servers" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -60,7 +64,7 @@ func TestListServersPaginates(t *testing.T) {
 	}
 	want := provider.Machine{Provider: "hetzner-cloud", Account: "hc", ID: "1", Name: "edge-01", Kind: provider.KindCloud,
 		IPv4: "198.51.100.1", IPv6: "2001:db8:c0ff:ee1::/64", Location: "fsn1", Product: "cx22", Status: "running",
-		Labels: map[string]string{"env": "prod"}}
+		Labels: map[string]string{"env": "prod"}, Price: &provider.Price{Amount: 3.79, Currency: "EUR", Period: "month", Source: "provider", Note: "net"}}
 	got := ms[0]
 	if got.Labels["env"] != "prod" {
 		t.Errorf("labels not mapped: %v", got.Labels)

@@ -199,6 +199,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if err != nil {
 		return err
 	}
+	a.warnNoRescue(m, prov)
 	if providerOnly {
 		return a.providerRescueOnly(cmd, m, prov, keys, keyPath, keyPaths, command, o, format)
 	}

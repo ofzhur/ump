@@ -55,6 +55,9 @@ type app struct {
 	saveTerm func() func()
 	// httpClient overrides the HTTP client handed to providers (tests).
 	httpClient *http.Client
+	// manual holds the servers added by hand, from the configuration
+	// loaded last, for the manual provider type.
+	manual map[string]provider.ManualServer
 	// now is the clock, for cache timestamps; nil means time.Now.
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.
@@ -160,7 +163,9 @@ func (a *app) newRootCmd() *cobra.Command {
 dedicated servers, cloud VMs and boxes in your own rack.
 
 Everything happens to servers: ` + "`ump server list`" + ` lists the machines of every
-configured provider account, ` + "`ump server show NAME`" + ` shows one in detail,
+configured provider account (the inventory of the fleet: -o wide|json,
+--diff for what changed, prices, your attributes, servers added by hand
+with ` + "`ump server add`" + `), ` + "`ump server show NAME`" + ` shows one in detail,
 ` + "`ump server reinstall NAME`" + ` installs it the way a profile says, ` + "`ump ssh NAME`" + `
 logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.
 
@@ -285,6 +290,7 @@ func (a *app) providerOptions() provider.Options {
 	opts := provider.Options{
 		HTTPClient: a.httpClient,
 		UserAgent:  "ump/" + Version,
+		Manual:     a.manual,
 	}
 	if a.verbose {
 		opts.Logf = func(format string, args ...any) {
@@ -301,6 +307,7 @@ func (a *app) loadConfig() (*config.Config, string, error) {
 	if err != nil {
 		return nil, path, err
 	}
+	a.manual = cfg.Manual
 	return cfg, path, nil
 }
 

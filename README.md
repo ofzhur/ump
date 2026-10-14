@@ -18,6 +18,13 @@ base system, disk layout, users and keys, firewall and interface names on
 every machine, whatever it is and wherever it runs, ready for Ansible or
 whatever configures it from there.
 
+The same listing is the **inventory** of that fleet: one table over all
+providers, in JSON for whatever consumes it, with what changed since the
+last look, with the servers' prices (from the API where it tells, set by
+hand where it does not) and facts of your own, and with servers no
+provider lists added by hand. A provisioner that already knows every
+machine needs no second tool to count them. See [inventory](docs/inventory.md).
+
 ```console
 $ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or arm64
 $ ump config isp                                 # add a provider account (wizard)
@@ -40,10 +47,12 @@ from the storage at every use, so they are current without a new binary.
 | Hetzner Robot | `hetzner-robot` | dedicated servers |
 | Hetzner Cloud | `hetzner-cloud` | the servers of a project |
 | OVHcloud | `ovh` | dedicated servers, VPS and Public Cloud instances |
+| by hand | `manual` | any machine with an address (`ump server add`): listed, installed over SSH; no rescue system behind it |
 
 With every one of them: list and show servers, rename them, set reverse
 DNS, reboot, start and stop, boot into the rescue system, reinstall, and
-log in. Several accounts per provider are fine. See [provider
+log in (manual servers: list, show, install and log in). Several
+accounts per provider are fine. See [provider
 accounts](docs/providers.md).
 
 What goes on the server is the [UMP Ubuntu 26.04 base
@@ -103,6 +112,7 @@ own](images/rescue/README.md#your-own-storage).
 | Document | Contents |
 |---|---|
 | [Quickstart](docs/quickstart.md) | install ump, add an account, look at the defaults, dry-run and reinstall a server, log in |
+| [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
 | [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets, what each provider can do |
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |

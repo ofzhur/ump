@@ -46,7 +46,11 @@ ump
 │   │   ├── get      [ref...] [-o table|json|yaml]     reverse DNS entries of servers' public addresses
 │   │   ├── set      <ref> [ptr-name] [--ip <addr>]    set the PTR of the primary IPv4 (or --ip); default: the server name
 │   │   └── delete   <ref> [--ip <addr>]               remove the PTR
-│   └── set          <ref> --profile <name> | --clear  remember the profile the server is reinstalled with
+│   ├── set          <ref> [--profile <name> | --clear] [--price <amount> [--currency <cur>] [--period month|hour] | --clear-price] [--attr k=v]... [--unset-attr k]...
+│   │                                                  what ump remembers about a server: profile, price, your attributes
+│   ├── add          <name> --ipv4 <addr> [--ipv6 <addr>] [--location <s>] [--product <s>] [--kind bare-metal|cloud] [--note <s>]
+│   │                                                  a server by hand, without a provider API (account "manual")
+│   └── remove       <name> [--yes]                    forget a server added by hand
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config
 │   ├── isp                                            interactive wizard: add an account, test it, save it
@@ -128,8 +132,11 @@ code is 4. A reference that matches nothing gives exit code 1.
 `status` is the provider's own status, lower-cased (`ready`, `running`,
 `off`, `cancelled`, ...); `location` is the datacenter or region,
 lower-cased; `labels` are present where the provider has them. `-o wide`
-adds the IPv6, product and kind columns; `-o name` prints `provider/id`
-per line. `defaults.output` in the configuration sets the default format.
+adds the IPv6, product, kind, price and attributes columns; `-o name`
+prints `provider/id` per line. `defaults.output` in the configuration
+sets the default format. `price` comes from the provider's API where it
+tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
+from `ump server set --attr`; see [inventory](inventory.md).
 
 ### The listing cache and `--diff`
 
@@ -436,6 +443,30 @@ did not answer after the reboot (look at the server's console). Providers
 that keep their rescue system as the boot option (OVHcloud) have it
 disabled before the reboot. Asks for confirmation on a terminal; without
 one, `--yes` is required.
+
+## `ump server set`, `add` and `remove`
+
+```
+ump server set REF [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]...
+ump server add NAME --ipv4 ADDR [--ipv6 ADDR] [--location S] [--product S] [--kind bare-metal|cloud] [--note S]
+ump server remove NAME [--yes]
+```
+
+`set` writes what ump cannot learn from the provider into the
+configuration file (`servers:`): the profile a server is reinstalled
+with (`--clear` forgets it), its price where the API does not say
+(`--price`, default currency `EUR` and period `month`; it wins over the
+API's price; `--clear-price` forgets it), and attributes of your own
+(`--attr owner=alice`, repeatable; `--unset-attr` forgets one). Price
+and attributes show in `ump server list -o wide` and `ump server show`
+and travel in `-o json`.
+
+`add` puts a server no provider lists into the configuration file
+(`manual:`), listed by the account `manual` of provider type `manual`;
+`remove` forgets it. Such a server has no rescue system behind it: `ump
+server rescue` and `reinstall` work when its running system lets UMP in
+over SSH, and a failed installation is yours to recover, which ump says
+before erasing anything. See [inventory](inventory.md).
 
 ## `ump ssh`
 

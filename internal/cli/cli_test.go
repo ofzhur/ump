@@ -520,9 +520,9 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatal(out)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "IPV6", "PRODUCT", "KIND"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "m2", "cloud"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "2001:db8::/64", "m1", "cloud"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "m2", "cloud", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
 	})
 }
 
@@ -2489,7 +2489,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--profile", "nope", "--account", "one"); code != 1 || !strings.Contains(errOut, `profile "nope"`) {
 		t.Errorf("set unknown profile: code %d, %q", code, errOut)
 	}
-	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--account", "one"); code != 2 || !strings.Contains(errOut, "give --profile NAME or --clear") {
+	if _, errOut, code = e.run("", false, "server", "set", "web-01", "--account", "one"); code != 2 || !strings.Contains(errOut, "give at least one of --profile, --clear, --price") {
 		t.Errorf("set without a choice: code %d, %q", code, errOut)
 	}
 	e.directRoot = true
@@ -3143,5 +3143,122 @@ func TestConfigKeyWizard(t *testing.T) {
 	}
 	if out, _, code := e.run("", true, "config", "key", "-o", "yaml"); code != 0 || !strings.Contains(out, "public_key: ssh-ed25519") {
 		t.Errorf("-o yaml on a terminal: code %d, %q", code, out)
+	}
+}
+
+func TestServerSetPriceAndAttributes(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	out, _, code := e.run("", false, "server", "set", "web-01", "--price", "39,90", "--attr", "owner=alice", "--attr", "role=web", "--account", "one")
+	if code != 0 || !strings.Contains(out, "fake/1 (web-01, 203.0.113.10): price 39.90 EUR/mo; attributes owner=alice,role=web.") {
+		t.Errorf("set: code %d\n%s", code, out)
+	}
+	if cfg := e.read(); !strings.Contains(cfg, "    price:\n      amount: 39.9\n      currency: EUR\n      period: month\n") || !strings.Contains(cfg, "    attributes:\n      owner: alice\n      role: web\n") {
+		t.Errorf("config after set:\n%s", cfg)
+	}
+	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
+		t.Errorf("wide: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"price": {`) || !strings.Contains(out, `"source": "manual"`) || !strings.Contains(out, `"owner": "alice"`) {
+		t.Errorf("json: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "server", "show", "web-01", "--account", "one")
+	if code != 0 || !strings.Contains(out, "\nUMP:\n  Price:       39.90 EUR/mo (manual)\n  Attributes:  owner=alice\n               role=web\n") {
+		t.Errorf("show: code %d\n%s", code, out)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--price", "abc"}, `--price "abc" is not an amount`},
+		{[]string{"--price", "5", "--currency", "euros"}, `--currency "euros" is not a three-letter code`},
+		{[]string{"--price", "5", "--period", "year"}, `--period "year" is not month or hour`},
+		{[]string{"--currency", "EUR"}, "--currency and --period go with --price"},
+		{[]string{"--attr", "bad key=1"}, `--attr "bad key=1": expected KEY=VALUE`},
+		{[]string{"--price", "5", "--clear-price"}, "--price and --clear-price exclude each other"},
+	} {
+		if _, errOut, code := e.run("", false, append([]string{"server", "set", "web-01", "--account", "one"}, c.args...)...); code != 2 || !strings.Contains(errOut, c.want) {
+			t.Errorf("%v: code %d, %q", c.args, code, errOut)
+		}
+	}
+	out, _, code = e.run("", false, "server", "set", "web-01", "--price", "2", "--currency", "usd", "--period", "hour", "--unset-attr", "role", "--account", "one")
+	if code != 0 || !strings.Contains(out, "price 2.00 USD/h; attributes owner=alice.") {
+		t.Errorf("set again: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "server", "set", "web-01", "--clear-price", "--unset-attr", "owner", "--account", "one")
+	if code != 0 || !strings.Contains(out, "no price set; no attributes.") || strings.Contains(e.read(), "fake/1") {
+		t.Errorf("clear all: code %d\n%s\n%s", code, out, e.read())
+	}
+}
+
+func TestManualServers(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	if _, errOut, code := e.run("", false, "server", "add", "rack-07"); code != 2 || !strings.Contains(errOut, "give the server's address") {
+		t.Errorf("add without address: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "add", "rack-07", "--ipv4", "nope"); code != 2 || !strings.Contains(errOut, `--ipv4 "nope" is not an address`) {
+		t.Errorf("add bad address: code %d, %q", code, errOut)
+	}
+	out, _, code := e.run("", false, "server", "add", "rack-07", "--ipv4", "203.0.113.10", "--location", "basement", "--product", "Dell R640", "--note", "KVM at 192.0.2.250")
+	if code != 0 || !strings.Contains(out, "Added manual/rack-07 (rack-07, 203.0.113.10). No provider API stands behind it") {
+		t.Errorf("add: code %d\n%s", code, out)
+	}
+	if cfg := e.read(); !strings.Contains(cfg, "  manual:\n    type: manual\n") || !strings.Contains(cfg, "manual:\n  rack-07:\n    ipv4: 203.0.113.10\n    location: basement\n    product: Dell R640\n    kind: bare-metal\n    note: KVM at 192.0.2.250\n") {
+		t.Errorf("config after add:\n%s", cfg)
+	}
+	if _, errOut, code := e.run("", false, "server", "add", "rack-07", "--ipv4", "203.0.113.10"); code != 1 || !strings.Contains(errOut, "manual server rack-07 exists already") {
+		t.Errorf("add twice: code %d, %q", code, errOut)
+	}
+	out, _, code = e.run("", false, "server", "list", "--account", "manual")
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "manual manual rack-07 rack-07 203.0.113.10 basement manual") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "server", "show", "rack-07", "--account", "manual")
+	if code != 0 || !strings.Contains(out, "Product:   Dell R640") || !strings.Contains(out, "\nManual:\n  Note:    KVM at 192.0.2.250\n") || !strings.Contains(out, "Rescue:  none:") {
+		t.Errorf("show: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "isp", "types"); code != 0 || !strings.Contains(out, "manual") {
+		t.Errorf("types: code %d\n%s", code, out)
+	}
+	// prices and attributes work on it too
+	if out, _, code := e.run("", false, "server", "set", "rack-07", "--price", "89", "--account", "manual"); code != 0 || !strings.Contains(out, "price 89.00 EUR/mo") {
+		t.Errorf("set price: code %d\n%s", code, out)
+	}
+	// reinstall and rescue warn: no rescue system; the direct way works when the system lets UMP in
+	e.writeProfiles()
+	e.directRoot = true
+	resetFakePower()
+	_, errOut, code := e.run("", false, "server", "reinstall", "rack-07", "--yes", "--account", "manual")
+	if code != 0 || !strings.Contains(errOut, "Warning: manual/rack-07 (rack-07, 203.0.113.10) has no provider rescue system behind it (provider type manual). ump reaches it over SSH alone; if the installation fails or the new system does not boot, the machine is yours to recover") || !strings.Contains(errOut, "rack-07 is up:") {
+		t.Errorf("reinstall: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "rack-07", "--account", "manual"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("reinstall without --yes: code %d, %q", code, errOut)
+	}
+	e.directRoot = false
+	e.inImage = false
+	_, errOut, code = e.run("", false, "server", "rescue", "rack-07", "--yes", "--account", "manual")
+	if code != 1 || !strings.Contains(errOut, "Warning: manual/rack-07") || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH, and provider type manual has no rescue system") {
+		t.Errorf("rescue without access: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "reboot", "rack-07", "--yes", "--account", "manual"); code == 0 || !strings.Contains(errOut, "cannot") {
+		t.Errorf("reboot: code %d, %q", code, errOut)
+	}
+	// remove
+	if _, errOut, code := e.run("", false, "server", "remove", "web-01"); code != 1 || !strings.Contains(errOut, `no manual server "web-01"`) {
+		t.Errorf("remove a provider's server: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "remove", "rack-07"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("remove without --yes: code %d, %q", code, errOut)
+	}
+	out, _, code = e.run("", false, "server", "remove", "rack-07", "--yes")
+	if code != 0 || !strings.Contains(out, "Removed manual/rack-07 (rack-07, 203.0.113.10) from the configuration.") {
+		t.Errorf("remove: code %d\n%s", code, out)
+	}
+	if cfg := e.read(); strings.Contains(cfg, "manual") {
+		t.Errorf("config after remove:\n%s", cfg)
 	}
 }

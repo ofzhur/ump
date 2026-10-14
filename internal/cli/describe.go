@@ -103,6 +103,9 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 			return err
 		}
 		d, err := describeMachine(ctx, byAccount[m.Account].prov, m)
+		if err == nil {
+			d.Sections = append(d.Sections, umpSection(cfg, m)...)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -130,6 +133,30 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 
 // describeMachine asks the provider for details, or falls back to the
 // listing's view when the provider cannot describe machines.
+// umpSection is what ump itself knows about a server: the profile set
+// for it, its price and the user's attributes.
+func umpSection(cfg *config.Config, m provider.Machine) []provider.Section {
+	s := cfg.Servers[m.Ref()]
+	var items []provider.Item
+	if s.Profile != "" {
+		items = append(items, provider.Item{Key: "profile", Value: s.Profile})
+	}
+	if m.Price != nil {
+		v := m.Price.String() + " (" + m.Price.Source
+		if m.Price.Note != "" {
+			v += ", " + m.Price.Note
+		}
+		items = append(items, provider.Item{Key: "price", Value: v + ")"})
+	}
+	if len(m.Attributes) > 0 {
+		items = append(items, provider.Item{Key: "attributes", Value: m.Attributes})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return []provider.Section{{Name: "UMP", Items: items}}
+}
+
 func describeMachine(ctx context.Context, p provider.Provider, m provider.Machine) (*provider.Details, error) {
 	if d, ok := p.(provider.Describer); ok {
 		return d.Describe(ctx, m)

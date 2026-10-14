@@ -60,6 +60,52 @@ type Machine struct {
 	Status string `json:"status" yaml:"status"`
 	// Labels are provider-side labels or tags, when the provider has them.
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	// Price is what the machine costs: from the provider's API where it
+	// says (Hetzner Cloud), else what the user set with ump server set.
+	Price *Price `json:"price,omitempty" yaml:"price,omitempty"`
+	// Attributes are what the user set for the machine with ump server
+	// set --attr: an owner, a role, a cost center, anything the inventory
+	// should carry.
+	Attributes map[string]string `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+}
+
+// Price is what a machine costs per period.
+type Price struct {
+	Amount   float64 `json:"amount" yaml:"amount"`
+	Currency string  `json:"currency" yaml:"currency"`
+	// Period is month or hour.
+	Period string `json:"period" yaml:"period"`
+	// Source is provider (from the API) or manual (ump server set);
+	// omitted in the configuration file.
+	Source string `json:"source,omitempty" yaml:"-"`
+	// Note says what the amount is, e.g. "net" or "gross", when known.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
+}
+
+// String renders a price for a table: 4.76 EUR/mo.
+func (p *Price) String() string {
+	if p == nil {
+		return ""
+	}
+	unit := map[string]string{"month": "mo", "hour": "h"}[p.Period]
+	if unit == "" {
+		unit = p.Period
+	}
+	return strconv.FormatFloat(p.Amount, 'f', 2, 64) + " " + p.Currency + "/" + unit
+}
+
+// ManualServer is a server the user added by hand (ump server add): no
+// API knows it, so this is all ump knows.
+type ManualServer struct {
+	IPv4     string `json:"ipv4,omitempty" yaml:"ipv4,omitempty"`
+	IPv6     string `json:"ipv6,omitempty" yaml:"ipv6,omitempty"`
+	Location string `json:"location,omitempty" yaml:"location,omitempty"`
+	Product  string `json:"product,omitempty" yaml:"product,omitempty"`
+	// Kind is bare-metal (the default) or cloud.
+	Kind Kind `json:"kind,omitempty" yaml:"kind,omitempty"`
+	// Note is free text: where the machine is, who rents it, how to
+	// recover it.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 // Ref returns the unambiguous machine reference, "provider/id".
@@ -176,6 +222,9 @@ type Options struct {
 	UserAgent string
 	// Logf receives one line per API call when verbose output is on.
 	Logf func(format string, args ...any)
+	// Manual holds the servers of a manual account, by name (the manual
+	// provider type lists them; other types ignore it).
+	Manual map[string]ManualServer
 }
 
 func (o Options) httpClient() *http.Client {

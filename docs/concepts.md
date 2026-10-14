@@ -6,7 +6,9 @@ the document that goes into depth.
 ## Servers and references
 
 A **server** is anything ump can install: a dedicated server or a cloud
-VM, always seen through a provider. Commands take a **server reference**:
+VM, seen through a provider, or a **manual server** added by hand (`ump
+server add`) when no provider lists it. Commands take a **server
+reference**:
 
 | Form | Example | Meaning |
 |---|---|---|
@@ -18,9 +20,11 @@ VM, always seen through a provider. Commands take a **server reference**:
 Names need not be unique: `ump server list` lists every match, a command
 that acts on one server asks which one is meant on a terminal and fails
 with the candidates without one, so a script retries with `provider/id` or
-`--account`. ump keeps no inventory of its own: the provider APIs are the
-source of truth, and listings are cached only to show what changed
-(`ump server list --diff`).
+`--account`. The provider APIs are the source of truth for what exists;
+ump adds what they do not know (a price set by hand, your attributes,
+the manual servers) from its configuration file, caches listings to
+show what changed (`ump server list --diff`), and so serves as the
+[inventory](inventory.md) of the fleet.
 
 The server's name at the provider is the name ump uses everywhere,
 including the hostname it sets at installation, so `ump server rename`

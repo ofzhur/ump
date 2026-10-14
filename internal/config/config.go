@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/ofzhur/ump/internal/provider"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,6 +49,9 @@ type Config struct {
 	// Servers holds what the user set for single servers (ump server set),
 	// keyed by the server's reference (provider/id).
 	Servers map[string]ServerSettings `yaml:"servers,omitempty"`
+	// Manual holds the servers added by hand (ump server add), by name;
+	// they are listed by the account "manual" of type manual.
+	Manual map[string]provider.ManualServer `yaml:"manual,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -63,6 +67,12 @@ type Defaults struct {
 type ServerSettings struct {
 	// Profile is the profile the server is reinstalled with.
 	Profile string `yaml:"profile,omitempty"`
+	// Price is what the server costs, set by hand where the provider's
+	// API does not say (ump server set --price); it wins over the API.
+	Price *provider.Price `yaml:"price,omitempty"`
+	// Attributes are the user's own facts about the server (ump server
+	// set --attr): owner, role, cost center, anything.
+	Attributes map[string]string `yaml:"attributes,omitempty"`
 }
 
 // Staging configures how UMP reaches staging environments (rescue
