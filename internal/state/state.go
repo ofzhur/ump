@@ -1,11 +1,8 @@
-// Package state is UMP's view of the fleet that outlives a command and
-// is shared: what the user set per server (profile, price, attributes),
-// the servers added by hand, and what ump installed where. It is one
-// YAML document behind a backend chosen by URL (local file, a file over
-// SSH, an S3 bucket, an HTTP service, Consul, Vault), read and written
-// whole with a version tag, so that concurrent writers about different
-// servers merge instead of overwriting each other, and locked per server
-// for the operations that must not run twice at once.
+// Package state is the state document of UMP's home: what ump knows
+// about the fleet beyond the providers' word (per-server settings, the
+// servers added by hand, what was installed where), kept as state.yaml
+// in the home and changed with read-modify-write on the backend's
+// version tag, so that concurrent changes about different servers merge.
 package state
 
 import (
@@ -19,11 +16,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
 // FormatVersion is the version of the document's layout.
 const FormatVersion = 1
+
+// File is the document's name in the home.
+const File = "state.yaml"
 
 // Document is the state.
 type Document struct {
@@ -116,7 +117,7 @@ func (d *Document) Bytes() ([]byte, error) {
 		}
 	}
 	var b strings.Builder
-	b.WriteString("# UMP state: what ump knows about the fleet beyond the providers' word\n# (ump state --help). Edit by hand or with ump server set|add|remove; a\n# command rewrites the file in this layout.\n")
+	b.WriteString("# UMP state: what ump knows about the fleet beyond the providers' word\n# (ump config state --help). Edit by hand or with ump server set|add|remove;\n# a command rewrites the file in this layout.\n")
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
 	if err := enc.Encode(d); err != nil {
@@ -126,60 +127,20 @@ func (d *Document) Bytes() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// ErrConflict says the state changed between the read and the write.
-var ErrConflict = errors.New("the state changed since it was read")
-
-// ErrLocked says another operation holds the lock.
-type ErrLocked struct {
-	Key  string
-	Info LockInfo
-}
-
-func (e *ErrLocked) Error() string {
-	return fmt.Sprintf("%s is locked by %s since %s (%s); ump state unlock %s forces it", e.Key, e.Info.Who, e.Info.Since.Format(time.RFC3339), e.Info.What, e.Key)
-}
-
-// LockInfo says who holds a lock, and for what.
-type LockInfo struct {
-	Key   string    `json:"key" yaml:"key"`
-	Who   string    `json:"who" yaml:"who"`
-	What  string    `json:"what" yaml:"what"`
-	Since time.Time `json:"since" yaml:"since"`
-}
-
-// Backend stores the document somewhere.
-type Backend interface {
-	// Read returns the document's bytes and a version tag; no document
-	// is empty bytes and an empty tag.
-	Read(ctx context.Context) ([]byte, string, error)
-	// Write stores the bytes when the stored version is still ifVersion
-	// (an empty one means: nothing stored yet), and returns the new tag;
-	// ErrConflict otherwise.
-	Write(ctx context.Context, data []byte, ifVersion string) (string, error)
-	// Lock takes the advisory lock named key; *ErrLocked when held.
-	Lock(ctx context.Context, key string, info LockInfo) error
-	// Unlock releases it.
-	Unlock(ctx context.Context, key string) error
-	// Locks lists the locks held.
-	Locks(ctx context.Context) ([]LockInfo, error)
-	// String says where the state is, without secrets.
-	String() string
-}
-
-// Store is the document behind a backend.
+// Store is the document in a backend.
 type Store struct {
-	Backend Backend
+	Backend backend.Backend
 }
 
 // Read returns the document and its version.
 func (s *Store) Read(ctx context.Context) (*Document, string, error) {
-	data, version, err := s.Backend.Read(ctx)
+	data, version, err := s.Backend.Read(ctx, File)
 	if err != nil {
-		return nil, "", fmt.Errorf("state %s: %w", s.Backend, err)
+		return nil, "", fmt.Errorf("%s in %s: %w", File, s.Backend, err)
 	}
 	d, err := Parse(data)
 	if err != nil {
-		return nil, "", fmt.Errorf("state %s: %w", s.Backend, err)
+		return nil, "", fmt.Errorf("%s in %s: %w", File, s.Backend, err)
 	}
 	return d, version, nil
 }
@@ -201,11 +162,11 @@ func (s *Store) Update(ctx context.Context, fn func(d *Document) error) error {
 		if err != nil {
 			return err
 		}
-		if _, err := s.Backend.Write(ctx, data, version); err != nil {
-			if errors.Is(err, ErrConflict) && attempt < 5 {
+		if _, err := s.Backend.Write(ctx, File, data, version); err != nil {
+			if errors.Is(err, backend.ErrConflict) && attempt < 5 {
 				continue
 			}
-			return fmt.Errorf("state %s: %w", s.Backend, err)
+			return fmt.Errorf("%s in %s: %w", File, s.Backend, err)
 		}
 		return nil
 	}
@@ -215,22 +176,22 @@ func (s *Store) Update(ctx context.Context, fn func(d *Document) error) error {
 // release; the caller runs the operation in between. Locks are per
 // server, so operations on different servers run side by side.
 func (s *Store) Lock(ctx context.Context, key, what string) (func() error, error) {
-	info := LockInfo{Key: key, Who: whoami(), What: what, Since: time.Now().UTC().Truncate(time.Second)}
+	info := backend.LockInfo{Key: key, Who: whoami(), What: what, Since: time.Now().UTC().Truncate(time.Second)}
 	if err := s.Backend.Lock(ctx, key, info); err != nil {
-		var locked *ErrLocked
+		var locked *backend.ErrLocked
 		if errors.As(err, &locked) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("state %s: lock %s: %w", s.Backend, key, err)
+		return nil, fmt.Errorf("%s: lock %s: %w", s.Backend, key, err)
 	}
 	return func() error { return s.Backend.Unlock(context.Background(), key) }, nil
 }
 
 // Locks lists the locks held, sorted by key.
-func (s *Store) Locks(ctx context.Context) ([]LockInfo, error) {
+func (s *Store) Locks(ctx context.Context) ([]backend.LockInfo, error) {
 	locks, err := s.Backend.Locks(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("state %s: %w", s.Backend, err)
+		return nil, fmt.Errorf("%s: %w", s.Backend, err)
 	}
 	sort.Slice(locks, func(i, j int) bool { return locks[i].Key < locks[j].Key })
 	return locks, nil
@@ -243,9 +204,4 @@ func whoami() string {
 	}
 	host, _ := os.Hostname()
 	return user + "@" + host + " (pid " + fmt.Sprint(os.Getpid()) + ")"
-}
-
-// lockKey makes a lock key safe for a file or object name.
-func lockKey(key string) string {
-	return strings.NewReplacer("/", "%2F", "\\", "%5C", ":", "%3A", " ", "%20").Replace(key)
 }

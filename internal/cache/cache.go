@@ -1,5 +1,5 @@
-// Package cache keeps UMP's local, disposable listing cache under
-// ~/.cache/ump. Every successful listing of an account is recorded as a
+// Package cache keeps UMP's disposable listing cache under cache/ in
+// its home. Every successful listing of an account is recorded as a
 // snapshot, but a new file is written only when the listing changed, so
 // the store holds the history of observed states: `ump get servers
 // --diff` compares the current listing with the previous one (or with the
@@ -8,8 +8,8 @@
 //
 // Layout:
 //
-//	~/.cache/ump/listings/<config id>/config-path
-//	~/.cache/ump/listings/<config id>/<account>/<listed at, UTC>.json
+//	<home>/cache/listings/<config id>/config-path
+//	<home>/cache/listings/<config id>/<account>/<listed at, UTC>.json
 //
 // The config id is derived from the configuration file's path, because
 // account names are only unique within one file.
@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
@@ -48,16 +49,10 @@ type Snapshot struct {
 	Machines []provider.Machine `json:"machines"`
 }
 
-// Dir is the cache directory, ~/.cache/ump (honouring XDG_CACHE_HOME).
+// Dir is the cache directory: cache/ in UMP's home, so that a home
+// behind a backend carries its listings along.
 func Dir() string {
-	if x := os.Getenv("XDG_CACHE_HOME"); x != "" {
-		return filepath.Join(x, "ump")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".cache", "ump")
-	}
-	return filepath.Join(home, ".cache", "ump")
+	return filepath.Join(config.UserConfigDir(), "cache")
 }
 
 // Store holds the listing snapshots of one configuration file.

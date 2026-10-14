@@ -22,6 +22,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/home"
 	"github.com/ofzhur/ump/internal/provider"
 	_ "github.com/ofzhur/ump/internal/provider/all"
 	"github.com/ofzhur/ump/internal/state"
@@ -59,10 +60,14 @@ type app struct {
 	// manual holds the servers added by hand, from the state loaded
 	// last, for the manual provider type.
 	manual map[string]provider.ManualServer
-	// store is the state's backend, opened once per run, and doc the
-	// document read last (nil after a change).
-	store *state.Store
-	doc   *state.Document
+	// home is where this run's home is; store is the state document's
+	// store, opened once per run, and doc the document read last (nil
+	// after a change); pullFailed says the backend did not answer and
+	// the mirror is used as it is.
+	home       *home.Resolved
+	pullFailed bool
+	store      *state.Store
+	doc        *state.Document
 	// now is the clock, for cache timestamps; nil means time.Now.
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.
@@ -137,7 +142,12 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
+	if err := a.resolveHome(ctx); err != nil {
+		fmt.Fprintf(a.stderr, "ump: %v\n", err)
+		return exitGeneric
+	}
 	err := root.ExecuteContext(ctx)
+	a.pushHome(context.Background())
 	if err == nil {
 		return exitOK
 	}
@@ -198,7 +208,6 @@ licensed under the Apache License 2.0.`,
 	root.AddCommand(a.newServerCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
-	root.AddCommand(a.newStateCmd())
 	root.AddCommand(a.newVersionCmd())
 	return root
 }
@@ -333,7 +342,7 @@ func (a *app) buildProvider(name string, acct config.Account) (provider.Provider
 // --account, or all configured ones.
 func (a *app) selectAccounts(cmd *cobra.Command, cfg *config.Config) ([]string, error) {
 	// the state's manual servers bring their account along
-	if _, err := a.loadState(cmd.Context(), cfg, config.ResolvePath(a.configFlag)); err != nil {
+	if _, err := a.loadState(cmd.Context(), cfg); err != nil {
 		return nil, err
 	}
 	if len(a.accounts) == 0 {

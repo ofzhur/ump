@@ -80,7 +80,7 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	if err != nil {
 		return usageErrorf(cmd, "%v", err)
 	}
-	if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+	if _, err := a.loadState(cmd.Context(), cfg); err != nil {
 		return err
 	}
 	if len(cfg.Accounts) == 0 {
@@ -328,7 +328,7 @@ func parseSince(s string, now time.Time, loc *time.Location) (time.Time, error) 
 
 // cachedListings serves the last recorded listing of each account.
 func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []string) ([]listResult, []string) {
-	doc, _ := a.loadState(context.Background(), cfg, "")
+	doc, _ := a.loadState(context.Background(), cfg)
 	results := make([]listResult, 0, len(names))
 	var notes []string
 	for _, n := range names {
@@ -391,7 +391,7 @@ type listResult struct {
 // API never sees several of our accounts at once (rate limits are per
 // API, and some count every account against the same client).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store) []listResult {
-	doc, err := a.loadState(ctx, cfg, "")
+	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 	}

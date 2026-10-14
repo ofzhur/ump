@@ -64,17 +64,17 @@ before it erases anything. ump server remove forgets the server again.`,
 			default:
 				return usageErrorf(cmd, "--kind %q is not bare-metal or cloud", kind)
 			}
-			cfg, path, err := a.loadConfig()
+			cfg, _, err := a.loadConfig()
 			if err != nil {
 				return err
 			}
 			if acct, ok := cfg.Accounts[manual.AccountName]; ok && acct.Type != manual.TypeName {
 				return fmt.Errorf("the account name %q is taken by a %s account; manual servers need it", manual.AccountName, acct.Type)
 			}
-			if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+			if _, err := a.loadState(cmd.Context(), cfg); err != nil {
 				return err
 			}
-			if err := a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+			if err := a.updateState(cmd.Context(), func(d *state.Document) error {
 				if _, exists := d.Manual[name]; exists {
 					return fmt.Errorf("manual server %s exists already (ump server remove %s first)", name, name)
 				}
@@ -107,11 +107,11 @@ remembered about it). The machine itself is not touched. Servers a
 provider lists cannot be removed here: they are the provider's.`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, path, err := a.loadConfig()
+			cfg, _, err := a.loadConfig()
 			if err != nil {
 				return err
 			}
-			doc, err := a.loadState(cmd.Context(), cfg, path)
+			doc, err := a.loadState(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ provider lists cannot be removed here: they are the provider's.`,
 			if err := a.confirm(cmd, yes, fmt.Sprintf("Forget %s? The machine itself is not touched.", describeRef(m))); err != nil {
 				return err
 			}
-			if err := a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+			if err := a.updateState(cmd.Context(), func(d *state.Document) error {
 				delete(d.Manual, name)
 				delete(d.Servers, m.Ref())
 				return nil

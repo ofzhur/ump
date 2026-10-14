@@ -77,7 +77,7 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 		user = "root"
 		if !staging {
 			pinned := ""
-			if doc, err := a.loadState(cmd.Context(), cfg, ""); err == nil {
+			if doc, err := a.loadState(cmd.Context(), cfg); err == nil {
 				pinned = doc.Servers[m.Ref()].Profile
 			}
 			user = a.profileAdmin(cfg, pinned)

@@ -47,7 +47,7 @@ and `source`):
 | manual servers | set it by hand |
 
 Set by hand, a price wins over the API's and stays in the
-[state](state.md):
+[state](state.md#the-state-document):
 
 ```console
 $ ump server set rack-07 --price 89                       # EUR per month
@@ -63,7 +63,7 @@ inventory still needs a number for.
 
 Attributes are facts of your own about a server, for the inventory and
 for scripts: an owner, a role, a cost center, a ticket. They live in the
-[state](state.md), show in `-o wide` and `ump server show`, and come
+[state](state.md#the-state-document), show in `-o wide` and `ump server show`, and come
 along in `-o json` as `attributes`.
 
 ```console
@@ -91,7 +91,7 @@ $ ump server remove vps-x
 Manual servers are listed by the account `manual` of provider type
 `manual`, with the status `manual`, and `ump server set` gives them a
 profile, a price and attributes like any other. They live in the
-[state](state.md) under `manual:`, so a team sharing a state backend
+[state](state.md#the-state-document) under `manual:`, so a team sharing a state backend
 sees them all; `ump server remove` forgets one (the machine itself is
 not touched).
 

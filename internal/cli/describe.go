@@ -52,7 +52,7 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 	if err != nil {
 		return err
 	}
-	if _, err := a.loadState(cmd.Context(), cfg, path); err != nil {
+	if _, err := a.loadState(cmd.Context(), cfg); err != nil {
 		return err
 	}
 	if len(cfg.Accounts) == 0 {
@@ -108,7 +108,7 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 		}
 		d, err := describeMachine(ctx, byAccount[m.Account].prov, m)
 		if err == nil {
-			doc, _ := a.loadState(ctx, cfg, "")
+			doc, _ := a.loadState(ctx, cfg)
 			d.Sections = append(d.Sections, umpSection(doc, m)...)
 		}
 		if err != nil {

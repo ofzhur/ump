@@ -51,14 +51,6 @@ ump
 │   ├── add          <name> --ipv4 <addr> [--ipv6 <addr>] [--location <s>] [--product <s>] [--kind bare-metal|cloud] [--note <s>]
 │   │                                                  a server by hand, without a provider API (account "manual")
 │   └── remove       <name> [--yes]                    forget a server added by hand
-├── state                                              where the state lives, its version, what it holds
-│   ├── show                                           the document
-│   ├── edit                                           your editor, then a checked write
-│   ├── pull     <file>                                the document to a file, with its version
-│   ├── push     <file> [--force]                      a file as the state; refused when it moved on
-│   ├── migrate  --to <url> [--force]                  copy to another backend and switch to it
-│   ├── locks                                          the per-server locks held
-│   └── unlock   <server>                              release one
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config
 │   ├── isp                                            interactive wizard: add an account, test it, save it
@@ -93,6 +85,15 @@ ump
 │   │   ├── create   <name> [--from <name>]            copy one into the file and open it in your editor
 │   │   ├── edit     [<name>]                          your editor on users.yaml, then a check of every user
 │   │   └── delete   <name> [--yes]
+│   ├── state                                          interactive wizard: where the home lives (local, or a backend shared by a team)
+│   │   ├── view                                       where the home is, the mirror, what it holds
+│   │   ├── set      --url <url> [backend flags]       point ump at a backend
+│   │   ├── migrate  --to <url> [backend flags] [--force]   copy the home there and point ump at it
+│   │   ├── clear                                      the local directory again
+│   │   ├── pull | push [--force]                      the mirror and the backend, by hand
+│   │   ├── test                                       does the backend answer?
+│   │   ├── locks                                      the per-server locks held
+│   │   └── unlock   <server>                          release one
 │   ├── path                                           where the configuration lives
 │   └── key      [-o json|yaml]                        interactive wizard over the keys; prints UMP's own key without a terminal or with -o
 │       ├── show     [-o json|yaml]                    UMP's own SSH public key (generated on first use)
@@ -461,7 +462,7 @@ ump server remove NAME [--yes]
 ```
 
 `set` writes what ump cannot learn from the provider into the
-[state](state.md) (`servers:`): the profile a server is reinstalled
+[state](state.md#the-state-document) (`servers:`): the profile a server is reinstalled
 with (`--clear` forgets it), its price where the API does not say
 (`--price`, default currency `EUR` and period `month`; it wins over the
 API's price; `--clear-price` forgets it), and attributes of your own
@@ -469,28 +470,12 @@ API's price; `--clear-price` forgets it), and attributes of your own
 and attributes show in `ump server list -o wide` and `ump server show`
 and travel in `-o json`.
 
-`add` puts a server no provider lists into the [state](state.md)
+`add` puts a server no provider lists into the [state](state.md#the-state-document)
 (`manual:`), listed by the account `manual` of provider type `manual`;
 `remove` forgets it. Such a server has no rescue system behind it: `ump
 server rescue` and `reinstall` work when its running system lets UMP in
 over SSH, and a failed installation is yours to recover, which ump says
 before erasing anything. See [inventory](inventory.md).
-
-## `ump state`
-
-```
-ump state
-ump state show | edit | pull FILE | push FILE [--force] | migrate --to URL [--force] | locks | unlock SERVER
-```
-
-The [state](state.md): what ump knows about the fleet beyond the
-providers' word, behind a backend named by `UMP_STATE`, else `state.url`
-in the configuration, else the local state file. `ump state` says which,
-with the version and what the document holds; `show` prints it; `edit`,
-`pull` and `push` change it by hand with the version checked; `migrate`
-copies it to another backend and switches the configuration; `locks`
-and `unlock` manage the per-server locks that `reinstall` and `rescue`
-take.
 
 ## `ump ssh`
 
@@ -525,6 +510,7 @@ ump config disk-layout [list|get|create|edit|delete]      (alias: dl)
 ump config firewall    [list|get|create|edit|delete]      (alias: fw)
 ump config user        [list|get|create|edit|delete]      (alias: u)
 ump config key         [show|list|add|remove]
+ump config state       [view|set|migrate|clear|pull|push|test|locks|unlock]
 ump config path
 ```
 
@@ -582,6 +568,16 @@ every provider type. `view` shows the configuration with plaintext
 secrets redacted (references are shown as they are), `test` checks every
 account, `remove` deletes an account together with the secret files the
 wizard created for it.
+
+### `ump config state`
+
+Where [the home](state.md) lives: the wizard without a subcommand
+(pick a backend, move the home there), `view`, `set --url URL` (use a
+backend as it is), `migrate --to URL` (copy the home there first),
+`clear` (the local directory again), `pull` and `push` for the mirror
+by hand, `test`, and `locks` and `unlock SERVER` for the per-server
+locks that `reinstall` and `rescue` take. `UMP_STATE` in the
+environment names the backend ahead of the pointer file.
 
 ### `ump config key`
 

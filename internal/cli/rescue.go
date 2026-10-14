@@ -200,11 +200,11 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 		return err
 	}
 	a.warnNoRescue(m, prov)
-	doc, err := a.loadState(cmd.Context(), cfg, "")
+	doc, err := a.loadState(cmd.Context(), cfg)
 	if err != nil {
 		return err
 	}
-	unlock, err := a.lockServer(cmd.Context(), cfg, m, "rescue")
+	unlock, err := a.lockServer(cmd.Context(), m, "rescue")
 	if err != nil {
 		return err
 	}

@@ -19,10 +19,10 @@ func machines(status string, names ...string) []provider.Machine {
 }
 
 func TestStore(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	s := Open(cfgPath)
-	if !strings.HasPrefix(s.Dir(), filepath.Join(os.Getenv("XDG_CACHE_HOME"), "ump", "listings")) {
+	if !strings.HasPrefix(s.Dir(), filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "cache", "listings")) {
 		t.Errorf("store dir %s", s.Dir())
 	}
 	if Open(filepath.Join(t.TempDir(), "other.yaml")).Dir() == s.Dir() {

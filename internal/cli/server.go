@@ -142,7 +142,7 @@ locally or on the storage.`,
 				}
 			}
 			var said []string
-			err = a.updateState(cmd.Context(), cfg, func(d *state.Document) error {
+			err = a.updateState(cmd.Context(), func(d *state.Document) error {
 				st := d.Servers[m.Ref()]
 				said = nil
 				switch {

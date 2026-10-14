@@ -186,7 +186,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	ctx := cmd.Context()
 	// the profile, resolved to the specification the installer takes:
 	// --profile, else the one set for the server, else default
-	doc, err := a.loadState(ctx, cfg, "")
+	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	// the server is locked for the whole installation: another ump must
 	// not reinstall or rescue it meanwhile; other servers are free
-	unlock, err := a.lockServer(ctx, cfg, m, "reinstall")
+	unlock, err := a.lockServer(ctx, m, "reinstall")
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	result.Admin = admin
 	// what was installed goes into the state, for the inventory
 	record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, sys.Details, a.now())
-	if err := a.updateState(ctx, cfg, func(d *state.Document) error {
+	if err := a.updateState(ctx, func(d *state.Document) error {
 		s := d.Servers[m.Ref()]
 		s.Installed = &record
 		d.Servers[m.Ref()] = s

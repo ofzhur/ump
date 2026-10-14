@@ -9,7 +9,8 @@ the rest is optional.
 
 ```
 ~/.config/ump/
-├── config.yaml              accounts, storage, UMP's key, where the state is, output default
+├── backend.yaml             where the home lives when it is not this directory (ump config state)
+├── config.yaml              accounts, storage, UMP's key, output default
 ├── profiles/
 │   ├── ubuntu-26.04.yaml    the published profiles (downloaded on first use; ump config os update replaces them)
 │   ├── ubuntu-24.04.yaml
@@ -19,6 +20,8 @@ the rest is optional.
 │   ├── firewalls.yaml       the named firewalls
 │   └── users.yaml           the named users
 ├── keys.yaml                the named public keys (ump config key add)
+├── state.yaml               what ump knows about servers beyond the providers: profile, price, attributes, manual servers, installations
+├── cache/                   the listing cache (ump server list --diff, --cached)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)
 ├── staging_ed25519          UMP's own SSH key, generated on first use
 ├── staging_ed25519.pub
@@ -68,12 +71,11 @@ staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
   image: https://ump.zhurko.de/dl/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
 
-state:                                 # where the state lives (ump state); UMP_STATE in the environment wins
-  url: s3://fleet/ump/state.yaml       # local (the default), file://, ssh://, s3://, r2://, http(s)://, consul://, vault://
-  region: eu-central-1                 # for s3://; endpoint: for S3-compatible stores
-  access_key: {env: FLEET_STATE_KEY}   # secrets as references, like an account's
-  secret_key: {file: ~/.config/ump/secrets/state.secret}
 ```
+
+Where the home lives is not in `config.yaml` but in `backend.yaml`
+next to it, or in `UMP_STATE`; see [the home and its
+backend](state.md).
 
 | Section | Meaning |
 |---|---|
@@ -83,7 +85,6 @@ state:                                 # where the state lives (ump state); UMP_
 | `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
 | `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage and says when a newer release is published, with the one-liner that installs it; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks. |
-| `state` | Where the [state](state.md) lives: `url`, and for the backends that need them `endpoint`, `region`, `access_key`, `secret_key`, `token`, `user`, `password` (secrets as references). The environment overrides all of it (`UMP_STATE`, `AWS_ACCESS_KEY_ID`, `UMP_STATE_TOKEN`, ...). `servers:` and `manual:` of older files are moved into the state by the first command. |
 
 Sections this version of ump does not know are kept when the file is
 saved. The file is written with mode 0600, atomically.

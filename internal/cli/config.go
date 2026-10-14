@@ -37,7 +37,7 @@ what a server becomes under os, UMP's own SSH key, and where it all lives.`,
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigStateCmd(), a.newConfigPathCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 

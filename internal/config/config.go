@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/ofzhur/ump/internal/provider"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,15 +45,6 @@ type Config struct {
 	// --profile and the server's own setting say nothing; ump config os
 	// default sets it. Default: DefaultProfile (ubuntu-26.04).
 	DefaultProfile string `yaml:"default_profile,omitempty"`
-	// State says where the state (what ump knows about the fleet beyond
-	// the providers' word) lives; UMP_STATE in the environment wins, and
-	// the local state file is the default. See internal/state.
-	State StateSettings `yaml:"state,omitempty"`
-	// Servers and Manual are where the per-server settings and the
-	// manual servers lived before the state; a command moves them into
-	// the state and drops them from here.
-	Servers map[string]ServerSettings        `yaml:"servers,omitempty"`
-	Manual  map[string]provider.ManualServer `yaml:"manual,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`
@@ -64,38 +54,6 @@ type Config struct {
 type Defaults struct {
 	// Output is the default output format (table, wide, json, yaml, name).
 	Output string `yaml:"output,omitempty"`
-}
-
-// ServerSettings is what the user set for one server.
-type ServerSettings struct {
-	// Profile is the profile the server is reinstalled with.
-	Profile string `yaml:"profile,omitempty"`
-	// Price is what the server costs, set by hand where the provider's
-	// API does not say (ump server set --price); it wins over the API.
-	Price *provider.Price `yaml:"price,omitempty"`
-	// Attributes are the user's own facts about the server (ump server
-	// set --attr): owner, role, cost center, anything.
-	Attributes map[string]string `yaml:"attributes,omitempty"`
-}
-
-// StateSettings say where the state lives and how to reach it. The
-// secrets are references like an account's (a file, an environment
-// variable, a command).
-type StateSettings struct {
-	// URL is local (the default), file:///path, ssh://[user@]host/path,
-	// s3://bucket/key, r2://account/bucket/key, http(s)://host/path,
-	// consul://host:8500/path or vault://host:8200/mount/path.
-	URL string `yaml:"url,omitempty"`
-	// Endpoint is the S3-compatible endpoint for s3://.
-	Endpoint string `yaml:"endpoint,omitempty"`
-	// Region is the S3 region.
-	Region    string `yaml:"region,omitempty"`
-	AccessKey Value  `yaml:"access_key,omitempty"`
-	SecretKey Value  `yaml:"secret_key,omitempty"`
-	// Token is for http(s)://, consul:// and vault://.
-	Token    Value `yaml:"token,omitempty"`
-	User     Value `yaml:"user,omitempty"`
-	Password Value `yaml:"password,omitempty"`
 }
 
 // Staging configures how UMP reaches staging environments (rescue
@@ -211,6 +169,24 @@ func ValidateAccountName(name string) error {
 // UserConfigDir is the per-user configuration directory, ~/.config/ump
 // (honouring XDG_CONFIG_HOME).
 func UserConfigDir() string {
+	if homeDir != "" {
+		return homeDir
+	}
+	return LocalDir()
+}
+
+// homeDir is the home of this run when it is not the local directory:
+// the mirror of a backend (internal/home).
+var homeDir string
+
+// SetHome makes dir the home of this run: every path ump keeps
+// (configuration, secrets, profiles, keys, state, cache) is under it.
+func SetHome(dir string) { homeDir = dir }
+
+// LocalDir is the local configuration directory, ~/.config/ump
+// (honouring XDG_CONFIG_HOME): the home when no backend is configured,
+// and where the backend pointer lives otherwise.
+func LocalDir() string {
 	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
 		return filepath.Join(x, "ump")
 	}
@@ -219,6 +195,19 @@ func UserConfigDir() string {
 		return filepath.Join(".config", "ump")
 	}
 	return filepath.Join(home, ".config", "ump")
+}
+
+// CacheDir is the local cache directory, ~/.cache/ump (honouring
+// XDG_CACHE_HOME): where the mirrors of backends live.
+func CacheDir() string {
+	if x := os.Getenv("XDG_CACHE_HOME"); x != "" {
+		return filepath.Join(x, "ump")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".cache", "ump")
+	}
+	return filepath.Join(home, ".cache", "ump")
 }
 
 // SecretsDir is where the setup wizard stores secret files. It is always

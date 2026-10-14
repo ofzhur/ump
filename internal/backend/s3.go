@@ -1,4 +1,4 @@
-package state
+package backend
 
 import (
 	"bytes"
@@ -13,17 +13,17 @@ import (
 	"time"
 )
 
-// S3 is an object in an S3 bucket, or in any S3-compatible store
-// (s3://bucket/key with an endpoint; r2://account/bucket/key for
-// Cloudflare R2). The version tag is the object's ETag and a write is
-// conditional on it (If-Match, If-None-Match: * for the first), so the
-// store must support conditional writes (AWS S3, R2 and MinIO do). The
-// per-server locks are small objects next to it, created with
+// S3 is a prefix in an S3 bucket, or in any S3-compatible store
+// (s3://bucket/prefix with an endpoint; r2://account/bucket/prefix for
+// Cloudflare R2). A file's version tag is the object's ETag and a write
+// is conditional on it (If-Match, If-None-Match: * for the first), so
+// the store must support conditional writes (AWS S3, R2 and MinIO do).
+// The advisory locks are small objects under .locks/, created with
 // If-None-Match: *.
 type S3 struct {
 	Endpoint  string // https://s3.eu-central-1.amazonaws.com, https://<account>.r2.cloudflarestorage.com, ...
 	Bucket    string
-	Key       string
+	Prefix    string
 	Region    string
 	AccessKey string
 	SecretKey string
@@ -36,7 +36,18 @@ func (s *S3) String() string {
 	if s.label != "" {
 		return s.label
 	}
-	return "s3://" + s.Bucket + "/" + s.Key
+	return "s3://" + s.Bucket + "/" + s.Prefix
+}
+
+func (s *S3) object(p string) (string, error) {
+	p, err := cleanPath(p)
+	if err != nil {
+		return "", err
+	}
+	if s.Prefix == "" {
+		return p, nil
+	}
+	return strings.TrimRight(s.Prefix, "/") + "/" + p, nil
 }
 
 func (s *S3) do(ctx context.Context, method, key string, body []byte, headers map[string]string) (*http.Response, []byte, error) {
@@ -49,7 +60,7 @@ func (s *S3) do(ctx context.Context, method, key string, body []byte, headers ma
 		req.Header.Set(k, v)
 	}
 	if method == http.MethodPut && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/yaml")
+		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 	now := time.Now
 	if s.Now != nil {
@@ -84,8 +95,12 @@ func s3Error(resp *http.Response, body []byte) error {
 	return fmt.Errorf("HTTP %d", resp.StatusCode)
 }
 
-func (s *S3) Read(ctx context.Context) ([]byte, string, error) {
-	resp, body, err := s.do(ctx, http.MethodGet, s.Key, nil, nil)
+func (s *S3) Read(ctx context.Context, p string) ([]byte, string, error) {
+	key, err := s.object(p)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, body, err := s.do(ctx, http.MethodGet, key, nil, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -98,14 +113,18 @@ func (s *S3) Read(ctx context.Context) ([]byte, string, error) {
 	return nil, "", s3Error(resp, body)
 }
 
-func (s *S3) Write(ctx context.Context, data []byte, ifVersion string) (string, error) {
-	headers := map[string]string{}
+func (s *S3) Write(ctx context.Context, p string, data []byte, ifVersion string) (string, error) {
+	key, err := s.object(p)
+	if err != nil {
+		return "", err
+	}
+	headers := map[string]string{"Content-Type": "application/octet-stream"}
 	if ifVersion == "" {
 		headers["If-None-Match"] = "*"
 	} else {
 		headers["If-Match"] = `"` + ifVersion + `"`
 	}
-	resp, body, err := s.do(ctx, http.MethodPut, s.Key, data, headers)
+	resp, body, err := s.do(ctx, http.MethodPut, key, data, headers)
 	if err != nil {
 		return "", err
 	}
@@ -120,9 +139,86 @@ func (s *S3) Write(ctx context.Context, data []byte, ifVersion string) (string, 
 	return "", s3Error(resp, body)
 }
 
-func (s *S3) lockKey(key string) string {
-	return s.Key + ".locks/" + lockKey(key) + ".json"
+func (s *S3) Delete(ctx context.Context, p string) error {
+	key, err := s.object(p)
+	if err != nil {
+		return err
+	}
+	resp, body, err := s.do(ctx, http.MethodDelete, key, nil, nil)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return s3Error(resp, body)
 }
+
+// list returns the objects under a prefix with their ETags.
+func (s *S3) list(ctx context.Context, prefix string) ([]Entry, error) {
+	var out []Entry
+	token := ""
+	for {
+		q := "?list-type=2&prefix=" + url.QueryEscape(prefix)
+		if token != "" {
+			q += "&continuation-token=" + url.QueryEscape(token)
+		}
+		resp, body, err := s.do(ctx, http.MethodGet, q, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, s3Error(resp, body)
+		}
+		var list struct {
+			Contents []struct {
+				Key  string `xml:"Key"`
+				ETag string `xml:"ETag"`
+			} `xml:"Contents"`
+			IsTruncated           bool   `xml:"IsTruncated"`
+			NextContinuationToken string `xml:"NextContinuationToken"`
+		}
+		if err := xml.Unmarshal(body, &list); err != nil {
+			return nil, err
+		}
+		for _, c := range list.Contents {
+			out = append(out, Entry{Path: c.Key, Version: strings.Trim(c.ETag, `"`)})
+		}
+		if !list.IsTruncated || list.NextContinuationToken == "" {
+			return out, nil
+		}
+		token = list.NextContinuationToken
+	}
+}
+
+func (s *S3) List(ctx context.Context) ([]Entry, error) {
+	prefix := ""
+	if s.Prefix != "" {
+		prefix = strings.TrimRight(s.Prefix, "/") + "/"
+	}
+	objects, err := s.list(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	for _, o := range objects {
+		rel := strings.TrimPrefix(o.Path, prefix)
+		if rel == "" || Excluded(rel) {
+			continue
+		}
+		out = append(out, Entry{Path: rel, Version: o.Version})
+	}
+	return out, nil
+}
+
+func (s *S3) locksPrefix() string {
+	if s.Prefix == "" {
+		return ".locks/"
+	}
+	return strings.TrimRight(s.Prefix, "/") + "/.locks/"
+}
+
+func (s *S3) lockKey(key string) string { return s.locksPrefix() + lockKey(key) + ".json" }
 
 func (s *S3) Lock(ctx context.Context, key string, info LockInfo) error {
 	payload, _ := json.Marshal(info)
@@ -155,25 +251,13 @@ func (s *S3) Unlock(ctx context.Context, key string) error {
 }
 
 func (s *S3) Locks(ctx context.Context) ([]LockInfo, error) {
-	prefix := s.Key + ".locks/"
-	resp, body, err := s.do(ctx, http.MethodGet, "?list-type=2&prefix="+url.QueryEscape(prefix), nil, nil)
+	objects, err := s.list(ctx, s.locksPrefix())
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, s3Error(resp, body)
-	}
-	var list struct {
-		Contents []struct {
-			Key string `xml:"Key"`
-		} `xml:"Contents"`
-	}
-	if err := xml.Unmarshal(body, &list); err != nil {
-		return nil, err
-	}
 	var locks []LockInfo
-	for _, c := range list.Contents {
-		r, b, err := s.do(ctx, http.MethodGet, c.Key, nil, nil)
+	for _, c := range objects {
+		r, b, err := s.do(ctx, http.MethodGet, c.Path, nil, nil)
 		if err != nil || r.StatusCode != http.StatusOK {
 			continue
 		}
