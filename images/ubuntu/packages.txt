@@ -83,8 +83,6 @@ xz-utils
 bzip2
 git
 
-# shells
-zsh
 
 # analysis: who logged in and when (last, from wtmpdb), load and I/O
 # history (sar, iostat, mpstat, pidstat; atop), what a process does

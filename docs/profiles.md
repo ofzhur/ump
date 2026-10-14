@@ -79,7 +79,7 @@ kernel:
 disks: lvm-linear      # a layout from layouts.yaml, or an inline one
 
 users: [ump]           # users from users.yaml: ump is the administrator, sudo without a
-                       # password, zsh, UMP's key and the public keys next to your ~/.ssh/id_*
+                       # password, UMP's key and the public keys next to your ~/.ssh/id_*
 
 packages: []
 
@@ -158,7 +158,7 @@ users:
   - ump                       # a user from users.yaml (ump config user), by name
   - name: ops                 # or an inline user, with the same fields
     sudo: true                # member of sudo without a password; the first such user is the administrator
-    shell: /bin/zsh           # optional; /bin/bash
+    shell: /bin/bash          # optional; /bin/bash
     groups: [adm]             # optional; created when missing
     keys: [ump, local]        # at least one key reference (see Keys)
   - name: root                # only when listed does root log in over SSH, with keys only
@@ -186,7 +186,7 @@ network:                      # optional
 | `users` | The accounts of the new system, in order: names from `users.yaml`, inline users, or both. At least one, no name twice, and one of them must be able to administer the system (below). |
 | `users[].name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special. In `users.yaml` the entry's key is the name. |
 | `users[].sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in, since no passwords are set. |
-| `users[].shell` | A path. Default `/bin/bash`. The image ships `bash` and `zsh` with oh-my-zsh. |
+| `users[].shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell needs its package. |
 | `users[].groups` | Extra groups, created when missing. |
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
 | `packages` | Ubuntu package names, installed from the archive inside the new system during the installation, through the rescue system's network. |
@@ -206,13 +206,13 @@ next to the profiles holds them by name, with `description`, `sudo`,
 profiles and is changed in one place. A profile may also carry inline
 users, with `name` and the same fields, for what belongs to that profile
 alone, and mix both. The published entry is `ump`, the administrator
-UMP provides (sudo without a password, zsh, `keys: [ump, local]`);
+UMP provides (sudo without a password, bash, `keys: [ump, local]`);
 `ump config os update` replaces it and keeps the users you added.
 
 ```console
 $ ump config user list
 NAME   SUDO   SHELL      KEYS         STATE   DESCRIPTION
-ump    yes    /bin/zsh   ump, local   ok      the administrator UMP provides
+ump    yes    /bin/bash  ump, local   ok      the administrator UMP provides
 $ ump config user create ops --from ump      # then your editor on users.yaml
 $ ump config user get ops
 $ ump config user edit                       # the whole file, checked afterwards

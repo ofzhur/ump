@@ -9,7 +9,7 @@ may also carry users inline for what belongs to it alone.
 ```console
 $ ump config user list
 NAME   SUDO   SHELL      KEYS         STATE   DESCRIPTION
-ump    yes    /bin/zsh   ump, local   ok      the administrator UMP provides
+ump    yes    /bin/bash  ump, local   ok      the administrator UMP provides
 ```
 
 ## Where users live
@@ -26,7 +26,6 @@ users:
   ump:
     description: the administrator UMP provides
     sudo: true
-    shell: /bin/zsh
     keys: [ump, local]
 ```
 
@@ -51,7 +50,7 @@ name: ops                     # inline users only; in users.yaml the entry's key
 description: ...              # optional; shown by ump config user list
 sudo: true                    # member of sudo without a password (no passwords are set)
 groups: [adm, docker]         # optional; created when missing
-shell: /bin/zsh               # optional; /bin/bash by default
+shell: /bin/bash              # optional; /bin/bash by default
 keys: [ump, local, oleg]      # at least one key reference (see Keys)
 ```
 
@@ -61,7 +60,7 @@ keys: [ump, local, oleg]      # at least one key reference (see Keys)
 | `description` | One line, shown by `ump config user list`. |
 | `sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in (`/etc/sudoers.d/90-ump-NAME`), since no passwords are set. |
 | `groups` | Extra groups the user joins; a group that does not exist is created. |
-| `shell` | A path. The image ships `/bin/bash` (colored prompt, completion) and `/bin/zsh` (oh-my-zsh, theme crunch). Default `/bin/bash`. |
+| `shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell (zsh, fish) needs its package in the profile's `packages`, or comes with your configuration management. |
 | `keys` | [Key references](keys.md): `ump`, `local`, `agent`, a key name, a file, or a key line. Every user needs at least one: without a password, a user without keys could not log in. |
 
 ## The administrator and root
@@ -79,7 +78,7 @@ Root cannot log in over SSH unless a profile lists `root` as a user;
 then it logs in with keys only, never with a password. Root remains the
 user of the rescue system, which is how ump installs the machine.
 
-The published user is `ump`: sudo, zsh, `keys: [ump, local]` (UMP's own
+The published user is `ump`: sudo, bash, `keys: [ump, local]` (UMP's own
 key and the public keys next to your `~/.ssh/id_*` files). The published
 profiles list it alone; add yours next to it, or make a profile of your
 own with other users.
@@ -128,7 +127,6 @@ users:
   ops:
     description: the operations team
     sudo: true
-    shell: /bin/zsh
     keys: [ump, alice, bob]
   deploy:
     description: what the CI deploys with

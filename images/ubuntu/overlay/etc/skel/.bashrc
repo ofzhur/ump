@@ -1,6 +1,6 @@
 # ~/.bashrc of a UMP-installed system: a colored prompt, completion and
 # the usual aliases. Yours to change; /etc/skel/.bashrc is the copy new
-# users get. zsh with oh-my-zsh is there too (chsh -s /bin/zsh).
+# users get.
 case $- in *i*) ;; *) return ;; esac
 
 HISTCONTROL=ignoreboth

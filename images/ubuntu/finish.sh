@@ -52,13 +52,10 @@ ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 # (install.sh); the administrator is the profile's sudo user
 passwd -l root >/dev/null 2>&1 || true
 
-# shells: the colored bash of /etc/skel and zsh with oh-my-zsh (the crunch
-# theme), shared from /usr/share/oh-my-zsh; root gets the same files
-git clone -q --depth 1 https://github.com/ohmyzsh/ohmyzsh.git /usr/share/oh-my-zsh
-rm -rf /usr/share/oh-my-zsh/.git /usr/share/oh-my-zsh/.github
-chmod -R go-w /usr/share/oh-my-zsh
+# the shell: bash with the colored prompt and completion of /etc/skel;
+# root gets the same file (another shell is the configuration
+# management's business)
 cp /etc/skel/.bashrc /root/.bashrc
-cp /etc/skel/.zshrc /root/.zshrc
 
 # the message of the day: UMP's own script alone (no help text, no news)
 chmod 755 /etc/update-motd.d/00-ump

@@ -2172,7 +2172,7 @@ func TestInstallServer(t *testing.T) {
 		t.Errorf("spec layout: %v", l)
 	}
 	users := spec["users"].([]any)
-	if len(users) != 1 || users[0].(map[string]any)["name"] != "ump" || users[0].(map[string]any)["sudo"] != true || users[0].(map[string]any)["shell"] != "/bin/zsh" || len(users[0].(map[string]any)["keys"].([]any)) != 1 || !strings.HasPrefix(users[0].(map[string]any)["keys"].([]any)[0].(string), "ssh-ed25519 ") {
+	if len(users) != 1 || users[0].(map[string]any)["name"] != "ump" || users[0].(map[string]any)["sudo"] != true || users[0].(map[string]any)["shell"] != "/bin/bash" || len(users[0].(map[string]any)["keys"].([]any)) != 1 || !strings.HasPrefix(users[0].(map[string]any)["keys"].([]any)[0].(string), "ssh-ed25519 ") {
 		t.Errorf("spec users: %v", users)
 	}
 	if fw := spec["firewall"].(map[string]any); fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
@@ -2967,7 +2967,7 @@ func TestProfileWizard(t *testing.T) {
 	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, two
 	// packages, renamed interfaces, no provision step, a description, no
 	// editor
-	script := "2\n\nweb\nump, ops\ny\n2\nump\nOps people\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
+	script := "2\n\nweb\nump, ops\ny\n\nump\nOps people\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
 	out, errOut, code := e.run(script, true, "config", "os", "create", "web")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)

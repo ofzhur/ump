@@ -270,12 +270,9 @@ func (a *app) defineUser(ui *prompter, name string) (*profile.User, error) {
 	if u.Sudo, err = ui.Confirm(name+": sudo without a password (an administrator)?", true); err != nil {
 		return nil, err
 	}
-	shells := []string{"/bin/zsh  (oh-my-zsh, theme crunch)", "/bin/bash  (colored prompt, completion)"}
-	si, err := ui.Choose("Shell of "+name, shells, 0)
-	if err != nil {
+	if u.Shell, err = ui.Line("Shell of "+name+" (the image has /bin/bash, with colors and completion; another shell needs its package)", "/bin/bash"); err != nil {
 		return nil, err
 	}
-	u.Shell = strings.Fields(shells[si])[0]
 	keys, err := ui.Line("Keys of "+name+" (ump: UMP's own; local: your ~/.ssh/id_*.pub; agent: ssh-add -L; a name from ump config key; a file; a key line; comma-separated)", "ump, local")
 	if err != nil {
 		return nil, err

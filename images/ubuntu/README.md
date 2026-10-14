@@ -46,8 +46,7 @@ systemd-networkd, `systemd-resolved`, OpenSSH, `tuned`, `cpufrequtils`,
 `dmidecode`, `lshw`), the analysis tools (`last` from `wtmpdb`, `sar`
 and friends from `sysstat`, `atop`, `iotop`, `lsof`, `strace`, `ltrace`,
 `pstree`, `ncdu`, `dig`, `traceroute`, `iftop`, `nethogs`, `socat`,
-`ipcalc`, `whois`, `tree`), `bash` with completion, `zsh` with
-[oh-my-zsh](https://ohmyz.sh) in `/usr/share/oh-my-zsh`, and `vim`,
+`ipcalc`, `whois`, `tree`), `bash` with completion, and `vim`,
 `tmux`, `htop`, `git`, `jq` and the usual shell tools. No cloud-init, no
 snaps, no recommends. The full list is in `packages.txt` of a build.
 
@@ -75,12 +74,11 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   `/etc/ssh/sshd_config.d/50-ump.conf`); the installer opens root with
   keys only (`10-ump-root.conf`) when the profile lists it. The
   administrator is the profile's sudo user, `ump` by default.
-- **Shells:** `/etc/skel/.bashrc` gives bash a colored prompt (red for
-  root), completion and the color aliases; `/etc/skel/.zshrc` gives zsh
-  oh-my-zsh with the `crunch` theme and the `git`, `sudo` and `systemd`
-  plugins, from the shared copy in `/usr/share/oh-my-zsh` (no
-  self-update; `git -C /usr/share/oh-my-zsh pull` as root updates it).
-  Both are in `/root` too; the profile picks each user's shell.
+- **Shell:** bash, with `/etc/skel/.bashrc` giving a colored prompt
+  (red for root), completion and the color aliases; `/root` has the
+  same file. Another shell is a matter for the configuration management
+  that follows the installation (a profile may still set `shell` for a
+  user to anything the image or its packages provide).
 - **History:** `last` and `last reboot` work from the first boot
   (`wtmpdb` on 26.04, with its PAM module recording logins; the classic
   `wtmp` on the older releases); `sar` has the load,

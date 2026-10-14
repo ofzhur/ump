@@ -24,7 +24,7 @@ var userSet = &namedSet{
 lists names from it in its users field (users: [ump, ops]), or carries
 users of its own, so the same user can be in many profiles. The first
 use puts the published users there: ump, the administrator UMP
-provides (sudo without a password, zsh, UMP's key and yours). A user
+provides (sudo without a password, bash, UMP's key and yours). A user
 has sudo, groups, a shell and key references (ump, local, agent, a key
 name from ump config key, a file, or a key line); docs/profiles.md
 describes the fields.

@@ -59,7 +59,7 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if spec.OS != "ubuntu-26.04" || spec.Timezone != "UTC" || spec.Kernel.Mitigations || spec.Kernel.IPv6 || spec.Layout.Name != "lvm-linear" || len(spec.Layout.Parts) != 5 {
 		t.Errorf("spec: %+v", spec)
 	}
-	if len(spec.Users) != 1 || spec.Users[0].Name != "ump" || !spec.Users[0].Sudo || len(spec.Users[0].Keys) != 1 || !strings.HasPrefix(spec.Users[0].Keys[0], "ssh-ed25519 ") || spec.Users[0].Shell != "/bin/zsh" {
+	if len(spec.Users) != 1 || spec.Users[0].Name != "ump" || !spec.Users[0].Sudo || len(spec.Users[0].Keys) != 1 || !strings.HasPrefix(spec.Users[0].Keys[0], "ssh-ed25519 ") || spec.Users[0].Shell != "/bin/bash" {
 		t.Errorf("users: %+v", spec.Users)
 	}
 	if spec.Admin() != "ump" || !spec.Network.Rename {
