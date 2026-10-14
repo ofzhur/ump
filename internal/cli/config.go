@@ -21,18 +21,18 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "config",
 		Aliases: []string{"c", "cfg"},
-		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), keys (key) and the home (state)",
+		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), userdata (userdata), keys (key) and the home (state)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
-what a server becomes under os, the named disk layouts, firewalls and
-users they refer to, UMP's own SSH key and the named keys, and where it
-all lives (state).
+what a server becomes under os, the named disk layouts, firewalls,
+users and userdata they refer to, UMP's own SSH key and the named keys,
+and where it all lives (state).
 
 Every entity has the same verbs with the same short forms: list (ls, l),
 get (g, show), view (v, show), create (c, new, add), add (a, new,
 create), edit (e), delete (d, rm, remove), remove (rm, d, delete),
 update (up), default (def), test (t). The entities: isp (i, provider,
 account), os (o, profile), disk-layout (dl, layout), firewall (fw),
-user (u), key (k), state (st); config itself is c or cfg.`,
+user (u), userdata (ud), key (k), state (st); config itself is c or cfg.`,
 		Example: `  ump config isp add              # the account wizard
   ump config isp view             # the accounts, secrets redacted
   ump config os create            # the profile wizard
@@ -40,6 +40,7 @@ user (u), key (k), state (st); config itself is c or cfg.`,
   ump config disk-layout list     # the named disk layouts
   ump config firewall list        # the named firewalls
   ump config user list            # the named users
+  ump config userdata list        # what runs in a freshly installed system
   ump config key list             # UMP's own key and the named keys
   ump config state view           # where the home is
   ump c o ls                      # the short form of ump config os list`,
@@ -48,7 +49,7 @@ user (u), key (k), state (st); config itself is c or cfg.`,
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigStateCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigUserdataCmd(), a.newConfigStateCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 

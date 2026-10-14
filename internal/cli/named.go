@@ -20,8 +20,9 @@ import (
 // lists, prints, creates, edits and deletes them.
 type namedSet struct {
 	// file is the file name in the profiles directory, key the mapping
-	// in it, noun what one entry is called (layout, firewall).
-	file, key, noun string
+	// in it, noun what one entry is called (layout, firewall) and plural
+	// what several are (noun + "s" when empty).
+	file, key, noun, plural string
 	// use, aliases, short, long and example are the command's.
 	use     string
 	aliases []string
@@ -36,6 +37,14 @@ type namedSet struct {
 	rows    func(data []byte, names []string) ([][]string, error)
 	// check parses the file and validates every entry.
 	check func(data []byte) error
+}
+
+// plurals is what several entries are called.
+func (set *namedSet) plurals() string {
+	if set.plural != "" {
+		return set.plural
+	}
+	return set.noun + "s"
 }
 
 func (set *namedSet) path() string { return filepath.Join(config.ProfilesDir(), set.file) }
@@ -159,7 +168,7 @@ func (set *namedSet) newListCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: verbAliases("list"),
-		Short:   "List the " + set.noun + "s",
+		Short:   "List the " + set.plurals(),
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
@@ -219,7 +228,7 @@ func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 					return usageErrorf(cmd, "a %s name is needed without a terminal: ump config %s create NAME --from NAME", set.noun, set.use)
 				}
 				names := d.names()
-				ui.Printf("%ss in %s: %s\n", strings.ToUpper(set.noun[:1])+set.noun[1:], config.AbbreviateHome(set.path()), strings.Join(names, ", "))
+				ui.Printf("%s in %s: %s\n", strings.ToUpper(set.plurals()[:1])+set.plurals()[1:], config.AbbreviateHome(set.path()), strings.Join(names, ", "))
 				if name, err = ui.Line("Name of the new "+set.noun, ""); err != nil {
 					return err
 				}
@@ -329,7 +338,7 @@ func (set *namedSet) edit(a *app, ctx context.Context) error {
 		return fmt.Errorf("the file is kept, but it is not valid: %w", err)
 	}
 	names := d.names()
-	fmt.Fprintf(a.stdout, "%d %ss, all valid: %s.\n", len(names), set.noun, strings.Join(names, ", "))
+	fmt.Fprintf(a.stdout, "%d %s, all valid: %s.\n", len(names), set.plurals(), strings.Join(names, ", "))
 	return nil
 }
 

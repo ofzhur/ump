@@ -63,14 +63,17 @@ profiles, the OS images, plus `get.sh` and the ump binaries. The default
 is `https://ump.zhurko.de/dl`; any web server or object store with plain
 `GET` does. See [configuration](configuration.md#storage).
 
-## Profiles, layouts, firewalls, users and keys
+## Profiles, layouts, firewalls, users, userdata and keys
 
 A **profile** says what a server becomes: the OS image, the disk layout,
-the users, extra packages, the firewall, the kernel command line, the
+the users, the userdata that runs in the new system, the firewall, the kernel command line, the
 step after the first boot. A **disk layout** is a list of parts
 (partitions, md arrays, logical volumes) applied to whatever disks a
 server has; a **firewall** is an input policy and the allowed ports; a
-**user** is an account with sudo, groups, a shell and key references.
+**user** is an account with sudo, groups, a shell and key references; a
+**userdata** entry is a script that runs in the new system before its
+first boot (a declarative configuration later, for the systems that
+take one).
 Layouts, firewalls and users are named entries in `layouts.yaml`,
 `firewalls.yaml` and `users.yaml`, referred to from profiles by name, or
 written inline in one. All of it is YAML in `~/.config/ump/profiles/`;
@@ -119,7 +122,7 @@ No passwords are set anywhere. See [keys](keys.md) and
 3. **Install.** Fetch the installer from the storage and run it there with
    the specification: plan, wipe, partition, md, LVM, file systems, unpack
    the image, hostname, netplan with uniform interface names, kernel
-   command line, users and keys, packages, firewall, boot loader. `--dry-run`
+   command line, users and keys, userdata, firewall, boot loader. `--dry-run`
    stops after the plan.
 4. **Reboot and verify.** Disable the provider's rescue flag where it
    persists, reboot, wait until SSH answers as the administrator with

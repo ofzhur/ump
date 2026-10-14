@@ -27,7 +27,11 @@ users: [ump]            # named users from users.yaml (ump config user): ump is 
   # - name: root        # root over SSH, with keys only
   #   keys: [ump, local]
 
-packages: []            # more Ubuntu packages, installed from the archive at installation
+userdata: [ubuntu]      # named entries from userdata.yaml (ump config userdata), run in order as root
+                        # in the new system before its first boot: packages, files, services; or inline:
+  # - name: web
+  #   script: |
+  #     apt-get install -y nginx
 
 # a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
 firewall: default

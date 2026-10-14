@@ -1,0 +1,27 @@
+# Named userdata for the profiles' userdata field; docs/userdata.md of
+# the ump repository (github.com/ofzhur/ump) describes the fields. An
+# entry runs as root in the freshly installed system, before its first
+# boot, with the network of the rescue system: install packages, drop
+# files, enable services. A profile lists names from here, in order
+# (userdata: [ubuntu, web]), or inline entries. A failing script fails
+# the installation.
+#
+#   type     bash (the only type yet; cloud-init, talos and nixos will
+#            follow for the systems that take a declarative configuration)
+#   script   the script itself
+#
+# ump config userdata (ud) lists, prints, creates, edits and deletes them.
+# ump config os update replaces the published entry ubuntu and keeps yours.
+userdata:
+  ubuntu:
+    description: what every Ubuntu gets; nothing yet
+    type: bash
+    script: |
+      #!/bin/bash
+      # Runs as root in the freshly installed Ubuntu, before its first
+      # boot, with network. Put what every Ubuntu of yours needs here,
+      # or make your own entry (ump config userdata create NAME) and
+      # list it in the profile after this one.
+      set -euo pipefail
+      echo "userdata ubuntu: nothing to do on $(hostname)"
+      # apt-get install -y --no-install-recommends htop

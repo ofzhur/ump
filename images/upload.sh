@@ -25,7 +25,7 @@
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh
-#   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/users.yaml
+#   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)

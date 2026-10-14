@@ -40,6 +40,10 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	layouts, err := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, err := ParseFirewalls(repoFile(t, "firewalls.yaml"))
 	users, _ := ParseUsers(repoFile(t, "users.yaml"))
+	userdata, uerr := ParseUserdata(repoFile(t, "userdata.yaml"))
+	if uerr != nil {
+		t.Fatal(uerr)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +56,7 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 			t.Errorf("layout %s: %v", name, err)
 		}
 	}
-	spec, err := p.Resolve(layouts, firewalls, users, fakeResolver)
+	spec, err := p.Resolve(layouts, firewalls, users, userdata, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +72,8 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if spec.Firewall.Policy != "drop" || len(spec.Firewall.Allow) != 2 || spec.Firewall.Allow[0].Proto != "icmp" || spec.Firewall.Allow[1] != (Allow{Proto: "tcp", Port: "22"}) {
 		t.Errorf("firewall: %+v", spec.Firewall)
 	}
-	if spec.Provision.Type != "none" || len(spec.Packages) != 0 {
-		t.Errorf("provision %+v packages %v", spec.Provision, spec.Packages)
+	if spec.Provision.Type != "none" || len(spec.Userdata) != 1 || spec.Userdata[0].Name != "ubuntu" || spec.Userdata[0].Type != "bash" || !strings.Contains(spec.Userdata[0].Script, "set -euo pipefail") {
+		t.Errorf("provision %+v userdata %v", spec.Provision, spec.Userdata)
 	}
 	data, err := spec.JSON()
 	if err != nil {
@@ -79,12 +83,12 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"os", "hostname", "timezone", "storage", "kernel", "layout", "users", "packages", "firewall", "provision", "profile"} {
+	for _, key := range []string{"os", "hostname", "timezone", "storage", "kernel", "layout", "users", "userdata", "firewall", "provision", "profile"} {
 		if _, ok := back[key]; !ok {
 			t.Errorf("json lacks %s", key)
 		}
 	}
-	if !strings.Contains(string(data), `"packages": []`) || !strings.Contains(string(data), `"allow": [`) {
+	if !strings.Contains(string(data), `"userdata": [`) || !strings.Contains(string(data), `"name": "ubuntu"`) || !strings.Contains(string(data), `"allow": [`) {
 		t.Errorf("json:\n%s", data)
 	}
 }
@@ -111,7 +115,7 @@ users:
     groups: [adm]
     shell: /bin/zsh
     keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 ops@x", agent]
-packages: [htop, nginx]
+userdata: [{name: web, script: "apt-get install -y nginx\n"}]
 firewall:
   policy: drop
   allow: [icmp, ssh, tcp/80, udp/53, "tcp/8000-8100", {proto: tcp, port: 443, from: 10.0.0.0/8}]
@@ -124,7 +128,7 @@ provision:
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := p.Resolve(nil, nil, nil, fakeResolver)
+	spec, err := p.Resolve(nil, nil, nil, nil, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,11 +147,15 @@ provision:
 	if spec.Provision.Type != "ansible-pull" || spec.Provision.Options["repo"] != "https://git.example.net/infra.git" || spec.Provision.Options["playbook"] != "site.yml" {
 		t.Errorf("provision: %+v", spec.Provision)
 	}
+	if len(spec.Userdata) != 1 || spec.Userdata[0].Name != "web" || spec.Userdata[0].Type != "bash" || spec.Userdata[0].Script != "apt-get install -y nginx\n" {
+		t.Errorf("userdata: %+v", spec.Userdata)
+	}
 }
 
 func TestProfileErrors(t *testing.T) {
 	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	userdata, _ := ParseUserdata(repoFile(t, "userdata.yaml"))
 	users, _ := ParseUsers(repoFile(t, "users.yaml"))
 	base := "name: t\nos: ubuntu-26.04\nusers:\n  - {name: root, keys: [ump]}\n"
 	cases := []struct {
@@ -167,7 +175,10 @@ func TestProfileErrors(t *testing.T) {
 		{"unknown user", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [nobody]\n", `user "nobody" is not in users.yaml (known: ump)`},
 		{"user twice", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump, {name: ump, sudo: true, keys: [ump]}]\n", "user ump is listed twice"},
 		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
-		{"bad package", base + "disks: lvm-linear\npackages: [\"rm -rf\"]\n", "is not a package name"},
+		{"bad userdata name", base + "disks: lvm-linear\nuserdata: [\"rm -rf\"]\n", "is not a userdata name"},
+		{"unknown userdata", base + "disks: lvm-linear\nuserdata: [nope]\n", `userdata "nope" is not in userdata.yaml`},
+		{"empty userdata", base + "disks: lvm-linear\nuserdata: [{name: x, script: \"\"}]\n", "the script is empty"},
+		{"userdata type", base + "disks: lvm-linear\nuserdata: [{name: x, type: chef, script: x}]\n", `type "chef" is not bash`},
 		{"two roots", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: ext4, mountpoint: /}\n    - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /}\n", "mountpoint / is used twice"},
 		{"root on lvm without boot", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: lvm, vg: v}\n    - {type: lvm, vg: v, name: root, size: rest, filesystem: ext4, mountpoint: /}\n", "/boot must be a slice of its own"},
 		{"lvm before vg", base + "disks:\n  parts:\n    - {type: lvm, vg: v, name: root, size: rest, filesystem: ext4, mountpoint: /}\n", `vg "v" is not made by an earlier slice or md part`},
@@ -179,7 +190,7 @@ func TestProfileErrors(t *testing.T) {
 	for _, c := range cases {
 		p, err := Parse([]byte(c.src))
 		if err == nil {
-			_, err = p.Resolve(layouts, firewalls, users, fakeResolver)
+			_, err = p.Resolve(layouts, firewalls, users, userdata, fakeResolver)
 		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
@@ -190,20 +201,21 @@ func TestProfileErrors(t *testing.T) {
 func TestSet(t *testing.T) {
 	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
 	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	userdata, _ := ParseUserdata(repoFile(t, "userdata.yaml"))
 	users, _ := ParseUsers(repoFile(t, "users.yaml"))
 	p, err := Parse(repoFile(t, "ubuntu-26.04.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	q, err := p.Set([]string{"disks=lvm-striped", "kernel.ipv6=true", "kernel.extra=quiet splash", "users[0]={name: ump, sudo: true, keys: [ump, agent]}", "users[ump].shell=/bin/bash",
-		"packages=[htop, nginx]", "users[+]={name: ops, sudo: true, keys: [ump]}", "network.rename=false", "firewall={policy: drop, allow: [icmp, ssh, tcp/80]}", "timezone=Europe/Berlin"})
+		"userdata=[ubuntu]", "users[+]={name: ops, sudo: true, keys: [ump]}", "network.rename=false", "firewall={policy: drop, allow: [icmp, ssh, tcp/80]}", "timezone=Europe/Berlin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.Disks.Name != "lvm-linear" || *p.Kernel.IPv6 || len(p.Users) != 1 || p.Users[0].Name != "ump" || p.Users[0].User != nil {
 		t.Errorf("the original changed: %+v", p)
 	}
-	spec, err := q.Resolve(layouts, firewalls, users, fakeResolver)
+	spec, err := q.Resolve(layouts, firewalls, users, userdata, fakeResolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +225,8 @@ func TestSet(t *testing.T) {
 	if len(spec.Users) != 2 || spec.Users[0].Shell != "/bin/bash" || len(spec.Users[0].Keys) != 2 || spec.Users[1].Name != "ops" || !spec.Users[1].Sudo {
 		t.Errorf("users: %+v", spec.Users)
 	}
-	if strings.Join(spec.Packages, ",") != "htop,nginx" || len(spec.Firewall.Allow) != 3 || spec.Firewall.Allow[2].Port != "80" {
-		t.Errorf("packages %v, firewall %+v", spec.Packages, spec.Firewall)
+	if len(spec.Userdata) != 1 || spec.Userdata[0].Name != "ubuntu" || len(spec.Firewall.Allow) != 3 || spec.Firewall.Allow[2].Port != "80" {
+		t.Errorf("userdata %v, firewall %+v", spec.Userdata, spec.Firewall)
 	}
 	for _, c := range []struct{ set, want string }{
 		{"nope=1", "field nope not found"},
@@ -223,7 +235,7 @@ func TestSet(t *testing.T) {
 		{"users[bob].shell=/bin/sh", `no entry of users named "bob"`},
 		{"users[0].shell=/bin/sh", "users[0] is not a mapping"},
 		{"disks", "expected FIELD=VALUE"},
-		{"packages=[a", "is not YAML"},
+		{"userdata=[a", "is not YAML"},
 		{"os.name=x", "os is not a mapping"},
 	} {
 		if _, err := p.Set([]string{c.set}); err == nil || !strings.Contains(err.Error(), c.want) {

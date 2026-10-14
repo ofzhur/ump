@@ -80,8 +80,8 @@ func (i osImage) String() string {
 
 // profileWizard asks what a new profile should hold and writes it:
 // the image, the layout, the firewall, the administrator and the keys,
-// the kernel switches, the time zone, packages, the interface names and
-// the provision step. The defaults are those of the default profile.
+// the kernel switches, the time zone, the userdata, the interface names
+// and the provision step. The defaults are those of the default profile.
 func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error {
 	ctx := cmd.Context()
 	cfg, _, err := a.loadConfig()
@@ -179,7 +179,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 		}
 	}
 
-	// the kernel, the time zone, packages, the interfaces, the provision step
+	// the kernel, the time zone, the userdata, the interfaces, the provision step
 	mit, err := ui.Confirm("CPU vulnerability mitigations on? (they cost performance; mitigations=off otherwise)", false)
 	if err != nil {
 		return err
@@ -192,11 +192,33 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	if p.Timezone, err = ui.Line("Time zone", "UTC"); err != nil {
 		return err
 	}
-	pkgs, err := ui.Line("Extra Ubuntu packages (comma-separated, none by default)", "")
+	userdata, err := a.loadUserdata(ctx, storage)
 	if err != nil {
 		return err
 	}
-	p.Packages = splitList(pkgs)
+	ui.Printf("Userdata comes from userdata.yaml (ump config userdata): %s. It runs as root in the new system before its first boot.\n", strings.Join(sortedKeys(userdata), ", "))
+	for {
+		answer, err := ui.Line("Userdata (comma-separated, in order; none for nothing)", "ubuntu")
+		if err != nil {
+			return err
+		}
+		p.Userdata = nil
+		ok := true
+		for _, n := range splitList(answer) {
+			if n == "none" {
+				continue
+			}
+			if _, known := userdata[n]; !known {
+				ui.Printf("%s is not in userdata.yaml; ump config userdata create %s makes it.\n", n, n)
+				ok = false
+				break
+			}
+			p.Userdata = append(p.Userdata, profile.UserdataRef{Name: n})
+		}
+		if ok {
+			break
+		}
+	}
 	rename, err := ui.Confirm("Uniform interface names (ext01, int01, ... instead of the kernel's)?", true)
 	if err != nil {
 		return err
@@ -213,7 +235,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	}
 
 	// check it the way an installation would, without resolving keys
-	if _, err := p.Resolve(layouts, firewalls, users, checkKeys); err != nil {
+	if _, err := p.Resolve(layouts, firewalls, users, userdata, checkKeys); err != nil {
 		return err
 	}
 	text, err := renderProfile(p, a.now().UTC().Format("2006-01-02"))

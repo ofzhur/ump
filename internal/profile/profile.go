@@ -1,5 +1,5 @@
 // Package profile reads the YAML profiles that say what a server becomes
-// when ump installs it (operating system, disk layout, users, packages,
+// when ump installs it (operating system, disk layout, users, userdata,
 // firewall, the provision step), validates them and renders the
 // specification the installer takes.
 package profile
@@ -18,17 +18,17 @@ import (
 
 // Profile is a server profile as written in YAML.
 type Profile struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description,omitempty"`
-	OS          string      `yaml:"os"`
-	Timezone    string      `yaml:"timezone,omitempty"`
-	Kernel      Kernel      `yaml:"kernel,omitempty"`
-	Disks       Disks       `yaml:"disks"`
-	Users       []UserRef   `yaml:"users"`
-	Packages    []string    `yaml:"packages,omitempty"`
-	Firewall    FirewallRef `yaml:"firewall,omitempty"`
-	Provision   Provision   `yaml:"provision,omitempty"`
-	Network     Network     `yaml:"network,omitempty"`
+	Name        string        `yaml:"name"`
+	Description string        `yaml:"description,omitempty"`
+	OS          string        `yaml:"os"`
+	Timezone    string        `yaml:"timezone,omitempty"`
+	Kernel      Kernel        `yaml:"kernel,omitempty"`
+	Disks       Disks         `yaml:"disks"`
+	Users       []UserRef     `yaml:"users"`
+	Userdata    []UserdataRef `yaml:"userdata,omitempty"`
+	Firewall    FirewallRef   `yaml:"firewall,omitempty"`
+	Provision   Provision     `yaml:"provision,omitempty"`
+	Network     Network       `yaml:"network,omitempty"`
 }
 
 // FirewallRef is either the name of a firewall from firewalls.yaml or an
@@ -194,6 +194,133 @@ func ParseUsers(data []byte) (map[string]*User, error) {
 		u.Name = name
 	}
 	return file.Users, nil
+}
+
+// Userdata is what runs in the freshly installed system before its
+// first boot: a script for Ubuntu (type bash), later a declarative
+// configuration for systems that take one (cloud-init, Talos, NixOS).
+type Userdata struct {
+	Name        string `yaml:"name,omitempty" json:"name"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	Type        string `yaml:"type,omitempty" json:"type"`
+	Script      string `yaml:"script" json:"script"`
+}
+
+// UserdataTypes are the kinds of userdata ump knows how to apply.
+var UserdataTypes = []string{"bash"}
+
+// Validate checks a userdata entry.
+func (u *Userdata) Validate() error {
+	t := u.Type
+	if t == "" {
+		t = "bash"
+	}
+	known := false
+	for _, k := range UserdataTypes {
+		if k == t {
+			known = true
+		}
+	}
+	if !known {
+		return fmt.Errorf("userdata %s: type %q is not %s", u.Name, u.Type, strings.Join(UserdataTypes, ", "))
+	}
+	if strings.TrimSpace(u.Script) == "" {
+		return fmt.Errorf("userdata %s: the script is empty", u.Name)
+	}
+	return nil
+}
+
+// UserdataRef is either the name of an entry of userdata.yaml or an
+// inline one.
+type UserdataRef struct {
+	Name string
+	Data *Userdata
+}
+
+func (r *UserdataRef) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Decode(&r.Name)
+	case yaml.MappingNode:
+		r.Data = &Userdata{}
+		return n.Decode(r.Data)
+	}
+	return fmt.Errorf("userdata: a userdata name or a userdata, not a %s", kindName(n.Kind))
+}
+
+func (r UserdataRef) MarshalYAML() (any, error) {
+	if r.Data != nil {
+		return r.Data, nil
+	}
+	return r.Name, nil
+}
+
+// ParseUserdata reads userdata.yaml: named userdata.
+func ParseUserdata(data []byte) (map[string]*Userdata, error) {
+	var file struct {
+		Userdata map[string]*Userdata `yaml:"userdata"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&file); err != nil {
+		return nil, err
+	}
+	for name, u := range file.Userdata {
+		if u == nil {
+			return nil, fmt.Errorf("userdata %s is empty", name)
+		}
+		u.Name = name
+		if u.Type == "" {
+			u.Type = "bash"
+		}
+	}
+	return file.Userdata, nil
+}
+
+// HasUserdataRefs reports whether the profile names entries of
+// userdata.yaml.
+func HasUserdataRefs(p *Profile) bool {
+	for _, r := range p.Userdata {
+		if r.Data == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveUserdata turns the profile's userdata references into entries:
+// inline ones as they are, names looked up in userdata.
+func (p *Profile) ResolveUserdata(userdata map[string]*Userdata) ([]Userdata, error) {
+	out := []Userdata{}
+	seen := map[string]bool{}
+	for i, r := range p.Userdata {
+		var u Userdata
+		switch {
+		case r.Data != nil:
+			u = *r.Data
+			if u.Name == "" {
+				u.Name = fmt.Sprintf("inline-%d", i+1)
+			}
+			if u.Type == "" {
+				u.Type = "bash"
+			}
+		default:
+			known, ok := userdata[r.Name]
+			if !ok {
+				return nil, fmt.Errorf("profile %s: userdata %q is not in userdata.yaml (known: %s)", p.Name, r.Name, strings.Join(sortedKeys(userdata), ", "))
+			}
+			u = *known
+		}
+		if err := u.Validate(); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", p.Name, err)
+		}
+		if seen[u.Name] {
+			return nil, fmt.Errorf("profile %s: userdata %s is listed twice", p.Name, u.Name)
+		}
+		seen[u.Name] = true
+		out = append(out, u)
+	}
+	return out, nil
 }
 
 // HasUserRefs reports whether the profile names users from users.yaml.
@@ -407,6 +534,7 @@ func ParseLayouts(data []byte) (map[string]*Layout, error) {
 
 var (
 	userName   = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	nameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	vgName     = regexp.MustCompile(`^[A-Za-z0-9_.+-]+$`)
 	sizeSpec   = regexp.MustCompile(`^([0-9]+)([KMGT]|%)$`)
 	portSpec   = regexp.MustCompile(`^([0-9]{1,5})(-([0-9]{1,5}))?$`)
@@ -545,9 +673,9 @@ func (p *Profile) Validate() error {
 			}
 		}
 	}
-	for _, pkg := range p.Packages {
-		if !regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`).MatchString(pkg) {
-			return fmt.Errorf("profile %s: %q is not a package name", p.Name, pkg)
+	for _, r := range p.Userdata {
+		if r.Data == nil && !nameRe.MatchString(r.Name) {
+			return fmt.Errorf("profile %s: %q is not a userdata name", p.Name, r.Name)
 		}
 	}
 	if p.Firewall.Rules != nil {
@@ -611,7 +739,7 @@ type Spec struct {
 	Layout    *Layout     `json:"layout"`
 	Disks     []string    `json:"disks,omitempty"`
 	Users     []User      `json:"users"`
-	Packages  []string    `json:"packages"`
+	Userdata  []Userdata  `json:"userdata"`
 	Firewall  Firewall    `json:"firewall"`
 	Provision Provision   `json:"provision"`
 	Network   NetworkSpec `json:"network"`
@@ -641,11 +769,15 @@ type ProfileInfo struct {
 // profile's inline ones, or by name from layouts and firewalls) and
 // resolves the key references, and returns the specification. The
 // caller fills in the hostname, storage and disks.
-func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, users map[string]*User, resolve KeyResolver) (*Spec, error) {
+func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, users map[string]*User, userdata map[string]*Userdata, resolve KeyResolver) (*Spec, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	resolvedUsers, err := p.ResolveUsers(users)
+	if err != nil {
+		return nil, err
+	}
+	resolvedUserdata, err := p.ResolveUserdata(userdata)
 	if err != nil {
 		return nil, err
 	}
@@ -689,14 +821,11 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 			Extra:       strings.TrimSpace(p.Kernel.Extra),
 		},
 		Layout:    layout,
-		Packages:  append([]string{}, p.Packages...),
+		Userdata:  resolvedUserdata,
 		Firewall:  firewall,
 		Provision: p.Provision,
 		Network:   NetworkSpec{Rename: p.Network.Rename == nil || *p.Network.Rename},
 		Profile:   ProfileInfo{Name: p.Name, Description: p.Description},
-	}
-	if spec.Packages == nil {
-		spec.Packages = []string{}
 	}
 	for _, u := range resolvedUsers {
 		var keys []string

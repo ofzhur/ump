@@ -61,7 +61,7 @@ Every disk of the server is erased. A profile (--profile, default:
 default; a file of that name in the profiles directory of the
 configuration, else the published one) says which image, which disk
 layout (by name from layouts.yaml, or its own), which users with which
-keys, which extra packages, what the firewall lets in, and the provision
+keys, which userdata runs in it, what the firewall lets in, and the provision
 step after the first boot. The default profile puts Ubuntu 26.04 on
 every disk as one linear volume group, gives the sudo user ump UMP's key
 and your ~/.ssh/id_*.pub keys (root has no SSH login), lets ICMP and SSH
@@ -88,7 +88,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
 	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for the administrator of the new system (repeatable)")
-	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, packages='[htop, nginx]'; repeatable)")
+	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, userdata='[ubuntu, web]'; repeatable)")
 	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")
@@ -249,7 +249,13 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return err
 		}
 	}
-	spec, err := prof.Resolve(layouts, firewalls, users, a.keyResolver(cfg))
+	var userdata map[string]*profile.Userdata
+	if profile.HasUserdataRefs(prof) {
+		if userdata, err = a.loadUserdata(ctx, storage); err != nil {
+			return err
+		}
+	}
+	spec, err := prof.Resolve(layouts, firewalls, users, userdata, a.keyResolver(cfg))
 	if err != nil {
 		return err
 	}

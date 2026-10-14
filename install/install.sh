@@ -4,7 +4,7 @@
 # specification says (ump install renders it from a profile): wipes the
 # disks, partitions them, builds md arrays and volume groups, unpacks the
 # image, configures what depends on the machine (hostname, network, users
-# and keys, packages, firewall, boot loader) and leaves the machine ready
+# and keys, userdata, firewall, boot loader) and leaves the machine ready
 # to reboot into the new system. See README.md.
 #
 # Usage: install.sh --spec FILE [--dry-run] [--force]
@@ -12,7 +12,7 @@
 #                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
 #
 #   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
-#                    kernel, layout, disks, users, packages, firewall, provision,
+#                    kernel, layout, disks, users, userdata, firewall, provision,
 #                    network (rename: false keeps the kernel's interface names)
 #   without --spec   the lvm-linear layout with root alone; the flags are:
 #   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
@@ -108,7 +108,7 @@ else
 			{type: "lvm", vg: "vg0", name: "root", size: "rest", filesystem: "ext4", mountpoint: "/"}]},
 		disks: ($disks | if . == "" then [] else split(",") end),
 		users: [{name: "root", shell: "/bin/bash", groups: [], sudo: false, keys: ($keys | split("\n") | map(select(test("^[a-z]"))))}],
-		packages: [], firewall: {policy: "accept", allow: []}, provision: {type: "none"},
+		userdata: [], firewall: {policy: "accept", allow: []}, provision: {type: "none"},
 		profile: {name: "command line"}}')"
 fi
 s() { jq -r "$1 // empty" <<< "$spec"; }           # a string, empty when absent
@@ -374,7 +374,7 @@ for i in "${!IF_MAC[@]}"; do
 done
 log "interfaces: $ifs$([ "$rename" = yes ] || printf '; kernel names kept')"
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
-log "packages: $(jq -r '.packages | if length == 0 then "none" else join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
+log "userdata: $(jq -r '.userdata | if length == 0 then "none" else map(.name) | join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
 log "kernel command line: $kernel_cmdline"
 if [ "$dry" = 1 ]; then
 	log "dry run: stopping here, no disk was touched"
@@ -693,23 +693,52 @@ else
 	log "ssh: root cannot log in; administrator $admin (sudo)"
 fi
 
-# --- packages -----------------------------------------------------------
+# --- nftables, userdata -------------------------------------------------
 
-packages="$(jq -r '.packages // [] | join(" ")' <<< "$spec")"
-need_nft=0
-if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec" && [ ! -x "$TARGET/usr/sbin/nft" ]; then need_nft=1; fi
-if [ -n "$packages" ] || [ "$need_nft" = 1 ]; then
-	log "packages: ${packages:-}${need_nft:+ nftables}"
-	# the resolver of the rescue system serves the chroot; no service starts
+# the network for the chroot: the resolver of the rescue system serves it,
+# and no service starts there
+net_on() {
 	resolv_was="$(readlink "$TARGET/etc/resolv.conf" 2>/dev/null || true)"
 	rm -f "$TARGET/etc/resolv.conf"
 	printf 'nameserver %s\n' $dns > "$TARGET/etc/resolv.conf"
 	printf '#!/bin/sh\nexit 101\n' > "$TARGET/usr/sbin/policy-rc.d"; chmod 755 "$TARGET/usr/sbin/policy-rc.d"
-	run_in_target "apt-get update" apt-get update -q
-	run_in_target "apt-get install" apt-get install -y -q --no-install-recommends $packages $([ "$need_nft" = 1 ] && echo nftables)
+}
+net_off() {
 	in_target apt-get clean >/dev/null 2>&1 || true
 	rm -f "$TARGET/usr/sbin/policy-rc.d" "$TARGET/etc/resolv.conf"
 	[ -n "$resolv_was" ] && ln -s "$resolv_was" "$TARGET/etc/resolv.conf"
+	return 0
+}
+
+if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec" && [ ! -x "$TARGET/usr/sbin/nft" ]; then
+	log "packages: nftables (the firewall needs it)"
+	net_on
+	run_in_target "apt-get update" apt-get update -q
+	run_in_target "apt-get install" apt-get install -y -q --no-install-recommends nftables
+	net_off
+fi
+
+# the userdata: each entry as a script under /etc/ump/userdata in the new
+# system, run there in order as root, with network; a failing one fails
+# the installation
+n_userdata=$(jq -r '.userdata | length' <<< "$spec")
+if [ "$n_userdata" -gt 0 ]; then
+	mkdir -p "$TARGET/etc/ump/userdata"
+	net_on
+	for ((i = 0; i < n_userdata; i++)); do
+		ud_name="$(jq -r ".userdata[$i].name" <<< "$spec")"
+		ud_type="$(jq -r ".userdata[$i].type // \"bash\"" <<< "$spec")"
+		[ "$ud_type" = bash ] || die "userdata $ud_name: type $ud_type is not supported by this installer (bash only)"
+		ud_file="/etc/ump/userdata/$(printf '%02d' "$((i + 1))")-$ud_name.sh"
+		jq -r ".userdata[$i].script" <<< "$spec" > "$TARGET$ud_file"
+		chmod 700 "$TARGET$ud_file"
+		log "userdata: $ud_name ($ud_file; its output in /var/log/ump-userdata.log)"
+		if ! ud_out="$(in_target env UMP_USERDATA="$ud_name" UMP_HOSTNAME="$hostname" UMP_OS="$os" UMP_PROFILE="$profile_name" UMP_ADMIN="$admin" bash "$ud_file" 2>&1)"; then
+			printf '%s\n' "$ud_out" >&2; die "userdata $ud_name failed"
+		fi
+		printf '=== userdata %s (%s) at %s ===\n%s\n' "$ud_name" "$ud_file" "$(date -u +%FT%TZ)" "$ud_out" >> "$TARGET/var/log/ump-userdata.log"
+	done
+	net_off
 fi
 
 # --- firewall -----------------------------------------------------------
@@ -824,6 +853,7 @@ uplink=$uplink
 ipv6=$([ "$ipv6" = true ] && echo on || echo off)
 mitigations=$([ "$mitigations" = true ] && echo on || echo off)
 firewall=$(jq -r '.firewall.policy' <<< "$spec")
+userdata=$(jq -r '.userdata | map(.name) | join(",")' <<< "$spec")
 provision=$(jq -r '.provision.type' <<< "$spec")
 $(jq -r '.provision.options // {} | to_entries[] | "provision_\(.key)=\(.value)"' <<< "$spec")
 META

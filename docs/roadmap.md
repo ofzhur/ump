@@ -15,7 +15,7 @@ As of October 2026, ump does what the [README](../README.md) and the
   from the provider's rescue system; `ump server rescue` and `unrescue`.
 - **Installation:** `ump server reinstall` from profiles, with named and
   inline disk layouts (partitions, md, LVM with striping, mirroring and
-  parity), users and keys, packages, nftables firewalls that also hold
+  parity), users and keys, userdata scripts, nftables firewalls that also hold
   the ports containers publish, uniform interface names, the kernel
   command line, UEFI and BIOS boot; `--dry-run`; the Ubuntu 26.04 base
   image; `ump ssh`.

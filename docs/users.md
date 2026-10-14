@@ -60,7 +60,7 @@ keys: [ump, local, oleg]      # at least one key reference (see Keys)
 | `description` | One line, shown by `ump config user list`. |
 | `sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in (`/etc/sudoers.d/90-ump-NAME`), since no passwords are set. |
 | `groups` | Extra groups the user joins; a group that does not exist is created. |
-| `shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell (zsh, fish) needs its package in the profile's `packages`, or comes with your configuration management. |
+| `shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell (zsh, fish) needs its package, installed by the profile's [userdata](userdata.md), or comes with your configuration management. |
 | `keys` | [Key references](keys.md): `ump`, `local`, `agent`, a key name, a file, or a key line. Every user needs at least one: without a password, a user without keys could not log in. |
 
 ## The administrator and root

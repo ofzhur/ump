@@ -25,7 +25,7 @@ root and the keys of a file).
    volume. A target that matches no disk, two parts taking the rest of
    one disk, an md or raid level with too few members, a UEFI machine
    without an `efi` part or a BIOS machine without a `bios` part stop it
-   here. Prints the plan, with the users, packages, firewall and
+   here. Prints the plan, with the users, userdata, firewall and
    provision step; `--dry-run` stops here.
 3. **Fetches the manifest** of the image, so that a missing image costs
    no disk.
@@ -67,10 +67,13 @@ root and the keys of a file).
    otherwise the image's `PermitRootLogin no` stands, and the
    administrator (the first sudo user, `ump` in the default profile) is
    the way in, for ump as well.
-9. **Packages:** the profile's packages are installed from the Ubuntu
-   archive inside the new system (through the rescue system's resolver,
-   with no service started), as is `nftables` when the firewall needs
-   it and the image lacks it.
+9. **Userdata:** `nftables` is installed from the Ubuntu archive when
+   the firewall needs it and the image lacks it; then every entry of
+   the profile's `userdata` is written to `/etc/ump/userdata/NN-NAME.sh`
+   in the new system and run there in order, as root in a chroot, with
+   the rescue system's resolver and no service started (`policy-rc.d`).
+   The output goes to `/var/log/ump-userdata.log` of the new system; a
+   failing script stops the installation with its output shown.
 10. **Firewall:** with `policy: drop`, `/etc/nftables.conf` is written
     and `nftables.service` enabled: input drop, with the loopback
     interface, established and related connections and the allowed
@@ -108,7 +111,7 @@ install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/
 
 The specification is JSON with the fields of a resolved profile (`os`,
 `hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
-`disks`, `users` with key lines, `packages`, `firewall`, `provision`,
+`disks`, `users` with key lines, `userdata` with scripts, `firewall`, `provision`,
 `network`);
 `ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`

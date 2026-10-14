@@ -20,7 +20,7 @@ import (
 // files next to them hold the published entries and the user's own.
 var publishedProfiles = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04"}
 
-var namedFiles = []*namedSet{layoutSet, firewallSet, userSet}
+var namedFiles = []*namedSet{layoutSet, firewallSet, userSet, userdataSet}
 
 // profileFiles are the files the first run downloads.
 var profileFiles = func() []string {
@@ -113,7 +113,7 @@ yours their own names).`,
 					return err
 				}
 				if len(kept) > 0 {
-					fmt.Fprintf(a.stdout, "%s: updated; your %ss kept: %s\n", set.file, set.noun, strings.Join(kept, ", "))
+					fmt.Fprintf(a.stdout, "%s: updated; your %s kept: %s\n", set.file, set.plurals(), strings.Join(kept, ", "))
 				} else {
 					fmt.Fprintf(a.stdout, "%s: updated\n", set.file)
 				}
@@ -168,8 +168,8 @@ func (a *app) newConfigOSCmd() *cobra.Command {
 configuration (` + config.AbbreviateHome(config.ProfilesDir()) + `), one per name,
 plus layouts.yaml with the named disk layouts. The first run puts the
 published default profile and layouts there. A profile names the image,
-the disk layout, the users with their keys, extra packages, the firewall
-and the provision step; docs/profiles.md in the repository describes
+the disk layout, the users with their keys, the userdata that runs in
+the new system, the firewall and the provision step; docs/profiles.md in the repository describes
 every field. ump server reinstall NAME --profile NAME installs with one,
 ump server set NAME --profile NAME remembers it for a server.
 
@@ -316,8 +316,8 @@ func (a *app) newOSCreateCmd() *cobra.Command {
 		Long: `On a terminal, ump config os create is a wizard: it asks for the name
 when none is given, then what the profile should hold (the image from
 the storage, the disk layout, the firewall, the administrator with shell
-and keys, the kernel switches, the time zone, packages, the interface
-names, the provision step) and writes it. --from NAME copies another
+and keys, the kernel switches, the time zone, the userdata, the
+interface names, the provision step) and writes it. --from NAME copies another
 profile instead and opens it in your editor; without a terminal that is
 the only way.`,
 		Args: usageArgs(cobra.MaximumNArgs(1)),
@@ -472,7 +472,13 @@ func (a *app) checkProfile(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if _, err := p.Resolve(layouts, firewalls, users, checkKeys); err != nil {
+	var userdata map[string]*profile.Userdata
+	if profile.HasUserdataRefs(p) {
+		if userdata, err = a.loadUserdata(ctx, cfg.StorageURL()); err != nil {
+			return err
+		}
+	}
+	if _, err := p.Resolve(layouts, firewalls, users, userdata, checkKeys); err != nil {
 		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)
 	}
 	fmt.Fprintf(a.stdout, "Profile %s is valid (%s, layout %s).\n", name, p.OS, layoutName(p))

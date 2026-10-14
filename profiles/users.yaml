@@ -6,7 +6,7 @@
 #   sudo     member of sudo without a password (no passwords are set)
 #   groups   extra groups, created when missing
 #   shell    a path; /bin/bash (colored prompt, completion) by default; another
-#            shell needs its package (packages in the profile)
+#            shell needs its package (install it with userdata)
 #   keys     ump (UMP's own key), local (your ~/.ssh/id_*.pub), agent
 #            (ssh-add -L), a key name from ump config key, a file, or a
 #            key line itself

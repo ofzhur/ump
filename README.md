@@ -68,17 +68,18 @@ alike, booting from UEFI and, on amd64, from legacy BIOS.
 
 ## The objects
 
-Six kinds of things are configured, all as YAML in `~/.config/ump/`,
+Seven kinds of things are configured, all as YAML in `~/.config/ump/`,
 each with its own `ump config` command (`list`, `get`, `create`,
 `edit`, `delete`; `create` and `add` ask their questions on a terminal):
 
 | Object | Command | What it is |
 |---|---|---|
 | [Provider accounts](docs/providers.md) | `ump config isp` | credentials for a provider API; secrets as references to files, environment variables or commands, never plaintext |
-| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, packages, firewall, kernel command line, the step after the first boot |
+| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line, the step after the first boot |
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
+| [Userdata](docs/userdata.md) | `ump config userdata` | what runs in a freshly installed system before its first boot: a script for Ubuntu today, a declarative configuration for the systems that take one later; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
 
 The first use downloads the published defaults: the profiles
@@ -103,7 +104,7 @@ from them (`ump config os create`, `ump config user create`, ...), and
    resolved profile: it plans every partition, array and volume against
    the disks it finds, wipes the disks, builds the layout, unpacks the
    image, and configures what depends on the machine (hostname, network
-   with uniform interface names, users and keys, packages, firewall, boot
+   with uniform interface names, users and keys, userdata, firewall, boot
    loader for UEFI and BIOS).
 4. The server reboots into the new system; ump waits until it answers
    over SSH with UMP's key and reports what came up.
@@ -125,6 +126,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
+| [Userdata](docs/userdata.md) | the scripts that run in a new system before its first boot: fields, how they run, the published entry, managing and using them |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
@@ -132,8 +134,8 @@ own](images/rescue/README.md#your-own-storage).
 | [Roadmap](docs/roadmap.md) | what is there, what comes next, open questions |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
 | [Ubuntu base image](images/ubuntu/README.md) | the system `ump server reinstall` puts on disks, and its defaults |
-| [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the image, users, packages, firewall, the boot loader |
-| [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls and users come from |
+| [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the image, users, userdata, firewall, the boot loader |
+| [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, users and userdata come from |
 | [Skill](docs/skill.md) | design outline for a planned part: operating a fleet and its Terraform and Ansible repository with an AI agent |
 
 ## Principles

@@ -125,7 +125,8 @@ Common first choices: a user of your own next to `ump` (`ump config
 user create oleg --from ump`, with your keys), `kernel.ipv6: true` if
 the server needs IPv6, another layout (`lvm-raid1` for two NVMe disks)
 or firewall (`web`). [Profiles](profiles.md), [disk
-layouts](disk-layouts.md), [firewalls](firewalls.md), [users](users.md)
+layouts](disk-layouts.md), [firewalls](firewalls.md), [users](users.md),
+[userdata](userdata.md)
 and [keys](keys.md) describe every field and the published ones.
 
 ## 6. See the plan, then install
@@ -146,7 +147,7 @@ Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/prof
 ==> network: ext01 (96:00:01:ab:cd:ef) 198.51.100.22/32,172.31.1.1; IPv6 off; DNS 1.1.1.1 8.8.8.8; hostname web-01; time zone UTC
 ==> interfaces: ext01 (ext, 96:00:01:ab:cd:ef, now eth0)
 ==> users: ump (2 key(s), sudo)
-==> packages: none; firewall: drop, allow icmp, tcp/22; provision: none
+==> userdata: ubuntu; firewall: drop, allow icmp, tcp/22; provision: none
 ==> dry run: stopping here, no disk was touched
 Dry run done; web-01 stays in the UMP rescue system (ump ssh web-01 --staging).
 ```
@@ -154,7 +155,7 @@ Dry run done; web-01 stays in the UMP rescue system (ump ssh web-01 --staging).
 The dry run brings the server into UMP's rescue system, a Debian that
 runs from RAM with the disks untouched, and prints what the profile
 resolves to on that machine: every partition, array and volume per disk,
-the network, users, packages and firewall. The server stays there until
+the network, users, userdata and firewall. The server stays there until
 you reboot it; `ump server unrescue web-01 --reboot` boots the old system
 again, and a real installation continues from the rescue system as it is.
 
@@ -203,7 +204,7 @@ uptime, memory, the root disk and the addresses.
   create NAME --from lvm-raid1`, `ump config firewall create NAME --from
   web`, `ump config user create NAME --from ump`; each checks the file
   after your editor returns. See [disk layouts](disk-layouts.md),
-  [firewalls](firewalls.md) and [users](users.md).
+  [firewalls](firewalls.md), [users](users.md) and [userdata](userdata.md).
 - **Keys under names.** `ump config key add oleg --file
   ~/.ssh/id_ed25519.pub` keeps a public key as `oleg`, for any user's
   `keys`; `ump config key add` alone asks for the name and the key. See

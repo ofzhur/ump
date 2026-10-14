@@ -2169,8 +2169,8 @@ func TestInstallServer(t *testing.T) {
 	if fw := spec["firewall"].(map[string]any); fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
 		t.Errorf("spec firewall: %v", fw)
 	}
-	if spec["provision"].(map[string]any)["type"] != "none" || len(spec["packages"].([]any)) != 0 {
-		t.Errorf("spec provision/packages: %v %v", spec["provision"], spec["packages"])
+	if ud := spec["userdata"].([]any); spec["provision"].(map[string]any)["type"] != "none" || len(ud) != 1 || ud[0].(map[string]any)["name"] != "ubuntu" || ud[0].(map[string]any)["type"] != "bash" || !strings.Contains(ud[0].(map[string]any)["script"].(string), "set -euo pipefail") {
+		t.Errorf("spec provision/userdata: %v %v", spec["provision"], spec["userdata"])
 	}
 	// root's keys of the new system are put into the rescue system first
 	if !strings.HasPrefix(e.installs[0], `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in 'ssh-ed25519 `) || !strings.Contains(e.installs[0], `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; cat > /tmp/ump-install.json && f=/tmp/ump-install.sh;`) {
@@ -2300,8 +2300,8 @@ func TestInstallProfiles(t *testing.T) {
 	resetFakePower()
 	e.directRoot = true
 
-	// a profile file of its own: users with sudo and agent keys, packages,
-	// an inline layout, a firewall, a provision step
+	// a profile file of its own: users with sudo and agent keys, inline
+	// userdata, an inline layout, a firewall, a provision step
 	dir := t.TempDir()
 	prof := filepath.Join(dir, "db.yaml")
 	os.WriteFile(prof, []byte(`os: ubuntu-26.04
@@ -2318,7 +2318,7 @@ disks:
 users:
   - {name: root, keys: [ump, agent]}
   - {name: dba, sudo: true, groups: [adm], keys: [agent]}
-packages: [postgresql, htop]
+userdata: [{name: pg, script: "apt-get install -y postgresql\n"}]
 firewall: {policy: drop, allow: [icmp, ssh, tcp/5432, {proto: tcp, port: 9100, from: 10.0.0.0/8}]}
 provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 `), 0o600)
@@ -2342,8 +2342,8 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	if len(users) != 2 || users[1].(map[string]any)["name"] != "dba" || users[1].(map[string]any)["sudo"] != true || len(users[0].(map[string]any)["keys"].([]any)) != 2 || len(users[1].(map[string]any)["keys"].([]any)) != 1 {
 		t.Errorf("users: %v", users)
 	}
-	if pk := spec["packages"].([]any); len(pk) != 2 || pk[0] != "postgresql" {
-		t.Errorf("packages: %v", pk)
+	if ud := spec["userdata"].([]any); len(ud) != 1 || ud[0].(map[string]any)["name"] != "pg" || ud[0].(map[string]any)["type"] != "bash" || ud[0].(map[string]any)["script"] != "apt-get install -y postgresql\n" {
+		t.Errorf("userdata: %v", ud)
 	}
 	if fw := spec["firewall"].(map[string]any); len(fw["allow"].([]any)) != 4 || fw["allow"].([]any)[3].(map[string]any)["from"] != "10.0.0.0/8" {
 		t.Errorf("firewall: %v", fw)
@@ -2359,7 +2359,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml":
+		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2892,7 +2892,7 @@ func TestConfigOSUpdate(t *testing.T) {
 	if _, errOut, code := e.run("", false, "config", "os", "edit", "ubuntu-24.04"); code != 1 || !strings.Contains(errOut, "ubuntu-24.04 is a published profile, which ump config os update replaces; make your own from it: ump config os create NAME --from ubuntu-24.04") {
 		t.Errorf("edit of a published profile: code %d, %q", code, errOut)
 	}
-	os.WriteFile(filepath.Join(dir, "ubuntu-26.04.yaml"), []byte(published["ubuntu-26.04.yaml"]+"packages: [htop]\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "ubuntu-26.04.yaml"), []byte(published["ubuntu-26.04.yaml"]+"timezone: Europe/Berlin\n"), 0o600)
 	os.WriteFile(filepath.Join(dir, "mine.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
 	if _, _, code := e.run("", false, "config", "dl", "create", "mine", "--from", "lvm-linear"); code != 0 {
 		t.Fatal("layout create failed")
@@ -2972,17 +2972,17 @@ func TestProfileWizard(t *testing.T) {
 	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 
 	// image 2 (24.04), the default layout, the web firewall, admin ump with
-	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, two
-	// packages, renamed interfaces, no provision step, a description, no
-	// editor
-	script := "2\n\nweb\nump, ops\ny\n\nump\nOps people\n\ny\n\nhtop, nginx\n\n\nWeb servers\n\n"
+	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, the
+	// userdata ubuntu (an unknown name first, refused), renamed
+	// interfaces, no provision step, a description, no editor
+	script := "2\n\nweb\nump, ops\ny\n\nump\nOps people\n\ny\n\nnope\nubuntu\n\n\nWeb servers\n\n"
 	out, errOut, code := e.run(script, true, "config", "os", "create", "web")
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
 	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
 		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Users come from users.yaml (ump config user): ump.",
-		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Extra Ubuntu packages", "Uniform interface names", "Provision step", "Description",
+		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): ubuntu.", "Userdata (comma-separated, in order; none for nothing) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Provision step", "Description",
 		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, errOut)
@@ -2995,7 +2995,7 @@ func TestProfileWizard(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{"# Profile web, made by ump config os create on 2026-10-12", "name: web\n", "description: Web servers\n", "os: ubuntu-24.04\n", "timezone: UTC\n",
 		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - ump\n  - ops\n",
-		"packages:\n  - htop\n  - nginx\n", "firewall: web\n", "provision:\n  type: none\n", "network:\n  rename: true\n"} {
+		"userdata:\n  - ubuntu\n", "firewall: web\n", "provision:\n  type: none\n", "network:\n  rename: true\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("profile lacks %q:\n%s", want, text)
 		}
@@ -3004,7 +3004,7 @@ func TestProfileWizard(t *testing.T) {
 		t.Errorf("list: code %d\n%s", code, out)
 	}
 	// without a name, the wizard asks for it first
-	if _, errOut, code := e.run("web2\n2\n\nweb\nump\n\ny\n\nhtop\n\n\nMore web\n\n", true, "config", "os", "create"); code != 0 || !strings.Contains(errOut, "Profiles in "+dir+": ") || !strings.Contains(errOut, "Name of the new profile:") || !strings.Contains(errOut, "Saved "+dir+"/web2.yaml") {
+	if _, errOut, code := e.run("web2\n2\n\nweb\nump\n\ny\n\nubuntu\n\n\nMore web\n\n", true, "config", "os", "create"); code != 0 || !strings.Contains(errOut, "Profiles in "+dir+": ") || !strings.Contains(errOut, "Name of the new profile:") || !strings.Contains(errOut, "Saved "+dir+"/web2.yaml") {
 		t.Errorf("create without a name: code %d\n%s", code, errOut)
 	}
 	if out, _, code := e.run("", false, "config", "user", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "ops yes /bin/bash ump ok Ops people") {
@@ -3020,7 +3020,7 @@ func TestProfileWizard(t *testing.T) {
 		t.Errorf("reinstall with the wizard's profile: code %d, %q", code, errOut)
 	}
 	spec := e.lastSpec()
-	if spec["os"] != "ubuntu-24.04" || spec["kernel"].(map[string]any)["ipv6"] != true || spec["firewall"].(map[string]any)["name"] != "web" || len(spec["packages"].([]any)) != 2 {
+	if spec["os"] != "ubuntu-24.04" || spec["kernel"].(map[string]any)["ipv6"] != true || spec["firewall"].(map[string]any)["name"] != "web" || len(spec["userdata"].([]any)) != 1 {
 		t.Errorf("spec: %v", spec)
 	}
 	if users := spec["users"].([]any); len(users) != 2 || users[0].(map[string]any)["name"] != "ump" || users[1].(map[string]any)["name"] != "ops" || users[1].(map[string]any)["shell"] != "/bin/bash" {
@@ -3050,12 +3050,12 @@ func TestReinstallSet(t *testing.T) {
 	e.directRoot = true
 	resetFakePower()
 	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one",
-		"--set", "kernel.extra=quiet", "--set", "users[0]={name: ump, sudo: true, keys: [ump]}", "--set", "users[ump].shell=/bin/bash", "--set", "packages=[htop, nginx]", "--set", "network.rename=false")
+		"--set", "kernel.extra=quiet", "--set", "users[0]={name: ump, sudo: true, keys: [ump]}", "--set", "users[ump].shell=/bin/bash", "--set", "userdata=[{name: x, script: 'echo x'}]", "--set", "network.rename=false")
 	if code != 0 {
 		t.Fatalf("reinstall --set: code %d, %q", code, errOut)
 	}
 	spec := e.lastSpec()
-	if spec["kernel"].(map[string]any)["extra"] != "quiet" || spec["users"].([]any)[0].(map[string]any)["shell"] != "/bin/bash" || len(spec["packages"].([]any)) != 2 || spec["network"].(map[string]any)["rename"] != false {
+	if spec["kernel"].(map[string]any)["extra"] != "quiet" || spec["users"].([]any)[0].(map[string]any)["shell"] != "/bin/bash" || len(spec["userdata"].([]any)) != 1 || spec["network"].(map[string]any)["rename"] != false {
 		t.Errorf("spec: %v", spec)
 	}
 	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--set", "kernel.colour=blue"); code != 2 || !strings.Contains(errOut, "field colour not found") {

@@ -85,6 +85,12 @@ ump
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      your editor on users.yaml, then a check of every user
 │   │   └── delete   (d, rm, remove) <name> [--yes]
+│   ├── userdata (ud)                                  the named userdata of userdata.yaml: what runs in a new system before its first boot
+│   │   ├── list     (ls, l)                           the entries, with type, lines and whether they are valid
+│   │   ├── get      (g, show) <name>                  print one
+│   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
+│   │   ├── edit     (e) [<name>]                      your editor on userdata.yaml, then a check of every entry
+│   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── state (st)                                     where the home lives: local, or a backend shared by a team
 │   │   ├── view     (v, show)                         where the home is, the mirror, what it holds
 │   │   ├── set      [--url <url> [backend flags]]     point ump at a backend; without flags the wizard on a terminal (pick one, copy the home there)
@@ -377,8 +383,8 @@ stock Linux and UMP's key, which `reinstall` may do since it erases the
 server anyway; `rescue` never does. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
-its own), the users with their keys, extra packages, what the firewall
-lets in, and the provision step after the first boot. The server is
+its own), the users with their keys, the userdata that runs in the new
+system, what the firewall lets in, and the provision step after the first boot. The server is
 brought into the UMP rescue system the way `rescue` does it (as it is
 when it runs it already, by a kexec from the running system when that
 lets UMP in as root, else through the provider's rescue system); the
@@ -430,7 +436,7 @@ README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
 says how to turn them on later. The flags override the profile for one
 installation: `--layout`, `--firewall`, `--os`, `--timezone`, `--ipv6`,
 `--set FIELD=VALUE` for any other field (`--set kernel.extra=quiet`,
-`--set users[0].shell=/bin/bash`, `--set 'packages=[htop, nginx]'`;
+`--set users[0].shell=/bin/bash`, `--set 'userdata=[ubuntu, web]'`;
 the value is YAML, an unknown field is refused),
 `--mitigations`, `--disks`, `--ssh-key`; `--storage` names another
 storage than the configured one for the installer, the images, the
@@ -438,7 +444,7 @@ profiles and the rescue image.
 
 `--dry-run` brings the server into the rescue system, prints the
 installer's plan (machine, every partition, array and volume per disk,
-network, users, packages, firewall, provision) and leaves it there
+network, users, userdata, firewall, provision) and leaves it there
 without touching a disk; a layout whose targets match no disk, or a raid
 level with too few members, stops there too. `--no-reboot` installs and leaves the
 server in the rescue system. `-o json` prints the result (the profile and layout, the way in, the
@@ -508,6 +514,7 @@ ump config os          list|get|create|edit|delete|update|default
 ump config disk-layout list|get|create|edit|delete
 ump config firewall    list|get|create|edit|delete
 ump config user        list|get|create|edit|delete
+ump config userdata    list|get|create|edit|delete
 ump config key         show|list|add|remove
 ump config state       view|set|migrate|clear|pull|push|test|locks|unlock
 ```
@@ -524,6 +531,7 @@ their own, so `ump c o ls` is `ump config os list`:
 | `disk-layout` | `dl`, `layout` |
 | `firewall` | `fw` |
 | `user` | `u` |
+| `userdata` | `ud` |
 | `key` | `k` |
 | `state` | `st` |
 | `list` | `ls`, `l` |
@@ -550,8 +558,8 @@ with `*`, and whether each is published or yours), `get` prints one,
 `create [NAME]` asks on a terminal what the profile should hold (the
 name when none is given; the image, from the storage's `os/index.json`; the disk layout; the
 firewall; the users from `users.yaml`, a new one defined on the spot;
-the kernel switches; the time zone; packages; the interface names; the
-provision step) and writes it, or with `--from NAME` copies another
+the kernel switches; the time zone; the userdata; the interface names;
+the provision step) and writes it, or with `--from NAME` copies another
 profile and opens it in your editor, `edit NAME` opens it and checks it
 afterwards (an invalid profile is kept, with the problem named; a
 published profile is refused, make your own from it), `delete NAME`
@@ -575,7 +583,10 @@ checks every layout afterwards, `delete` removes one. `ump config firewall`
 server reinstall --firewall NAME` picks one for an installation. `ump
 config user` (`u`) is the same for the named [users](profiles.md#users)
 in `users.yaml` (`ump`, the administrator UMP provides), which a
-profile lists by name in `users`.
+profile lists by name in `users`, and `ump config userdata` (`ud`) for
+the named [userdata](userdata.md) in `userdata.yaml` (`ubuntu`, what
+every Ubuntu gets), the scripts a profile lists in `userdata` to run
+in the new system before its first boot.
 
 Without arguments and on a terminal, `ump config isp add` is an
 interactive wizard. On a fresh system it first asks whether everything

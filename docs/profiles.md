@@ -2,8 +2,8 @@
 
 A profile says what a server becomes when `ump server reinstall` installs
 it: which operating system image, which [disk layout](disk-layouts.md),
-which users with which SSH keys, which extra packages, what the
-[firewall](firewalls.md) lets in, the kernel command line, and what
+which users with which SSH keys, which [userdata](userdata.md) runs in
+the new system, what the [firewall](firewalls.md) lets in, the kernel command line, and what
 happens after the first boot. It is one YAML file per profile.
 
 ```console
@@ -81,7 +81,7 @@ disks: lvm-linear      # a layout from layouts.yaml, or an inline one
 users: [ump]           # users from users.yaml: ump is the administrator, sudo without a
                        # password, UMP's key and the public keys next to your ~/.ssh/id_*
 
-packages: []
+userdata: [ubuntu]     # entries from userdata.yaml, run in the new system before its first boot
 
 firewall: default      # a firewall from firewalls.yaml, or an inline one
 
@@ -163,7 +163,8 @@ users:
     keys: [ump, local]        # at least one key reference (see Keys)
   - name: root                # only when listed does root log in over SSH, with keys only
     keys: [ump]
-packages: [htop]              # optional; Ubuntu packages, installed from the archive at installation
+userdata: [ubuntu, web]       # optional; entries from userdata.yaml, or inline ones, run in order
+                              # as root in the new system before its first boot
 firewall: default             # a firewall name from firewalls.yaml, or an inline one;
                               # absent: no firewall
 provision:                    # optional; the step after the first boot
@@ -186,10 +187,10 @@ network:                      # optional
 | `users` | The accounts of the new system, in order: names from `users.yaml`, inline users, or both. At least one, no name twice, and one of them must be able to administer the system (below). |
 | `users[].name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special. In `users.yaml` the entry's key is the name. |
 | `users[].sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in, since no passwords are set. |
-| `users[].shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell needs its package. |
+| `users[].shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell needs its package, installed by userdata. |
 | `users[].groups` | Extra groups, created when missing. |
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
-| `packages` | Ubuntu package names, installed from the archive inside the new system during the installation, through the rescue system's network. |
+| `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
 | `provision.type` | The step after the first boot: `none`, `ansible-pull` or `ansible-bootstrap`. The type and the other keys of the section are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`); running the step is not implemented yet, `ump server reinstall` says so. |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
@@ -304,8 +305,8 @@ then, with the default profile's answers preselected: the image (listed from the
 date, or another name), the disk layout and the firewall by name, the
 users by name from `users.yaml` (a name it does not know is defined on
 the spot: sudo, shell, keys, description, and kept there), the
-mitigations and IPv6 switches, the time zone, extra packages, the
-interface naming, the provision step and a description. It checks the result like an
+mitigations and IPv6 switches, the time zone, the userdata by name
+from `userdata.yaml`, the interface naming, the provision step and a description. It checks the result like an
 installation would, writes the file, prints it and offers your editor.
 `--from NAME` copies a profile instead, and without a terminal that is
 the only form.
@@ -350,7 +351,7 @@ $ ump server set web-01 --clear
 
 `ump server reinstall --dry-run` brings the server into the rescue system
 and prints what the profile resolves to on that machine: every partition,
-array and volume per disk, the network, the users, packages, firewall and
+array and volume per disk, the network, the users, userdata, firewall and
 provision step, without touching a disk.
 
 The flags of `ump server reinstall` override a profile for one
@@ -367,7 +368,7 @@ installation:
 | `--ssh-key FILE` | adds the file's keys to the administrator (repeatable) |
 | `--disks /dev/sda,/dev/sdb` | the disks the layout is applied to (default: every disk of the server) |
 | `--hostname NAME` | the hostname (default: the server's name at the provider) |
-| `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable): `--set kernel.extra=quiet`, `--set users[0].shell=/bin/bash`, `--set users[ump].keys='[ump, agent]'`, `--set 'packages=[htop, nginx]'`, `--set 'users[+]={name: ops, sudo: true, keys: [local]}'`, `--set network.rename=false`; an unknown field is refused like in a profile file |
+| `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable): `--set kernel.extra=quiet`, `--set users[0].shell=/bin/bash`, `--set users[ump].keys='[ump, agent]'`, `--set 'userdata=[ubuntu, web]'`, `--set 'users[+]={name: ops, sudo: true, keys: [local]}'`, `--set network.rename=false`; an unknown field is refused like in a profile file |
 
 The resolved profile travels to the installer as a JSON specification and
 stays on the installed system as `/etc/ump/spec.json` (mode 0600);
@@ -402,7 +403,7 @@ users:
     groups: [www-data]
     keys: [deploy]             # a named key: ump config key add deploy --file ~/.ssh/deploy.pub
 
-packages: [nginx, certbot]
+userdata: [ubuntu, web]        # ubuntu: what every Ubuntu gets; web: yours, ump config userdata create web
 
 firewall: web                  # ICMP, SSH, HTTP, HTTPS
 
