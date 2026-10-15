@@ -4,6 +4,8 @@
 # agent needs. Needs qemu-system-<arch> and ssh-keygen on the host.
 #
 # Usage: test-boot.sh [amd64|arm64]   (uses out/<arch>, see build.sh)
+# Environment: MEM (MB, default 2048), TIMEOUT, PORT, KEXEC_TEST=0 to skip
+# the kexec test, KEXEC_DISK=1 to keep its download on the virtual disk.
 set -euo pipefail
 ARCH="${1:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -91,6 +93,12 @@ if [ "$KEXEC_TEST" = 1 ] && command -v python3 >/dev/null; then
 	trap 'kill "$http_pid" 2>/dev/null; cleanup' EXIT
 	boot_id="$(ssh "${ssh_opts[@]}" cat /proc/sys/kernel/random/boot_id)"
 	echo "==> kexec test: downloading the image from the host and kexecing into it"
+	# KEXEC_DISK=1 keeps the download on the virtual disk, as on a machine
+	# that jumps from a system installed on disk (not from a rescue system
+	# in RAM, which holds the download in memory too)
+	if [ "${KEXEC_DISK:-0}" = 1 ]; then
+		ssh "${ssh_opts[@]}" 'mkfs.ext4 -q -F /dev/vda && mkdir -p /var/tmp && mount /dev/vda /var/tmp' || { echo "could not put /var/tmp on the disk"; exit 1; }
+	fi
 	scp -q -i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$PORT" "$HERE/kexec-into-rescue.sh" root@127.0.0.1:/tmp/
 	ssh "${ssh_opts[@]}" "UMP_RESCUE_URL=http://10.0.2.2:$http_port /tmp/kexec-into-rescue.sh -a $ARCH -H ump-rescue-kexec --no-exec" || { echo "kexec-into-rescue.sh failed"; exit 1; }
 	# the command that replaces the kernel is detached from the session

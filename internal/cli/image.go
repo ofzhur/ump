@@ -204,6 +204,10 @@ func (a *app) enterImage(ctx context.Context, user, addr string, identities []st
 		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended before the rescue image was loaded", addr))
 	case !strings.Contains(out, "==> "):
 		return fmt.Errorf("%s could not fetch the entry script from %s/kexec-into-rescue.sh (exit status %d); the server must reach the image's base URL", addr, url, code)
+	case code == 3:
+		// kexec-into-rescue.sh stops before the jump when the machine has
+		// too little memory for the image; it said why above
+		return fmt.Errorf("the rescue image does not fit the memory of %s (see above); nothing was changed there", addr)
 	case code != 0:
 		return fmt.Errorf("loading the rescue image on %s failed (exit status %d)", addr, code)
 	}

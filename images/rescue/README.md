@@ -11,9 +11,14 @@ RAM with no disk mounted. The same image serves the `kexec` entry method
 on clouds without a rescue system, and later virtual media and PXE.
 
 The image is one kernel plus one initramfs per architecture (amd64,
-arm64). The initramfs **is** the whole system: the kernel starts
-`/init`, which is systemd, and nothing is ever switched to. There is
-no squashfs to fetch and nothing to mount.
+arm64). The initramfs is small: a static busybox, the `loop`,
+`squashfs` and `overlay` modules, [`init`](init) and the whole system as
+`rootfs.squashfs`. `init` mounts the squashfs read-only, puts a
+writable layer in RAM on top (overlayfs) and starts systemd there, so
+the system costs its compressed size in memory instead of its unpacked
+size. There is still nothing to fetch but the two files, and no disk is
+mounted. When `init` cannot mount the system it says why on the
+console and opens a shell there.
 
 ## Building
 
@@ -103,7 +108,7 @@ image alone) and serve this below it:
 | `rescue/kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
 | `rescue/<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
 | `rescue/<arch>/vmlinuz` | the rescue kernel |
-| `rescue/<arch>/initrd.zst` | the rescue system, as a zstd-compressed initramfs |
+| `rescue/<arch>/initrd.zst` | the rescue system: a zstd-compressed initramfs with `init` and the system as a squashfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
 | `profiles/ubuntu-26.04.yaml`, `profiles/ubuntu-24.04.yaml`, `profiles/ubuntu-22.04.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml`, `profiles/users.yaml` | the published [profile](../../docs/profiles.md), [layouts](../../docs/disk-layouts.md) and [firewalls](../../docs/firewalls.md); a copy in `~/.config/ump/profiles/` wins |
@@ -241,9 +246,19 @@ otherwise.
 ## Memory
 
 Everything lives in RAM, so size is the one thing that limits where the
-image boots. A kexec from a RAM-based rescue system holds the running
-system, the downloaded files and the kernel's copy of them at the same
-time, and the new kernel then unpacks the whole initramfs into memory.
+image boots. A kexec holds the running system, the downloaded files
+(on disk when the running system has one, in RAM in a rescue system)
+and the kernel's copy of them at the same time; the new kernel then
+unpacks the initramfs, whose bulk is the squashfs, which stays
+compressed in memory from then on. Until 2026.10.15 the initramfs was
+the unpacked system itself (236 MB on amd64), which needed about 600 MB
+to boot and panicked on a 512 MB DigitalOcean droplet ("Unable to mount
+root fs on unknown-block(0,0)": the initramfs did not fit, so there was
+no root). The manifest says how much memory the image needs
+(`memory_mb`: twice the initramfs, four times the kernel, and 160 MB
+for the system and the tools), and `kexec-into-rescue.sh` stops before
+the jump on a machine with less (`--ignore-memory` jumps anyway), so a
+machine too small for the image keeps running what it runs.
 That is why [`finish.sh`](finish.sh) is so strict about what stays:
 no locales (the C.UTF-8 locale is built into glibc), no Python (which
 `xfsprogs` would pull in for `xfs_scrub`), no ICU, no device-tree
@@ -251,8 +266,8 @@ blobs, no udev hardware database, no sound, media, wireless, InfiniBand,
 netfilter or exotic file system modules. Debian's arm64 kernel lacks
 `kexec_file_load`, so `kexec-into-rescue.sh` falls back to the classic
 `kexec_load`, which keeps one more copy in user space while loading; the
-image is sized so that this still works with 1 GB of RAM, the smallest
-cloud instance class. Measured on the 2026.10.12 build:
+image is sized so that this still works with 1 GB of RAM. Measured on
+the 2026.10.12 build (the unpacked layout):
 
 | | amd64 | arm64 |
 |---|---|---|
@@ -267,6 +282,25 @@ rescue system used 202 MB; with the image loaded through
 `kexec_file_load` and the downloads deleted, 369 MB; the UMP rescue
 system after boot, 395 MB (253 MB of it the unpacked root file system),
 with 542 MB available. SSH answered about ten seconds after `kexec -e`.
+
+Loading the image takes about twice the initramfs and four times the
+kernel in free memory, on top of the running system (`kexec_file_load`
+reads the files into the kernel and copies them into place). On a small
+machine that runs from disk, a 512 MB droplet with its own Ubuntu,
+`kexec-into-rescue.sh` adds a swap file on that disk for the load, so
+that the running system's memory makes room; a system in RAM has no
+disk to swap to and must have the room itself, else the script stops
+before the jump.
+
+Measured on the 2026.10.15 build (squashfs layout, amd64, QEMU): the
+initramfs is 101 MB, the manifest asks for 412 MB. With 512 MB (463 MB
+visible to the kernel) the image boots, passes every check and runs on
+an overlay root (185 MB used, 102 MB of it the squashfs). A jump from
+there with the download on a disk (`KEXEC_DISK=1 MEM=512
+test-boot.sh`) found 274 MB free for a load that needs 316 MB, added a
+170 MB swap file, loaded, jumped and came back with the configuration
+carried over; without the swap file the kernel's out-of-memory killer
+stopped the load (the running system stays as it is then).
 
 ## Limitations and next steps
 

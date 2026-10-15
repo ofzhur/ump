@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the UMP rescue image: a Debian system that runs entirely from RAM
-# as one initramfs, with a generic kernel, the firmware of server NICs and
+# (a squashfs inside a small initramfs, with a writable layer in RAM on
+# top), with a generic kernel, the firmware of server NICs and
 # storage controllers, and the tools the UMP agent needs. The provider's
 # rescue system (or any running Linux) downloads it and kexecs into it;
 # see README.md and kexec-into-rescue.sh.
@@ -40,7 +41,7 @@ log() { printf '\n==> %s\n' "$*"; }
 log "build dependencies"
 export DEBIAN_FRONTEND=noninteractive
 HOST_ARCH="$(dpkg --print-architecture)"
-deps=(mmdebstrap cpio zstd ca-certificates)
+deps=(mmdebstrap cpio zstd xz-utils squashfs-tools ca-certificates)
 if [ "$ARCH" != "$HOST_ARCH" ]; then
 	deps+=(qemu-user-static binfmt-support arch-test)
 fi
@@ -98,14 +99,36 @@ if [ "$ARCH" = arm64 ]; then
 	gzip -9 -n -f "$OUT/vmlinuz" && mv "$OUT/vmlinuz.gz" "$OUT/vmlinuz"
 fi
 rm -f "$ROOTFS"/boot/vmlinuz-* "$ROOTFS"/boot/initrd.img-* "$ROOTFS"/boot/System.map-* "$ROOTFS"/boot/config-*
-# The kernel starts /init from the initramfs; the initramfs is the whole
-# system, so /init is systemd and no root is ever switched to.
-ln -sfn sbin/init "$ROOTFS/init"
 [ -e "$ROOTFS/dev/console" ] || mknod -m 600 "$ROOTFS/dev/console" c 5 1
 # read the package list from the host side: a foreign-architecture root
 # cannot be chrooted into without /proc (the emulation needs it)
 dpkg-query --admindir="$ROOTFS/var/lib/dpkg" -W -f='${Package} ${Version}\n' > "$OUT/packages.txt"
-(cd "$ROOTFS" && find . -print0 | cpio --null -o -H newc --quiet) | zstd -T0 -19 -q > "$OUT/initrd.zst"
+
+# The system is a squashfs inside a small initramfs: the kernel unpacks
+# only the initramfs (busybox, three modules, /init and the squashfs
+# file), and /init mounts the squashfs with a writable layer in RAM on
+# top and starts systemd there. The system so costs its compressed size
+# in memory instead of its unpacked size (see README.md, Memory).
+log "squashing the system"
+INITRD="$WORK/initrd"
+mkdir -p "$INITRD/bin" "$INITRD/dev" "$INITRD/lib/modules"
+mksquashfs "$ROOTFS" "$INITRD/rootfs.squashfs" -comp zstd -Xcompression-level 19 -b 1M -noappend -quiet -no-progress
+cp "$ROOTFS/usr/bin/busybox" "$INITRD/bin/busybox"
+for m in loop squashfs overlay; do
+	ko="$(find "$ROOTFS/usr/lib/modules/$kver" -name "$m.ko*" | head -n 1)"
+	case "$ko" in
+	"") ;; # built into the kernel
+	*.xz) xz -dc "$ko" > "$INITRD/lib/modules/$m.ko" ;;
+	*.zst) zstd -dcq "$ko" > "$INITRD/lib/modules/$m.ko" ;;
+	*.gz) gzip -dc "$ko" > "$INITRD/lib/modules/$m.ko" ;;
+	*) cp "$ko" "$INITRD/lib/modules/$m.ko" ;;
+	esac
+done
+install -m 0755 "$HERE/init" "$INITRD/init"
+mknod -m 600 "$INITRD/dev/console" c 5 1
+# the squashfs is compressed already; zstd at a low level only keeps the
+# name honest and costs nothing
+(cd "$INITRD" && find . -print0 | cpio --null -o -H newc --quiet) | zstd -T0 -3 -q > "$OUT/initrd.zst"
 
 if [ "$BUILD_KEXEC" = 1 ]; then
 	log "building a static kexec"
@@ -124,6 +147,12 @@ sha256sum "${files[@]}" > SHA256SUMS
 	printf '  "version": "%s",\n  "arch": "%s",\n  "suite": "%s",\n  "kernel": "%s",\n' "$VERSION" "$ARCH" "$SUITE" "$kver"
 	printf '  "built": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	printf '  "cmdline": "console=tty0 console=ttyS0,115200n8",\n'
+	# the smallest MemTotal the image boots with: the kernel holds the
+	# compressed initramfs while it unpacks it (twice its size), plus the
+	# kernel itself and room for systemd and the tools (see README.md)
+	initrd_mb=$(( ($(stat -c %s initrd.zst) + 1048575) / 1048576 ))
+	kernel_mb=$(( ($(stat -c %s vmlinuz) + 1048575) / 1048576 ))
+	printf '  "memory_mb": %s,\n' "$(( 2 * initrd_mb + 4 * kernel_mb + 160 ))"
 	printf '  "files": {\n'
 	n=0
 	for f in "${files[@]}"; do

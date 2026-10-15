@@ -10,7 +10,11 @@
 #
 # Usage: kexec-into-rescue.sh -u https://example.net/ump/rescue [-a amd64|arm64]
 #            [-k AUTHORIZED_KEYS_FILE] [-K PUBLIC_KEY]... [-H HOSTNAME] [-i IFACE]
-#            [-d DNS,DNS] [-c EXTRA_CMDLINE] [--no-exec] [--dry-run]
+#            [-d DNS,DNS] [-c EXTRA_CMDLINE] [--no-exec] [--dry-run] [--ignore-memory]
+#
+# The image needs the memory its manifest names (memory_mb); on a machine
+# with less the jump would end in a kernel panic with nothing to come back
+# to, so the script stops before it unless --ignore-memory.
 set -euo pipefail
 
 url="${UMP_RESCUE_URL:-}"
@@ -23,6 +27,7 @@ dns="1.1.1.1,8.8.8.8"
 extra=""
 exec_it=1
 dry=0
+ignore_memory=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-u|--url) url="$2"; shift 2 ;;
@@ -35,6 +40,7 @@ while [ $# -gt 0 ]; do
 	-c|--cmdline) extra="$2"; shift 2 ;;
 	--no-exec) exec_it=0; shift ;;
 	--dry-run) dry=1; shift ;;
+	--ignore-memory) ignore_memory=1; shift ;;
 	-h|--help) sed -n '2,/^set -euo/{/^set -euo/!p;}' "$0"; exit 0 ;;
 	*) echo "unknown argument $1" >&2; exit 2 ;;
 	esac
@@ -82,6 +88,58 @@ for f in vmlinuz initrd.zst $([ -f "$dir/kexec" ] && echo kexec); do
 		exit 1
 	fi
 done
+
+# the image boots only with enough memory: the manifest says how much
+# (memory_mb); an older manifest without it gets an estimate from the
+# initramfs, which such images unpacked whole
+mem_mb=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo) / 1024 ))
+need_mb="$(sed -n 's/.*"memory_mb": *\([0-9][0-9]*\).*/\1/p' "$dir/manifest.json" | head -n 1)"
+if [ -z "$need_mb" ]; then
+	need_mb=$(( $(wc -c < "$dir/initrd.zst") / 1048576 * 4 + 128 ))
+fi
+if [ "$mem_mb" -lt "$need_mb" ]; then
+	echo "this machine has $mem_mb MB of memory; the UMP rescue image needs $need_mb MB to boot, and with less the jump ends in a kernel panic with nothing to come back to" >&2
+	if [ "$ignore_memory" = 0 ]; then
+		rm -f "$dir/vmlinuz" "$dir/initrd.zst" "$dir/kexec"
+		echo "stopped before the jump; the running system is untouched (--ignore-memory jumps anyway)" >&2
+		exit 3
+	fi
+fi
+echo "==> memory: $mem_mb MB, the image needs $need_mb MB"
+
+# Loading takes about twice the initramfs and four times the kernel on
+# top of what the running system uses. A small machine that runs from
+# disk (a 512 MB droplet with its own Ubuntu) gets a swap file on that
+# disk for the load, so that the running system's memory makes room; a
+# system in RAM has no disk to swap to and must have the room itself.
+initrd_mb=$(( ($(wc -c < "$dir/initrd.zst") + 1048575) / 1048576 ))
+kernel_mb=$(( ($(wc -c < "$dir/vmlinuz") + 1048575) / 1048576 ))
+load_mb=$(( 2 * initrd_mb + 4 * kernel_mb + 64 ))
+free_mb() { awk '/^(MemAvailable|SwapFree):/ {kb += $2} END {print int(kb / 1024)}' /proc/meminfo; }
+avail_mb=$(free_mb)
+if [ "$avail_mb" -lt "$load_mb" ]; then
+	fstype="$(stat -f -c %T "$dir" 2>/dev/null || echo unknown)"
+	case "$fstype" in
+	ext2/ext3|ext4|xfs)
+		swap_mb=$(( load_mb - avail_mb + 128 ))
+		swap="$dir/swap"
+		echo "==> memory: $avail_mb MB free, loading needs $load_mb MB; adding a swap file of $swap_mb MB on disk ($dir)"
+		rm -f "$swap"
+		if dd if=/dev/zero of="$swap" bs=1M count="$swap_mb" status=none && chmod 600 "$swap" && mkswap "$swap" >/dev/null && swapon "$swap"; then
+			avail_mb=$(free_mb)
+		else
+			rm -f "$swap"
+			echo "could not add the swap file" >&2
+		fi
+		;;
+	esac
+	if [ "$avail_mb" -lt "$load_mb" ] && [ "$ignore_memory" = 0 ]; then
+		echo "loading the image needs $load_mb MB of free memory, and $avail_mb MB are free ($dir is on $fstype, which takes no swap file); stop what uses memory here, or use a machine with more" >&2
+		rm -f "$dir/vmlinuz" "$dir/initrd.zst" "$dir/kexec"
+		echo "stopped before the jump; the running system is untouched (--ignore-memory tries anyway)" >&2
+		exit 3
+	fi
+fi
 
 echo "==> reading the network configuration"
 if [ -z "$iface" ]; then

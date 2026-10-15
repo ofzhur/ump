@@ -1,0 +1,40 @@
+#!/bin/busybox sh
+# The first step of the UMP rescue system, /init of its initramfs. The
+# system itself is rootfs.squashfs next to this script: it is mounted
+# read-only, a writable layer in RAM goes on top (overlayfs), and systemd
+# starts from there. The system so costs its compressed size in memory,
+# not its unpacked size, which lets the image boot on 512 MB machines.
+# On failure it says why on the console and opens a shell there.
+export PATH=/bin
+/bin/busybox --install -s /bin
+
+fail() {
+	echo "ump-rescue init: $*" > /dev/console
+	echo "ump-rescue init: dropping to a shell on the console" > /dev/console
+	exec sh < /dev/console > /dev/console 2>&1
+}
+
+mkdir -p /dev /proc /sys /ro /rw /newroot
+mount -t devtmpfs devtmpfs /dev || fail "cannot mount /dev"
+mount -t proc proc /proc || fail "cannot mount /proc"
+mount -t sysfs sysfs /sys || fail "cannot mount /sys"
+
+# the three modules the build put here, decompressed; a kernel that has
+# them built in refuses them, which is fine
+for m in loop squashfs overlay; do
+	[ -f "/lib/modules/$m.ko" ] && insmod "/lib/modules/$m.ko" 2>/dev/null
+done
+
+mount -t tmpfs -o mode=0755 tmpfs /rw || fail "cannot mount the writable layer"
+mkdir -p /rw/upper /rw/work
+mount -t squashfs -o ro,loop /rootfs.squashfs /ro || fail "cannot mount rootfs.squashfs"
+mount -t overlay overlay -o lowerdir=/ro,upperdir=/rw/upper,workdir=/rw/work /newroot || fail "cannot mount the overlay"
+[ -x /newroot/sbin/init ] || fail "no /sbin/init in the system image"
+
+for d in dev proc sys; do
+	mkdir -p "/newroot/$d"
+	mount --move "/$d" "/newroot/$d" || fail "cannot move /$d"
+done
+# switch_root empties this initramfs; the squashfs stays in memory as
+# long as the loop device holds it, which is what the system runs on
+exec switch_root /newroot /sbin/init
