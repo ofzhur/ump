@@ -50,9 +50,28 @@ func (s *S3) object(p string) (string, error) {
 	return strings.TrimRight(s.Prefix, "/") + "/" + p, nil
 }
 
+// do sends a request for an object key (or, with a key that starts with
+// "?", for the bucket with that query). The key is sent and signed in
+// SigV4's encoding, so that a key with characters such as "%" or a space
+// (the lock of vultr/ID is the object vultr%2FID.json) reaches the same
+// object the signature names.
 func (s *S3) do(ctx context.Context, method, key string, body []byte, headers map[string]string) (*http.Response, []byte, error) {
-	u := strings.TrimRight(s.Endpoint, "/") + "/" + s.Bucket + "/" + key
-	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
+	key, rawQuery, _ := strings.Cut(key, "?")
+	u, err := url.Parse(strings.TrimRight(s.Endpoint, "/"))
+	if err != nil {
+		return nil, nil, err
+	}
+	objectPath := "/" + s.Bucket + "/" + key
+	u.RawPath = u.EscapedPath() + awsEscape(objectPath, false)
+	u.Path += objectPath
+	if rawQuery != "" {
+		q, err := url.ParseQuery(rawQuery)
+		if err != nil {
+			return nil, nil, err
+		}
+		u.RawQuery = awsQuery(q)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}

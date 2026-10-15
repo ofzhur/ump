@@ -1,8 +1,12 @@
 package backend
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,6 +164,82 @@ type obj struct {
 	etag string
 }
 
+// uriEncode is SigV4's encoding as the S3 documentation describes it,
+// written apart from the client's so that the two check each other.
+func uriEncode(s string, encodeSlash bool) string {
+	var b strings.Builder
+	for _, c := range []byte(s) {
+		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') || strings.IndexByte("-_.~", c) >= 0 || (c == '/' && !encodeSlash) {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// checkSigV4 verifies a request's signature the way S3 and R2 do: from
+// the path and the query as the server decoded them. It returns what is
+// wrong, or "".
+func checkSigV4(r *http.Request, secret string) string {
+	auth := r.Header.Get("Authorization")
+	var cred, signedHeaders, sig string
+	for _, part := range strings.Split(strings.TrimPrefix(auth, "AWS4-HMAC-SHA256 "), ", ") {
+		k, v, _ := strings.Cut(part, "=")
+		switch k {
+		case "Credential":
+			cred = v
+		case "SignedHeaders":
+			signedHeaders = v
+		case "Signature":
+			sig = v
+		}
+	}
+	scopeParts := strings.SplitN(cred, "/", 2)
+	if len(scopeParts) != 2 || sig == "" {
+		return "no SigV4 authorization"
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	sum := sha256.Sum256(body)
+	if hex.EncodeToString(sum[:]) != r.Header.Get("x-amz-content-sha256") {
+		return "payload hash mismatch"
+	}
+	var pairs []string
+	for k, vs := range r.URL.Query() {
+		for _, v := range vs {
+			pairs = append(pairs, uriEncode(k, true)+"="+uriEncode(v, true))
+		}
+	}
+	sort.Strings(pairs)
+	var headers strings.Builder
+	for _, h := range strings.Split(signedHeaders, ";") {
+		v := r.Header.Get(h)
+		if h == "host" {
+			v = r.Host
+		}
+		headers.WriteString(h + ":" + strings.TrimSpace(v) + "\n")
+	}
+	canonical := strings.Join([]string{r.Method, uriEncode(r.URL.Path, false), strings.Join(pairs, "&"), headers.String(), signedHeaders, r.Header.Get("x-amz-content-sha256")}, "\n")
+	scope := scopeParts[1]
+	date := strings.SplitN(scope, "/", 2)[0]
+	ch := sha256.Sum256([]byte(canonical))
+	toSign := "AWS4-HMAC-SHA256\n" + r.Header.Get("x-amz-date") + "\n" + scope + "\n" + hex.EncodeToString(ch[:])
+	mac := func(key []byte, data string) []byte {
+		h := hmac.New(sha256.New, key)
+		h.Write([]byte(data))
+		return h.Sum(nil)
+	}
+	k := []byte("AWS4" + secret)
+	for _, part := range []string{date, strings.Split(scope, "/")[1], "s3", "aws4_request"} {
+		k = mac(k, part)
+	}
+	if want := hex.EncodeToString(mac(k, toSign)); want != sig {
+		return "SignatureDoesNotMatch for the canonical request:\n" + canonical
+	}
+	return ""
+}
+
 // fakeS3 is enough of S3 for a backend: GET, PUT with If-Match and
 // If-None-Match, DELETE and list-type=2 with a prefix.
 func fakeS3(t *testing.T) *httptest.Server {
@@ -167,8 +247,10 @@ func fakeS3(t *testing.T) *httptest.Server {
 	objects := map[string]obj{}
 	n := 0
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 Credential=AK/") || r.Header.Get("x-amz-content-sha256") == "" {
+		if msg := checkSigV4(r, "SK"); msg != "" {
+			t.Errorf("%s %s: %s", r.Method, r.URL.RequestURI(), msg)
 			w.WriteHeader(403)
+			fmt.Fprintf(w, "<Error><Code>SignatureDoesNotMatch</Code><Message>%s</Message></Error>", msg)
 			return
 		}
 		mu.Lock()
