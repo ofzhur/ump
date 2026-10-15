@@ -87,13 +87,14 @@ each with its own `ump config` command (`list`, `get`, `create`,
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
-| [Userdata](docs/userdata.md) | `ump config userdata` | what runs in a freshly installed system before its first boot: a script for Ubuntu today, a declarative configuration for the systems that take one later; listed by name in profiles |
+| [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, a NixOS module for NixOS; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
 
 The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
 group, the sudo user `ump` with your keys, ICMP and SSH open),
-`ubuntu-24.04` and `ubuntu-22.04`, the layouts `lvm-linear`,
+`ubuntu-24.04`, `ubuntu-22.04` and `nixos-25.11` (NixOS from its
+stable channel, see [NixOS](docs/nixos.md)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
 `web` and `open`, and the user `ump`. They are templates: make your own
 from them (`ump config os create`, `ump config user create`, ...), and
@@ -136,6 +137,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
 | [Userdata](docs/userdata.md) | the scripts that run in a new system before its first boot: fields, how they run, the published entry, managing and using them |
+| [NixOS](docs/nixos.md) | NixOS from its stable channel: how the profile becomes NixOS configuration, userdata as modules, how the installation runs |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |

@@ -1,8 +1,9 @@
 # The UMP installer
 
 [`install.sh`](install.sh) puts an operating system on a machine's disks
-from a [UMP base image](../images/ubuntu/README.md) the way a
-specification says. It runs as root in the [UMP rescue
+from a [UMP base image](../images/ubuntu/README.md), or NixOS with
+`nixos-install` (see [NixOS](../docs/nixos.md)), the way a specification
+says. It runs as root in the [UMP rescue
 system](../images/rescue/README.md), where no disk is in use, and
 refuses to run anywhere else unless told to with `--force`, because it
 erases every disk of the machine it runs on. `ump server reinstall` renders the
@@ -45,7 +46,12 @@ root and the keys of a file).
    to read LVM or md.
 6. **Mounts** root, then the other mountpoints by depth, and **unpacks
    the image** straight from the download into them, checking the
-   archive's SHA-256 against the manifest.
+   archive's SHA-256 against the manifest. The manifest's `family` decides
+   what follows: steps 7 to 11 are for an image (Ubuntu); for `nixos` the
+   installer writes the profile, what it found on the machine and the
+   firewall ruleset next to UMP's NixOS module ([`nixos/ump.nix`](nixos/ump.nix)),
+   with the userdata as NixOS modules, and runs `nixos-install` from the
+   manifest's channel instead (see [NixOS](../docs/nixos.md#how-the-installation-runs)).
 7. **Configures the machine:** hostname, `/etc/fstab` by UUID (swap
    included), a netplan file with every wired interface matched by MAC
    and, unless the profile says `network: {rename: false}`, renamed

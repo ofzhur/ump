@@ -2420,7 +2420,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
+		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/nixos-25.11.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2986,7 +2986,7 @@ func TestConfigOSUpdate(t *testing.T) {
 	if _, _, code := e.run("", false, "config", "os", "list"); code != 0 {
 		t.Fatal("first list failed")
 	}
-	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nusers.yaml: updated\n") {
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\nnixos-25.11.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nusers.yaml: updated\n") {
 		t.Errorf("update when current: code %d\n%s", code, out)
 	}
 
@@ -3085,7 +3085,7 @@ func TestProfileWizard(t *testing.T) {
 	}
 	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
 		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Users come from users.yaml (ump config user): ump.",
-		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): ubuntu.", "Userdata (comma-separated, in order; none for nothing) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Provision step", "Description",
+		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): nixos, ubuntu.", "Userdata (comma-separated, in order; none for nothing; bash for ubuntu-24.04) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Provision step", "Description",
 		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, errOut)

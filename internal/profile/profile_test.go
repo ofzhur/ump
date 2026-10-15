@@ -178,7 +178,7 @@ func TestProfileErrors(t *testing.T) {
 		{"bad userdata name", base + "disks: lvm-linear\nuserdata: [\"rm -rf\"]\n", "is not a userdata name"},
 		{"unknown userdata", base + "disks: lvm-linear\nuserdata: [nope]\n", `userdata "nope" is not in userdata.yaml`},
 		{"empty userdata", base + "disks: lvm-linear\nuserdata: [{name: x, script: \"\"}]\n", "the script is empty"},
-		{"userdata type", base + "disks: lvm-linear\nuserdata: [{name: x, type: chef, script: x}]\n", `type "chef" is not bash`},
+		{"userdata type", base + "disks: lvm-linear\nuserdata: [{name: x, type: chef, script: x}]\n", `type "chef" is not bash, nix`},
 		{"two roots", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: ext4, mountpoint: /}\n    - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /}\n", "mountpoint / is used twice"},
 		{"root on lvm without boot", base + "disks:\n  parts:\n    - {type: slice, target: [first], size: rest, filesystem: lvm, vg: v}\n    - {type: lvm, vg: v, name: root, size: rest, filesystem: ext4, mountpoint: /}\n", "/boot must be a slice of its own"},
 		{"lvm before vg", base + "disks:\n  parts:\n    - {type: lvm, vg: v, name: root, size: rest, filesystem: ext4, mountpoint: /}\n", `vg "v" is not made by an earlier slice or md part`},
@@ -241,5 +241,39 @@ func TestSet(t *testing.T) {
 		if _, err := p.Set([]string{c.set}); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.set, err, c.want)
 		}
+	}
+}
+
+func TestNixOSProfileAndUserdataTypes(t *testing.T) {
+	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
+	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	users, _ := ParseUsers(repoFile(t, "users.yaml"))
+	userdata, err := ParseUserdata(repoFile(t, "userdata.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Parse(repoFile(t, "nixos-25.11.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := p.Resolve(layouts, firewalls, users, userdata, fakeResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.OS != "nixos-25.11" || len(spec.Userdata) != 1 || spec.Userdata[0].Type != "nix" || !strings.Contains(spec.Userdata[0].Script, "{ config, lib, pkgs, ... }:") {
+		t.Errorf("nixos spec: %+v", spec.Userdata)
+	}
+	if Family("nixos-25.11") != "nixos" || Family("ubuntu-26.04") != "image" || UserdataType("nixos") != "nix" || UserdataType("image") != "bash" {
+		t.Error("families")
+	}
+	// the other way round, in both directions, is refused by name
+	q, _ := p.Set([]string{"userdata=[ubuntu]"})
+	if _, err := q.Resolve(layouts, firewalls, users, userdata, fakeResolver); err == nil || !strings.Contains(err.Error(), "userdata ubuntu is bash, and nixos-25.11 takes nix userdata") {
+		t.Errorf("bash on nixos: %v", err)
+	}
+	u, _ := Parse(repoFile(t, "ubuntu-26.04.yaml"))
+	u, _ = u.Set([]string{"userdata=[nixos]"})
+	if _, err := u.Resolve(layouts, firewalls, users, userdata, fakeResolver); err == nil || !strings.Contains(err.Error(), "userdata nixos is nix, and ubuntu-26.04 takes bash userdata") {
+		t.Errorf("nix on ubuntu: %v", err)
 	}
 }

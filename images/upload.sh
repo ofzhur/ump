@@ -24,7 +24,7 @@
 #   rescue/kexec-into-rescue.sh
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
-#   install/install.sh
+#   install/install.sh, install/nixos/ump.nix
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
@@ -208,7 +208,7 @@ for w in "${what[@]}"; do
 		done
 		;;
 	os)
-		for d in "$HERE"/ubuntu/out/*/*/; do
+		for d in "$HERE"/ubuntu/out/*/*/ "$HERE"/nixos/out/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }
@@ -238,6 +238,7 @@ for w in "${what[@]}"; do
 		echo "==> uploading the scripts to $TARGET"
 		put "$HERE/rescue/kexec-into-rescue.sh" rescue/kexec-into-rescue.sh
 		put "$HERE/../install/install.sh" install/install.sh
+		put "$HERE/../install/nixos/ump.nix" install/nixos/ump.nix
 		put "$HERE/../install/get.sh" get.sh
 		built=1
 		;;

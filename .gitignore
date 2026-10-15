@@ -7,3 +7,4 @@
 *.out
 images/rescue/out/
 images/ubuntu/out/
+images/nixos/out/

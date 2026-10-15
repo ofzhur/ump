@@ -10,13 +10,17 @@ may also carry entries inline for what belongs to it alone.
 ```console
 $ ump config userdata list
 NAME     TYPE   LINES   STATE   DESCRIPTION
+nixos    nix    12      ok      what every NixOS gets; nothing yet
 ubuntu   bash   7       ok      what every Ubuntu gets; nothing yet
 ```
 
-Today an entry is a bash script, and Ubuntu is the system it runs on.
-Operating systems that take a declarative configuration instead
-(cloud-init, Talos, NixOS) will take it here too, as entries of other
-types, when ump installs them.
+An entry is a bash script (type `bash`) for Ubuntu, or a NixOS module
+(type `nix`) for [NixOS](nixos.md), where it is merged with UMP's own
+module instead of run. A profile takes the type its system takes, and
+ump refuses a mix before it touches the machine. Other systems that take
+a declarative configuration (cloud-init, Talos) may follow as other
+types. The rest of this page is about bash userdata; [NixOS](nixos.md#userdata-on-nixos)
+describes the modules.
 
 ## Where userdata lives
 
@@ -67,7 +71,7 @@ Ubuntu of yours should get, and the published profiles list it.
 ```yaml
 name: web                     # inline entries only; in userdata.yaml the entry's key is the name
 description: ...              # optional; shown by ump config userdata list
-type: bash                    # optional; bash is the default and the only type yet
+type: bash                    # optional; bash (the default) or nix (a NixOS module, docs/nixos.md)
 script: |                     # the script itself
   #!/bin/bash
   set -euo pipefail
@@ -78,8 +82,8 @@ script: |                     # the script itself
 |---|---|
 | `name` | Lower-case letters, digits, `.`, `_` and `-`, starting with a letter or digit. In `userdata.yaml` the entry's key is the name. |
 | `description` | One line, shown by `ump config userdata list`. |
-| `type` | `bash`: a script run by bash. Default `bash`. Other types will come with the systems that take them. |
-| `script` | The script, not empty. A shebang line is not needed, bash runs it either way. |
+| `type` | `bash`: a script run by bash, for Ubuntu (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](nixos.md#userdata-on-nixos)). |
+| `script` | The script or the module, not empty. A shebang line is not needed, bash runs it either way. |
 
 ## How it runs
 

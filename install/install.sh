@@ -2,10 +2,18 @@
 # UMP installer. Runs as root in the UMP rescue system, where no disk is in
 # use, and puts an operating system on the machine's disks the way a
 # specification says (ump install renders it from a profile): wipes the
-# disks, partitions them, builds md arrays and volume groups, unpacks the
-# image, configures what depends on the machine (hostname, network, users
-# and keys, userdata, firewall, boot loader) and leaves the machine ready
-# to reboot into the new system. See README.md.
+# disks, partitions them, builds md arrays and volume groups, then puts the
+# system there the way its family wants it, and leaves the machine ready to
+# reboot into it. See README.md.
+#
+#   image (Ubuntu)  unpacks the image and configures what depends on the
+#                   machine (hostname, network, users and keys, userdata,
+#                   firewall, boot loader)
+#   nixos           writes the profile, what this script found on the
+#                   machine and the firewall ruleset next to UMP's NixOS
+#                   module (install/nixos/ump.nix on the storage), with the
+#                   profile's userdata as NixOS modules, and runs
+#                   nixos-install from the image's channel
 #
 # Usage: install.sh --spec FILE [--dry-run] [--force]
 #        install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
@@ -385,12 +393,29 @@ fi
 
 log "fetching the manifest"
 manifest="$(curl -fsSL "$image_url/manifest.json")" || die "cannot fetch $image_url/manifest.json; the storage must serve the image (see images/ubuntu/README.md)"
-want_sum="$(printf '%s' "$manifest" | jq -r '.files["rootfs.tar.zst"].sha256 // empty')"
+family="$(printf '%s' "$manifest" | jq -r '.family // "image"')"
 image_version="$(printf '%s' "$manifest" | jq -r '.version // empty')"
 image_kernel="$(printf '%s' "$manifest" | jq -r '.kernel // empty')"
+# the size of the installed system: the root file system must hold twice it
 unpacked_mb="$(printf '%s' "$manifest" | jq -r '.unpacked_mb // empty')"
-[ -n "$want_sum" ] || die "the manifest names no rootfs.tar.zst checksum"
-log "image $os version ${image_version:-?}, kernel ${image_kernel:-?}, ${unpacked_mb:-?} MB unpacked"
+case "$family" in
+image)
+	want_sum="$(printf '%s' "$manifest" | jq -r '.files["rootfs.tar.zst"].sha256 // empty')"
+	[ -n "$want_sum" ] || die "the manifest names no rootfs.tar.zst checksum"
+	log "image $os version ${image_version:-?}, kernel ${image_kernel:-?}, ${unpacked_mb:-?} MB unpacked"
+	;;
+nixos)
+	for k in channel nix.url nix.sha256 state_version; do
+		[ -n "$(printf '%s' "$manifest" | jq -r ".$k // empty")" ] || die "the NixOS manifest names no $k"
+	done
+	log "image $os: NixOS from the channel $(printf '%s' "$manifest" | jq -r .channel), installed with nixos-install"
+	;;
+*) die "the manifest's family $family is not one this installer knows (image, nixos)" ;;
+esac
+# the userdata must be of the kind the system takes
+want_ud=bash; [ "$family" = nixos ] && want_ud=nix
+bad_ud="$(jq -r --arg t "$want_ud" '[.userdata[] | select((.type // "bash") != $t) | .name] | join(", ")' <<< "$spec")"
+[ -z "$bad_ud" ] || die "userdata $bad_ud is not of the type $os takes ($want_ud)"
 
 # --- the disks ---------------------------------------------------------
 
@@ -541,13 +566,66 @@ for m in "${MOUNTS[@]}"; do
 done
 cleanup() {
 	set +e
+	mountpoint -q /nix && umount -l /nix 2>/dev/null
 	for m in "$TARGET/dev/pts" "$TARGET/run" "$TARGET/sys" "$TARGET/proc" "$TARGET/dev"; do mountpoint -q "$m" && umount -l "$m" 2>/dev/null; done
 	for ((n = ${#MOUNTS[@]} - 1; n >= 0; n--)); do set -- ${MOUNTS[$n]}; mountpoint -q "$TARGET$1" && umount -l "$TARGET$1" 2>/dev/null; done
 }
 trap cleanup EXIT
 
-# --- the image ---------------------------------------------------------
+# the administrator: the first sudo user, else root; ump logs in as it
+admin="$(jq -r '[.users[] | select(.name == "root" or .sudo == true)][0].name // .users[0].name' <<< "$spec")"
 
+# the firewall ruleset, the same for every system: input policy, and the
+# same list for new connections forwarded in from the external interfaces
+nft_ruleset() {
+	ext=""; for i in "${!IF_MAC[@]}"; do [ "${IF_KIND[$i]}" = ext ] && ext="${ext:+$ext, }\"${IF_NAME[$i]}\""; done
+	# the allowed entries, for the input chain (dport) and for the forward
+	# chain, where the destination port is the container's after the DNAT
+	# of a published port, so the original one is matched; ICMPv6 is
+	# protocol 58, by number because an older nft resolves the name
+	# through /etc/protocols only
+	allow() { # allow input|forward
+		if [ "$1" = input ]; then
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
+		else
+			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + "meta l4proto " + .proto + " ct original proto-dst " + .port + " accept" end' <<< "$spec"
+		fi
+	}
+	echo "#!/usr/sbin/nft -f"
+	echo "# written by UMP from the profile's firewall section; nft -f after editing"
+	echo "flush ruleset"
+	echo "table inet filter {"
+	echo "  chain input {"
+	echo "    type filter hook input priority 0; policy drop;"
+	echo "    iif lo accept"
+	echo "    ct state established,related accept"
+	echo "    ct state invalid drop"
+	allow input
+	echo "  }"
+	echo "  # Forwarded traffic (containers, virtual machines) passes, except"
+	echo "  # new connections coming in on the external interfaces: those are"
+	echo "  # held to the same list, by the port they were addressed to. A"
+	echo "  # port a container publishes (docker run -p) is reachable only"
+	echo "  # when it is allowed here, whatever the container engine adds."
+	echo "  chain forward {"
+	echo "    type filter hook forward priority 0; policy accept;"
+	echo "    ct state established,related accept"
+	echo "    ct state invalid drop"
+	echo "    iifname { ${ext:-\"ext*\"} } ct state new jump forward-in"
+	echo "  }"
+	echo "  chain forward-in {"
+	allow forward
+	echo "    drop"
+	echo "  }"
+	echo "  chain output {"
+	echo "    type filter hook output priority 0; policy accept;"
+	echo "  }"
+	echo "}"
+}
+
+# --- an image (Ubuntu): unpacked, then configured in place -----------------
+
+install_image() {
 log "downloading and unpacking $image_url/rootfs.tar.zst"
 sumfile="$(mktemp)"
 rm -f "$sumfile"
@@ -682,8 +760,7 @@ for ((n = 0; n < nusers; n++)); do
 	[ "$name" = root ] || in_target chown -R "$name:$name" "$home/.ssh"
 done
 # root over SSH only when the profile lists it with keys (the image says
-# no); the administrator is the first sudo user, else root
-admin="$(jq -r '[.users[] | select(.name == "root" or .sudo == true)][0].name // .users[0].name' <<< "$spec")"
+# no)
 mkdir -p "$TARGET/etc/ssh/sshd_config.d"
 rm -f "$TARGET/etc/ssh/sshd_config.d/10-ump-root.conf"
 if jq -e '[.users[] | select(.name == "root")] | length > 0' >/dev/null <<< "$spec"; then
@@ -745,51 +822,7 @@ fi
 
 if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec"; then
 	log "firewall: input drop, allowing $(jq -r '[.firewall.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)" end] | join(", ")' <<< "$spec"); the same for connections forwarded in from outside (containers' published ports)"
-	ext=""; for i in "${!IF_MAC[@]}"; do [ "${IF_KIND[$i]}" = ext ] && ext="${ext:+$ext, }\"${IF_NAME[$i]}\""; done
-	# the allowed entries, for the input chain (dport) and for the forward
-	# chain; ICMPv6 is protocol 58, by number because an older nft resolves
-	# the name through /etc/protocols only
-	# chain, where the destination port is the container's after the DNAT
-	# of a published port, so the original one is matched
-	allow() { # allow input|forward
-		if [ "$1" = input ]; then
-			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + .proto + " dport " + .port + " accept" end' <<< "$spec"
-		else
-			jq -r '.firewall.allow[] | if .proto == "icmp" then "    ip protocol icmp accept\n    meta l4proto 58 accept" else (if .from then (if (.from | test(":")) then "    ip6 saddr " + .from + " " else "    ip saddr " + .from + " " end) else "    " end) + "meta l4proto " + .proto + " ct original proto-dst " + .port + " accept" end' <<< "$spec"
-		fi
-	}
-	{
-		echo "#!/usr/sbin/nft -f"
-		echo "# written by UMP from the profile's firewall section; nft -f after editing"
-		echo "flush ruleset"
-		echo "table inet filter {"
-		echo "  chain input {"
-		echo "    type filter hook input priority 0; policy drop;"
-		echo "    iif lo accept"
-		echo "    ct state established,related accept"
-		echo "    ct state invalid drop"
-		allow input
-		echo "  }"
-		echo "  # Forwarded traffic (containers, virtual machines) passes, except"
-		echo "  # new connections coming in on the external interfaces: those are"
-		echo "  # held to the same list, by the port they were addressed to. A"
-		echo "  # port a container publishes (docker run -p) is reachable only"
-		echo "  # when it is allowed here, whatever the container engine adds."
-		echo "  chain forward {"
-		echo "    type filter hook forward priority 0; policy accept;"
-		echo "    ct state established,related accept"
-		echo "    ct state invalid drop"
-		echo "    iifname { ${ext:-\"ext*\"} } ct state new jump forward-in"
-		echo "  }"
-		echo "  chain forward-in {"
-		allow forward
-		echo "    drop"
-		echo "  }"
-		echo "  chain output {"
-		echo "    type filter hook output priority 0; policy accept;"
-		echo "  }"
-		echo "}"
-	} > "$TARGET/etc/nftables.conf"
+	nft_ruleset > "$TARGET/etc/nftables.conf"
 	chmod 755 "$TARGET/etc/nftables.conf"
 	if ! out="$(in_target nft -c -f /etc/nftables.conf 2>&1)"; then
 		printf '%s\n' "$out" >&2
@@ -832,6 +865,127 @@ arm64)
 esac
 run_in_target "update-grub" update-grub
 grep -q 'vmlinuz' "$TARGET/boot/grub/grub.cfg" || die "grub.cfg names no kernel"
+}
+
+# --- NixOS: UMP's module and the profile, installed with nixos-install ----
+
+# a swap file on the new root while Nix evaluates and builds: evaluating
+# a NixOS configuration takes about a gigabyte, which a small machine's
+# rescue system (in RAM) does not have
+swap_on_target() {
+	local avail need=2048
+	avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+	[ "$avail" -ge "$need" ] && return 0
+	target_swap="$TARGET/.ump-install-swap"
+	log "memory: $avail MB free; a swap file of $need MB on the new root while NixOS is built"
+	dd if=/dev/zero of="$target_swap" bs=1M count="$need" status=none && chmod 600 "$target_swap" && mkswap "$target_swap" >/dev/null && swapon "$target_swap" \
+		|| { rm -f "$target_swap"; target_swap=""; warn "no swap file; building may run out of memory"; }
+}
+
+install_nixos() {
+	local channel nix_url nix_sum work nixdir nixbin p chan tools log_file ud_n i ud_name
+
+	channel="$(jq -r .channel <<< "$manifest")"
+	nix_url="$(jq -r .nix.url <<< "$manifest")"
+	nix_sum="$(jq -r .nix.sha256 <<< "$manifest")"
+	target_swap=""
+
+	# Nix, from its release tarball, with the store on the new system's
+	# disk from the first byte: /nix here is the new /nix
+	log "downloading Nix from $nix_url"
+	mkdir -p "$TARGET/nix" /nix
+	mount --bind "$TARGET/nix" /nix
+	work="$(mktemp -d)"
+	curl -fsSL -o "$work/nix.tar.xz" "$nix_url" || die "cannot download $nix_url"
+	[ "$(sha256sum "$work/nix.tar.xz" | cut -d' ' -f1)" = "$nix_sum" ] || die "checksum mismatch for $nix_url"
+	tar -xJf "$work/nix.tar.xz" -C "$work"
+	nixdir="$(ls -d "$work"/nix-*/ | head -n 1)"
+	mkdir -p /nix/store
+	cp -RPp "$nixdir"/store/* /nix/store/
+	for p in "$nixdir"/store/*; do [ -x "$p/bin/nix-build" ] && nixbin="/nix/store/$(basename "$p")/bin"; done
+	[ -n "${nixbin:-}" ] || die "no nix-build in $nix_url"
+	"$nixbin/nix-store" --load-db < "$nixdir/.reginfo"
+	rm -rf "$work"
+	export HOME=/root USER=root PATH="$nixbin:$PATH" NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+	export NIX_CONFIG=$'build-users-group =\nsandbox = false\nexperimental-features = nix-command\nfallback = true'
+
+	log "channel: $channel"
+	nix-channel --add "$channel" nixos >/dev/null
+	nix-channel --update nixos >/dev/null 2>&1 || die "nix-channel --update failed for $channel"
+	chan=/nix/var/nix/profiles/per-user/root/channels/nixos
+	[ -d "$chan" ] || chan="$(nix-instantiate --eval --expr '<nixos>' 2>/dev/null)"
+	nixos_rev="$(cat "$chan/.git-revision" 2>/dev/null || true)"
+	export NIX_PATH="nixpkgs=$chan:nixos=$chan:nixos-config=$TARGET/etc/nixos/configuration.nix"
+	tools="$(nix-build '<nixpkgs>' -A nixos-install-tools --no-out-link 2>/dev/null)" || die "cannot get nixos-install from $channel"
+	export PATH="$tools/bin:$PATH"
+
+	log "configuration: /etc/nixos (hardware-configuration.nix, ump/, userdata/)"
+	"$tools/bin/nixos-generate-config" --root "$TARGET" >/dev/null 2>&1 || die "nixos-generate-config failed"
+	# only now: the hardware configuration must not take the swap file
+	swap_on_target
+	mkdir -p "$TARGET/etc/nixos/ump" "$TARGET/etc/nixos/userdata"
+	curl -fsSL -o "$TARGET/etc/nixos/ump/default.nix" "$storage/install/nixos/ump.nix" || die "cannot fetch $storage/install/nixos/ump.nix"
+	printf '%s\n' "$spec" | jq 'del(.userdata)' > "$TARGET/etc/nixos/ump/spec.json"
+	nft_ruleset > "$TARGET/etc/nixos/ump/nftables.conf"
+	{
+		printf '%s\n' "${IF_MAC[@]}" | paste -d'\t' - <(printf '%s\n' "${IF_NAME[@]}") <(printf '%s\n' "${IF_KIND[@]}") \
+			| jq -R 'split("\t") | {mac: .[0], name: .[1], kind: .[2]}' | jq -s .
+	} > "$TARGET/etc/nixos/ump/interfaces.json"
+	bios_disks="$(for x in "${disks[@]}"; do for i in "${!P_DISK[@]}"; do [ "${P_DISK[$i]}" = "$x" ] && [ "${P_FS[$i]}" = bios ] && { echo "$x"; break; }; done; done)"
+	lvm_raid=false; for k in "${!L_VG[@]}"; do [ "${L_RAID[$k]}" != none ] && lvm_raid=true; done
+	jq -n --arg os "$os" --arg state_version "$(jq -r .state_version <<< "$manifest")" \
+		--slurpfile interfaces "$TARGET/etc/nixos/ump/interfaces.json" --arg uplink_mac "$mac" \
+		--arg ip4 "${ip4%%,*}" --arg gw4 "$(case "$ip4" in *,*) echo "${ip4#*,}" ;; esac)" \
+		--arg ip6 "${ip6%%,*}" --arg gw6 "$(case "$ip6" in *,*) echo "${ip6#*,}" ;; esac)" \
+		--arg dns "$dns" --arg cmdline "$kernel_cmdline" --argjson rename "$([ "$rename" = yes ] && echo true || echo false)" \
+		--argjson efi "$([ "$has_efi" = 1 ] && echo true || echo false)" --arg bios "$bios_disks" \
+		--argjson md "$([ ${#M_LEVEL[@]} -gt 0 ] && echo true || echo false)" --arg mdadm_conf "$( [ ${#M_LEVEL[@]} -gt 0 ] && mdadm --detail --scan || true)" \
+		--arg swaps "$(for sw in "${SWAPS[@]:-}"; do [ -n "$sw" ] && blkid -s UUID -o value "$sw"; done)" \
+		--argjson lvm_raid "$lvm_raid" '{
+		os: $os, state_version: $state_version, rename: $rename, interfaces: $interfaces[0], uplink_mac: $uplink_mac,
+		ip4: $ip4, gw4: $gw4, ip6: $ip6, gw6: $gw6, dns: ($dns | split(" ")),
+		kernel_params: ($cmdline | split(" ") | map(select(. != ""))),
+		efi: $efi, bios_disks: ($bios | split("\n") | map(select(. != ""))),
+		md: $md, mdadm_conf: $mdadm_conf, lvm_raid: $lvm_raid,
+		swaps: ($swaps | split("\n") | map(select(. != "")))}' > "$TARGET/etc/nixos/ump/facts.json"
+	rm -f "$TARGET/etc/nixos/ump/interfaces.json"
+
+	ud_n=$(jq -r '.userdata | length' <<< "$spec")
+	for ((i = 0; i < ud_n; i++)); do
+		ud_name="$(jq -r ".userdata[$i].name" <<< "$spec")"
+		jq -r ".userdata[$i].script" <<< "$spec" > "$TARGET/etc/nixos/userdata/$(printf '%02d' "$((i + 1))")-$ud_name.nix"
+		log "userdata: $ud_name (/etc/nixos/userdata/$(printf '%02d' "$((i + 1))")-$ud_name.nix)"
+	done
+	cat > "$TARGET/etc/nixos/configuration.nix" <<'NIX'
+# Written by ump server reinstall. The machine is ./ump (what UMP set up
+# from the profile: users and keys, network, firewall, boot loader) plus
+# the userdata modules in ./userdata, in the order of their names; NixOS
+# merges them, and the userdata wins over UMP's defaults. Change the
+# machine here or in a userdata module, then nixos-rebuild switch.
+{ lib, ... }:
+{
+  imports = [ ./hardware-configuration.nix ./ump ]
+    ++ map (f: ./userdata + "/${f}") (lib.attrNames (lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n) (builtins.readDir ./userdata)));
+}
+NIX
+
+	log "nixos-install (downloads from the binary cache; this takes a few minutes)"
+	log_file="$TARGET/var/log/ump-nixos-install.log"
+	mkdir -p "$(dirname "$log_file")"
+	if ! "$tools/bin/nixos-install" --root "$TARGET" --no-root-passwd > "$log_file" 2>&1; then
+		tail -n 40 "$log_file" >&2
+		die "nixos-install failed (the whole output is in /var/log/ump-nixos-install.log of the new system)"
+	fi
+	image_version="$(jq -r .version <<< "$manifest")${nixos_rev:+ (nixpkgs ${nixos_rev:0:12})}"
+	image_kernel="$(basename "$(dirname "$(readlink -f "$TARGET/nix/var/nix/profiles/system/kernel")")" | sed 's/^[a-z0-9]*-linux-//')"
+	[ -n "$target_swap" ] && { swapoff "$target_swap" 2>/dev/null; rm -f "$target_swap"; }
+	umount /nix 2>/dev/null || umount -l /nix
+}
+
+case "$family" in
+image) install_image ;;
+nixos) install_nixos ;;
+esac
 
 mkdir -p "$TARGET/etc/ump"
 printf '%s\n' "$spec" | jq . > "$TARGET/etc/ump/spec.json"

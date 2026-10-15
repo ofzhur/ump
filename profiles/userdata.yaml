@@ -6,9 +6,8 @@
 # (userdata: [ubuntu, web]), or inline entries. A failing script fails
 # the installation.
 #
-#   type     bash (the only type yet; cloud-init, talos and nixos will
-#            follow for the systems that take a declarative configuration)
-#   script   the script itself
+#   type     bash (a script, for Ubuntu) or nix (a NixOS module, for NixOS)
+#   script   the script, or the module
 #
 # ump config userdata (ud) lists, prints, creates, edits and deletes them.
 # ump config os update replaces the published entry ubuntu and keeps yours.
@@ -25,3 +24,16 @@ userdata:
       set -euo pipefail
       echo "userdata ubuntu: nothing to do on $(hostname)"
       # apt-get install -y --no-install-recommends htop
+  nixos:
+    description: what every NixOS gets; nothing yet
+    type: nix
+    script: |
+      # A NixOS module, imported by /etc/nixos/configuration.nix next to
+      # UMP's own (/etc/nixos/ump); NixOS merges them, and what is set here
+      # wins over UMP's defaults. Put what every NixOS of yours needs here,
+      # or make your own entry (ump config userdata create NAME --from nixos)
+      # and list it in the profile after this one.
+      { config, lib, pkgs, ... }:
+      {
+        # environment.systemPackages = with pkgs; [ btop ];
+      }

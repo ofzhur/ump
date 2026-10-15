@@ -32,7 +32,8 @@ something to look at and start from.
 ([`ubuntu-26.04.yaml`](../profiles/ubuntu-26.04.yaml),
 [`ubuntu-24.04.yaml`](../profiles/ubuntu-24.04.yaml),
 [`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml): the same profile
-with each image) and the published entries of the named files (the
+with each image; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml), the
+same for NixOS) and the published entries of the named files (the
 layouts `lvm-*`, the firewalls `default`, `web` and `open`, the user
 `ump`) are templates: `ump config os update` fetches them again and
 replaces them, which is why `ump config os edit` refuses a published
@@ -123,8 +124,11 @@ publishes:
 | `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `ubuntu-26.04`, the default |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` |
+| `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](nixos.md)) | `nixos-25.11` |
 
-The three published profiles are the same apart from the image, so a
+The published Ubuntu profiles are the same apart from the image, and
+the NixOS one apart from the image and its userdata (`nixos`, a NixOS
+module, where the Ubuntu profiles have `ubuntu`, a script). A system or
 release is chosen in one of three ways:
 
 - **A profile per release:** `ump server reinstall NAME --profile
@@ -135,7 +139,9 @@ release is chosen in one of three ways:
   a copy of a published profile; `ump config os default NAME` then
   makes it the default.
 - **For one installation:** `ump server reinstall NAME --os
-  ubuntu-22.04` overrides the profile's image and changes nothing else.
+  ubuntu-22.04` overrides the profile's image and changes nothing else
+  (between Ubuntu and NixOS the userdata must change too, so take the
+  other profile instead).
 
 More images come later; [the storage
 layout](../images/rescue/README.md#your-own-storage) says what an image

@@ -23,7 +23,7 @@ type osImage struct {
 }
 
 // knownImages are tried when the storage publishes no os/index.json.
-var knownImages = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04"}
+var knownImages = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "nixos-25.11"}
 
 // osImages lists the images of the storage: the names from
 // os/index.json (or the known ones that answer), with the version and
@@ -198,7 +198,11 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	}
 	ui.Printf("Userdata comes from userdata.yaml (ump config userdata): %s. It runs as root in the new system before its first boot.\n", strings.Join(sortedKeys(userdata), ", "))
 	for {
-		answer, err := ui.Line("Userdata (comma-separated, in order; none for nothing)", "ubuntu")
+		def := "ubuntu"
+		if profile.Family(p.OS) == "nixos" {
+			def = "nixos"
+		}
+		answer, err := ui.Line("Userdata (comma-separated, in order; none for nothing; "+profile.UserdataType(profile.Family(p.OS))+" for "+p.OS+")", def)
 		if err != nil {
 			return err
 		}

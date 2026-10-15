@@ -15,6 +15,7 @@ the rest is optional.
 │   ├── ubuntu-26.04.yaml    the published profiles (downloaded on first use; ump config os update replaces them)
 │   ├── ubuntu-24.04.yaml
 │   ├── ubuntu-22.04.yaml
+│   ├── nixos-25.11.yaml
 │   ├── NAME.yaml            your profiles
 │   ├── layouts.yaml         the named disk layouts: the published ones and yours
 │   ├── firewalls.yaml       the named firewalls
@@ -152,7 +153,7 @@ provider.
 [users](profiles.md#users) in `users.yaml`. The first command that
 needs the directory creates it and downloads the published files from
 the storage. The published profiles (`ubuntu-26.04`, `ubuntu-24.04`,
-`ubuntu-22.04`) and the published entries of the named files are
+`ubuntu-22.04`, `nixos-25.11`) and the published entries of the named files are
 templates that `ump config os update` replaces; what you create under
 names of your own is yours and never touched. `default_profile` in
 `config.yaml` (set with `ump config os default NAME`) names the profile

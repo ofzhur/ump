@@ -206,8 +206,27 @@ type Userdata struct {
 	Script      string `yaml:"script" json:"script"`
 }
 
-// UserdataTypes are the kinds of userdata ump knows how to apply.
-var UserdataTypes = []string{"bash"}
+// UserdataTypes are the kinds of userdata ump knows how to apply: bash
+// scripts for systems unpacked from an image (Ubuntu), NixOS modules for
+// NixOS.
+var UserdataTypes = []string{"bash", "nix"}
+
+// Family is the kind of system an image name installs: nixos for the
+// nixos-* images, image (unpacked and configured in place) for the rest.
+func Family(os string) string {
+	if strings.HasPrefix(os, "nixos") {
+		return "nixos"
+	}
+	return "image"
+}
+
+// UserdataType is the userdata type a system family takes.
+func UserdataType(family string) string {
+	if family == "nixos" {
+		return "nix"
+	}
+	return "bash"
+}
 
 // Validate checks a userdata entry.
 func (u *Userdata) Validate() error {
@@ -780,6 +799,12 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 	resolvedUserdata, err := p.ResolveUserdata(userdata)
 	if err != nil {
 		return nil, err
+	}
+	want := UserdataType(Family(p.OS))
+	for _, u := range resolvedUserdata {
+		if u.Type != want {
+			return nil, fmt.Errorf("profile %s: userdata %s is %s, and %s takes %s userdata (see docs/userdata.md)", p.Name, u.Name, u.Type, p.OS, want)
+		}
 	}
 	if admin(resolvedUsers) == "" {
 		return nil, fmt.Errorf("profile %s: no user has sudo and root is not listed; ump could not administer the new system", p.Name)
