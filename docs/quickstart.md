@@ -25,34 +25,36 @@ $ git clone git@github.com:ofzhur/ump.git && cd ump && make     # ./ump; make in
 
 ## 2. Decide where ump keeps its things
 
-Everything ump keeps is one directory, its home: the accounts and their
-secrets, the profiles, UMP's own SSH key, what it knows about your
-servers, the listing cache. By default that is `~/.config/ump`, and for
-one person on one machine that is all there is to it: skip to the next
-step.
+Everything ump keeps is its state: the accounts and their secrets,
+the profiles, UMP's own SSH key, what it knows about your servers, the
+listing cache. It lives in a state backend; by default that is the
+local directory `~/.config/ump`, and for one person on one machine
+that is all there is to it: skip to the next step.
 
-Decide now if the home should be somewhere shared instead, because the
-account you add next lands wherever the home is. A team, a second
-machine, or CI wants a **backend**: a directory in the fleet's git
-repository, a directory on a jump host over SSH, an S3 or R2 bucket, an
-HTTP service, Consul or Vault. Everyone using the same backend shares
-the whole home, UMP's key included, and so reaches the same servers.
+Decide now if the state should be somewhere shared instead, because
+the account you add next lands wherever the state is. A team, a second
+machine, or CI wants a shared **state backend**: a directory in the
+fleet's git repository, a directory on a jump host over SSH, an S3 or
+R2 bucket, an HTTP service, Consul or Vault. Everyone using the same
+backend has the same state, UMP's key included, and so reaches the
+same servers.
 
 ```console
-$ ump config state set                                  # the wizard: pick a backend, copy the home there
+$ ump config state setup                                # the wizard: pick a backend, migrate the state there
 $ ump config state migrate --to file:///srv/fleet/ump   # or in one line
 $ ump config state view
-Home:      file:///srv/fleet/ump (backend.yaml)
+Backend:   file:///srv/fleet/ump (backend.yaml)
 Mirror:    ~/.cache/ump/homes/3f9a1c2b7e4d
 ```
 
 From then on ump works on a mirror of the backend: pulled before every
 command, pushed after it, with conflicts named rather than overwritten.
 `UMP_STATE=s3://fleet/ump` in the environment names a backend ahead of
-the file, which is how CI gets the same home without anything on disk.
-Mind that the home holds secrets in clear text: choose a backend that
-only your team can read. Moving later is the same `migrate`; see [the
-home and its backend](state.md).
+the file, which is how CI gets the same state without anything on
+disk. Mind that the state holds secrets in clear text: choose a backend
+that only your team can read. Moving later is the same wizard, which
+offers the migration when this machine holds state; see [the state
+backend](state.md).
 
 ## 3. Add a provider account
 
@@ -228,10 +230,10 @@ uptime, memory, the root disk and the addresses.
   `ump server set NAME --price 89 --attr owner=alice` records what the
   API does not know, `ump server add` a machine no provider lists. See
   [inventory](inventory.md).
-- **A shared home, later.** If you skipped step 2, `ump config state
-  migrate --to URL` moves the home to a backend at any time, with
-  everything in it, and `clear` brings it back. See [the home and its
-  backend](state.md).
+- **A shared state, later.** If you skipped step 2, `ump config state
+  setup` (or `migrate --to URL`) moves the state to a backend at any
+  time, with everything in it, and `clear` brings it back. See [the
+  state backend](state.md).
 - **Scripts and agents.** Every command has `-o json`; nothing prompts
   without a terminal (`--yes` where something is destructive, exit code 3
   otherwise). See the [CLI reference](cli.md).

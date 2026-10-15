@@ -21,7 +21,7 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "config",
 		Aliases: []string{"c", "cfg"},
-		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), userdata (userdata), keys (key) and the home (state)",
+		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), userdata (userdata), keys (key) and the state backend (state)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
 what a server becomes under os, the named disk layouts, firewalls,
 users and userdata they refer to, UMP's own SSH key and the named keys,
@@ -42,7 +42,7 @@ user (u), userdata (ud), key (k), state (st); config itself is c or cfg.`,
   ump config user list            # the named users
   ump config userdata list        # what runs in a freshly installed system
   ump config key list             # UMP's own key and the named keys
-  ump config state view           # where the home is
+  ump config state view           # which state backend, and what the state holds
   ump c o ls                      # the short form of ump config os list`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {

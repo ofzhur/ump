@@ -235,7 +235,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 	// who forgot UMP_STATE wants to notice now
 	if a.home.Backend == nil {
 		if _, err := os.Stat(path); err != nil {
-			ui.Printf("No backend is configured: everything ump keeps, this account's secrets included, stays in %s on this machine (a team, another machine or CI shares a backend instead; UMP_STATE or ump config state set).\n", config.AbbreviateHome(config.LocalDir()))
+			ui.Printf("No state backend is configured: everything ump keeps, this account's secrets included, stays in %s on this machine (a team, another machine or CI shares a state backend instead; UMP_STATE or ump config state setup).\n", config.AbbreviateHome(config.LocalDir()))
 			local, err := ui.Confirm("Keep it on this machine?", true)
 			if err != nil {
 				return err
@@ -357,7 +357,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		if a.home.Backend != nil {
 			where = a.home.Backend.String()
 		}
-		ui.Printf("\nThe secrets are kept as files in the home (%s), readable only by you.\n", where)
+		ui.Printf("\nThe secrets are kept as files in the state (%s), readable only by you.\n", where)
 	}
 	ui.Printf("\n")
 

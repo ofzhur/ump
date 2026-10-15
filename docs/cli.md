@@ -91,10 +91,11 @@ ump
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      your editor on userdata.yaml, then a check of every entry
 │   │   └── delete   (d, rm, remove) <name> [--yes]
-│   ├── state (st)                                     where the home lives: local, or a backend shared by a team
-│   │   ├── view     (v, show)                         where the home is, the mirror, what it holds
-│   │   ├── set      [--url <url> [backend flags]]     point ump at a backend; without flags the wizard on a terminal (pick one, copy the home there)
-│   │   ├── migrate  --to <url> [backend flags] [--force]   copy the home there and point ump at it
+│   ├── state (st)                                     the state backend: the local directory, or one shared by a team
+│   │   ├── view     (v, show)                         which backend, the mirror, what the state holds
+│   │   ├── setup    (configure, edit)                 the wizard on a terminal: pick a backend, migrate the state there
+│   │   ├── set      --url <url> [backend flags]       point ump at a backend as it is
+│   │   ├── migrate  --to <url> [backend flags] [--force]   copy the state there and point ump at it
 │   │   ├── clear                                      the local directory again
 │   │   ├── pull | push [--force]                      the mirror and the backend, by hand
 │   │   ├── test     (t)                               does the backend answer?
@@ -516,7 +517,7 @@ ump config firewall    list|get|create|edit|delete
 ump config user        list|get|create|edit|delete
 ump config userdata    list|get|create|edit|delete
 ump config key         show|list|add|remove
-ump config state       view|set|migrate|clear|pull|push|test|locks|unlock
+ump config state       view|setup|set|migrate|clear|pull|push|test|locks|unlock
 ```
 
 An entity called without a verb prints its help. The verbs have the
@@ -591,10 +592,10 @@ in the new system before its first boot.
 Without arguments and on a terminal, `ump config isp add` is an
 interactive wizard. On a fresh system it first asks whether everything
 should stay in `~/.config/ump` on this machine, and runs the backend
-wizard (`ump config state set`) when the answer is no, so that a team's
-first account lands in the shared home. Then it asks for the provider type, an account name and
-the credentials; the secrets become files under `secrets/` in the home,
-readable only by you, wherever the home lives (environment variables or
+wizard (`ump config state setup`) when the answer is no, so that a team's
+first account lands in the shared state. Then it asks for the provider type, an account name and
+the credentials; the secrets become files under `secrets/` in the state,
+readable only by you, wherever it lives (environment variables or
 a command such as `pass show ...` are for the non-interactive form
 below), then it tests the credentials with one API call and writes the
 account to the configuration. For OVHcloud it can request a consumer key for you and hand
@@ -614,10 +615,11 @@ wizard created for it.
 
 ### `ump config state`
 
-Where [the home](state.md) lives: `view`, `set` (without flags, on a terminal, a wizard
-that picks a backend and offers to copy the home there; `set --url
-URL` uses a backend as it is), `migrate --to URL` (copy the home there
-first),
+[The state backend](state.md): `view`, `setup` (on a terminal, a
+wizard that picks a backend and, when this machine holds state, offers
+to migrate it there; a backend that holds state is used as it is),
+`set --url URL` (use a backend as it is, from flags), `migrate --to
+URL` (copy the state there first),
 `clear` (the local directory again), `pull` and `push` for the mirror
 by hand, `test`, and `locks` and `unlock SERVER` for the per-server
 locks that `reinstall` and `rescue` take. `UMP_STATE` in the

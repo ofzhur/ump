@@ -9,7 +9,7 @@ the rest is optional.
 
 ```
 ~/.config/ump/
-├── backend.yaml             where the home lives when it is not this directory (ump config state)
+├── backend.yaml             the state backend, when it is not this directory (ump config state setup)
 ├── config.yaml              accounts, storage, UMP's key, output default
 ├── profiles/
 │   ├── ubuntu-26.04.yaml    the published profiles (downloaded on first use; ump config os update replaces them)
@@ -73,8 +73,8 @@ staging:
 
 ```
 
-Where the home lives is not in `config.yaml` but in `backend.yaml`
-next to it, or in `UMP_STATE`; see [the home and its
+Which state backend holds all this is not in `config.yaml` but in
+`backend.yaml` next to it, or in `UMP_STATE`; see [the state
 backend](state.md).
 
 | Section | Meaning |

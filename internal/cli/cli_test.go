@@ -773,7 +773,7 @@ func TestWizardFileStorage(t *testing.T) {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
 	for _, want := range []string{"No accounts configured yet.", "Provider type", "1) fake", "Account name [fake]:",
-		"The secrets are kept as files in the home (", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
+		"The secrets are kept as files in the state (", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
 		"Saved account acc (fake)", "Done. Try: ump server list"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, out)
@@ -3286,7 +3286,7 @@ func TestConfigState(t *testing.T) {
 
 	// no backend: the home is the local directory
 	out, _, code := e.run("", false, "config", "state", "view")
-	if code != 0 || !strings.Contains(out, "Home:      "+local+" (local; no backend configured)") || !strings.Contains(out, "Accounts:  2") {
+	if code != 0 || !strings.Contains(out, "Backend:   none, the state is in "+local) || !strings.Contains(out, "Accounts:  2") {
 		t.Errorf("view: code %d\n%s", code, out)
 	}
 	if short, _, code := e.run("", false, "c", "st", "v"); code != 0 || short != out {
@@ -3327,13 +3327,13 @@ func TestConfigState(t *testing.T) {
 			mirror = strings.TrimSpace(strings.TrimPrefix(line, "Mirror:"))
 		}
 	}
-	if code != 0 || !strings.Contains(out, "Home:      file://"+remote+" (backend.yaml)") || !strings.HasPrefix(mirror, filepath.Join(os.Getenv("XDG_CACHE_HOME"), "ump", "homes")) || !strings.Contains(out, "State:     1 servers with settings, 0 with an installation recorded, 1 added by hand") {
+	if code != 0 || !strings.Contains(out, "Backend:   file://"+remote+" (backend.yaml)") || !strings.HasPrefix(mirror, filepath.Join(os.Getenv("XDG_CACHE_HOME"), "ump", "homes")) || !strings.Contains(out, "Servers:   1 with settings, 0 with an installation recorded, 1 added by hand") {
 		t.Errorf("view after migrate: code %d\n%s", code, out)
 	}
 	if out, errOut, code := e.run("", false, "server", "list", "-o", "name", "--account", "one", "--account", "manual"); code != 0 || !strings.Contains(out, "fake/1\n") || !strings.Contains(out, "manual/rack-07\n") {
 		t.Errorf("list through the mirror: code %d, %q, %q", code, out, errOut)
 	}
-	if _, errOut, code := e.run("", false, "config", "state", "migrate", "--to", "file://"+remote); code != 1 || !strings.Contains(errOut, "the home is at file://"+remote+" already") {
+	if _, errOut, code := e.run("", false, "config", "state", "migrate", "--to", "file://"+remote); code != 1 || !strings.Contains(errOut, "the state is at file://"+remote+" already") {
 		t.Errorf("migrate to the same: code %d, %q", code, errOut)
 	}
 
@@ -3405,23 +3405,23 @@ func TestConfigState(t *testing.T) {
 	// the environment wins over the pointer; test, set and clear
 	other := filepath.Join(t.TempDir(), "other")
 	t.Setenv("UMP_STATE", "file://"+other)
-	if out, _, code := e.run("", false, "config", "state", "view"); code != 0 || !strings.Contains(out, "Home:      file://"+other+" (UMP_STATE in the environment)") || !strings.Contains(out, "State:     0 servers with settings") {
+	if out, _, code := e.run("", false, "config", "state", "view"); code != 0 || !strings.Contains(out, "Backend:   file://"+other+" (UMP_STATE in the environment)") || !strings.Contains(out, "Servers:   0 with settings") {
 		t.Errorf("view from the environment:\n%s", out)
 	}
 	if out, _, code := e.run("", false, "config", "state", "test"); code != 0 || !strings.Contains(out, "file://"+other+" answers (0 files there)") {
 		t.Errorf("test: code %d\n%s", code, out)
 	}
 	t.Setenv("UMP_STATE", "")
-	if out, _, code := e.run("", false, "config", "state", "set", "--url", "file://"+other); code != 0 || !strings.Contains(out, "The home is file://"+other+" now") {
+	if out, _, code := e.run("", false, "config", "state", "set", "--url", "file://"+other); code != 0 || !strings.Contains(out, "The state backend is file://"+other+" now") {
 		t.Errorf("set: code %d\n%s", code, out)
 	}
-	if out, _, code := e.run("", false, "config", "state", "clear"); code != 0 || !strings.Contains(out, "No backend configured; the home is "+local) {
+	if out, _, code := e.run("", false, "config", "state", "clear"); code != 0 || !strings.Contains(out, "No backend configured; the state is in "+local) {
 		t.Errorf("clear: code %d\n%s", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(local, "backend.yaml")); err == nil {
 		t.Error("backend.yaml still there after clear")
 	}
-	if out, _, code := e.run("", false, "config", "state", "view"); code != 0 || !strings.Contains(out, "(local; no backend configured)") {
+	if out, _, code := e.run("", false, "config", "state", "view"); code != 0 || !strings.Contains(out, "Backend:   none, the state is in "+local) {
 		t.Errorf("view after clear:\n%s", out)
 	}
 	// a secret given as a value is kept in a file and referenced
@@ -3434,8 +3434,61 @@ func TestConfigState(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(local, "backend.token")); string(data) != "t0ken\n" {
 		t.Errorf("secret file: %q", data)
 	}
-	if _, errOut, code := e.run("", false, "config", "state", "set"); code != 2 || !strings.Contains(errOut, "--url is required without a terminal") {
-		t.Errorf("set without a terminal: code %d, %q", code, errOut)
+	if _, errOut, code := e.run("", false, "config", "state", "set"); code != 2 || !strings.Contains(errOut, "--url is required (ump config state setup asks for it on a terminal)") {
+		t.Errorf("set without --url: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "state", "setup"); code != 3 || !strings.Contains(errOut, "needs a terminal") {
+		t.Errorf("setup without a terminal: code %d, %q", code, errOut)
+	}
+}
+
+func TestStateSetup(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	local := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")
+	os.MkdirAll(filepath.Join(local, "profiles"), 0o700)
+	os.WriteFile(filepath.Join(local, "profiles", "db.yaml"), []byte("os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	if _, _, code := e.run("", false, "server", "set", "fake/1", "--attr", "owner=alice"); code != 0 {
+		t.Fatal("server set failed")
+	}
+	// not a clean start: the wizard says what the state holds and offers
+	// the migration to an empty backend
+	remote := filepath.Join(t.TempDir(), "fleet")
+	out, errOut, code := e.run("1\nfile://"+remote+"\ny\n", true, "config", "state", "setup")
+	if code != 0 {
+		t.Fatalf("setup: code %d\n%s%s", code, out, errOut)
+	}
+	for _, want := range []string{"No state backend is configured; the state is in " + local + " on this machine and holds 2 accounts, 1 profile files, 1 servers with settings.", "Where should the state live?", "file://" + remote + " answers (0 files there).", "Migrate this machine's state (2 accounts, 1 profile files, 1 servers with settings) there? [Y/n]:", "Copied ", "The state backend is file://" + remote + " now"} {
+		if !strings.Contains(out+errOut, want) {
+			t.Errorf("setup lacks %q:\n%s%s", want, out, errOut)
+		}
+	}
+	for _, f := range []string{"profiles/db.yaml", "state.yaml"} { // the test's config.yaml lives outside the home (--config)
+		if _, err := os.Stat(filepath.Join(remote, f)); err != nil {
+			t.Errorf("%s did not reach the backend: %v", f, err)
+		}
+	}
+	if out, _, code := e.run("", false, "config", "state", "view"); code != 0 || !strings.Contains(out, "Backend:   file://"+remote+" (backend.yaml)") {
+		t.Errorf("view after setup:\n%s", out)
+	}
+	// the same backend again: nothing to do
+	if out, errOut, code := e.run("1\nfile://"+remote+"\n", true, "config", "state", "setup"); code != 0 || !strings.Contains(out+errOut, "it is the state backend already") {
+		t.Errorf("same backend: code %d\n%s%s", code, out, errOut)
+	}
+	// another backend that holds state: used as it is by default
+	other := filepath.Join(t.TempDir(), "other")
+	os.MkdirAll(other, 0o700)
+	os.WriteFile(filepath.Join(other, "config.yaml"), []byte("accounts: {}\n"), 0o600)
+	out, errOut, code = e.run("1\nfile://"+other+"\n\n", true, "config", "state", "setup")
+	if code != 0 || !strings.Contains(out+errOut, "It holds state already, and so does this machine (") || !strings.Contains(out+errOut, "1) use the state in the backend") || strings.Contains(out+errOut, "Copied ") || !strings.Contains(out+errOut, "The state backend is file://"+other+" now") {
+		t.Errorf("backend with state: code %d\n%s%s", code, out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(other, "profiles", "db.yaml")); err == nil {
+		t.Error("the state was copied although the backend's was chosen")
+	}
+	// none: back to the local directory
+	if out, errOut, code := e.run("8\n", true, "config", "state", "setup"); code != 0 || !strings.Contains(out+errOut, "No backend; the state stays in "+local) {
+		t.Errorf("none: code %d\n%s%s", code, out, errOut)
 	}
 }
 
@@ -3444,7 +3497,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	// a fresh system: the wizard asks about the home first; "n" runs the
 	// backend wizard, where "none" keeps the local directory
 	out, _, code := e.run("n\n8\nfake\nacc\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add")
-	if code != 0 || !strings.Contains(out, "No backend is configured: everything ump keeps, this account's secrets included, stays in") || !strings.Contains(out, "Keep it on this machine? [Y/n]:") || !strings.Contains(out, "Where should the home live?") || !strings.Contains(out, "No backend; the home is") || !strings.Contains(out, "Saved account acc (fake)") {
+	if code != 0 || !strings.Contains(out, "No state backend is configured: everything ump keeps, this account's secrets included, stays in") || !strings.Contains(out, "Keep it on this machine? [Y/n]:") || !strings.Contains(out, "Where should the state live?") || !strings.Contains(out, "No backend; the state stays in") || !strings.Contains(out, "Saved account acc (fake)") {
 		t.Errorf("fresh system: code %d\n%s", code, out)
 	}
 	if strings.Contains(out, "3) manual") || strings.Contains(out, "manual         servers added by hand") {
@@ -3462,7 +3515,7 @@ func TestWizardHomeQuestion(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "fleet")
 	t.Setenv("UMP_STATE", "file://"+remote)
 	out, _, code = e.run("fake\nacc3\ncarol\ns3cret\n\nn\n", true, "config", "isp", "add")
-	if code != 0 || strings.Contains(out, "Where should this account's secrets be kept?") || !strings.Contains(out, "The secrets are kept as files in the home (file://"+remote+")") || !strings.Contains(out, "Home: file://"+remote) || !strings.Contains(out, "Saved account acc3 (fake)") {
+	if code != 0 || strings.Contains(out, "Where should this account's secrets be kept?") || !strings.Contains(out, "The secrets are kept as files in the state (file://"+remote+")") || !strings.Contains(out, "Home: file://"+remote) || !strings.Contains(out, "Saved account acc3 (fake)") {
 		t.Errorf("behind a backend: code %d\n%s", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(remote, "secrets", "acc3.password")); err != nil {

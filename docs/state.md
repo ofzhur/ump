@@ -1,15 +1,16 @@
-# The home and its backend
+# The state backend
 
-Everything ump keeps lives in one directory, its **home**: `config.yaml`
-with the accounts, the secret files, the profiles with the layouts,
-firewalls and users, the named keys, UMP's own SSH key, `state.yaml`
+The **state** is everything ump keeps: `config.yaml` with the
+accounts, the secret files, the profiles with the layouts, firewalls,
+users and userdata, the named keys, UMP's own SSH key, `state.yaml`
 (what ump knows about servers beyond the providers' word: profile,
 price, attributes, the servers added by hand, what was installed where)
-and the listing cache. Without a backend that directory is
-`~/.config/ump`, and a single person on one machine never needs more.
+and the listing cache. It lives in a **state backend**. Without one
+configured, that is the local directory `~/.config/ump`, and a single
+person on one machine never needs more.
 
-With a **backend**, the home lives there, shared by everyone who uses
-the same one, UMP's key included, so a team acts as one UMP. ump works
+With a shared state backend, everyone who uses the same one has the
+same state, UMP's key included, so a team acts as one UMP. ump works
 on a **mirror** of it under its cache directory: pulled before every
 command, pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
@@ -17,24 +18,40 @@ overwritten in silence. `state.yaml` and the per-server locks of `ump
 server reinstall` and `rescue` go through the backend directly.
 
 ```console
-$ ump config state set                          # the wizard: pick a backend, copy the home there
-$ ump config state view                         # where the home is, the mirror, what it holds
+$ ump config state setup                        # the wizard: pick a backend, migrate the state there
+$ ump config state view                         # which backend, the mirror, what the state holds
 $ ump config state migrate --to file:///srv/fleet/ump
 $ UMP_STATE=r2://account/bucket/ump ump server list
 ```
 
-## Where the home is
+## Which backend
 
 Three places are asked, in this order:
 
 1. `UMP_STATE` in the environment: a backend URL (below), with the
    credential variables. CI and scripts set it, and nothing on disk is
    needed.
-2. `~/.config/ump/backend.yaml`: the pointer `ump config state` writes.
-3. Nothing: the home is `~/.config/ump` itself (`$XDG_CONFIG_HOME/ump`).
+2. `~/.config/ump/backend.yaml`: the pointer `ump config state setup`
+   (or `set`, `migrate`) writes.
+3. Nothing: the state is `~/.config/ump` itself (`$XDG_CONFIG_HOME/ump`).
    A fresh system starts here.
 
 `ump config state view` says which applies, and where the mirror is.
+
+## Setting it up
+
+`ump config state setup` asks on a terminal: the kind of backend, its
+address and credentials. It checks that the backend answers and then
+looks at both sides. A backend that holds state already is used as it
+is, unless this machine holds state too and you choose to overwrite
+the backend with it. An empty backend gets this machine's state copied
+over when there is any (the wizard says what it holds: accounts,
+profiles, servers with settings) and asks first; that is a
+**migration**, the same as `migrate --to URL`, and the copy left on
+this machine stays. On a clean start nothing is copied and the backend
+starts empty. The account wizard (`ump config isp add`) runs the same
+questions on a fresh system when you say the state should not stay on
+this machine.
 
 ## Backends
 
@@ -49,7 +66,7 @@ Three places are asked, in this order:
 | `vault://host:8200/mount/prefix` | secrets in a KV version 2 engine of Vault, one per file (`http+vault://` for plain http) | `token` |
 
 The credentials come from `backend.yaml` as references (`{env: NAME}`,
-`{file: PATH}`, `{command: CMD}`), written by `ump config state` (a
+`{file: PATH}`, `{command: CMD}`), written by `ump config state setup` (a
 value given as such is kept in a file of its own next to the pointer),
 or from the environment, which wins: `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `UMP_STATE_ENDPOINT`,
@@ -64,7 +81,7 @@ access_key: {env: FLEET_STATE_KEY}
 secret_key: {file: ~/.config/ump/backend.secret_key}
 ```
 
-The home holds secrets, the accounts' and UMP's key, in clear text,
+The state holds secrets, the accounts' and UMP's key, in clear text,
 as `~/.config/ump` does; choose a backend accordingly (a private
 bucket, a Vault, a repository nobody else reads).
 
@@ -93,10 +110,10 @@ an ump that died left behind.
 ## Commands
 
 ```
-ump config state view                  # where the home is, the mirror, what it holds
-ump config state set                   # the wizard, on a terminal: pick a backend, copy the home there
-ump config state set --url URL [...]   # point ump at a backend as it is (the home there is used)
-ump config state migrate --to URL [...] [--force]   # copy the current home there, then point ump at it
+ump config state view                  # which backend, the mirror, what the state holds
+ump config state setup                 # the wizard, on a terminal: pick a backend, migrate the state there
+ump config state set --url URL [...]   # point ump at a backend as it is (the state there is used)
+ump config state migrate --to URL [...] [--force]   # copy the current state there, then point ump at it
 ump config state clear                 # no backend: the local directory again
 ump config state pull | push [--force] # the mirror and the backend, by hand
 ump config state test                  # does the backend answer?
@@ -145,8 +162,8 @@ disappears. `installed` is written by `ump server reinstall` when the
 new system answered, from what `/etc/ump/install` on the machine says,
 and shown by `ump server show`. `manual` holds what `ump server add`
 took; its servers are listed by the account `manual`, which exists
-wherever the state does. Edit the file by hand (in the home, or in the
-mirror and push) or with `ump server set`, `add` and `remove`; unknown
+wherever the state does. Edit the file by hand (in the local directory,
+or in the mirror and push) or with `ump server set`, `add` and `remove`; unknown
 fields are an error, so a typo is caught before anything is written,
 and a command rewrites the file in its own layout, so a server's `note`
 is the place for remarks.

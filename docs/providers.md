@@ -84,10 +84,10 @@ Done. Try: ump server list
 ```
 
 On a fresh system it first asks whether everything should stay in
-`~/.config/ump` on this machine, and runs `ump config state` when the
-answer is no, so that a team's first account lands in the shared home.
+`~/.config/ump` on this machine, and runs `ump config state setup` when the
+answer is no, so that a team's first account lands in the shared state.
 It then asks for the provider type, an account name and the credentials
-(secrets are read without echo), keeps the secrets as files in the home,
+(secrets are read without echo), keeps the secrets as files in the state,
 wherever it lives, tests them with one API call (a listing) and writes
 the account to the configuration. Environment variables and commands as
 secret references are the non-interactive form's (`--set

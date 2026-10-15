@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ func (a *app) resolveHome(ctx context.Context) error {
 	}
 	m := &home.Mirror{Backend: h.Backend, Dir: h.Dir}
 	if _, _, err := m.Pull(ctx); err != nil {
-		fmt.Fprintf(a.stderr, "ump: the home could not be pulled from %s (%v); working with the mirror as it is\n", h.Backend, err)
+		fmt.Fprintf(a.stderr, "ump: the state could not be pulled from %s (%v); working with the mirror as it is\n", h.Backend, err)
 		a.pullFailed = true
 	}
 	return nil
@@ -189,23 +190,24 @@ func applyState(d *state.Document, ms []provider.Machine) {
 
 // --- ump config state ---------------------------------------------------
 
-const stateLong = `Everything ump keeps lives in one directory, its home: config.yaml with
-the accounts, the secret files, the profiles, the named keys, UMP's own
-SSH key, state.yaml (what ump knows about servers beyond the providers'
-word) and the listing cache. Without a backend that is ` + "`~/.config/ump`" + `.
+const stateLong = `The state is everything ump keeps: config.yaml with the accounts, the
+secret files, the profiles, the named keys, UMP's own SSH key,
+state.yaml (what ump knows about servers beyond the providers' word)
+and the listing cache. It lives in a state backend: without one
+configured, the local directory ` + "`~/.config/ump`" + `.
 
-With a backend, the home lives there, shared by everyone who uses it,
-and ump works on a mirror under its cache directory: pulled before every
+With a shared state backend, everyone who uses it acts as one UMP, and
+ump works on a mirror under its cache directory: pulled before every
 command, pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
 overwritten. state.yaml and the per-server locks of ump server reinstall
 and rescue go through the backend directly.
 
-Where the home is: UMP_STATE in the environment names a backend (with
+Which backend: UMP_STATE in the environment names one (with
 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, UMP_STATE_ENDPOINT,
 UMP_STATE_TOKEN (also VAULT_TOKEN, CONSUL_HTTP_TOKEN), UMP_STATE_USER and
 UMP_STATE_PASSWORD as needed); else ` + "`~/.config/ump/backend.yaml`" + `, which
-this command writes; else the local directory. Backends:
+ump config state setup writes; else the local directory. Backends:
 
   file:///path/to/dir              a directory (one in the fleet's git repository)
   ssh://[user@]host/path/to/dir    a directory on another machine, through your ssh client
@@ -215,24 +217,25 @@ this command writes; else the local directory. Backends:
   consul://host:8500/prefix        Consul KV (token); http+consul:// for plain http
   vault://host:8200/mount/prefix   Vault KV v2 (token); http+vault:// for plain http
 
-On a terminal, ump config state set without flags is a wizard that asks
-for a backend and offers to copy the home there.`
+On a terminal, ump config state setup is a wizard: it asks for the
+backend and, when this machine holds state already, offers to migrate
+it there.`
 
 func (a *app) newConfigStateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "state",
 		Aliases: []string{"st"},
-		Short:   "Where UMP's home lives: the local directory, or a backend shared by a team",
+		Short:   "The state backend: where ump keeps everything, the local directory or one shared by a team",
 		Long:    stateLong,
-		Example: `  ump config state view            # where the home is
-  ump config state set             # the wizard: pick a backend, copy the home there
+		Example: `  ump config state view            # which backend, and what the state holds
+  ump config state setup           # the wizard: pick a backend, migrate the state there
   ump config state migrate --to file:///srv/fleet/ump
   ump config state set --url s3://fleet/ump --region eu-central-1 --access-key env:FLEET_KEY --secret-key file:~/.fleet.secret
   ump config state pull
   ump config state locks
   UMP_STATE=r2://account/bucket/ump ump server list`,
 	}
-	cmd.AddCommand(a.newStateViewCmd(), a.newStateSetCmd(), a.newStateClearCmd(), a.newStateMigrateCmd(), a.newStatePullCmd(), a.newStatePushCmd(), a.newStateTestCmd(), a.newStateLocksCmd(), a.newStateUnlockCmd())
+	cmd.AddCommand(a.newStateViewCmd(), a.newStateSetupCmd(), a.newStateSetCmd(), a.newStateClearCmd(), a.newStateMigrateCmd(), a.newStatePullCmd(), a.newStatePushCmd(), a.newStateTestCmd(), a.newStateLocksCmd(), a.newStateUnlockCmd())
 	return cmd
 }
 
@@ -240,19 +243,19 @@ func (a *app) newStateViewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "view",
 		Aliases: verbAliases("view"),
-		Short:   "Where the home is, and what it holds",
+		Short:   "Which backend the state is in, and what it holds",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h := a.home
 			switch {
 			case h.Backend == nil:
-				fmt.Fprintf(a.stdout, "Home:      %s (local; no backend configured)\n", config.AbbreviateHome(h.Dir))
+				fmt.Fprintf(a.stdout, "Backend:   none, the state is in %s\n", config.AbbreviateHome(h.Dir))
 			default:
 				how := "backend.yaml"
 				if h.Source == "env" {
 					how = "UMP_STATE in the environment"
 				}
-				fmt.Fprintf(a.stdout, "Home:      %s (%s)\n", h.Backend, how)
+				fmt.Fprintf(a.stdout, "Backend:   %s (%s)\n", h.Backend, how)
 				fmt.Fprintf(a.stdout, "Mirror:    %s\n", config.AbbreviateHome(h.Dir))
 				if a.pullFailed {
 					fmt.Fprintln(a.stdout, "Pulled:    no, the backend did not answer; the mirror is what there is")
@@ -269,7 +272,7 @@ func (a *app) newStateViewCmd() *cobra.Command {
 						installed++
 					}
 				}
-				fmt.Fprintf(a.stdout, "State:     %d servers with settings, %d with an installation recorded, %d added by hand\n", len(d.Servers), installed, len(d.Manual))
+				fmt.Fprintf(a.stdout, "Servers:   %d with settings, %d with an installation recorded, %d added by hand\n", len(d.Servers), installed, len(d.Manual))
 			}
 			if locks, err := a.stateStore().Locks(cmd.Context()); err == nil && len(locks) > 0 {
 				fmt.Fprintf(a.stdout, "Locks:     %d (ump config state locks)\n", len(locks))
@@ -363,21 +366,16 @@ func (a *app) newStateSetCmd() *cobra.Command {
 	var f pointerFlags
 	var noTest bool
 	cmd := &cobra.Command{
-		Use:   "set [--url URL] [--endpoint URL] [--region R] [--access-key REF] [--secret-key REF] [--token REF] [--user REF] [--password REF]",
-		Short: "Point the home at a backend: a wizard on a terminal, or from flags",
-		Long: `Write backend.yaml: the backend ump works on from now on. Without flags
-and on a terminal, a wizard asks for the backend and offers to copy the
-current home there. With --url, the home there is used as it is (to
-carry the current home over, use migrate), and the backend is listed
+		Use:   "set --url URL [--endpoint URL] [--region R] [--access-key REF] [--secret-key REF] [--token REF] [--user REF] [--password REF]",
+		Short: "Point ump at a state backend as it is, from flags (setup asks, migrate copies)",
+		Long: `Write backend.yaml: the backend ump works on from now on. The state
+there is used as it is; to carry the current state over, use migrate,
+and on a terminal, setup asks for everything. The backend is listed
 once to check that it answers, unless --no-test.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.url == "" {
-				ui := a.resolverUI(cmd)
-				if ui == nil {
-					return usageErrorf(cmd, "--url is required without a terminal")
-				}
-				return a.stateWizard(cmd, ui)
+				return usageErrorf(cmd, "--url is required (ump config state setup asks for it on a terminal)")
 			}
 			p, err := f.pointer(nil)
 			if err != nil {
@@ -393,7 +391,7 @@ once to check that it answers, unless --no-test.`,
 			if err := home.SavePointer(p); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stdout, "The home is %s now (%s); the next command works on its mirror.\n", p.URL, config.AbbreviateHome(home.PointerPath()))
+			fmt.Fprintf(a.stdout, "The state backend is %s now (%s); the next command works on its mirror.\n", p.URL, config.AbbreviateHome(home.PointerPath()))
 			if os.Getenv("UMP_STATE") != "" {
 				fmt.Fprintln(a.stdout, "UMP_STATE is set in this environment and wins over the file.")
 			}
@@ -408,13 +406,13 @@ once to check that it answers, unless --no-test.`,
 func (a *app) newStateClearCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear",
-		Short: "Forget the backend: the home is the local directory again (the mirror and the backend stay)",
+		Short: "Forget the backend: the state is the local directory's again (the mirror and the backend stay)",
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := home.SavePointer(nil); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stdout, "No backend configured; the home is %s. The mirror and the backend's files stay as they are.\n", config.AbbreviateHome(config.LocalDir()))
+			fmt.Fprintf(a.stdout, "No backend configured; the state is in %s. The mirror and the backend's files stay as they are.\n", config.AbbreviateHome(config.LocalDir()))
 			if os.Getenv("UMP_STATE") != "" {
 				fmt.Fprintln(a.stdout, "UMP_STATE is set in this environment and still names a backend.")
 			}
@@ -428,8 +426,8 @@ func (a *app) newStateMigrateCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "migrate --to URL [backend flags] [--force]",
-		Short: "Copy the home to a backend and point ump at it",
-		Long: `Write every file of the current home (the local directory, or the
+		Short: "Copy the state to a backend and point ump at it",
+		Long: `Write every file of the current state (the local directory, or the
 mirror of the current backend) to the backend URL names, which must be
 empty unless --force, then write backend.yaml so that the next command
 works there. The copy left behind stays. With UMP_STATE in the
@@ -449,7 +447,7 @@ until it says the new URL.`,
 				return err
 			}
 			if a.home.Backend != nil && a.home.Backend.String() == b.String() {
-				return fmt.Errorf("the home is at %s already", b)
+				return fmt.Errorf("the state is at %s already", b)
 			}
 			n, err := home.Copy(cmd.Context(), a.home.Dir, b, force)
 			if err != nil {
@@ -477,7 +475,7 @@ func (a *app) newStatePullCmd() *cobra.Command {
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.home.Backend == nil {
-				return errors.New("no backend configured; the home is the local directory")
+				return errors.New("no backend configured; the state is in the local directory")
 			}
 			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
 			pulled, removed, err := m.Pull(cmd.Context())
@@ -502,7 +500,7 @@ mirror's copy over the backend's.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.home.Backend == nil {
-				return errors.New("no backend configured; the home is the local directory")
+				return errors.New("no backend configured; the state is in the local directory")
 			}
 			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
 			changes, err := m.Push(cmd.Context())
@@ -604,17 +602,65 @@ func (a *app) newStateUnlockCmd() *cobra.Command {
 	}
 }
 
-// stateWizard is ump config state set without flags on a terminal, over
-// the prompter of the caller (the account wizard runs it on a fresh
-// system).
+// newStateSetupCmd is the wizard: ump config state setup.
+func (a *app) newStateSetupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup",
+		Aliases: []string{"configure", "edit", "wizard"},
+		Short:   "Choose the state backend and migrate the state there (a wizard, on a terminal)",
+		Long: `Ask which backend the state should live in, its address and credentials,
+check that it answers, and then: a backend that holds state already is
+used as it is unless you choose to overwrite it with this machine's;
+an empty one gets this machine's state copied over when there is any
+(a migration), and the next command works there. "none" goes back to
+the local directory. Without a terminal, use set or migrate.`,
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ui := a.resolverUI(cmd)
+			if ui == nil {
+				return withExit(exitAborted, errors.New("ump config state setup is interactive and needs a terminal; use set --url URL or migrate --to URL instead"))
+			}
+			return a.stateWizard(cmd, ui)
+		},
+	}
+}
+
+// stateSummary says what the state in dir holds, for the wizard:
+// "2 accounts, 5 profile files, 3 servers with settings"; "" when nothing.
+func (a *app) stateSummary(ctx context.Context, dir string) string {
+	var parts []string
+	if cfg, _, err := a.loadConfig(); err == nil && len(cfg.Accounts) > 0 {
+		parts = append(parts, fmt.Sprintf("%d accounts", len(cfg.Accounts)))
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "profiles")); err == nil && len(entries) > 0 {
+		parts = append(parts, fmt.Sprintf("%d profile files", len(entries)))
+	}
+	if d, err := a.loadState(ctx, config.New()); err == nil && len(d.Servers)+len(d.Manual) > 0 {
+		parts = append(parts, fmt.Sprintf("%d servers with settings", len(d.Servers)+len(d.Manual)))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keys.yaml")); err == nil {
+		parts = append(parts, "named keys")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// stateWizard is ump config state setup, over the prompter of the
+// caller (the account wizard runs it on a fresh system).
 func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
-	if a.home.Backend != nil {
-		ui.Printf("The home is %s (mirror %s).\n", a.home.Backend, config.AbbreviateHome(a.home.Dir))
-	} else {
-		ui.Printf("The home is %s; no backend is configured.\n", config.AbbreviateHome(a.home.Dir))
+	ctx := cmd.Context()
+	held := a.stateSummary(ctx, a.home.Dir)
+	switch {
+	case a.home.Backend != nil && held != "":
+		ui.Printf("The state backend is %s (mirror %s); the state holds %s.\n", a.home.Backend, config.AbbreviateHome(a.home.Dir), held)
+	case a.home.Backend != nil:
+		ui.Printf("The state backend is %s (mirror %s); the state is empty.\n", a.home.Backend, config.AbbreviateHome(a.home.Dir))
+	case held != "":
+		ui.Printf("No state backend is configured; the state is in %s on this machine and holds %s.\n", config.AbbreviateHome(a.home.Dir), held)
+	default:
+		ui.Printf("No state backend is configured; the state is in %s on this machine, and it is empty: a clean start.\n", config.AbbreviateHome(a.home.Dir))
 	}
 	kinds := []string{"file  a directory on this machine (one in the fleet's git repository)", "ssh  a directory on another machine", "s3  an S3 bucket, or any store with conditional writes", "r2  a Cloudflare R2 bucket", "http  an HTTP service", "consul  Consul KV", "vault  Vault KV v2", "none  the local directory, no backend"}
-	i, err := ui.Choose("Where should the home live?", kinds, -1)
+	i, err := ui.Choose("Where should the state live?", kinds, -1)
 	if err != nil {
 		return err
 	}
@@ -623,7 +669,7 @@ func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
 		if err := home.SavePointer(nil); err != nil {
 			return err
 		}
-		ui.Printf("No backend; the home is %s.\n", config.AbbreviateHome(config.LocalDir()))
+		ui.Printf("No backend; the state stays in %s.\n", config.AbbreviateHome(config.LocalDir()))
 		return nil
 	}
 	var f pointerFlags
@@ -686,29 +732,47 @@ func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
 	if err != nil {
 		return err
 	}
-	b, n, err := a.checkBackend(cmd.Context(), p)
+	b, n, err := a.checkBackend(ctx, p)
 	if err != nil {
 		return err
 	}
-	ui.Printf("%s answers (%d files there).\n", b, n)
-	move := n == 0
-	if n > 0 {
-		if move, err = ui.Confirm("It holds files already. Overwrite them with the current home?", false); err != nil {
-			return err
-		}
-	} else if move, err = ui.Confirm("Copy the current home there?", true); err != nil {
-		return err
+	if a.home.Backend != nil && a.home.Backend.String() == b.String() {
+		ui.Printf("%s answers; it is the state backend already.\n", b)
+		return nil
 	}
-	if move {
-		copied, err := home.Copy(cmd.Context(), a.home.Dir, b, n > 0)
+	ui.Printf("%s answers (%d files there).\n", b, n)
+	// a backend that holds state is used as it is unless overwritten; an
+	// empty one gets this machine's state when there is any: a migration
+	move := false
+	switch {
+	case n > 0 && held != "":
+		choice, err := ui.Choose("It holds state already, and so does this machine ("+held+"). Which one?", []string{"use the state in the backend; this machine's stays where it is, unused", "overwrite the backend with this machine's state (a migration)"}, 0)
 		if err != nil {
 			return err
 		}
-		ui.Printf("Copied %d files.\n", copied)
+		move = choice == 1
+	case n > 0:
+		ui.Printf("The state there is used as it is.\n")
+	case held != "":
+		if move, err = ui.Confirm("Migrate this machine's state ("+held+") there?", true); err != nil {
+			return err
+		}
+	default:
+		ui.Printf("Nothing to migrate: the state starts empty there.\n")
+	}
+	if move {
+		copied, err := home.Copy(ctx, a.home.Dir, b, n > 0)
+		if err != nil {
+			return err
+		}
+		ui.Printf("Copied %d files to %s; the copy in %s stays.\n", copied, b, config.AbbreviateHome(a.home.Dir))
 	}
 	if err := home.SavePointer(p); err != nil {
 		return err
 	}
-	ui.Printf("The home is %s now (%s); the next command works on its mirror.\n", b, config.AbbreviateHome(home.PointerPath()))
+	ui.Printf("The state backend is %s now (%s); the next command works on its mirror.\n", b, config.AbbreviateHome(home.PointerPath()))
+	if os.Getenv("UMP_STATE") != "" {
+		ui.Printf("UMP_STATE is set in this environment and wins over the file; point it at %s.\n", p.URL)
+	}
 	return nil
 }
