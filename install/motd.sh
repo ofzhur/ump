@@ -1,7 +1,9 @@
 #!/bin/sh
 # The message of the day of a UMP-installed system: who this machine is
-# and how it does, in brief. Shown at login (pam_motd); run it to see it.
-# Remove or change it freely; /etc/motd (static) is shown after it.
+# and how it does, in brief. The same script on every system UMP installs:
+# on Ubuntu /etc/update-motd.d/00-ump (pam_motd shows it at login), on
+# NixOS part of UMP's module (shown at interactive SSH logins); ump-motd
+# shows it on both. POSIX sh with coreutils, procps and iproute2.
 B='\033[1m'; C='\033[1;36m'; G='\033[1;32m'; D='\033[2m'; N='\033[0m'
 printf '%b' "$C"
 cat <<'ART'
@@ -18,7 +20,7 @@ printf '  %bUnus Mundus Provisioner%b  %bthe same system on every machine%b\n\n'
 
 os="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"')"
 row() { printf '  %b%-10s%b %s\n' "$G" "$1" "$N" "$2"; }
-row "host" "$(hostname) ($os, $(uname -r), $(uname -m))"
+row "host" "$(hostname 2>/dev/null || uname -n) ($os, $(uname -r), $(uname -m))"
 if [ -r /etc/ump/install ]; then
 	profile="$(sed -n 's/^profile=//p' /etc/ump/install)"
 	when="$(sed -n 's/^installed=//p' /etc/ump/install)"

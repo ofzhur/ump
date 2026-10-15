@@ -88,7 +88,10 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
 - **Message of the day:** `/etc/update-motd.d/00-ump` alone: the UMP
   banner, the host, when and from which profile it was installed,
   uptime and load, memory, the root disk and the addresses. No help
-  text, no news from the network (`/etc/default/motd-news`).
+  text, no news from the network (`/etc/default/motd-news`). The script
+  is [`install/motd.sh`](../../install/motd.sh), which the installer
+  puts on every system it installs (NixOS too), so it changes without a
+  new image; `ump-motd` shows it again.
 - **Interface names:** `ext01`, `ext02`, ... for the interfaces with a
   public address and `int01`, ... for the rest, bound to the MAC
   addresses by the netplan file the installer writes; `network:

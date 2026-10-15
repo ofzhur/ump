@@ -57,8 +57,8 @@ passwd -l root >/dev/null 2>&1 || true
 # management's business)
 cp /etc/skel/.bashrc /root/.bashrc
 
-# the message of the day: UMP's own script alone (no help text, no news)
-chmod 755 /etc/update-motd.d/00-ump
+# the message of the day: UMP's own script alone (no help text, no news);
+# the installer puts it in (install/motd.sh), the same on every system
 for f in /etc/update-motd.d/*; do [ "$f" = /etc/update-motd.d/00-ump ] || rm -f "$f"; done
 
 # the boot loader configuration file that grub-mkconfig reads; the

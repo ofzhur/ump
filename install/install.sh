@@ -729,6 +729,16 @@ run_in_target() { # run_in_target WHAT COMMAND...: the output is shown only when
 }
 in_target ssh-keygen -A >/dev/null
 
+# the message of the day, the same on every system: from the storage,
+# else the image's own stays
+mkdir -p "$TARGET/etc/update-motd.d"
+if curl -fsSL -o "$TARGET/etc/update-motd.d/00-ump" "$storage/install/motd.sh"; then
+	chmod 755 "$TARGET/etc/update-motd.d/00-ump"
+	ln -sf /etc/update-motd.d/00-ump "$TARGET/usr/local/bin/ump-motd"
+else
+	warn "cannot fetch $storage/install/motd.sh; the image's message of the day stays"
+fi
+
 # --- users --------------------------------------------------------------
 
 log "users"
@@ -927,6 +937,7 @@ install_nixos() {
 	swap_on_target
 	mkdir -p "$TARGET/etc/nixos/ump" "$TARGET/etc/nixos/userdata"
 	curl -fsSL -o "$TARGET/etc/nixos/ump/default.nix" "$storage/install/nixos/ump.nix" || die "cannot fetch $storage/install/nixos/ump.nix"
+	curl -fsSL -o "$TARGET/etc/nixos/ump/motd.sh" "$storage/install/motd.sh" || die "cannot fetch $storage/install/motd.sh"
 	printf '%s\n' "$spec" | jq 'del(.userdata)' > "$TARGET/etc/nixos/ump/spec.json"
 	nft_ruleset > "$TARGET/etc/nixos/ump/nftables.conf"
 	{

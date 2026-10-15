@@ -24,7 +24,7 @@
 #   rescue/kexec-into-rescue.sh
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
-#   install/install.sh, install/nixos/ump.nix
+#   install/install.sh, install/nixos/ump.nix, install/motd.sh
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
@@ -239,6 +239,7 @@ for w in "${what[@]}"; do
 		put "$HERE/rescue/kexec-into-rescue.sh" rescue/kexec-into-rescue.sh
 		put "$HERE/../install/install.sh" install/install.sh
 		put "$HERE/../install/nixos/ump.nix" install/nixos/ump.nix
+		put "$HERE/../install/motd.sh" install/motd.sh
 		put "$HERE/../install/get.sh" get.sh
 		built=1
 		;;

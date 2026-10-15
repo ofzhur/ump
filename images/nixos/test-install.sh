@@ -53,6 +53,7 @@ firmware=(-drive "if=pflash,format=raw,readonly=on,file=$code" -drive "if=pflash
 mkdir -p "$WORK/storage/os/nixos-25.11/$ARCH" "$WORK/storage/install/nixos"
 cp "$MANIFEST" "$WORK/storage/os/nixos-25.11/$ARCH/manifest.json"
 cp "$ROOT/install/nixos/ump.nix" "$WORK/storage/install/nixos/ump.nix"
+cp "$ROOT/install/motd.sh" "$WORK/storage/install/motd.sh"
 python3 -m http.server --bind 127.0.0.1 --directory "$WORK/storage" "$HTTP" >/dev/null 2>&1 &
 http_pid=$!
 
@@ -122,7 +123,10 @@ hello >/dev/null && echo "userdata: package hello installed"
 swapon --show=NAME --noheadings | grep -q . && echo "swap: $(swapon --show=NAME --noheadings | paste -sd" " -)"
 grep -q "^os=nixos-25.11" /etc/ump/install && echo "install record: $(grep "^image_version=" /etc/ump/install)"
 sudo -n nixos-rebuild dry-build >/dev/null 2>&1 && echo "nixos-rebuild: the configuration evaluates on the machine"
+ump-motd | grep -q "Unus Mundus Provisioner" && echo "message of the day: ump-motd shows the banner"
 '
+# the banner at an interactive login, as Ubuntu shows it
+printf 'exit\n' | ssh "${ssh_opts[@]}" -tt ump@127.0.0.1 2>/dev/null | tr -d "\r" | grep -q "Unus Mundus Provisioner" && echo "message of the day: shown at an interactive SSH login" || echo "message of the day: NOT shown at an interactive SSH login"
 echo "==> powering off"
 ssh "${ssh_opts[@]}" ump@127.0.0.1 'sudo -n systemctl poweroff' 2>/dev/null || true
 echo "==> ok"

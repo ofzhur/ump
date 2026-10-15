@@ -7,6 +7,7 @@
 #                   their MAC addresses, the uplink's addresses, the boot
 #                   disks, md arrays)
 #   nftables.conf   the firewall ruleset, the same UMP writes on Ubuntu
+#   motd.sh         the message of the day, the same script as on Ubuntu
 #
 # configuration.nix imports this module and every userdata module of the
 # profile (/etc/nixos/userdata/*.nix, in order), and NixOS merges them:
@@ -143,11 +144,22 @@ in
     ruleset = builtins.readFile ./nftables.conf;
   };
 
+  # --- the message of the day: UMP's banner and how the machine does, the
+  # same script as on Ubuntu, shown at interactive SSH logins (where
+  # Ubuntu's pam_motd shows it) and by ump-motd ---------------------------------
+
+  environment.loginShellInit = lib.mkAfter ''
+    if [ -n "$SSH_CONNECTION" ] && [ -t 1 ] && [ -z "''${UMP_MOTD_SHOWN:-}" ]; then
+      export UMP_MOTD_SHOWN=1
+      ump-motd
+    fi
+  '';
+
   # --- what an operator wants on every server ------------------------------
 
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = [ (pkgs.writeShellScriptBin "ump-motd" (builtins.readFile ./motd.sh)) ] ++ (with pkgs; [
     htop atop iotop sysstat iftop tcpdump mtr dnsutils ethtool lsof strace
     curl wget jq rsync git vim tmux tree file unzip ncdu
     pciutils usbutils smartmontools nvme-cli parted gptfdisk lvm2 mdadm nftables
-  ];
+  ]);
 }
