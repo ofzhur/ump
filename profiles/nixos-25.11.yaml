@@ -2,7 +2,7 @@
 # nixos-25.11. NixOS is installed by nixos-install from the stable channel
 # nixos-25.11, and everything below becomes NixOS configuration: UMP's
 # module in /etc/nixos/ump and the userdata modules in /etc/nixos/userdata,
-# which NixOS merges (docs/nixos.md). Published profiles are replaced by
+# which NixOS merges (docs/oses.md#nixos). Published profiles are replaced by
 # ump config os update, so make your own from this one (ump config os
 # create NAME --from nixos-25.11) instead of editing it. Every field is
 # described in docs/profiles.md.

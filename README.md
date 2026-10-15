@@ -69,12 +69,13 @@ Several accounts per provider are fine. [ISPs](docs/isps.md) says what
 each does in detail, [provider accounts](docs/providers.md) how to set
 them up.
 
-**Operating systems.** Prebuilt server systems, the same on every
+**Operating systems.** Server systems out of the box, the same on every
 machine, for amd64 and arm64, booting from UEFI and, on amd64, BIOS:
-Ubuntu 26.04 (the default), 24.04 and 22.04 LTS, built by UMP with
+Ubuntu 26.04 (the default), 24.04 and 22.04 LTS, prebuilt by UMP with
 LVM, md, netplan, SSH and the tools a server needs, and nothing that
-does not belong there (no cloud-init, no snaps); and NixOS 25.11 from
-its stable channel, with the profile as NixOS modules. Each gets the
+does not belong there (no cloud-init, no snaps); and NixOS 25.11,
+installed from NixOS's public servers and its stable channel, with the
+profile as NixOS modules. Each gets the
 same disks, users and keys, interface names, firewall and message of
 the day. See [operating systems](docs/oses.md).
 
@@ -102,7 +103,7 @@ The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
 group, the sudo user `ump` with your keys, ICMP and SSH open),
 `ubuntu-24.04`, `ubuntu-22.04` and `nixos-25.11` (NixOS from its
-stable channel, see [NixOS](docs/nixos.md)), the layouts `lvm-linear`,
+stable channel, see [NixOS](docs/oses.md#nixos)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
 `web` and `open`, and the user `ump`. They are templates: make your own
 from them (`ump config os create`, `ump config user create`, ...), and
@@ -160,8 +161,7 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
-| [Operating systems](docs/oses.md) | the prebuilt systems, what every one of them gets, how to pick one |
-| [NixOS](docs/nixos.md) | NixOS from its stable channel: how the profile becomes NixOS configuration, userdata as modules, how the installation runs |
+| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04 and NixOS 25.11, what every system gets, how each is installed, NixOS configuration and userdata as modules |
 | [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu system UMP builds, what it holds and its defaults |
 
 **Reference**

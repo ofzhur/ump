@@ -124,7 +124,7 @@ publishes:
 | `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `ubuntu-26.04`, the default |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` |
-| `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](nixos.md)) | `nixos-25.11` |
+| `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](oses.md#nixos)) | `nixos-25.11` |
 
 The published Ubuntu profiles are the same apart from the image, and
 the NixOS one apart from the image and its userdata (`nixos`, a NixOS

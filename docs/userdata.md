@@ -15,11 +15,11 @@ ubuntu   bash   7       ok      what every Ubuntu gets; nothing yet
 ```
 
 An entry is a bash script (type `bash`) for Ubuntu, or a NixOS module
-(type `nix`) for [NixOS](nixos.md), where it is merged with UMP's own
+(type `nix`) for [NixOS](oses.md#nixos), where it is merged with UMP's own
 module instead of run. A profile takes the type its system takes, and
 ump refuses a mix before it touches the machine. Other systems that take
 a declarative configuration (cloud-init, Talos) may follow as other
-types. The rest of this page is about bash userdata; [NixOS](nixos.md#userdata-on-nixos)
+types. The rest of this page is about bash userdata; [NixOS](oses.md#userdata-on-nixos)
 describes the modules.
 
 ## Where userdata lives
@@ -71,7 +71,7 @@ Ubuntu of yours should get, and the published profiles list it.
 ```yaml
 name: web                     # inline entries only; in userdata.yaml the entry's key is the name
 description: ...              # optional; shown by ump config userdata list
-type: bash                    # optional; bash (the default) or nix (a NixOS module, docs/nixos.md)
+type: bash                    # optional; bash (the default) or nix (a NixOS module, docs/oses.md#nixos)
 script: |                     # the script itself
   #!/bin/bash
   set -euo pipefail
@@ -82,7 +82,7 @@ script: |                     # the script itself
 |---|---|
 | `name` | Lower-case letters, digits, `.`, `_` and `-`, starting with a letter or digit. In `userdata.yaml` the entry's key is the name. |
 | `description` | One line, shown by `ump config userdata list`. |
-| `type` | `bash`: a script run by bash, for Ubuntu (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](nixos.md#userdata-on-nixos)). |
+| `type` | `bash`: a script run by bash, for Ubuntu (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](oses.md#userdata-on-nixos)). |
 | `script` | The script or the module, not empty. A shebang line is not needed, bash runs it either way. |
 
 ## How it runs

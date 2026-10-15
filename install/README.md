@@ -2,7 +2,7 @@
 
 [`install.sh`](install.sh) puts an operating system on a machine's disks
 from a [UMP base image](../images/ubuntu/README.md), or NixOS with
-`nixos-install` (see [NixOS](../docs/nixos.md)), the way a specification
+`nixos-install` (see [NixOS](../docs/oses.md#nixos)), the way a specification
 says. It runs as root in the [UMP rescue
 system](../images/rescue/README.md), where no disk is in use, and
 refuses to run anywhere else unless told to with `--force`, because it
@@ -51,7 +51,7 @@ root and the keys of a file).
    installer writes the profile, what it found on the machine and the
    firewall ruleset next to UMP's NixOS module ([`nixos/ump.nix`](nixos/ump.nix)),
    with the userdata as NixOS modules, and runs `nixos-install` from the
-   manifest's channel instead (see [NixOS](../docs/nixos.md#how-the-installation-runs)).
+   manifest's channel instead (see [NixOS](../docs/oses.md#how-the-installation-runs)).
 7. **Configures the machine:** hostname, `/etc/fstab` by UUID (swap
    included), a netplan file with every wired interface matched by MAC
    and, unless the profile says `network: {rename: false}`, renamed
