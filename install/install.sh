@@ -904,10 +904,12 @@ install_nixos() {
 	cp -RPp "$nixdir"/store/* /nix/store/
 	for p in "$nixdir"/store/*; do [ -x "$p/bin/nix-build" ] && nixbin="/nix/store/$(basename "$p")/bin"; done
 	[ -n "${nixbin:-}" ] || die "no nix-build in $nix_url"
-	"$nixbin/nix-store" --load-db < "$nixdir/.reginfo"
-	rm -rf "$work"
+	# single-user Nix as root: no build users, no sandbox (the rescue system
+	# has neither), and everything comes from the binary cache anyway
 	export HOME=/root USER=root PATH="$nixbin:$PATH" NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 	export NIX_CONFIG=$'build-users-group =\nsandbox = false\nexperimental-features = nix-command\nfallback = true'
+	"$nixbin/nix-store" --load-db < "$nixdir/.reginfo"
+	rm -rf "$work"
 
 	log "channel: $channel"
 	nix-channel --add "$channel" nixos >/dev/null
