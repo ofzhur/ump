@@ -705,6 +705,12 @@ func parseError(status int, body []byte) error {
 		apiErr.Message = e.Error
 	}
 	switch {
+	case status == http.StatusUnauthorized && strings.HasPrefix(apiErr.Message, "Unauthorized IP address"):
+		// Vultr names the address: the key is right, its access control
+		// does not list this machine
+		apiErr.Message = apiErr.Message + " (the API key's access control does not allow it: customer portal → Account → API → Access Control, add the address)"
+	case status == http.StatusUnauthorized && apiErr.Message != "":
+		apiErr.Message = "authentication failed: " + apiErr.Message + " (check the API key, and that its access control allows this machine's address)"
 	case status == http.StatusUnauthorized:
 		apiErr.Message = "authentication failed (check the API key, and that its access control allows this machine's address)"
 	case status == http.StatusForbidden && apiErr.Message == "":

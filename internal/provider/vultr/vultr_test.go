@@ -208,6 +208,17 @@ func TestUnauthorized(t *testing.T) {
 	if !errors.As(err, &apiErr) || apiErr.Status != 401 || !strings.Contains(apiErr.Message, "access control") {
 		t.Errorf("error: %v", err)
 	}
+	// Vultr names the refused address: the message says so and how to fix it
+	ipSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"error":"Unauthorized IP address: 192.0.2.7","status":401}`)
+	}))
+	defer ipSrv.Close()
+	p, _ = Type.New("vu", map[string]string{"api_key": "key", "url": ipSrv.URL}, provider.Options{HTTPClient: ipSrv.Client()})
+	_, err = p.(provider.Inventory).List(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Unauthorized IP address: 192.0.2.7 (the API key's access control does not allow it: customer portal → Account → API → Access Control, add the address)") {
+		t.Errorf("unauthorized address: %v", err)
+	}
 	if errs := Type.Validate(map[string]string{}); len(errs) != 1 || !strings.Contains(errs[0].Error(), "api_key is required") {
 		t.Errorf("validate: %v", errs)
 	}

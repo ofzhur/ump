@@ -230,8 +230,8 @@ set; instances carry their project as labels; VPS are labelled
 One account covers the cloud instances and the bare metal servers of a
 Vultr account; the personal API key is the credential. Its access
 control is a list of addresses allowed to use it, empty at first, so
-add the addresses ump runs from (a 401 "Invalid API token" from an
-address that is not allowed looks like a wrong key). An instance's or a
+add the addresses ump runs from; otherwise Vultr answers "Unauthorized
+IP address: ..." with the address it saw, and ump passes that on. An instance's or a
 server's ID is Vultr's UUID, its name the label (the hostname when
 there is no label), its location the region (`fra`, `ewr`, ...), its
 product the plan, and its tags become labels.
