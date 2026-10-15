@@ -37,6 +37,7 @@ manual          mixed        inventory, describe                                
 | `hetzner-robot` | Hetzner dedicated servers | `login` (`#ws+...`), `password` | Robot → Settings → Web service and app settings |
 | `hetzner-cloud` | the servers of one Hetzner Cloud project | `token` | Cloud Console → the project → Security → API tokens; read permission is enough for listing, read and write for everything else |
 | `ovh` | OVHcloud dedicated servers, VPS and Public Cloud instances of one account | `endpoint` (`ovh-eu`, `ovh-ca`, `ovh-us`, or a URL), `application_key`, `application_secret`, `consumer_key` | an application at `https://eu.api.ovh.com/createApp/` (`ca.`/`us.` for the other endpoints) gives key and secret; the wizard requests the consumer key for you |
+| `vultr` | the cloud instances and bare metal servers of one Vultr account | `api_key` | customer portal → Account → API → Enable API; under Access Control, allow the addresses ump runs from (or all IPv4 and IPv6) |
 | `manual` | the servers added with `ump server add` | none | the account `manual` appears by itself with the first server added; see [manual servers](#manual-servers-manual) |
 
 `ump config isp types` prints the settings of every type below the table,
@@ -223,6 +224,46 @@ set; instances carry their project as labels; VPS are labelled
 - `ump server show` adds, for a dedicated server, the boot option, the
   addresses, the service dates and the hardware; for an instance, the
   flavor, image, addresses, SSH key and project.
+
+### Vultr (`vultr`)
+
+One account covers the cloud instances and the bare metal servers of a
+Vultr account; the personal API key is the credential. Its access
+control is a list of addresses allowed to use it, empty at first, so
+add the addresses ump runs from (a 401 "Invalid API token" from an
+address that is not allowed looks like a wrong key). An instance's or a
+server's ID is Vultr's UUID, its name the label (the hostname when
+there is no label), its location the region (`fra`, `ewr`, ...), its
+product the plan, and its tags become labels.
+
+- Price: the plan's monthly list price in USD, from the API
+  (`"source": "provider"`); a plan Vultr no longer offers has none, set
+  it by hand then.
+- Status: an instance shows its power state (`running`, `stopped`) once
+  active, else Vultr's status (`pending`, `suspended`, `resizing`); a
+  bare metal server shows Vultr's status.
+- Rename sets the label; the hostname inside the system stays.
+- Power: one reboot (a soft and a hard reboot are the same call), start,
+  and stop, which halts: the API has no ACPI shutdown. A power cycle is a
+  halt and a start. The power state of a bare metal server is not in
+  the API.
+- Reverse DNS works for instances, the IPv4 and single addresses of the
+  IPv6 network; deleting an IPv4 entry restores Vultr's default
+  (`*.vultrusercontent.com`). Bare metal servers have no reverse DNS in
+  the API; set it in the customer portal.
+- Rescue: Vultr has no rescue system in its API. `ump server rescue` and
+  `ump server reinstall` go in over SSH into the running system (as root
+  or a sudo user, with UMP's key or yours: put UMP's public key, `ump
+  config key show`, into the instance's SSH keys when you deploy it) and
+  load the rescue image with kexec. ump says before erasing anything
+  that no provider rescue stands behind the machine; a system that does
+  not boot is recovered with Vultr's web console or a reinstall in the
+  customer portal.
+- `ump server show` adds the server's status, OS, tags and features, the
+  plan's CPUs, memory, disk and bandwidth with the price, the region's
+  city and country, and the network (netmask, gateway, the IPv6 network,
+  the private address and the firewall group of an instance, the MAC
+  address of a bare metal server).
 
 ### Manual servers (`manual`)
 

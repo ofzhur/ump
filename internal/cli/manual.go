@@ -145,7 +145,7 @@ provider lists cannot be removed here: they are the provider's.`,
 }
 
 // noRescueWarning is said before anything disruptive happens to a server
-// whose provider has no rescue system: a manual one.
+// whose provider has no rescue system: a manual one, or one at Vultr.
 func noRescueWarning(m provider.Machine, prov provider.Provider) string {
 	if _, ok := prov.(provider.Rescue); ok {
 		return ""
