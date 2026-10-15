@@ -249,7 +249,7 @@ func nonEmpty(s, def string) string {
 // with UMP's key for root (erasing it, which the reinstall does anyway),
 // then the direct way kexecs from there into the UMP rescue system.
 func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provider.StockInstaller, keys []provider.PublicKey, keyPath, imageURL, hostname, why string) (*imageEntry, error) {
-	fmt.Fprintf(a.stderr, "%s; the provider reinstalls %s with a stock Linux and UMP's key first (this takes a few minutes) ...\n", why, m.Name)
+	fmt.Fprintf(a.stderr, "%s; the provider reinstalls %s with a stock Linux first (this takes a few minutes) ...\n", why, m.Name)
 	stock, err := si.InstallStock(ctx, m, keys)
 	if err != nil {
 		return nil, fmt.Errorf("account %s: %w", m.Account, err)
@@ -263,19 +263,29 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 		wait = stock.Wait
 	}
 	wait = a.waitLimit(wait)
-	fmt.Fprintf(a.stderr, "%s runs the provider's %s now; waiting for root access over SSH (up to %s) ...", m.Name, stock.Image, fmtWait(wait))
+	keysNote := "UMP's key for root"
+	if stock.Keys != "" {
+		keysNote = stock.Keys
+	}
+	fmt.Fprintf(a.stderr, "%s runs the provider's %s now, with %s; waiting for root access over SSH (up to %s) ...", m.Name, stock.Image, keysNote, fmtWait(wait))
 	start := time.Now()
 	deadline := start.Add(wait)
 	tick := a.waitTicker(start)
-	identities := []string{keyPath}
+	// UMP's key, and yours: a provider that re-adds the keys the machine
+	// was created with lets in whoever's those are
+	identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
 	for {
-		if p, ok := a.probeHost(ctx, "root", addr, identities, true); ok && p.root {
+		if p, ok := a.probeHost(ctx, "root", addr, identities, false); ok && p.root {
 			fmt.Fprintf(a.stderr, " yes after %s (%s).\n", time.Since(start).Round(time.Second), nonEmpty(p.os, "unknown system"))
 			break
 		}
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
-			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; look at the server's console, or allow a longer wait (wait: in config.yaml, or UMP_WAIT)", m.Name, fmtWait(wait)))
+			hint := "look at the server's console, or allow a longer wait (wait: in config.yaml, or UMP_WAIT)"
+			if stock.Keys != "" {
+				hint = "root takes " + stock.Keys + ", and none of them is UMP's or one of yours here (" + strings.Join(identities, ", ") + ", the ssh-agent); log in with such a key and add UMP's (ump config key show), or " + hint
+			}
+			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; %s", m.Name, fmtWait(wait), hint))
 		}
 		if err := sleepCtx(ctx, waitPoll); err != nil {
 			fmt.Fprintln(a.stderr)
@@ -284,7 +294,7 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 		tick()
 	}
 	fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s.\n", imageURL, m.Name)
-	if err := a.enterImage(ctx, "root", addr, identities, true, imageURL, hostname, keys); err != nil {
+	if err := a.enterImage(ctx, "root", addr, identities, false, imageURL, hostname, keys); err != nil {
 		return nil, err
 	}
 	version, err := a.waitForImage(ctx, addr, keyPath)

@@ -247,15 +247,20 @@ public one (the private VPC address is shown by `ump server show`).
   so `ump server rename web-01 web-01.example.net` is how to set it;
   `ump server rdns` says the provider type has none.
 - Rescue: DigitalOcean's recovery ISO is reached through its web
-  console only, and its rebuild takes no SSH key (the droplet gets the
-  keys it was created with). So `ump server rescue` and `ump server
-  reinstall` go in over SSH into the running system alone, as root or a
-  sudo user, with UMP's key or yours: add UMP's public key (`ump config
-  key show`) to the team's SSH keys and pick it when creating droplets,
-  or use your own key there. ump says before erasing anything that no
-  provider rescue stands behind the droplet; a system that does not
-  boot is recovered with the recovery console or a rebuild in the
-  Control Panel.
+  console only, so `ump server rescue` and `ump server reinstall` go in
+  over SSH into the running system, as root or a sudo user, with UMP's
+  key or yours (your default keys and the ssh-agent). When that does
+  not let UMP in, `ump server reinstall`, which erases the droplet
+  anyway, has DigitalOcean rebuild it first with its newest Debian
+  image (Ubuntu when there is none) and goes on from there.
+  DigitalOcean's rebuild takes no SSH key: root gets the keys the
+  droplet was created with again, so ump gets in when one of them is
+  UMP's or one of yours on this machine. Pick UMP's public key (`ump
+  config key show`, added to the team's SSH keys) or your own when you
+  create droplets. `ump server rescue` never rebuilds. ump says before
+  erasing anything that no provider rescue stands behind the droplet; a
+  system that does not boot is recovered with the recovery console or a
+  rebuild in the Control Panel.
 - `ump server show` adds the image, tags, features, VPC and volumes,
   the size's CPUs, memory, disk and transfer with the price, the
   region's name, and the addresses with netmask and gateway.

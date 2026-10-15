@@ -90,15 +90,19 @@ var fakeKeyless bool
 func (f *fakeProvider) RescueTakesNoKey(m provider.Machine) bool { return fakeKeyless }
 
 // fakeStock makes the fake provider able to reinstall a machine with a
-// stock image; the machine then lets UMP in as root.
-var fakeStock bool
+// stock image; the machine then lets UMP in as root. fakeStockKeys is
+// what the stock install says root takes, when not UMP's key.
+var (
+	fakeStock     bool
+	fakeStockKeys string
+)
 
 func (f *fakeProvider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
 	if !fakeStock {
 		return nil, &provider.APIError{Provider: "fake", Message: "no stock images"}
 	}
 	fakePower.actions = append(fakePower.actions, "stock:"+keys[0].Name)
-	return &provider.StockInstall{Image: "Debian 13", Address: m.IPv4}, nil
+	return &provider.StockInstall{Image: "Debian 13", Address: m.IPv4, Keys: fakeStockKeys}, nil
 }
 
 func (f *fakeProvider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
@@ -2716,10 +2720,11 @@ func TestReinstallWithoutRescueTakesTheStockWay(t *testing.T) {
 	if code != 4 || !strings.Contains(errOut, "Checking root access to 203.0.113.10 over SSH ... no") || !strings.Contains(errOut, "ump: account nr: fake: no stock images") {
 		t.Errorf("stock image refused: code %d, %q", code, errOut)
 	}
-	// with one: the provider reinstalls its own system with UMP's key, and
-	// the installation goes on from there
-	fakeStock = true
-	defer func() { fakeStock = false }()
+	// with one: the provider reinstalls its own system (here with the keys
+	// the machine was created with, as at DigitalOcean), and the
+	// installation goes on from there
+	fakeStock, fakeStockKeys = true, "the SSH keys the machine was created with"
+	defer func() { fakeStock, fakeStockKeys = false, "" }()
 	resetFakePower()
 	e.stockRoot = true
 	defer func() { e.stockRoot = false }()
@@ -2728,8 +2733,8 @@ func TestReinstallWithoutRescueTakesTheStockWay(t *testing.T) {
 		t.Fatalf("stock way: code %d, %q", code, errOut)
 	}
 	for _, want := range []string{
-		"Provider type norescue has no rescue system and the running system does not let UMP in; the provider reinstalls web-01 with a stock Linux and UMP's key first",
-		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH (up to 15m) ... yes",
+		"Provider type norescue has no rescue system and the running system does not let UMP in; the provider reinstalls web-01 with a stock Linux first",
+		"web-01 runs the provider's Debian 13 now, with the SSH keys the machine was created with; waiting for root access over SSH (up to 15m) ... yes",
 		"web-01 is up: Ubuntu 26.04.1 LTS",
 	} {
 		if !strings.Contains(errOut, want) {
@@ -2774,8 +2779,8 @@ func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 		t.Fatalf("stock way: code %d, %q", code, errOut)
 	}
 	for _, want := range []string{
-		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls web-01 with a stock Linux and UMP's key first",
-		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH (up to 15m) ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
+		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls web-01 with a stock Linux first",
+		"web-01 runs the provider's Debian 13 now, with UMP's key for root; waiting for root access over SSH (up to 15m) ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
 		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01.",
 		"web-01 is up: Ubuntu 26.04.1 LTS",
 	} {

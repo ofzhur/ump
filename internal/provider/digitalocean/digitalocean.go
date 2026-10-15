@@ -1,11 +1,12 @@
 // Package digitalocean integrates DigitalOcean droplets through the
 // DigitalOcean API v2 (https://docs.digitalocean.com/reference/api/).
 //
-// DigitalOcean has no rescue system in its API, sets reverse DNS from
-// the droplet's name and rebuilds a droplet only with the SSH keys it was
-// created with, so this provider lists, describes, renames and powers
-// droplets; ump reaches a droplet for a reinstall over SSH into its
-// running system.
+// DigitalOcean has no rescue system in its API and sets reverse DNS from
+// the droplet's name, so this provider lists, describes, renames and
+// powers droplets; ump reaches a droplet for a reinstall over SSH into
+// its running system, and when that does not let it in, DigitalOcean
+// rebuilds the droplet with a stock image and the SSH keys it was
+// created with (StockInstaller), which are usually the user's own.
 package digitalocean
 
 import (
@@ -59,8 +60,8 @@ var Type = provider.Type{
 var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapPower}
 
 // actionPoll is how often a running action is checked, actionWait how
-// long it may run.
-var actionPoll, actionWait = time.Second, 5 * time.Minute
+// long it may run (a rebuild, rebuildWait).
+var actionPoll, actionWait, rebuildWait = time.Second, 5 * time.Minute, 15 * time.Minute
 
 // Provider is a configured DigitalOcean account (a team).
 type Provider struct {
@@ -225,6 +226,74 @@ func (p *Provider) action(ctx context.Context, m provider.Machine, body map[stri
 	return p.client.WaitAction(ctx, raw.Action)
 }
 
+// stockImage picks the image a droplet is rebuilt with: the newest
+// Debian, else the newest Ubuntu, among the distribution images.
+func (p *Provider) stockImage(ctx context.Context) (Image, error) {
+	images, err := p.client.ListImages(ctx)
+	if err != nil {
+		return Image{}, err
+	}
+	var best Image
+	bestRank := -1.0
+	for _, img := range images {
+		if img.Status != "" && img.Status != "available" {
+			continue
+		}
+		// debian-13-x64, ubuntu-24-04-x64
+		parts := strings.Split(img.Slug, "-")
+		if len(parts) < 3 || parts[len(parts)-1] != "x64" {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.Join(parts[1:len(parts)-1], "."), 64)
+		if err != nil {
+			continue
+		}
+		var rank float64
+		switch parts[0] {
+		case "debian":
+			rank = 1000 + v
+		case "ubuntu":
+			rank = v
+		default:
+			continue
+		}
+		if rank > bestRank {
+			best, bestRank = img, rank
+		}
+	}
+	if best.Slug == "" {
+		return Image{}, &provider.APIError{Provider: TypeName, Message: "no Debian or Ubuntu distribution image to rebuild with"}
+	}
+	return best, nil
+}
+
+// InstallStock implements provider.StockInstaller: DigitalOcean rebuilds
+// the droplet with its newest Debian (else Ubuntu) image. Its rebuild
+// takes no SSH key: root gets the keys the droplet was created with, so
+// ump gets in with whichever of them it holds (yours, or UMP's when the
+// droplet was created with it). The call returns when the rebuild is done.
+func (p *Provider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
+	id, err := dropletID(m)
+	if err != nil {
+		return nil, err
+	}
+	img, err := p.stockImage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Action Action `json:"action"`
+	}
+	if err := p.client.do(ctx, http.MethodPost, path(id)+"/actions", map[string]string{"type": "rebuild", "image": img.Slug}, &raw); err != nil {
+		return nil, err
+	}
+	if err := p.client.waitAction(ctx, raw.Action, rebuildWait); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(img.Distribution + " " + img.Name)
+	return &provider.StockInstall{Image: name, Address: m.IPv4, Wait: 10 * time.Minute, Keys: "the SSH keys the droplet was created with"}, nil
+}
+
 // Describe implements provider.Describer from GET /droplets/{id}.
 func (p *Provider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
 	id, err := dropletID(m)
@@ -344,6 +413,14 @@ type Droplet struct {
 	VPCUUID   string   `json:"vpc_uuid"`
 }
 
+// Image is a distribution image a droplet can be rebuilt with.
+type Image struct {
+	Slug         string `json:"slug"`
+	Name         string `json:"name"`
+	Distribution string `json:"distribution"`
+	Status       string `json:"status"`
+}
+
 // Action is an asynchronous DigitalOcean operation.
 type Action struct {
 	ID     int64  `json:"id"`
@@ -393,12 +470,39 @@ func (c *Client) GetDroplet(ctx context.Context, id int64) (*Droplet, error) {
 	return &raw.Droplet, nil
 }
 
+// ListImages returns the distribution images.
+func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
+	var out []Image
+	for page := 1; ; page++ {
+		var resp struct {
+			Images []Image `json:"images"`
+			Links  struct {
+				Pages struct {
+					Next string `json:"next"`
+				} `json:"pages"`
+			} `json:"links"`
+		}
+		q := url.Values{"type": {"distribution"}, "page": {strconv.Itoa(page)}, "per_page": {strconv.Itoa(perPage)}}
+		if err := c.do(ctx, http.MethodGet, "/images?"+q.Encode(), nil, &resp); err != nil {
+			return nil, err
+		}
+		out = append(out, resp.Images...)
+		if resp.Links.Pages.Next == "" || len(resp.Images) == 0 {
+			return out, nil
+		}
+	}
+}
+
 // WaitAction polls an action until it completed or errored.
 func (c *Client) WaitAction(ctx context.Context, a Action) error {
-	deadline := time.Now().Add(actionWait)
+	return c.waitAction(ctx, a, actionWait)
+}
+
+func (c *Client) waitAction(ctx context.Context, a Action, limit time.Duration) error {
+	deadline := time.Now().Add(limit)
 	for a.Status == "in-progress" {
 		if time.Now().After(deadline) {
-			return &provider.APIError{Provider: TypeName, Message: fmt.Sprintf("action %s still in progress after %s", a.Type, actionWait)}
+			return &provider.APIError{Provider: TypeName, Message: fmt.Sprintf("action %s still in progress after %s", a.Type, limit)}
 		}
 		select {
 		case <-ctx.Done():

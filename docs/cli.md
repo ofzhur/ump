@@ -331,6 +331,12 @@ exit status becomes ump's, which is the form for scripts and agents
 the image version, the provider's password where it issues one, the
 `ssh` command) without connecting.
 
+`rescue` never erases a server. Where the provider has no rescue
+system for ump (DigitalOcean, Linode, Vultr, servers added by hand), it
+goes in over SSH alone and stops with exit code 5 when the running
+system does not let UMP in; only `reinstall`, which erases the server
+anyway and asks first, may have the provider rebuild it.
+
 How the server gets there depends on what answers, and ump says so on
 the way:
 
@@ -391,8 +397,10 @@ Puts an operating system on the server's disks from a [UMP base
 image](../images/ubuntu/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS), or whose provider has none and whose running
-system does not let UMP in (Linode, Vultr), is first reinstalled by the
-provider with its stock Linux and UMP's key, which `reinstall` may do
+system does not let UMP in (Linode, Vultr, DigitalOcean), is first
+reinstalled by the provider with its stock Linux and UMP's key (at
+DigitalOcean, whose rebuild takes no key: the keys the droplet was
+created with, which ump tries along with yours), which `reinstall` may do
 since it erases the server anyway; `rescue` never does. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or

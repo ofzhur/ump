@@ -49,6 +49,16 @@ func (f *fakeDO) handler(t *testing.T) http.Handler {
 				f.name = req["name"]
 			}
 			io.WriteString(w, `{"action":{"id":9,"status":"in-progress","type":"`+req["type"]+`"}}`)
+		case r.URL.Path == "/images":
+			if r.URL.Query().Get("type") != "distribution" {
+				t.Errorf("images without type=distribution: %s", r.URL)
+			}
+			io.WriteString(w, `{"images":[
+				{"slug":"debian-12-x64","name":"12 x64","distribution":"Debian","status":"available"},
+				{"slug":"debian-13-x64","name":"13 x64","distribution":"Debian","status":"available"},
+				{"slug":"ubuntu-26-04-x64","name":"26.04 (LTS) x64","distribution":"Ubuntu","status":"available"},
+				{"slug":"centos-stream-10-x64","name":"Stream 10 x64","distribution":"CentOS","status":"available"},
+				{"slug":"debian-14-x64","name":"14 x64","distribution":"Debian","status":"retired"}],"links":{}}`)
 		case r.URL.Path == "/actions/9":
 			f.polls++
 			io.WriteString(w, `{"action":{"id":9,"status":"completed","type":"x"}}`)
@@ -145,6 +155,22 @@ func TestPowerAndRename(t *testing.T) {
 	}
 	if f.polls != 6 {
 		t.Errorf("each action is followed to completion: %d polls", f.polls)
+	}
+}
+
+func TestInstallStock(t *testing.T) {
+	p, f := newTest(t)
+	ctx := context.Background()
+	ms, _ := p.List(ctx)
+	st, err := p.InstallStock(ctx, ms[0], []provider.PublicKey{{Name: "ump", Data: "ssh-ed25519 AAAAump ump@desk"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Image != "Debian 13 x64" || st.Address != "203.0.113.20" || st.Keys != "the SSH keys the droplet was created with" || st.Wait == 0 {
+		t.Errorf("stock install: %+v", st)
+	}
+	if strings.Join(f.writes, "\n") != `{"image":"debian-13-x64","type":"rebuild"}` || f.polls != 1 {
+		t.Errorf("rebuild: %v, %d polls", f.writes, f.polls)
 	}
 }
 

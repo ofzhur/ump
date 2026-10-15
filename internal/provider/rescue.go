@@ -63,11 +63,16 @@ type StockInstall struct {
 	// Wait is how long the machine may take to let UMP in after the
 	// call returned; zero means the caller's default.
 	Wait time.Duration
+	// Keys says which keys root takes on the new system when they are
+	// not UMP's (the provider re-adds the keys the machine was created
+	// with); empty means UMP's.
+	Keys string
 }
 
 // StockInstaller is implemented by providers that can put one of their
-// own stock Linux images on a machine with UMP's key for root, which
-// erases the machine. It is the way in for machines whose rescue system
+// own stock Linux images on a machine with UMP's key for root (or, where
+// the provider takes no key, the keys the machine was created with),
+// which erases the machine. It is the way in for machines whose rescue system
 // takes no key, or whose provider has none, when the running system
 // does not let UMP in: ump server reinstall, which erases the machine
 // anyway, may use it; nothing else may.
