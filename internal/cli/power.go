@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,9 +18,10 @@ import (
 // sshPort is probed when a command waits for a machine to come back.
 var sshPort = 22
 
-// waitTimeout is how long a --wait waits for SSH to answer.
+// waitTimeout is how long a --wait waits for SSH to answer, unless the
+// configuration's wait says otherwise.
 var (
-	waitTimeout  = 10 * time.Minute
+	waitTimeout  = 15 * time.Minute
 	waitDownTime = 90 * time.Second
 	waitPoll     = 2 * time.Second
 	dialTimeout  = 3 * time.Second
@@ -236,25 +238,86 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 			fmt.Fprintf(a.stderr, " down after %s.\n", time.Since(start).Round(time.Second))
 		}
 	}
-	fmt.Fprintf(a.stderr, "Waiting for SSH on %s ...", addr)
-	deadline := time.Now().Add(waitTimeout)
-	lastDot := time.Now()
+	limit := a.waitLimit(waitTimeout)
+	fmt.Fprintf(a.stderr, "Waiting for SSH on %s (up to %s) ...", addr, fmtWait(limit))
+	deadline := time.Now().Add(limit)
+	tick := a.waitTicker(start)
 	for !a.probe(ctx, addr) {
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
-			return withExit(exitUnreachable, fmt.Errorf("SSH on %s did not answer within %s", addr, waitTimeout))
+			return withExit(exitUnreachable, fmt.Errorf("SSH on %s did not answer within %s; a slow provider may need a longer wait (wait: 30m in config.yaml, or UMP_WAIT=30m)", addr, fmtWait(limit)))
 		}
 		if err := sleepCtx(ctx, waitPoll); err != nil {
 			fmt.Fprintln(a.stderr)
 			return err
 		}
-		if time.Since(lastDot) >= 10*time.Second {
-			fmt.Fprint(a.stderr, ".")
-			lastDot = time.Now()
-		}
+		tick()
 	}
 	fmt.Fprintf(a.stderr, " up after %s.\n", time.Since(start).Round(time.Second))
 	return nil
+}
+
+// waitLimit is how long a wait may take: UMP_WAIT, else the
+// configuration's wait, else def. A value that is not a duration is
+// said once and ignored.
+func (a *app) waitLimit(def time.Duration) time.Duration {
+	v, from := os.Getenv("UMP_WAIT"), "UMP_WAIT"
+	if v == "" {
+		if cfg, _, err := a.loadConfig(); err == nil {
+			v, from = cfg.Wait, "wait in the configuration"
+		}
+	}
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		if !a.waitWarned {
+			fmt.Fprintf(a.stderr, "ump: %s is %q, not a duration such as 20m; waiting up to %s\n", from, v, fmtWait(def))
+			a.waitWarned = true
+		}
+		return def
+	}
+	return d
+}
+
+// waitTicker returns what a wait loop calls after each poll: a dot every
+// ten seconds, and the minutes waited instead of the dot at each full
+// minute (.....1m.....2m), so that the wait shows how long it has run.
+func (a *app) waitTicker(start time.Time) func() {
+	last := start
+	return func() {
+		if time.Since(last) < 10*time.Second {
+			return
+		}
+		last = time.Now()
+		elapsed := time.Since(start)
+		if m := int(elapsed / time.Minute); m > 0 && elapsed%time.Minute < 10*time.Second {
+			fmt.Fprintf(a.stderr, "%dm", m)
+			return
+		}
+		fmt.Fprint(a.stderr, ".")
+	}
+}
+
+// fmtWait renders a limit for people: 15m, 1h30m, 45s.
+func fmtWait(d time.Duration) string {
+	if d < time.Second {
+		return d.String()
+	}
+	d = d.Round(time.Second)
+	h, m, sec := int(d/time.Hour), int(d%time.Hour/time.Minute), int(d%time.Minute/time.Second)
+	var out string
+	if h > 0 {
+		out += fmt.Sprintf("%dh", h)
+	}
+	if m > 0 {
+		out += fmt.Sprintf("%dm", m)
+	}
+	if sec > 0 || out == "" {
+		out += fmt.Sprintf("%ds", sec)
+	}
+	return out
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

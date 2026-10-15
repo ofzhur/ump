@@ -45,6 +45,11 @@ type Config struct {
 	// --profile and the server's own setting say nothing; ump config os
 	// default sets it. Default: DefaultProfile (ubuntu-26.04).
 	DefaultProfile string `yaml:"default_profile,omitempty"`
+	// Wait is how long ump waits for a machine to answer after it
+	// rebooted, jumped into the rescue system or was reinstalled by its
+	// provider, as a Go duration (20m, 1h). Default: 15 minutes;
+	// UMP_WAIT does the same for one run.
+	Wait string `yaml:"wait,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`

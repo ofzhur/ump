@@ -298,7 +298,9 @@ again; a server that is switched off is switched on instead. `stop` asks
 the operating system to shut down unless `--hard` cuts the power. The
 commands return when the provider accepted the action (Hetzner Cloud
 actions are followed to completion); `--wait` then waits until SSH stops
-answering and answers again (exit code 5 after 10 minutes).
+answering and answers again (exit code 5 after 15 minutes, or the
+`wait` of the [configuration](configuration.md); the line says the
+limit and marks each minute waited).
 
 Rebooting and stopping are disruptive: on a terminal they ask for
 confirmation, without one they need `--yes` (exit code 3 otherwise), as
@@ -365,7 +367,9 @@ a fresh host key every boot, so the connections skip host key checks;
 providers that report the host key fingerprints (Hetzner Robot) have
 them printed for comparison. A provider rescue system that does not take
 UMP's key (one that only issues a password) is reported together with
-the commands to load the image by hand. Exit status 5 means the server
+the commands to load the image by hand. Every wait prints its limit
+(15 minutes unless `wait` in the configuration or `UMP_WAIT` says
+otherwise) and marks each minute waited. Exit status 5 means the server
 did not answer in time: no root access with `--via direct`, or the
 rescue system never came up after the kexec (reset the server with
 `ump server reboot --hard` and look at its console).

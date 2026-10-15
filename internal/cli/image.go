@@ -20,9 +20,10 @@ import (
 )
 
 // imageWaitTimeout is how long the UMP rescue system has to answer after
-// the kexec. A kexec skips the firmware, so a minute is usual; the limit
-// is generous for slow network cards and large machines.
-var imageWaitTimeout = 5 * time.Minute
+// the kexec, unless the configuration's wait says otherwise. A kexec
+// skips the firmware, so a minute is usual; the limit is generous for
+// slow providers, slow network cards and large machines.
+var imageWaitTimeout = 15 * time.Minute
 
 // bootMarker is the line the entry script prints right before it jumps.
 const bootMarker = "==> booting into the UMP rescue system"
@@ -202,10 +203,11 @@ func (a *app) imageVersion(ctx context.Context, addr, keyPath string) (string, b
 // and the provider's rescue system accepts UMP's key too, so the wait is
 // for the version file, not for the port.
 func (a *app) waitForImage(ctx context.Context, addr, keyPath string) (string, error) {
-	fmt.Fprintf(a.stderr, "Waiting for the UMP rescue system on %s ...", addr)
+	limit := a.waitLimit(imageWaitTimeout)
+	fmt.Fprintf(a.stderr, "Waiting for the UMP rescue system on %s (up to %s) ...", addr, fmtWait(limit))
 	start := time.Now()
-	deadline := start.Add(imageWaitTimeout)
-	lastDot := start
+	deadline := start.Add(limit)
+	tick := a.waitTicker(start)
 	for {
 		if v, ok := a.imageVersion(ctx, addr, keyPath); ok {
 			fmt.Fprintf(a.stderr, " up after %s (ump-rescue %s).\n", time.Since(start).Round(time.Second), v)
@@ -213,16 +215,13 @@ func (a *app) waitForImage(ctx context.Context, addr, keyPath string) (string, e
 		}
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
-			return "", withExit(exitUnreachable, fmt.Errorf("the UMP rescue system on %s did not answer within %s; the machine may need a reset (ump reboot server ... --hard) and its console", addr, imageWaitTimeout))
+			return "", withExit(exitUnreachable, fmt.Errorf("the UMP rescue system on %s did not answer within %s; the machine may need a reset (ump server reboot ... --hard) and its console; a slow provider may need a longer wait (wait: 30m in config.yaml, or UMP_WAIT=30m)", addr, fmtWait(limit)))
 		}
 		if err := sleepCtx(ctx, waitPoll); err != nil {
 			fmt.Fprintln(a.stderr)
 			return "", err
 		}
-		if time.Since(lastDot) >= 10*time.Second {
-			fmt.Fprint(a.stderr, ".")
-			lastDot = time.Now()
-		}
+		tick()
 	}
 }
 
@@ -259,13 +258,15 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 	if addr == "" {
 		addr = m.IPv4
 	}
-	fmt.Fprintf(a.stderr, "%s runs the provider's %s now; waiting for root access over SSH ...", m.Name, stock.Image)
-	start := time.Now()
 	wait := imageWaitTimeout
 	if stock.Wait > wait {
 		wait = stock.Wait
 	}
+	wait = a.waitLimit(wait)
+	fmt.Fprintf(a.stderr, "%s runs the provider's %s now; waiting for root access over SSH (up to %s) ...", m.Name, stock.Image, fmtWait(wait))
+	start := time.Now()
 	deadline := start.Add(wait)
+	tick := a.waitTicker(start)
 	identities := []string{keyPath}
 	for {
 		if p, ok := a.probeHost(ctx, "root", addr, identities, true); ok && p.root {
@@ -274,12 +275,13 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 		}
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
-			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; look at the server's console", m.Name, wait))
+			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; look at the server's console, or allow a longer wait (wait: in config.yaml, or UMP_WAIT)", m.Name, fmtWait(wait)))
 		}
 		if err := sleepCtx(ctx, waitPoll); err != nil {
 			fmt.Fprintln(a.stderr)
 			return nil, err
 		}
+		tick()
 	}
 	fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s.\n", imageURL, m.Name)
 	if err := a.enterImage(ctx, "root", addr, identities, true, imageURL, hostname, keys); err != nil {

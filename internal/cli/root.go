@@ -84,6 +84,8 @@ type app struct {
 	agentKeys func() ([]string, error)
 	// editor opens a file in the user's editor; nil means $VISUAL/$EDITOR.
 	editor func(path string) error
+	// waitWarned says that a bad wait setting was reported already.
+	waitWarned bool
 
 	// global flags
 	configFlag string

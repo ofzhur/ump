@@ -1699,7 +1699,7 @@ func TestRescueCommands(t *testing.T) {
 		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\nGoing through the provider's rescue system.\n",
 		"Provider rescue system reached (Debian GNU/Linux 12 (bookworm)); loading the UMP rescue image from https://ump.zhurko.de/dl/rescue.\n",
 		"==> booting into the UMP rescue system",
-		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+		"Waiting for the UMP rescue system on 203.0.113.10 (up to 15m) ... up after 0s (ump-rescue 2026.10.12).\n",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("progress line missing: %q in\n%s", want, errOut)
@@ -1932,7 +1932,7 @@ func TestRescueDirectAndRunning(t *testing.T) {
 		"Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n",
 		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.\n",
 		"==> booting into the UMP rescue system",
-		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+		"Waiting for the UMP rescue system on 203.0.113.10 (up to 15m) ... up after 0s (ump-rescue 2026.10.12).\n",
 		"Connecting to the UMP rescue system of web-01 as root; exit the shell to return.\n",
 	} {
 		if !strings.Contains(errOut, want) {
@@ -2177,7 +2177,7 @@ func TestInstallServer(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\n",
-		"Waiting for the UMP rescue system on 203.0.113.10 ... up after 0s (ump-rescue 2026.10.12).\n",
+		"Waiting for the UMP rescue system on 203.0.113.10 (up to 15m) ... up after 0s (ump-rescue 2026.10.12).\n",
 		"Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "ubuntu-26.04.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
 		"==> installed: ubuntu-26.04 2026.10.12",
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
@@ -2729,7 +2729,7 @@ func TestReinstallWithoutRescueTakesTheStockWay(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Provider type norescue has no rescue system and the running system does not let UMP in; the provider reinstalls web-01 with a stock Linux and UMP's key first",
-		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes",
+		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH (up to 15m) ... yes",
 		"web-01 is up: Ubuntu 26.04.1 LTS",
 	} {
 		if !strings.Contains(errOut, want) {
@@ -2775,7 +2775,7 @@ func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls web-01 with a stock Linux and UMP's key first",
-		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
+		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH (up to 15m) ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
 		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01.",
 		"web-01 is up: Ubuntu 26.04.1 LTS",
 	} {
@@ -3603,5 +3603,54 @@ func TestWizardHomeQuestion(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(remote, "secrets", "acc3.password")); err != nil {
 		t.Errorf("the secret did not reach the backend: %v", err)
+	}
+}
+
+func TestWaitLimit(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	var errOut bytes.Buffer
+	a := &app{stderr: &errOut, configFlag: e.cfgPath}
+	if d := a.waitLimit(15 * time.Minute); d != 15*time.Minute {
+		t.Errorf("default: %s", d)
+	}
+	e.write(testConfig + "wait: 40m\n")
+	if d := a.waitLimit(15 * time.Minute); d != 40*time.Minute {
+		t.Errorf("from the configuration: %s", d)
+	}
+	t.Setenv("UMP_WAIT", "1h")
+	if d := a.waitLimit(15 * time.Minute); d != time.Hour {
+		t.Errorf("UMP_WAIT wins: %s", d)
+	}
+	t.Setenv("UMP_WAIT", "soon")
+	if d := a.waitLimit(15 * time.Minute); d != 15*time.Minute || !strings.Contains(errOut.String(), `UMP_WAIT is "soon", not a duration such as 20m; waiting up to 15m`) {
+		t.Errorf("a bad value: %s, %q", d, errOut.String())
+	}
+	a.waitLimit(15 * time.Minute)
+	if strings.Count(errOut.String(), "not a duration") != 1 {
+		t.Errorf("said more than once: %q", errOut.String())
+	}
+	for d, want := range map[time.Duration]string{15 * time.Minute: "15m", 10 * time.Minute: "10m", 90 * time.Minute: "1h30m", time.Hour: "1h", 45 * time.Second: "45s", 30 * time.Millisecond: "30ms"} {
+		if got := fmtWait(d); got != want {
+			t.Errorf("fmtWait(%s) = %q, want %q", d, got, want)
+		}
+	}
+	// the ticker: a dot per ten seconds, the minutes at each full minute
+	var out bytes.Buffer
+	b := &app{stderr: &out}
+	start := time.Now().Add(-65 * time.Second)
+	tick := b.waitTicker(start)
+	tick()
+	if out.String() != "1m" {
+		t.Errorf("at 65s: %q", out.String())
+	}
+	tick()
+	if out.String() != "1m" {
+		t.Errorf("no second mark within ten seconds: %q", out.String())
+	}
+	out.Reset()
+	b.waitTicker(time.Now().Add(-25 * time.Second))()
+	if out.String() != "." {
+		t.Errorf("at 25s: %q", out.String())
 	}
 }
