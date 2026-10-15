@@ -4,6 +4,8 @@ What each provider type does in detail: its credentials and IDs, prices,
 renaming, power, reverse DNS, the way into a rescue system, and what
 `ump server show` adds. How accounts are set up is in [provider
 accounts](providers.md); the vocabulary is in [concepts](concepts.md).
+This page is part of [platforms](platforms.md), next to [operating
+systems](oses.md).
 
 | Type | Provider | Rescue system for ump | Without SSH access, reinstall |
 |---|---|---|---|

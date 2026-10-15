@@ -58,6 +58,12 @@ As of October 2026, ump does what the [README](../README.md) and the
   place; see [adding a provider type](providers.md#adding-a-provider-type).
 - **Cloud instances.** Creating and destroying instances for providers
   that have them, for convenience; Terraform remains the usual way.
+- **Configuration management.** Handing an installed machine over to the
+  tool that keeps it configured (Ansible, Salt, Puppet, NixOS's own
+  deployments), with the facts ump knows about it (provider, profile,
+  addresses, interfaces, attributes) as its inventory; the provision step
+  of the profile is where it starts. It becomes the third kind of
+  [platform](platforms.md), next to providers and operating systems.
 - **The skill.** Packaged operating knowledge for AI agents that run a
   fleet with ump, Terraform and Ansible, with an approval step that stays
   human. [The design outline](skill.md) is written; the tool-side

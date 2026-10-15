@@ -45,34 +45,42 @@ output. Once a day ump says when a newer release is published, and the
 same one-liner updates it; the scripts, images and profiles it uses come
 from the storage at every use, so they are current without a new binary.
 
-## What ump works with
+## Platforms
 
-| Provider | Type | Servers |
-|---|---|---|
-| Hetzner Robot | `hetzner-robot` | dedicated servers |
-| Hetzner Cloud | `hetzner-cloud` | the servers of a project |
-| OVHcloud | `ovh` | dedicated servers, VPS and Public Cloud instances |
-| DigitalOcean | `digitalocean` | droplets |
-| Linode (Akamai) | `linode` | cloud instances |
-| Vultr | `vultr` | cloud instances and bare metal servers |
-| by hand | `manual` | any machine with an address (`ump server add`): listed, installed over SSH; no rescue system behind it |
+What ump works with: the providers whose machines it finds and controls,
+the operating systems it puts on them, and later the configuration
+management that takes over from there. See [platforms](docs/platforms.md).
 
-With every one of them: list and show servers, rename them, set reverse
-DNS, reboot, start and stop, boot into the rescue system, reinstall, and
-log in (DigitalOcean, Linode and Vultr: no rescue system for ump, so the
-install goes over SSH, at Linode and Vultr after the provider's own
-rebuild when needed; at DigitalOcean ump must be able to log into the
-droplet before it installs, with your key or UMP's picked at creation,
-and DigitalOcean sets reverse DNS from the droplet name; manual
-servers: list, show, install and log in). Several
-accounts per provider are fine. See [provider
-accounts](docs/providers.md).
+**Providers.** Every account's machines are listed together, with their
+prices where the provider says them; ump shows, renames, powers and
+reinstalls them and sets their reverse DNS:
 
-What goes on the server is the [UMP Ubuntu 26.04 base
-image](images/ubuntu/README.md): a complete server system, LVM, md,
-netplan, SSH, the hardware tools and nothing that does not belong on a
-server (no cloud-init, no snaps), installed on amd64 and arm64 machines
-alike, booting from UEFI and, on amd64, from legacy BIOS.
+| Provider | Type | Servers | Rescue system for ump |
+|---|---|---|---|
+| Hetzner Robot | `hetzner-robot` | dedicated servers | yes |
+| Hetzner Cloud | `hetzner-cloud` | the servers of a project | yes |
+| OVHcloud | `ovh` | dedicated servers, VPS and Public Cloud instances | yes |
+| DigitalOcean | `digitalocean` | droplets | no: ump must be able to log in before it installs |
+| Linode (Akamai) | `linode` | cloud instances | no: Linode rebuilds with UMP's key when needed |
+| Vultr | `vultr` | cloud instances and bare metal servers | no: Vultr reinstalls with UMP's key when needed |
+| by hand | `manual` | any machine with an address (`ump server add`) | no: ump must be able to log in |
+
+Several accounts per provider are fine. [ISPs](docs/isps.md) says what
+each does in detail, [provider accounts](docs/providers.md) how to set
+them up.
+
+**Operating systems.** Prebuilt server systems, the same on every
+machine, for amd64 and arm64, booting from UEFI and, on amd64, BIOS:
+Ubuntu 26.04 (the default), 24.04 and 22.04 LTS, built by UMP with
+LVM, md, netplan, SSH and the tools a server needs, and nothing that
+does not belong there (no cloud-init, no snaps); and NixOS 25.11 from
+its stable channel, with the profile as NixOS modules. Each gets the
+same disks, users and keys, interface names, firewall and message of
+the day. See [operating systems](docs/oses.md).
+
+**Configuration management** is planned: handing an installed machine
+over to the tool that keeps it configured, with what ump knows about it
+([roadmap](docs/roadmap.md)).
 
 ## The objects
 
@@ -125,28 +133,47 @@ own](images/rescue/README.md#your-own-storage).
 
 ## Documentation
 
+**Getting started**
+
 | Document | Contents |
 |---|---|
 | [Quickstart](docs/quickstart.md) | install ump, decide where it keeps its things, add an account, look at the defaults, dry-run and reinstall a server, log in |
+| [Concepts](docs/concepts.md) | the vocabulary and how the pieces fit, briefly |
 | [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
 | [The state backend](docs/state.md) | where ump keeps everything: the local directory, or a backend shared by a team (a directory, SSH, S3, R2, HTTP, Consul, Vault), the setup wizard and migration, the mirror, locks per server |
+
+**Objects**
+
+| Document | Contents |
+|---|---|
 | [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets |
-| [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
-| [Userdata](docs/userdata.md) | the scripts that run in a new system before its first boot: fields, how they run, the published entry, managing and using them |
-| [NixOS](docs/nixos.md) | NixOS from its stable channel: how the profile becomes NixOS configuration, userdata as modules, how the installation runs |
+| [Userdata](docs/userdata.md) | what a new system gets on top of its profile: fields, how it runs, the published entries, managing and using them |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
-| [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
+
+**Platforms**
+
+| Document | Contents |
+|---|---|
+| [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
+| [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
+| [Operating systems](docs/oses.md) | the prebuilt systems, what every one of them gets, how to pick one |
+| [NixOS](docs/nixos.md) | NixOS from its stable channel: how the profile becomes NixOS configuration, userdata as modules, how the installation runs |
+| [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu system UMP builds, what it holds and its defaults |
+
+**Reference**
+
+| Document | Contents |
+|---|---|
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
-| [Concepts](docs/concepts.md) | the vocabulary and how the pieces fit, briefly |
-| [Roadmap](docs/roadmap.md) | what is there, what comes next, open questions |
+| [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Ubuntu base image](images/ubuntu/README.md) | the system `ump server reinstall` puts on disks, and its defaults |
-| [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the image, users, userdata, firewall, the boot loader |
+| [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
 | [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, users and userdata come from |
+| [Roadmap](docs/roadmap.md) | what is there, what comes next, open questions |
 | [Skill](docs/skill.md) | design outline for a planned part: operating a fleet and its Terraform and Ansible repository with an AI agent |
 
 ## Principles

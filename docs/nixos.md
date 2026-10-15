@@ -1,5 +1,7 @@
 # NixOS
 
+One of the [operating systems](oses.md) ump installs.
+
 ump installs NixOS from its stable channel with the same profiles,
 layouts, users, firewalls and keys as Ubuntu. What differs is how the
 result is held: on Ubuntu ump configures the unpacked image in place; on
