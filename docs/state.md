@@ -60,7 +60,7 @@ this machine.
 | `file:///path/to/dir` | a directory on this machine, for example in the fleet's git repository, where history and sharing come from git | nothing |
 | `ssh://[user@]host/path/to/dir` | a directory on another machine, reached with your ssh client (keys, agent, `~/.ssh/config`) | an account there with `sh`, `sha256sum`, `find` and `mkdir` |
 | `s3://bucket/prefix` | an S3 bucket, or any S3-compatible store that supports conditional writes (`If-Match`): AWS S3, MinIO, ... | `endpoint` (AWS from the region when empty), `region`, `access_key`, `secret_key` |
-| `r2://account/bucket/prefix` | a Cloudflare R2 bucket | `access_key`, `secret_key` |
+| `r2://account/bucket/prefix` | a Cloudflare R2 bucket; `account` is the Cloudflare account ID (see [R2](#r2) below) | `access_key`, `secret_key` |
 | `http://` or `https://host/path` | a service, Terraform-style: `GET /path/FILE` with an ETag, `PUT` with `If-Match` (`If-None-Match: *` for a new file; 412 or 409 is a conflict), `DELETE`, `GET /path?list` as JSON `[{"path", "version"}]`, `LOCK` and `UNLOCK /path?key=SERVER` (423 when held, the holder as JSON), `GET /path?locks` | `token` (bearer), or `user` and `password` |
 | `consul://host:8500/prefix` | keys in Consul's KV store (`http+consul://` for plain http) | `token` |
 | `vault://host:8200/mount/prefix` | secrets in a KV version 2 engine of Vault, one per file (`http+vault://` for plain http) | `token` |
@@ -72,6 +72,33 @@ or from the environment, which wins: `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `UMP_STATE_ENDPOINT`,
 `UMP_STATE_TOKEN` (also `VAULT_TOKEN` and `CONSUL_HTTP_TOKEN`),
 `UMP_STATE_USER`, `UMP_STATE_PASSWORD`.
+
+### R2
+
+The three parts of an `r2://` URL come from the Cloudflare dashboard:
+
+- **account**: the account ID, 32 hexadecimal characters. It is shown
+  as "Account ID" on the right of the account's home page and of the R2
+  overview, and it is the first part of the bucket's S3 API address,
+  `https://ACCOUNT.r2.cloudflarestorage.com`, which the bucket's
+  Settings page lists.
+- **bucket**: the bucket's name, under R2 > Overview > Create bucket.
+  Keep it private: no public access, no custom domain, since the state
+  holds secrets.
+- **prefix**: any path inside the bucket, `ump` for example; it may be
+  left out.
+
+The keys come from R2 > Manage API tokens > Create API token, with the
+permission "Object Read & Write", scoped to that bucket alone. Its
+"Access Key ID" is the `access_key` and its "Secret Access Key" the
+`secret_key`; Cloudflare shows the secret once, so keep it right away
+(as a file, or in your password manager behind a `command:`
+reference). The token value shown above them is not needed.
+
+```console
+$ ump config state migrate --to r2://0123456789abcdef0123456789abcdef/fleet-state/ump \
+    --access-key env:R2_ACCESS_KEY_ID --secret-key file:~/.config/ump/r2.secret
+```
 
 ```yaml
 # ~/.config/ump/backend.yaml

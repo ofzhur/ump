@@ -90,7 +90,7 @@ func Open(raw string, c Credentials) (Backend, error) {
 	case "r2":
 		parts := strings.SplitN(strings.Trim(u.Path, "/"), "/", 2)
 		if u.Host == "" || parts[0] == "" {
-			return nil, fmt.Errorf("backend %q: r2://account/bucket/prefix", raw)
+			return nil, fmt.Errorf("backend %q: r2://account/bucket/prefix, where account is the Cloudflare account ID (the dashboard's R2 overview, or the bucket's S3 API address https://ACCOUNT.r2.cloudflarestorage.com)", raw)
 		}
 		prefix := ""
 		if len(parts) == 2 {

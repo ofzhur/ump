@@ -212,7 +212,10 @@ ump config state setup writes; else the local directory. Backends:
   file:///path/to/dir              a directory (one in the fleet's git repository)
   ssh://[user@]host/path/to/dir    a directory on another machine, through your ssh client
   s3://bucket/prefix               S3 or any store with conditional writes (endpoint, region, keys)
-  r2://account/bucket/prefix       Cloudflare R2 (keys)
+  r2://account/bucket/prefix       Cloudflare R2 (keys); account is the Cloudflare account ID,
+                                   on the dashboard's R2 overview and in the bucket's S3 API
+                                   address https://ACCOUNT.r2.cloudflarestorage.com; the keys
+                                   from R2 > Manage API tokens (Object Read & Write)
   http(s)://host/path              a service: GET/PUT with ETag, DELETE, GET ?list, LOCK/UNLOCK
   consul://host:8500/prefix        Consul KV (token); http+consul:// for plain http
   vault://host:8200/mount/prefix   Vault KV v2 (token); http+vault:// for plain http
@@ -686,6 +689,7 @@ func (a *app) stateWizard(cmd *cobra.Command, ui *prompter) error {
 			}
 		}
 	case "r2":
+		ui.Printf("The account is the Cloudflare account ID (32 hex characters): \"Account ID\" on the dashboard's R2 overview, and the first part of the bucket's S3 API address https://ACCOUNT.r2.cloudflarestorage.com. The keys come next: R2 > Manage API tokens > Create API token, permission Object Read & Write on this bucket; Access Key ID and Secret Access Key.\n")
 		f.url, err = ask("r2://account/bucket/prefix", "")
 	case "http":
 		f.url, err = ask("URL", "https://")
