@@ -235,6 +235,16 @@ name, its location the region (`fra1`, `nyc3`, ...), its product the
 size (`s-1vcpu-1gb`), and its tags become labels. The IPv4 is the
 public one (the private VPC address is shown by `ump server show`).
 
+> **For now, ump installs a droplet only when it can already log in.**
+> The droplet has to let ump in over SSH before `ump server reinstall`,
+> as root or as a sudo user, with one of your keys (in `~/.ssh` or your
+> ssh-agent) or UMP's own (`ump config key show`). Pick such a key when
+> you create the droplet: DigitalOcean puts SSH keys on a droplet only
+> at creation, and neither its API nor its rebuild nor its recovery ISO
+> adds one later (both give the droplet back the keys it was created
+> with). Without that access ump stops before it changes anything. A
+> way into droplets that are locked out may come in a later release.
+
 - Price: the size's monthly list price in USD, which the droplet record
   carries (`"source": "provider"`).
 - Status: DigitalOcean's own: `active`, `off`, `new`, `archive`.
@@ -246,20 +256,15 @@ public one (the private VPC address is shown by `ump server show`).
   from the droplet's name when that is a fully qualified domain name,
   so `ump server rename web-01 web-01.example.net` is how to set it;
   `ump server rdns` says the provider type has none.
-- Rescue: DigitalOcean's recovery ISO is reached through its web
-  console only, so `ump server rescue` and `ump server reinstall` go in
-  over SSH into the running system, as root or a sudo user, with UMP's
-  key or yours (your default keys and the ssh-agent). When that does
-  not let UMP in, `ump server reinstall`, which erases the droplet
-  anyway, has DigitalOcean rebuild it first with its newest Debian
-  image (Ubuntu when there is none) and goes on from there.
-  DigitalOcean's rebuild takes no SSH key: root gets the keys the
-  droplet was created with again, so ump gets in when one of them is
-  UMP's or one of yours on this machine. Pick UMP's public key (`ump
-  config key show`, added to the team's SSH keys) or your own when you
-  create droplets. `ump server rescue` jumps into the UMP rescue system only with `--force`, since
-  nothing but the provider's console brings the server back when it
-  fails; it never rebuilds or erases. ump says before
+- Rescue: DigitalOcean has no rescue system in its API (its recovery
+  ISO is switched on in the Control Panel only, and takes the
+  droplet's creation keys too), so `ump server rescue` and `ump server
+  reinstall` go in over SSH into the running droplet alone, with the
+  access described above. When it gets in with one of your keys, ump
+  adds UMP's key to that account, so that UMP's key works by itself from
+  then on. `ump server rescue` jumps into the UMP rescue system only
+  with `--force`, since nothing but the console brings the droplet back
+  when the jump fails; it never rebuilds or erases. ump says before
   erasing anything that no provider rescue stands behind the droplet; a
   system that does not boot is recovered with the recovery console or a
   rebuild in the Control Panel.

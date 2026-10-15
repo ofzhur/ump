@@ -402,11 +402,13 @@ Puts an operating system on the server's disks from a [UMP base
 image](../images/ubuntu/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS), or whose provider has none and whose running
-system does not let UMP in (Linode, Vultr, DigitalOcean), is first
-reinstalled by the provider with its stock Linux and UMP's key (at
-DigitalOcean, whose rebuild takes no key: the keys the droplet was
-created with, which ump tries along with yours), which `reinstall` may do
-since it erases the server anyway; `rescue` never does. The profile (`--profile`, default `default`: a file
+system does not let UMP in (Linode, Vultr), is first reinstalled by the
+provider with its stock Linux and UMP's key, which `reinstall` may do
+since it erases the server anyway; `rescue` never does. Where the
+provider can do neither (DigitalOcean, servers added by hand), the
+running system must let UMP in before the installation, with one of
+your keys or UMP's; without that, `reinstall` stops before it changes
+anything. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
 its own), the users with their keys, the userdata that runs in the new

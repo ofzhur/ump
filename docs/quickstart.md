@@ -3,7 +3,9 @@
 From nothing to a freshly installed server in six commands. You need a
 server at [Hetzner Robot, Hetzner Cloud, OVHcloud, DigitalOcean, Linode or Vultr](providers.md) with a
 public address, the API credentials of that account, and `ssh` on your
-machine. The server will be erased.
+machine. The server will be erased. At DigitalOcean, the droplet must
+also let you log in over SSH with a key on this machine (pick it when
+you create the droplet); see [DigitalOcean](providers.md#digitalocean-digitalocean).
 
 ## 1. Install ump
 

@@ -39,8 +39,10 @@ the account, UMP's public key is appended to that account's
 `authorized_keys` over the connection that works, and ump says so. From
 then on UMP's key reaches the machine by itself, which is what a team
 sharing the [state](state.md) and CI rely on. The same happens after a
-provider rebuilt a machine with the keys it was created with
-(DigitalOcean). Nothing is changed where UMP's key works already.
+provider rebuilt a machine with its stock Linux. Nothing is changed
+where UMP's key works already. This is also the way into providers
+that put keys on a machine only when it is created (DigitalOcean): pick
+one of your keys, or UMP's, at creation, and ump takes it from there.
 
 ## Key references
 

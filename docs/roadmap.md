@@ -12,7 +12,7 @@ As of October 2026, ump does what the [README](../README.md) and the
   provider rescue, so they are installed over SSH, after the provider's
   own rebuild with UMP's key when SSH does not let UMP in; DigitalOcean
   (droplets) with listing, details, rename, power and an install over
-  SSH, after a rebuild with the droplet's own keys when needed; the account
+  SSH, which needs SSH access to the droplet beforehand; the account
   wizard and the non-interactive form, secret references, the listing
   cache with `--diff`, `--since` and `--cached`.
 - **The rescue system:** UMP's own rescue image for amd64 and arm64,
@@ -42,6 +42,12 @@ As of October 2026, ump does what the [README](../README.md) and the
   partition.
 - **Network.** IPv6 addresses from the provider's network information
   where the rescue system cannot see them; bonds and VLANs.
+- **A way into locked-out servers.** At DigitalOcean (and for servers
+  added by hand) ump installs only what it can log into: DigitalOcean
+  puts SSH keys on a droplet only at creation, and its rebuild and
+  recovery ISO take those same keys. An automatic way in for droplets
+  that let nobody in (for example through a custom image, or the
+  recovery console) may come in a later release.
 - **Several servers at once.** `ump server reinstall` over a list of
   servers with a parallel limit and a per-server progress view.
 - **More providers.** Scaleway bare metal (rescue), clouds without a

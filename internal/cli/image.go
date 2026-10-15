@@ -488,7 +488,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
 				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and the running system does not let UMP in", m.Provider))
 			}
-			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system", addr, m.Provider)
+			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system: ump installs such a server only through its running system, so it must let UMP in (as root or a sudo user, with one of your keys, ~/.ssh or the ssh-agent, or UMP's own, ump config key show); put one there, at the provider when the server is created, and run this again. Nothing was changed", addr, m.Provider)
 		}
 		fmt.Fprintln(a.stderr, "Going through the provider's rescue system.")
 	}

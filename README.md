@@ -60,8 +60,10 @@ from the storage at every use, so they are current without a new binary.
 With every one of them: list and show servers, rename them, set reverse
 DNS, reboot, start and stop, boot into the rescue system, reinstall, and
 log in (DigitalOcean, Linode and Vultr: no rescue system for ump, so the
-install goes over SSH, after the provider's own rebuild when needed;
-DigitalOcean sets reverse DNS from the droplet name; manual
+install goes over SSH, at Linode and Vultr after the provider's own
+rebuild when needed; at DigitalOcean ump must be able to log into the
+droplet before it installs, with your key or UMP's picked at creation,
+and DigitalOcean sets reverse DNS from the droplet name; manual
 servers: list, show, install and log in). Several
 accounts per provider are fine. See [provider
 accounts](docs/providers.md).
