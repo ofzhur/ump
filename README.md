@@ -129,7 +129,8 @@ own](images/rescue/README.md#your-own-storage).
 | [Quickstart](docs/quickstart.md) | install ump, decide where it keeps its things, add an account, look at the defaults, dry-run and reinstall a server, log in |
 | [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
 | [The state backend](docs/state.md) | where ump keeps everything: the local directory, or a backend shared by a team (a directory, SSH, S3, R2, HTTP, Consul, Vault), the setup wizard and migration, the mirror, locks per server |
-| [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets, what each provider can do |
+| [Provider accounts](docs/providers.md) | the provider types, their credentials, the wizard and the non-interactive form, secrets |
+| [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
