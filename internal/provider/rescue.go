@@ -1,6 +1,9 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // CapRescue is implemented by providers whose machines can boot a rescue
 // system that UMP reaches over SSH (see Rescue).
@@ -57,13 +60,17 @@ type StockInstall struct {
 	Image string
 	// Address is where SSH answers once the machine runs it.
 	Address string
+	// Wait is how long the machine may take to let UMP in after the
+	// call returned; zero means the caller's default.
+	Wait time.Duration
 }
 
 // StockInstaller is implemented by providers that can put one of their
 // own stock Linux images on a machine with UMP's key for root, which
 // erases the machine. It is the way in for machines whose rescue system
-// takes no key: ump server reinstall, which erases the machine anyway,
-// may use it; nothing else may.
+// takes no key, or whose provider has none, when the running system
+// does not let UMP in: ump server reinstall, which erases the machine
+// anyway, may use it; nothing else may.
 type StockInstaller interface {
 	InstallStock(ctx context.Context, m Machine, keys []PublicKey) (*StockInstall, error)
 }

@@ -954,6 +954,48 @@ func init() {
 	})
 }
 
+// noRescueProvider is a fake without any rescue system that can install
+// a stock image, as at Vultr.
+type noRescueProvider struct{ inner *fakeProvider }
+
+func (n *noRescueProvider) Type() string    { return "norescue" }
+func (n *noRescueProvider) Account() string { return n.inner.account }
+func (n *noRescueProvider) Capabilities() []provider.Capability {
+	return []provider.Capability{provider.CapInventory, provider.CapPower}
+}
+func (n *noRescueProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	ms, err := n.inner.List(ctx)
+	for i := range ms {
+		ms[i].Provider = "norescue"
+	}
+	return ms, err
+}
+func (n *noRescueProvider) PowerState(ctx context.Context, m provider.Machine) (provider.PowerState, error) {
+	return n.inner.PowerState(ctx, m)
+}
+func (n *noRescueProvider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	return n.inner.Reboot(ctx, m, mode)
+}
+func (n *noRescueProvider) PowerOn(ctx context.Context, m provider.Machine) error {
+	return n.inner.PowerOn(ctx, m)
+}
+func (n *noRescueProvider) PowerOff(ctx context.Context, m provider.Machine, hard bool) error {
+	return n.inner.PowerOff(ctx, m, hard)
+}
+func (n *noRescueProvider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
+	return n.inner.InstallStock(ctx, m, keys)
+}
+
+func init() {
+	provider.Register(provider.Type{
+		Name: "norescue", Kind: provider.KindCloud, Description: "Fake provider without a rescue system",
+		Fields: []provider.Field{{Key: "password", Secret: true, Required: true}},
+		New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
+			return &noRescueProvider{inner: &fakeProvider{account: account, settings: s}}, nil
+		},
+	})
+}
+
 // keylessProvider is a fake whose rescue system takes no key and that
 // cannot install a stock image either: nothing but the refusal is left.
 type keylessProvider struct{ inner *fakeProvider }
@@ -2664,6 +2706,47 @@ func TestListAccountsSameTypeInSequence(t *testing.T) {
 	}
 }
 
+func TestReinstallWithoutRescueTakesTheStockWay(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  nr:\n    type: norescue\n    password: s3cret\n")
+	e.writeProfiles()
+	resetFakePower()
+	// no root access, and the provider refuses the stock image: its error
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes")
+	if code != 4 || !strings.Contains(errOut, "Checking root access to 203.0.113.10 over SSH ... no") || !strings.Contains(errOut, "ump: account nr: fake: no stock images") {
+		t.Errorf("stock image refused: code %d, %q", code, errOut)
+	}
+	// with one: the provider reinstalls its own system with UMP's key, and
+	// the installation goes on from there
+	fakeStock = true
+	defer func() { fakeStock = false }()
+	resetFakePower()
+	e.stockRoot = true
+	defer func() { e.stockRoot = false }()
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes")
+	if code != 0 {
+		t.Fatalf("stock way: code %d, %q", code, errOut)
+	}
+	for _, want := range []string{
+		"Provider type norescue has no rescue system and the running system does not let UMP in; the provider reinstalls web-01 with a stock Linux and UMP's key first",
+		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes",
+		"web-01 is up: Ubuntu 26.04.1 LTS",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stock way lacks %q in\n%s", want, errOut)
+		}
+	}
+	if got := strings.Join(fakePower.actions, ","); !strings.HasPrefix(got, "stock:ump") {
+		t.Errorf("actions: %s", got)
+	}
+	// rescue never reinstalls
+	resetFakePower()
+	_, _, code = e.run("", false, "server", "rescue", "web-01", "--yes")
+	if code == 0 || len(fakePower.actions) != 0 {
+		t.Errorf("rescue must not reinstall: code %d, actions %v", code, fakePower.actions)
+	}
+}
+
 func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 	e := newTestEnv(t)
 	e.write("accounts:\n  kl:\n    type: keyless\n    password: s3cret\n")
@@ -2691,7 +2774,7 @@ func TestRescueKeylessIsRefusedEarly(t *testing.T) {
 		t.Fatalf("stock way: code %d, %q", code, errOut)
 	}
 	for _, want := range []string{
-		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls it with a stock Linux and UMP's key first",
+		"The provider's rescue system of web-01 takes no SSH key; the provider reinstalls web-01 with a stock Linux and UMP's key first",
 		"web-01 runs the provider's Debian 13 now; waiting for root access over SSH ... yes after 0s (Debian GNU/Linux 13 (trixie)).",
 		"Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01.",
 		"web-01 is up: Ubuntu 26.04.1 LTS",

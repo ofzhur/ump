@@ -2,6 +2,7 @@ package vultr
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -56,6 +60,8 @@ func (f *fakeVultr) handler(t *testing.T) http.Handler {
 			io.WriteString(w, `{"plans":[{"id":"vc2-1c-1gb","vcpu_count":1,"ram":1024,"disk":25,"monthly_cost":5,"type":"vc2"}],"meta":{"links":{"next":""}}}`)
 		case "/plans-metal":
 			io.WriteString(w, `{"plans_metal":[{"id":"vbm-8c-64gb","cpu_count":8,"monthly_cost":350,"type":"SSD"}],"meta":{"links":{"next":""}}}`)
+		case "/ssh-keys":
+			io.WriteString(w, `{"ssh_keys":[{"id":"k1","name":"laptop","ssh_key":"ssh-ed25519 AAAAexisting me@laptop"}],"meta":{"links":{"next":""}}}`)
 		case "/regions":
 			io.WriteString(w, `{"regions":[{"id":"fra","city":"Frankfurt","country":"DE","continent":"Europe"}],"meta":{"links":{"next":""}}}`)
 		case "/instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60":
@@ -179,6 +185,54 @@ func TestPowerRenameAndRDNS(t *testing.T) {
 	}
 	if strings.Join(f.writes, "\n") != strings.Join(want, "\n") {
 		t.Errorf("writes:\n%s\nwant:\n%s", strings.Join(f.writes, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestInstallStock(t *testing.T) {
+	p, f := newTest(t)
+	ctx := context.Background()
+	ms, _ := p.List(ctx)
+	web := ms[0]
+	keys := []provider.PublicKey{
+		{Name: "ump", Data: "ssh-ed25519 AAAAump ump@desk"},
+		{Name: "mine", Data: "ssh-ed25519 AAAAexisting other comment"}, // in the account already
+	}
+	st, err := p.InstallStock(ctx, web, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Address != "198.51.100.10" || st.Image != "Ubuntu 24.04 LTS x64" || st.Wait != 15*time.Minute {
+		t.Errorf("stock install: %+v", st)
+	}
+	if len(f.writes) != 3 || f.writes[0] != `POST /ssh-keys {"name":"ump","ssh_key":"ssh-ed25519 AAAAump ump@desk"}` ||
+		!strings.HasPrefix(f.writes[1], "PATCH /instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60 ") ||
+		f.writes[2] != "POST /instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60/reinstall {}" {
+		t.Fatalf("writes:\n%s", strings.Join(f.writes, "\n"))
+	}
+	var patch struct {
+		UserData string `json:"user_data"`
+	}
+	json.Unmarshal([]byte(strings.SplitN(f.writes[1], " ", 3)[2]), &patch)
+	raw, err := base64.StdEncoding.DecodeString(patch.UserData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		DisableRoot bool `yaml:"disable_root"`
+		WriteFiles  []struct {
+			Path    string `yaml:"path"`
+			Append  bool   `yaml:"append"`
+			Content string `yaml:"content"`
+		} `yaml:"write_files"`
+		Runcmd []any `yaml:"runcmd"`
+	}
+	if !strings.HasPrefix(string(raw), "#cloud-config\n") || yaml.Unmarshal(raw, &cfg) != nil {
+		t.Fatalf("user data:\n%s", raw)
+	}
+	if cfg.DisableRoot || len(cfg.WriteFiles) != 2 || cfg.WriteFiles[0].Path != "/root/.ssh/authorized_keys" || !cfg.WriteFiles[0].Append ||
+		cfg.WriteFiles[0].Content != "ssh-ed25519 AAAAump ump@desk\nssh-ed25519 AAAAexisting other comment\n" ||
+		cfg.WriteFiles[1].Content != "PermitRootLogin prohibit-password\n" || len(cfg.Runcmd) != 1 {
+		t.Errorf("cloud-config: %+v\n%s", cfg, raw)
 	}
 }
 

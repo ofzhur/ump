@@ -3,12 +3,15 @@
 //
 // Vultr has no rescue system in its API, so this provider lists,
 // describes, renames, powers and sets reverse DNS; ump reaches a Vultr
-// machine for a reinstall over SSH into its running system.
+// machine for a reinstall over SSH into its running system, and when
+// that does not let it in, Vultr reinstalls the machine's own OS with
+// user data that opens root to UMP's key (StockInstaller).
 package vultr
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ofzhur/ump/internal/provider"
 )
@@ -362,6 +366,56 @@ func (p *Provider) SetPTR(ctx context.Context, m provider.Machine, ip netip.Addr
 	return p.client.do(ctx, http.MethodPost, path+"/ipv6/reverse", map[string]string{"ip": ip.String(), "reverse": ptr}, nil)
 }
 
+// stockWait is how long a reinstalled machine may take to let UMP in:
+// Vultr reinstalls an instance in a few minutes, a bare metal server in
+// a quarter of an hour or more.
+var stockWait = map[provider.Kind]time.Duration{provider.KindCloud: 15 * time.Minute, provider.KindBareMetal: 45 * time.Minute}
+
+// stockUserData is the cloud-config that opens root to the keys on the
+// first boot of the reinstalled system: the keys appended to root's
+// authorized_keys, root logins with keys allowed, sshd restarted.
+func stockUserData(keys []provider.PublicKey) string {
+	var b strings.Builder
+	b.WriteString("#cloud-config\n# written by ump server reinstall: lets UMP in as root for the installation\ndisable_root: false\nwrite_files:\n  - path: /root/.ssh/authorized_keys\n    permissions: \"0600\"\n    append: true\n    content: |\n")
+	for _, k := range keys {
+		b.WriteString("      " + strings.TrimSpace(k.Data) + "\n")
+	}
+	b.WriteString("  - path: /etc/ssh/sshd_config.d/00-ump-root.conf\n    content: |\n      PermitRootLogin prohibit-password\nruncmd:\n  - [sh, -c, \"chmod 700 /root/.ssh; systemctl restart ssh || systemctl restart sshd || true\"]\n")
+	return b.String()
+}
+
+// InstallStock implements provider.StockInstaller: UMP's keys are added
+// to the account's SSH keys (for the next deploys; Vultr's reinstall
+// takes none), the machine's user data is set to a cloud-config that
+// opens root to them, and Vultr reinstalls the machine's OS, which runs
+// it on its first boot. The previous user data is replaced.
+func (p *Provider) InstallStock(ctx context.Context, m provider.Machine, keys []provider.PublicKey) (*provider.StockInstall, error) {
+	if len(keys) == 0 {
+		return nil, &provider.APIError{Provider: TypeName, Message: "a stock installation needs a key for root"}
+	}
+	for _, k := range keys {
+		if err := p.client.EnsureSSHKey(ctx, k); err != nil {
+			return nil, err
+		}
+	}
+	data := base64.StdEncoding.EncodeToString([]byte(stockUserData(keys)))
+	if err := p.client.do(ctx, http.MethodPatch, base(m), map[string]string{"user_data": data}, nil); err != nil {
+		return nil, err
+	}
+	if err := p.client.do(ctx, http.MethodPost, base(m)+"/reinstall", map[string]string{}, nil); err != nil {
+		return nil, err
+	}
+	image := "OS"
+	if m.Kind == provider.KindBareMetal {
+		if bm, err := p.client.GetBareMetal(ctx, m.ID); err == nil && bm.OS != "" {
+			image = bm.OS
+		}
+	} else if in, err := p.client.GetInstance(ctx, m.ID); err == nil && in.OS != "" {
+		image = in.OS
+	}
+	return &provider.StockInstall{Image: image, Address: m.IPv4, Wait: stockWait[m.Kind]}, nil
+}
+
 // region returns a region by its ID, from GET /regions read once.
 func (p *Provider) region(ctx context.Context, id string) (Region, error) {
 	p.mu.Lock()
@@ -637,6 +691,41 @@ func (c *Client) IPv4s(ctx context.Context, id string) ([]IPv4, error) {
 // IPv6s returns an instance's IPv6 networks.
 func (c *Client) IPv6s(ctx context.Context, id string) ([]IPv6, error) {
 	return list[IPv6](ctx, c, "/instances/"+url.PathEscape(id)+"/ipv6", "ipv6s")
+}
+
+// SSHKey is a key of the account.
+type SSHKey struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	SSHKey string `json:"ssh_key"`
+}
+
+// EnsureSSHKey adds the key to the account's SSH keys unless a key with
+// the same type and data is there already.
+func (c *Client) EnsureSSHKey(ctx context.Context, k provider.PublicKey) error {
+	have, err := list[SSHKey](ctx, c, "/ssh-keys", "ssh_keys")
+	if err != nil {
+		return err
+	}
+	for _, h := range have {
+		if keyData(h.SSHKey) == keyData(k.Data) {
+			return nil
+		}
+	}
+	name := k.Name
+	if name == "" {
+		name = "ump"
+	}
+	return c.do(ctx, http.MethodPost, "/ssh-keys", map[string]string{"name": name, "ssh_key": strings.TrimSpace(k.Data)}, nil)
+}
+
+// keyData is a key line without its comment.
+func keyData(line string) string {
+	f := strings.Fields(line)
+	if len(f) < 2 {
+		return strings.TrimSpace(line)
+	}
+	return f[0] + " " + f[1]
 }
 
 // ReverseIPv6s returns an instance's IPv6 reverse entries.

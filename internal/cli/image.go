@@ -249,8 +249,8 @@ func nonEmpty(s, def string) string {
 // system takes no key: the provider puts its stock Linux on the machine
 // with UMP's key for root (erasing it, which the reinstall does anyway),
 // then the direct way kexecs from there into the UMP rescue system.
-func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provider.StockInstaller, keys []provider.PublicKey, keyPath, imageURL, hostname string) (*imageEntry, error) {
-	fmt.Fprintf(a.stderr, "The provider's rescue system of %s takes no SSH key; the provider reinstalls it with a stock Linux and UMP's key first (this takes a few minutes) ...\n", m.Name)
+func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provider.StockInstaller, keys []provider.PublicKey, keyPath, imageURL, hostname, why string) (*imageEntry, error) {
+	fmt.Fprintf(a.stderr, "%s; the provider reinstalls %s with a stock Linux and UMP's key first (this takes a few minutes) ...\n", why, m.Name)
 	stock, err := si.InstallStock(ctx, m, keys)
 	if err != nil {
 		return nil, fmt.Errorf("account %s: %w", m.Account, err)
@@ -261,7 +261,11 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 	}
 	fmt.Fprintf(a.stderr, "%s runs the provider's %s now; waiting for root access over SSH ...", m.Name, stock.Image)
 	start := time.Now()
-	deadline := start.Add(imageWaitTimeout)
+	wait := imageWaitTimeout
+	if stock.Wait > wait {
+		wait = stock.Wait
+	}
+	deadline := start.Add(wait)
 	identities := []string{keyPath}
 	for {
 		if p, ok := a.probeHost(ctx, "root", addr, identities, true); ok && p.root {
@@ -270,7 +274,7 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 		}
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
-			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; look at the server's console", m.Name, imageWaitTimeout))
+			return nil, withExit(exitUnreachable, fmt.Errorf("%s did not let UMP in as root within %s after the provider's reinstall; look at the server's console", m.Name, wait))
 		}
 		if err := sleepCtx(ctx, waitPoll); err != nil {
 			fmt.Fprintln(a.stderr)
@@ -427,6 +431,9 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH (as root, or a sudo user with UMP's key); --via provider goes through the provider's rescue system", addr))
 		}
 		if !hasRescue {
+			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
+				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and the running system does not let UMP in", m.Provider))
+			}
 			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system", addr, m.Provider)
 		}
 		fmt.Fprintln(a.stderr, "Going through the provider's rescue system.")
@@ -441,7 +448,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	}
 	if kr, ok := prov.(provider.KeylessRescue); ok && kr.RescueTakesNoKey(m) {
 		if si, ok := prov.(provider.StockInstaller); ok && o.stock && addr != "" {
-			return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname)
+			return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("The provider's rescue system of %s takes no SSH key", m.Name))
 		}
 		return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself; give UMP root access to the running system (UMP's key in root's authorized_keys, see ump config key) for the direct way, or use ump server rescue --no-image with the mailed password", m.Name))
 	}

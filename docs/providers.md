@@ -253,9 +253,15 @@ product the plan, and its tags become labels.
   the API; set it in the customer portal.
 - Rescue: Vultr has no rescue system in its API. `ump server rescue` and
   `ump server reinstall` go in over SSH into the running system (as root
-  or a sudo user, with UMP's key or yours: put UMP's public key, `ump
-  config key show`, into the instance's SSH keys when you deploy it) and
-  load the rescue image with kexec. ump says before erasing anything
+  or a sudo user, with UMP's key or yours) and load the rescue image
+  with kexec. When the running system does not let UMP in, `ump server
+  reinstall`, which erases the machine anyway, has Vultr reinstall the
+  machine's own OS first: UMP's key is added to the account's SSH keys
+  (as `ump`, ready for the next deploys), the machine's user data is
+  replaced by a cloud-config that opens root to that key, and Vultr's
+  reinstall runs it on the first boot; ump waits up to 15 minutes for
+  an instance (45 for a bare metal server) and goes on from there.
+  `ump server rescue` never does that. ump says before erasing anything
   that no provider rescue stands behind the machine; a system that does
   not boot is recovered with Vultr's web console or a reinstall in the
   customer portal.

@@ -57,7 +57,8 @@ from the storage at every use, so they are current without a new binary.
 
 With every one of them: list and show servers, rename them, set reverse
 DNS, reboot, start and stop, boot into the rescue system, reinstall, and
-log in (Vultr: the rescue system and the install go over SSH; manual
+log in (Vultr: no rescue system, so the install goes over SSH, after
+Vultr's own reinstall with UMP's key when needed; manual
 servers: list, show, install and log in). Several
 accounts per provider are fine. See [provider
 accounts](docs/providers.md).
