@@ -257,7 +257,9 @@ public one (the private VPC address is shown by `ump server show`).
   droplet was created with again, so ump gets in when one of them is
   UMP's or one of yours on this machine. Pick UMP's public key (`ump
   config key show`, added to the team's SSH keys) or your own when you
-  create droplets. `ump server rescue` never rebuilds. ump says before
+  create droplets. `ump server rescue` jumps into the UMP rescue system only with `--force`, since
+  nothing but the provider's console brings the server back when it
+  fails; it never rebuilds or erases. ump says before
   erasing anything that no provider rescue stands behind the droplet; a
   system that does not boot is recovered with the recovery console or a
   rebuild in the Control Panel.
@@ -297,8 +299,9 @@ the IPv6 is the SLAAC address.
   newest Debian image (Ubuntu when there is none), UMP's key for root
   and a random root password nobody needs; UMP's key is also added to
   your profile's SSH keys when the token may do that. ump waits up to
-  15 minutes and goes on from there. `ump server rescue` never does
-  that. A system that does not boot is recovered with Lish, Linode's
+  15 minutes and goes on from there. `ump server rescue` jumps into the
+  UMP rescue system only with `--force`, since nothing but the provider's console
+  brings the server back when it fails; it never rebuilds or erases. A system that does not boot is recovered with Lish, Linode's
   console, or a rebuild in Cloud Manager.
 - `ump server show` adds the image, hypervisor, group, tags, watchdog
   and backups, the type's CPUs, memory, disk and transfer with the
@@ -342,7 +345,9 @@ product the plan, and its tags become labels.
   replaced by a cloud-config that opens root to that key, and Vultr's
   reinstall runs it on the first boot; ump waits up to 15 minutes for
   an instance (45 for a bare metal server) and goes on from there.
-  `ump server rescue` never does that. ump says before erasing anything
+  `ump server rescue` jumps into the UMP rescue system only with `--force`, since
+  nothing but the provider's console brings the server back when it
+  fails; it never rebuilds or erases. ump says before erasing anything
   that no provider rescue stands behind the machine; a system that does
   not boot is recovered with Vultr's web console or a reinstall in the
   customer portal.
@@ -366,7 +371,8 @@ through SSH: when the running system lets UMP in (as root or a sudo
 user, with UMP's key or yours), the rescue image is loaded and entered
 with kexec. Nothing stands behind that: a failed installation or a
 system that does not boot is yours to recover, with a console or the
-provider's own means, and ump says so before erasing anything. See
+provider's own means, and ump says so before erasing anything; `ump
+server rescue` makes the jump only with `--force`. See
 [inventory](inventory.md#servers-added-by-hand).
 
 ## Adding a provider type

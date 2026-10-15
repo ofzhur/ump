@@ -36,7 +36,7 @@ ump
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
 │   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
-│   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-- command]
+│   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
 │   ├── start        <ref> [--wait]
@@ -315,7 +315,7 @@ in time.
 ## Rescue: `ump server rescue|unrescue`
 
 ```
-ump server rescue REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--yes] [-o json|yaml] [-- COMMAND...]
+ump server rescue REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-o json|yaml] [-- COMMAND...]
 ump server unrescue REF [--reboot] [--wait] [--yes]
 ```
 
@@ -332,10 +332,15 @@ the image version, the provider's password where it issues one, the
 `ssh` command) without connecting.
 
 `rescue` never erases a server. Where the provider has no rescue
-system for ump (DigitalOcean, Linode, Vultr, servers added by hand), it
-goes in over SSH alone and stops with exit code 5 when the running
-system does not let UMP in; only `reinstall`, which erases the server
-anyway and asks first, may have the provider rebuild it.
+system for ump (DigitalOcean, Linode, Vultr, servers added by hand),
+the only way is the jump over SSH from the running system, and when
+that jump fails nothing but the provider's console brings the server
+back; so `rescue` refuses it with exit code 3 unless `--force` is
+given (a server that already runs the UMP rescue system is connected
+to either way), and stops with exit code 5 when the running system
+does not let UMP in. Only `reinstall`, which erases the server anyway
+and asks once, makes the jump without `--force` and may have the
+provider rebuild the server first.
 
 How the server gets there depends on what answers, and ump says so on
 the way:

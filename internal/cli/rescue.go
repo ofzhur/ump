@@ -21,6 +21,7 @@ type rescueOptions struct {
 	noConnect bool
 	noImage   bool
 	yes       bool
+	force     bool
 	output    string
 	image     string
 	via       string
@@ -53,7 +54,13 @@ configuration (staging.image) or --image.
 rescue system. Rescue systems have a fresh host key every boot, so the
 connections skip host key checks; providers that report the host key
 fingerprints have them printed. Asks for confirmation on a terminal;
-without one, --yes is required.`,
+without one, --yes is required.
+
+Where the provider has no rescue system for ump (DigitalOcean, Linode,
+Vultr, servers added by hand), a failed jump leaves only the provider's
+console to bring the server back, so rescue refuses the jump without
+--force; a server that already runs the UMP rescue system is connected
+to either way. rescue never rebuilds or erases a server.`,
 		Args: usageArgs(cobra.MinimumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			refs, command := splitDash(cmd.ArgsLenAtDash(), args)
@@ -71,6 +78,7 @@ without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.noWait, "no-wait", false, "do not wait until the provider's rescue system answers (and do not connect)")
 	sub.Flags().BoolVar(&o.noConnect, "no-connect", false, "print how to connect instead of connecting")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
+	sub.Flags().BoolVar(&o.force, "force", false, "jump into the rescue system even where no provider rescue system stands behind the server")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the connection details as json or yaml instead of connecting")
 	return sub
 }
@@ -216,7 +224,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if imageURL == "" {
 		imageURL = cfg.StagingImage()
 	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != "", users: a.loginUsers(cfg, m, doc)})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, imageURL, entryOptions{via: o.via, yes: o.yes, quiet: format != "", unguarded: o.force, users: a.loginUsers(cfg, m, doc)})
 	if err != nil {
 		return err
 	}

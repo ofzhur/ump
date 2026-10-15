@@ -291,7 +291,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if u := prof.Admin(users); u != "" && u != "root" {
 		logins = append([]string{"root", u}, logins[1:]...)
 	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, users: dedupe(logins)})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, unguarded: true, users: dedupe(logins)})
 	if err != nil {
 		return err
 	}

@@ -3659,3 +3659,35 @@ func TestWaitLimit(t *testing.T) {
 		t.Errorf("at 25s: %q", out.String())
 	}
 }
+
+func TestRescueWithoutProviderRescueNeedsForce(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  nr:\n    type: norescue\n    password: s3cret\n")
+	e.writeProfiles()
+	resetFakePower()
+	// the running system lets UMP in, but nothing stands behind a failed
+	// jump: refused without --force, before anything happens
+	e.directRoot, e.versionAfter = true, 2
+	_, errOut, code := e.run("", true, "server", "rescue", "web-01", "--yes")
+	if code != 3 || !strings.Contains(errOut, "has no provider rescue system to fall back on") || !strings.Contains(errOut, "ump server rescue --force takes that risk") {
+		t.Errorf("without --force: code %d, %q", code, errOut)
+	}
+	if entries := e.entryCommands(); len(entries) != 0 || len(fakePower.actions) != 0 {
+		t.Errorf("something happened: entries %v, actions %v", entries, fakePower.actions)
+	}
+	// with --force the jump is made
+	_, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--force")
+	if code != 0 || !strings.Contains(errOut, "Waiting for the UMP rescue system on 203.0.113.10") {
+		t.Errorf("with --force: code %d, %q", code, errOut)
+	}
+	// a server that runs the UMP rescue system already is connected to
+	e.directRoot, e.inImage = false, true
+	if _, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes"); code != 0 || !strings.Contains(errOut, "already runs the UMP rescue system") {
+		t.Errorf("running already: code %d, %q", code, errOut)
+	}
+	// reinstall needs no --force: its confirmation covers the wipe
+	e.inImage, e.directRoot, e.versionPolls = false, true, 0
+	if _, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes"); code != 0 || !strings.Contains(errOut, "web-01 is up:") {
+		t.Errorf("reinstall: code %d, %q", code, errOut)
+	}
+}

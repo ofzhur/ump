@@ -327,6 +327,10 @@ type entryOptions struct {
 	// machine) as the way in when its rescue system takes no key; only a
 	// reinstall, which erases the machine anyway, sets it.
 	stock bool
+	// unguarded allows the jump into the UMP rescue system on a machine
+	// whose provider has no rescue system to fall back on: rescue sets it
+	// with --force, reinstall always (the user accepted the wipe).
+	unguarded bool
 	// users are tried in turn for the direct way: root, and the sudo
 	// users where root cannot log in (loginUsers); root and ump when
 	// empty.
@@ -422,6 +426,9 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 				how = fmt.Sprintf(", as %s with sudo", user)
 			}
 			fmt.Fprintf(a.stderr, " yes (%s%s).\n", nonEmpty(p.os, "unknown system"), how)
+			if !hasRescue && !o.unguarded {
+				return nil, withExit(exitAborted, fmt.Errorf("%s has no provider rescue system to fall back on: if the jump into the UMP rescue system fails, only the provider's console brings the server back. ump server rescue --force takes that risk; ump server reinstall, which erases the server anyway, asks once and needs no --force", describeRef(m)))
+			}
 			if err := ask(fmt.Sprintf("Load the UMP rescue image on %s over SSH and kexec into it? The running system ends without a shutdown.", describeRef(m))); err != nil {
 				return nil, err
 			}
