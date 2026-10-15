@@ -6,6 +6,7 @@ package all
 
 import (
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/provider/digitalocean"
 	"github.com/ofzhur/ump/internal/provider/hetznercloud"
 	"github.com/ofzhur/ump/internal/provider/hetznerrobot"
 	"github.com/ofzhur/ump/internal/provider/linode"
@@ -19,6 +20,7 @@ func init() {
 	provider.Register(hetznercloud.Type)
 	provider.Register(ovh.Type)
 	provider.Register(linode.Type)
+	provider.Register(digitalocean.Type)
 	provider.Register(vultr.Type)
 	provider.Register(manual.Type)
 }

@@ -238,7 +238,9 @@ ump server rename NAME|ID|IP|PROVIDER/ID NEW-NAME [--force] [-o json|yaml|name]
 Sets the name the server is known by at its provider: the server name at
 Hetzner Robot and Hetzner Cloud, the instance name of an OVHcloud Public
 Cloud instance (OVHcloud dedicated servers cannot be renamed through the
-API, and the command says so), the label at Linode and Vultr.
+API, and the command says so), the label at Linode and Vultr, the
+droplet name at DigitalOcean (which also sets the droplet's reverse DNS
+when the name is a fully qualified domain name).
 The name is a label at the provider: the hostname of an installed
 operating system does not change. UMP uses the provider name as the
 machine name everywhere, including the hostname it sets when it installs
@@ -276,7 +278,8 @@ Hetzner Cloud then shows its default again.
 Providers differ: Hetzner Robot and Hetzner Cloud accept any name;
 OVHcloud checks that the name resolves to the address first, so create
 the forward record before setting the PTR there, and so does Linode;
-Vultr sets reverse DNS for instances, not for bare metal servers. Providers without
+Vultr sets reverse DNS for instances, not for bare metal servers;
+DigitalOcean has no reverse DNS API and derives it from the droplet name. Providers without
 reverse DNS support are noted on stderr by `rdns get` and refused with
 exit code 1 by `set` and `delete`. `ump config isp types` shows which
 capabilities each provider type has.

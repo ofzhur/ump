@@ -10,7 +10,9 @@ As of October 2026, ump does what the [README](../README.md) and the
   reverse DNS, power, rescue and reinstall for all of them; Linode
   (instances) and Vultr (instances, bare metal) with the same except a
   provider rescue, so they are installed over SSH, after the provider's
-  own rebuild with UMP's key when SSH does not let UMP in; the account
+  own rebuild with UMP's key when SSH does not let UMP in; DigitalOcean
+  (droplets) with listing, details, rename, power and an install over
+  SSH; the account
   wizard and the non-interactive form, secret references, the listing
   cache with `--diff`, `--since` and `--cached`.
 - **The rescue system:** UMP's own rescue image for amd64 and arm64,

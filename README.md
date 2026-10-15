@@ -52,15 +52,17 @@ from the storage at every use, so they are current without a new binary.
 | Hetzner Robot | `hetzner-robot` | dedicated servers |
 | Hetzner Cloud | `hetzner-cloud` | the servers of a project |
 | OVHcloud | `ovh` | dedicated servers, VPS and Public Cloud instances |
+| DigitalOcean | `digitalocean` | droplets |
 | Linode (Akamai) | `linode` | cloud instances |
 | Vultr | `vultr` | cloud instances and bare metal servers |
 | by hand | `manual` | any machine with an address (`ump server add`): listed, installed over SSH; no rescue system behind it |
 
 With every one of them: list and show servers, rename them, set reverse
 DNS, reboot, start and stop, boot into the rescue system, reinstall, and
-log in (Linode and Vultr: no rescue system for ump, so the install goes
-over SSH, after the provider's own rebuild with UMP's key when needed;
-manual
+log in (DigitalOcean, Linode and Vultr: no rescue system for ump, so the
+install goes over SSH, after the provider's own rebuild with UMP's key
+when needed at Linode and Vultr; DigitalOcean sets reverse DNS from the
+droplet name; manual
 servers: list, show, install and log in). Several
 accounts per provider are fine. See [provider
 accounts](docs/providers.md).

@@ -772,7 +772,7 @@ func TestWizardFileStorage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 	}
-	for _, want := range []string{"No accounts configured yet.", "Provider type", "1) fake", "Account name [fake]:",
+	for _, want := range []string{"No accounts configured yet.", "Provider type", "2) fake", "Account name [fake]:",
 		"The secrets are kept as files in the state (", "the login", "Login:", "Password:", "Region", "Testing acc ... ok (2 servers)",
 		"Saved account acc (fake)", "Done. Try: ump server list"} {
 		if !strings.Contains(out, want) {

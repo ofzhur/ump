@@ -37,6 +37,7 @@ manual          mixed        inventory, describe                                
 | `hetzner-robot` | Hetzner dedicated servers | `login` (`#ws+...`), `password` | Robot → Settings → Web service and app settings |
 | `hetzner-cloud` | the servers of one Hetzner Cloud project | `token` | Cloud Console → the project → Security → API tokens; read permission is enough for listing, read and write for everything else |
 | `ovh` | OVHcloud dedicated servers, VPS and Public Cloud instances of one account | `endpoint` (`ovh-eu`, `ovh-ca`, `ovh-us`, or a URL), `application_key`, `application_secret`, `consumer_key` | an application at `https://eu.api.ovh.com/createApp/` (`ca.`/`us.` for the other endpoints) gives key and secret; the wizard requests the consumer key for you |
+| `digitalocean` | the droplets of one DigitalOcean team | `token` | Control Panel → API → Tokens → Generate New Token; read for listing, write (or the custom scopes droplet read and update, actions read) for renaming and power |
 | `linode` | the instances of one Linode (Akamai Cloud Computing) account | `token` | Cloud Manager → your profile → API Tokens → Create a Personal Access Token, with Linodes and IPs read/write and Images read only |
 | `vultr` | the cloud instances and bare metal servers of one Vultr account | `api_key` | customer portal → Account → API → Enable API; under Access Control, allow the addresses ump runs from (or all IPv4 and IPv6) |
 | `manual` | the servers added with `ump server add` | none | the account `manual` appears by itself with the first server added; see [manual servers](#manual-servers-manual) |
@@ -225,6 +226,39 @@ set; instances carry their project as labels; VPS are labelled
 - `ump server show` adds, for a dedicated server, the boot option, the
   addresses, the service dates and the hardware; for an instance, the
   flavor, image, addresses, SSH key and project.
+
+### DigitalOcean (`digitalocean`)
+
+One account is one DigitalOcean team; a personal access token is the
+credential. A droplet's ID is its droplet ID, its name the droplet
+name, its location the region (`fra1`, `nyc3`, ...), its product the
+size (`s-1vcpu-1gb`), and its tags become labels. The IPv4 is the
+public one (the private VPC address is shown by `ump server show`).
+
+- Price: the size's monthly list price in USD, which the droplet record
+  carries (`"source": "provider"`).
+- Status: DigitalOcean's own: `active`, `off`, `new`, `archive`.
+- Rename uses the rename action; ump waits until it is done.
+- Power: reboot (ACPI), power cycle for a hard reset and a power cycle
+  alike, shutdown (ACPI) and power off, power on; every action is
+  followed to completion.
+- Reverse DNS: DigitalOcean has no API for it. It sets a droplet's PTR
+  from the droplet's name when that is a fully qualified domain name,
+  so `ump server rename web-01 web-01.example.net` is how to set it;
+  `ump server rdns` says the provider type has none.
+- Rescue: DigitalOcean's recovery ISO is reached through its web
+  console only, and its rebuild takes no SSH key (the droplet gets the
+  keys it was created with). So `ump server rescue` and `ump server
+  reinstall` go in over SSH into the running system alone, as root or a
+  sudo user, with UMP's key or yours: add UMP's public key (`ump config
+  key show`) to the team's SSH keys and pick it when creating droplets,
+  or use your own key there. ump says before erasing anything that no
+  provider rescue stands behind the droplet; a system that does not
+  boot is recovered with the recovery console or a rebuild in the
+  Control Panel.
+- `ump server show` adds the image, tags, features, VPC and volumes,
+  the size's CPUs, memory, disk and transfer with the price, the
+  region's name, and the addresses with netmask and gateway.
 
 ### Linode (`linode`)
 

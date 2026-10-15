@@ -44,6 +44,7 @@ and `source`):
 | Hetzner Cloud | the API: the server type's monthly price at the server's location, net, EUR (`"source": "provider"`), for retired types too |
 | Hetzner Robot | not in the API: set it by hand |
 | OVHcloud | not in the API: set it by hand |
+| DigitalOcean | the API: the size's monthly list price, USD (`"source": "provider"`) |
 | Linode | the API: the type's monthly list price in the instance's region, USD (`"source": "provider"`); none for a retired type |
 | Vultr | the API: the plan's monthly list price, USD (`"source": "provider"`); none for a plan Vultr no longer offers |
 | manual servers | set it by hand |
