@@ -33,7 +33,7 @@ requires a valid hostname.
 ## Accounts and providers
 
 A **provider** is an integration with a hosting API: Hetzner Robot,
-Hetzner Cloud, OVHcloud, Vultr. An **account** is one set of credentials for one
+Hetzner Cloud, OVHcloud, Linode, Vultr. An **account** is one set of credentials for one
 provider, under a name of your choice (`ump config isp`); several
 accounts of the same type are fine. Each provider type declares its
 **capabilities** (inventory, describe, rename, rdns, power, rescue), and

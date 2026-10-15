@@ -238,7 +238,7 @@ ump server rename NAME|ID|IP|PROVIDER/ID NEW-NAME [--force] [-o json|yaml|name]
 Sets the name the server is known by at its provider: the server name at
 Hetzner Robot and Hetzner Cloud, the instance name of an OVHcloud Public
 Cloud instance (OVHcloud dedicated servers cannot be renamed through the
-API, and the command says so), the label at Vultr.
+API, and the command says so), the label at Linode and Vultr.
 The name is a label at the provider: the hostname of an installed
 operating system does not change. UMP uses the provider name as the
 machine name everywhere, including the hostname it sets when it installs
@@ -275,8 +275,8 @@ Hetzner Cloud then shows its default again.
 
 Providers differ: Hetzner Robot and Hetzner Cloud accept any name;
 OVHcloud checks that the name resolves to the address first, so create
-the forward record before setting the PTR there; Vultr sets reverse DNS
-for instances, not for bare metal servers. Providers without
+the forward record before setting the PTR there, and so does Linode;
+Vultr sets reverse DNS for instances, not for bare metal servers. Providers without
 reverse DNS support are noted on stderr by `rdns get` and refused with
 exit code 1 by `set` and `delete`. `ump config isp types` shows which
 capabilities each provider type has.
@@ -303,7 +303,9 @@ the [safety model](concepts.md#safety) says. Provider differences:
 Hetzner Robot presses the power button for on and off and has no reset
 for a switched-off server; OVHcloud dedicated servers know one reboot (a
 hardware reset) and cannot be switched on or off through the API; Vultr
-has one reboot and stops by halting (no ACPI shutdown in its API).
+has one reboot and stops by halting (no ACPI shutdown in its API);
+Linode has one reboot, and its shutdown powers off what does not stop
+in time.
 
 ## Rescue: `ump server rescue|unrescue`
 
@@ -382,7 +384,7 @@ Puts an operating system on the server's disks from a [UMP base
 image](../images/ubuntu/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS), or whose provider has none and whose running
-system does not let UMP in (Vultr), is first reinstalled by the
+system does not let UMP in (Linode, Vultr), is first reinstalled by the
 provider with its stock Linux and UMP's key, which `reinstall` may do
 since it erases the server anyway; `rescue` never does. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a

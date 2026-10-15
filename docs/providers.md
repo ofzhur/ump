@@ -37,6 +37,7 @@ manual          mixed        inventory, describe                                
 | `hetzner-robot` | Hetzner dedicated servers | `login` (`#ws+...`), `password` | Robot → Settings → Web service and app settings |
 | `hetzner-cloud` | the servers of one Hetzner Cloud project | `token` | Cloud Console → the project → Security → API tokens; read permission is enough for listing, read and write for everything else |
 | `ovh` | OVHcloud dedicated servers, VPS and Public Cloud instances of one account | `endpoint` (`ovh-eu`, `ovh-ca`, `ovh-us`, or a URL), `application_key`, `application_secret`, `consumer_key` | an application at `https://eu.api.ovh.com/createApp/` (`ca.`/`us.` for the other endpoints) gives key and secret; the wizard requests the consumer key for you |
+| `linode` | the instances of one Linode (Akamai Cloud Computing) account | `token` | Cloud Manager → your profile → API Tokens → Create a Personal Access Token, with Linodes and IPs read/write and Images read only |
 | `vultr` | the cloud instances and bare metal servers of one Vultr account | `api_key` | customer portal → Account → API → Enable API; under Access Control, allow the addresses ump runs from (or all IPv4 and IPv6) |
 | `manual` | the servers added with `ump server add` | none | the account `manual` appears by itself with the first server added; see [manual servers](#manual-servers-manual) |
 
@@ -224,6 +225,47 @@ set; instances carry their project as labels; VPS are labelled
 - `ump server show` adds, for a dedicated server, the boot option, the
   addresses, the service dates and the hardware; for an instance, the
   flavor, image, addresses, SSH key and project.
+
+### Linode (`linode`)
+
+One account is one Linode (Akamai Cloud Computing) account; a personal
+access token is the credential, with the scopes Linodes and IPs
+read/write and Images read only (a missing scope shows up as a 403
+that says so). An instance's ID is its Linode ID, its name the label,
+its location the region (`de-fra-2`, `us-east`, ...), its product the
+type (`g6-nanode-1`), and its tags become labels. The IPv4 shown is the
+first public one (Linode lists private addresses in the same field);
+the IPv6 is the SLAAC address.
+
+- Price: the type's monthly list price in USD, the region's own where
+  Linode charges more there (`"source": "provider"`); a retired type has
+  none, set it by hand then.
+- Rename sets the label: 3 to 64 letters, digits, `-`, `_` and `.`,
+  starting with a letter. The hostname inside the system stays.
+- Power: one reboot (a soft and a hard reboot are the same call), boot,
+  and shutdown, which asks the system to stop and powers it off when it
+  does not in time; a power cycle is a shutdown and a boot.
+- Reverse DNS works for the public IPv4 addresses, the SLAAC address and
+  addresses in the instance's IPv6 ranges; deleting an entry restores
+  Linode's default (`*.ip.linodeusercontent.com`). Linode checks that
+  the name resolves to the address, so create the forward record first.
+- Rescue: Linode's rescue mode boots Finnix, which has no SSH with keys,
+  so ump does not use it. `ump server rescue` and `ump server reinstall`
+  go in over SSH into the running system (as root or a sudo user, with
+  UMP's key or yours) and load the rescue image with kexec. When the
+  running system does not let UMP in, `ump server reinstall`, which
+  erases the instance anyway, has Linode rebuild it first with its
+  newest Debian image (Ubuntu when there is none), UMP's key for root
+  and a random root password nobody needs; UMP's key is also added to
+  your profile's SSH keys when the token may do that. ump waits up to
+  15 minutes and goes on from there. `ump server rescue` never does
+  that. A system that does not boot is recovered with Lish, Linode's
+  console, or a rebuild in Cloud Manager.
+- `ump server show` adds the image, hypervisor, group, tags, watchdog
+  and backups, the type's CPUs, memory, disk and transfer with the
+  price, the region's name and country, and the addresses (public and
+  private IPv4 with their reverse names, the SLAAC address, the IPv6
+  ranges).
 
 ### Vultr (`vultr`)
 
