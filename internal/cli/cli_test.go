@@ -256,8 +256,12 @@ type testEnv struct {
 	directRoot bool
 	// directSudo: the running system refuses root, but lets UMP in as
 	// ump, who has sudo without a password
-	directSudo    bool
-	stockRoot     bool
+	directSudo bool
+	stockRoot  bool
+	// umpKeyDenied: UMP's key alone opens nothing on the running system
+	// (the user's key does); keyAdds are the accounts UMP's key was added to
+	umpKeyDenied  bool
+	keyAdds       []string
 	inImage       bool
 	rescueNoKey   bool
 	entryExit     int
@@ -371,7 +375,18 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	cmd := argv[len(argv)-1]
 	inProviderRescue := fakePower.rescue["fake/1"]
+	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
 	switch {
+	case strings.HasPrefix(cmd, "umask 077; mkdir -p ~/.ssh"):
+		for _, a := range argv {
+			if strings.HasSuffix(a, "@203.0.113.10") {
+				e.keyAdds = append(e.keyAdds, strings.TrimSuffix(a, "@203.0.113.10"))
+			}
+		}
+		e.umpKeyDenied = false
+		return "", "", 0
+	case strings.HasPrefix(cmd, "id -u;") && umpKeyOnly && e.umpKeyDenied && !e.kexeced && !e.inImage:
+		return "", "root@203.0.113.10: Permission denied (publickey).\n", 255
 	case strings.HasPrefix(cmd, "id -u;"):
 		switch {
 		case e.kexeced || e.inImage:
@@ -2047,7 +2062,7 @@ func TestRescueDirectWithSudo(t *testing.T) {
 	}
 	users := []string{}
 	for _, call := range e.remoteCalls {
-		if strings.HasPrefix(call[len(call)-1], "id -u;") {
+		if strings.HasPrefix(call[len(call)-1], "id -u;") && !strings.Contains(strings.Join(call, " "), "IdentitiesOnly=yes") {
 			for _, a := range call {
 				if strings.HasSuffix(a, "@203.0.113.10") {
 					users = append(users, strings.TrimSuffix(a, "@203.0.113.10"))
@@ -3689,5 +3704,27 @@ func TestRescueWithoutProviderRescueNeedsForce(t *testing.T) {
 	e.inImage, e.directRoot, e.versionPolls = false, true, 0
 	if _, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes"); code != 0 || !strings.Contains(errOut, "web-01 is up:") {
 		t.Errorf("reinstall: code %d, %q", code, errOut)
+	}
+}
+
+func TestDirectEntrySetsUpUMPKey(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	resetFakePower()
+	// the running system lets the user's key in, not UMP's: UMP's key is
+	// added to root's authorized_keys over that connection, once
+	e.directRoot, e.versionAfter, e.umpKeyDenied = true, 2, true
+	_, errOut, code := e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one")
+	if code != 0 {
+		t.Fatalf("code %d, %q", code, errOut)
+	}
+	if !strings.Contains(errOut, "UMP's key did not open root@web-01, one of yours did; added UMP's key to that account's authorized_keys") || strings.Join(e.keyAdds, ",") != "root" {
+		t.Errorf("key setup: %v, %q", e.keyAdds, errOut)
+	}
+	// UMP's key opens it already: nothing is added
+	e.keyAdds, e.kexeced, e.versionPolls = nil, false, 0
+	_, errOut, code = e.run("", true, "server", "rescue", "web-01", "--yes", "--account", "one")
+	if code != 0 || len(e.keyAdds) != 0 || strings.Contains(errOut, "added UMP's key") {
+		t.Errorf("UMP's key works already: code %d, %v, %q", code, e.keyAdds, errOut)
 	}
 }

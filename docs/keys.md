@@ -32,6 +32,16 @@ fingerprints (`-o json` for scripts); put it in `authorized_keys` of a
 machine installed by other means, and `ump server rescue` takes the
 direct way in there too.
 
+ump sets that up by itself where it can: when `ump server rescue` or
+`ump server reinstall` gets into a running system with one of your keys
+(your default keys or the ssh-agent) but UMP's key alone does not open
+the account, UMP's public key is appended to that account's
+`authorized_keys` over the connection that works, and ump says so. From
+then on UMP's key reaches the machine by itself, which is what a team
+sharing the [state](state.md) and CI rely on. The same happens after a
+provider rebuilt a machine with the keys it was created with
+(DigitalOcean). Nothing is changed where UMP's key works already.
+
 ## Key references
 
 In a user's `keys`:

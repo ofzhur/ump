@@ -140,6 +140,31 @@ func (a *app) probeAdmin(ctx context.Context, users []string, addr string, ident
 	return "", hostProbe{}, false, notAdmin
 }
 
+// setupUMPKey makes UMP's own key open the account ump got into with
+// one of the user's keys: when UMP's key alone does not let it in, the
+// key is appended to the account's authorized_keys over the connection
+// that works. From then on UMP's key reaches the machine by itself, which
+// is what a team sharing the state and CI rely on. It says what it did;
+// a failure is only reported, the caller goes on.
+func (a *app) setupUMPKey(ctx context.Context, m provider.Machine, user, addr string, identities []string, keyPath string, umpKey provider.PublicKey) {
+	if umpKey.Data == "" {
+		return
+	}
+	if _, ok := a.probeHost(ctx, user, addr, []string{keyPath}, true); ok {
+		return
+	}
+	line := strings.TrimSpace(umpKey.Data)
+	script := "umask 077; mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && " +
+		"{ grep -qxF " + shellJoin([]string{line}) + " ~/.ssh/authorized_keys || printf '%s\n' " + shellJoin([]string{line}) + " >> ~/.ssh/authorized_keys; }"
+	argv := withSSHOptions(sshArgs(user, addr, identities, false, true, []string{script}), batchOptions(15*time.Second)...)
+	var out, errb bytes.Buffer
+	if code, err := a.sshExec(ctx, argv, nil, &out, &errb); err != nil || code != 0 {
+		fmt.Fprintf(a.stderr, "UMP's key does not open %s@%s, and adding it failed (%s); going on with your key.\n", user, m.Name, nonEmpty(strings.TrimSpace(errb.String()), fmt.Sprintf("exit %d", code)))
+		return
+	}
+	fmt.Fprintf(a.stderr, "UMP's key did not open %s@%s, one of yours did; added UMP's key to that account's authorized_keys, so that UMP gets in by itself from now on.\n", user, m.Name)
+}
+
 // entryCommand is what runs on the machine to load the image: the entry
 // script, fetched from the base URL, with the base URL, the hostname and
 // the keys to carry over.
@@ -277,6 +302,9 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 	for {
 		if p, ok := a.probeHost(ctx, "root", addr, identities, false); ok && p.root {
 			fmt.Fprintf(a.stderr, " yes after %s (%s).\n", time.Since(start).Round(time.Second), nonEmpty(p.os, "unknown system"))
+			if len(keys) > 0 {
+				a.setupUMPKey(ctx, m, "root", addr, identities, keyPath, keys[0])
+			}
 			break
 		}
 		if time.Now().After(deadline) {
@@ -416,6 +444,9 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 			users = []string{"root", defaultAdmin}
 		}
 		user, p, ok, notAdmin := a.probeAdmin(ctx, users, addr, identities, false)
+		if ok && p.version == "" && len(keys) > 0 {
+			a.setupUMPKey(ctx, m, user, addr, identities, keyPath, keys[0])
+		}
 		switch {
 		case ok && p.version != "":
 			fmt.Fprintf(a.stderr, " %s already runs the UMP rescue system %s.\n", m.Name, p.version)
