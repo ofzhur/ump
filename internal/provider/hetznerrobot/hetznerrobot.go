@@ -461,12 +461,19 @@ func nonNil(list []string) []string {
 	return list
 }
 
-// List implements provider.Inventory.
+// List implements provider.Inventory. A server's status is its power
+// state (running, off) where Robot knows it, else Robot's own status of
+// the server (ready, in process), which is about the contract, not the
+// machine. The power state is in GET /reset/{number} only (the list GET
+// /reset leaves it out), so it is asked per ready server, a few at a
+// time; the first refusal (Robot limits its API per hour) stops the
+// asking, and the servers not asked keep Robot's status.
 func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	servers, err := p.client.ListServers(ctx)
 	if err != nil {
 		return nil, err
 	}
+	power := p.powerStates(ctx, servers)
 	out := make([]provider.Machine, 0, len(servers))
 	p.mu.Lock()
 	p.servers = make(map[int]Server, len(servers))
@@ -475,9 +482,61 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	}
 	p.mu.Unlock()
 	for _, s := range servers {
-		out = append(out, p.machine(s))
+		m := p.machine(s)
+		if m.Status == "ready" {
+			switch powerState(power[s.ServerNumber]) {
+			case provider.PowerOn:
+				m.Status = "running"
+			case provider.PowerOff:
+				m.Status = "off"
+			}
+		}
+		out = append(out, m)
 	}
 	return out, nil
+}
+
+// powerParallel is how many power states are asked at once.
+const powerParallel = 4
+
+// powerStates asks Robot for the power state of every ready server
+// (operating_status of GET /reset/{number}), powerParallel at a time,
+// and stops at the first error; it returns what it got, by number.
+func (p *Provider) powerStates(ctx context.Context, servers []Server) map[int]string {
+	var (
+		mu      sync.Mutex
+		out     = map[int]string{}
+		stopped bool
+		wg      sync.WaitGroup
+		slots   = make(chan struct{}, powerParallel)
+	)
+	for _, s := range servers {
+		if !strings.EqualFold(s.Status, "ready") || s.Cancelled {
+			continue
+		}
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			mu.Lock()
+			skip := stopped
+			mu.Unlock()
+			if skip || ctx.Err() != nil {
+				return
+			}
+			r, err := p.client.GetReset(ctx, n)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				stopped = true
+				return
+			}
+			out[n] = r.OperatingStatus
+		}(s.ServerNumber)
+	}
+	wg.Wait()
+	return out
 }
 
 func (p *Provider) machine(s Server) provider.Machine {

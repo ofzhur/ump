@@ -22,6 +22,12 @@ systems](oses.md).
 - Dedicated servers. The server name is a free label at Hetzner, not
   required to be unique; `ump server rename` sets it and refuses a name
   another listed server has (`--force` renames anyway).
+- Status: the power state (`running`, `off`) where Robot reports it,
+  asked per server (`GET /reset/<number>`, a few at a time) because
+  Robot's server list has only the contract's status; a server whose
+  power state Robot cannot tell, or one not asked because Robot refused
+  a request (it limits its API per hour), shows that status (`ready`,
+  `in process`), and a cancelled server shows `cancelled`.
 - Rescue: UMP's key (and `--ssh-key` files) must be registered at the
   account; the provider registers keys it does not know by fingerprint,
   then arms the rescue system and resets the server. Robot prints the

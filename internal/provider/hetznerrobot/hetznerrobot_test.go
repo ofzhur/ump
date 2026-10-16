@@ -44,11 +44,16 @@ func TestListServers(t *testing.T) {
 			w.Write([]byte(`{"error":{"status":401,"code":"UNAUTHORIZED","message":"Unauthorized"}}`))
 			return
 		}
-		if r.URL.Path != "/server" {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/server":
+			w.Write([]byte(serversJSON))
+		case "/reset/321":
+			// the power state is asked per server (the cancelled 322 is not asked)
+			w.Write([]byte(`{"reset": {"server_ip": "203.0.113.10", "server_number": 321, "type": ["sw", "hw", "man"], "operating_status": "running"}}`))
+		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(serversJSON))
 	})
 	ms, err := inv.List(context.Background())
 	if err != nil {
@@ -58,12 +63,37 @@ func TestListServers(t *testing.T) {
 		t.Fatalf("got %d machines, want 2", len(ms))
 	}
 	want := provider.Machine{Provider: "hetzner-robot", Account: "main", ID: "321", Name: "web-01", Kind: provider.KindBareMetal,
-		IPv4: "203.0.113.10", IPv6: "2001:db8:111:4221::/64", Location: "nbg1-dc1", Product: "AX41-NVMe", Status: "ready"}
+		IPv4: "203.0.113.10", IPv6: "2001:db8:111:4221::/64", Location: "nbg1-dc1", Product: "AX41-NVMe", Status: "running"}
 	if !reflect.DeepEqual(ms[0], want) {
 		t.Errorf("machine 0:\n got %+v\nwant %+v", ms[0], want)
 	}
 	if ms[1].Name != "322" || ms[1].Status != "cancelled" || ms[1].IPv6 != "" || ms[1].Location != "hel1-dc12" {
 		t.Errorf("machine 1: %+v", ms[1])
+	}
+}
+
+func TestListStatusWithoutPowerState(t *testing.T) {
+	for _, c := range []struct {
+		name, reset string
+		code        int
+		want        string
+	}{
+		{"off", `{"reset": {"server_number": 321, "operating_status": "shut off"}}`, 200, "off"},
+		{"not supported", `{"reset": {"server_number": 321, "operating_status": "not supported"}}`, 200, "ready"},
+		{"call refused", `{"error":{"status":403,"code":"RATE_LIMIT_EXCEEDED","message":"limit"}}`, 403, "ready"},
+	} {
+		_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/reset/321" {
+				w.WriteHeader(c.code)
+				w.Write([]byte(c.reset))
+				return
+			}
+			w.Write([]byte(serversJSON))
+		})
+		ms, err := inv.List(context.Background())
+		if err != nil || ms[0].Status != c.want || ms[1].Status != "cancelled" {
+			t.Errorf("%s: %v, statuses %s/%s, want %s/cancelled", c.name, err, ms[0].Status, ms[1].Status, c.want)
+		}
 	}
 }
 

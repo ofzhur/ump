@@ -144,8 +144,9 @@ code is 4. A reference that matches nothing gives exit code 1.
 ]
 ```
 
-`status` is the provider's own status, lower-cased (`ready`, `running`,
-`off`, `cancelled`, ...); `location` is the datacenter or region,
+`status` is the machine's power state where the provider tells it
+(`running`, `off`), else the provider's own status, lower-cased
+(`ready`, `cancelled`, `active`, ...); `location` is the datacenter or region,
 lower-cased; `labels` are present where the provider has them. `-o wide`
 adds the IPv6, product, kind, price and attributes columns; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
@@ -679,7 +680,7 @@ $ ump config isp test main
 # what do I have?
 $ ump server list
 $ ump server list -o wide --account main
-$ ump server list -o json | jq '.[] | select(.status=="ready")'
+$ ump server list -o json | jq '.[] | select(.status=="off")'
 $ ump server show web-01
 $ ump server rename web-01 prod-web-01
 $ ump server rdns set prod-web-01 prod-web-01.example.net
