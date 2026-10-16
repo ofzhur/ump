@@ -12,15 +12,16 @@ $ ump server list                         # every server of every account
 $ ump server list -o wide                 # with IPv6, product, kind, price and attributes
 $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
-$ ump server list --cached                # the last listing, without the APIs
+$ ump server list --refresh               # ask the providers, not the cache
+$ ump server list --cached                # the last listing, however old, without the APIs
 $ ump server show web-01                  # everything the provider knows, plus what ump knows
 ```
 
 ## The listing
 
-`ump server list` asks every configured account (the provider types in
-parallel, the accounts of one type one after the other) and prints one
-row per server: account, provider, ID, name, IPv4, location and status.
+`ump server list` asks every configured account, all in parallel (on a
+terminal each account's servers appear as soon as it answered), and
+prints one row per server: account, provider, ID, name, IPv4, location and status.
 `-o wide` adds IPv6, product, kind, price and attributes; `-o json` and
 `-o yaml` print every field, including the provider's labels; `-o name`
 prints `provider/id` per line. `--account NAME` restricts the listing,
@@ -28,7 +29,10 @@ and references after the command select servers (`ump server list
 web-01 db-01`). An account whose API fails is reported on stderr and the
 others are still listed; the exit code says so (4).
 
-Every listing is cached, so `--diff` shows what was added, removed or
+A listing is served from the cache for 5 minutes (`cache_ttl` in the
+configuration, `UMP_CACHE_TTL` for one run, `0` turns it off), unless a
+command changed one of the account's servers since; `--refresh` asks the
+providers anyway. Every listing is recorded, so `--diff` shows what was added, removed or
 changed since the previous one (`--since 2h`, `--since 2026-10-01` for
 an earlier point), and `--cached` prints the last listing without
 touching an API. See [the CLI reference](cli.md#ump-server-list).

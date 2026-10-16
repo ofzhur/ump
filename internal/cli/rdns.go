@@ -132,7 +132,7 @@ func (a *app) listedMachines(cmd *cobra.Command) ([]provider.Machine, map[string
 		return nil, nil, 0, 0, err
 	}
 	ctx := cmd.Context()
-	results := a.listAccounts(ctx, cfg, names, cache.Open(path))
+	results := a.listAccounts(ctx, cfg, names, cache.Open(path), a.cachedListing(cfg))
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -304,6 +304,7 @@ func (a *app) setRDNS(cmd *cobra.Command, ref, name, ipFlag, output string, remo
 			return fmt.Errorf("the server name %q cannot be used as reverse DNS entry; give a name explicitly: %v", m.Name, err)
 		}
 	}
+	defer a.invalidateListing(m.Account)
 	if err := rd.SetPTR(cmd.Context(), m, ip, name); err != nil {
 		return fmt.Errorf("account %s: %w", m.Account, err)
 	}

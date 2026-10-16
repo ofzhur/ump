@@ -207,6 +207,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	if err != nil {
 		return err
 	}
+	defer a.invalidateListing(m.Account)
 	a.warnNoRescue(m, prov)
 	doc, err := a.loadState(cmd.Context(), cfg)
 	if err != nil {
@@ -309,6 +310,7 @@ func (a *app) unrescueServer(cmd *cobra.Command, ref string, reboot, wait, yes b
 	if err != nil {
 		return err
 	}
+	defer a.invalidateListing(m.Account)
 	rs, ok := prov.(provider.Rescue)
 	if !ok {
 		return fmt.Errorf("account %s: provider type %s has no rescue system", m.Account, m.Provider)

@@ -86,6 +86,11 @@ type app struct {
 	editor func(path string) error
 	// waitWarned says that a bad wait setting was reported already.
 	waitWarned bool
+	// ttlWarned says that a bad cache TTL setting was reported already.
+	ttlWarned bool
+	// liveTerm reports the size of the terminal stdout writes to, for
+	// output that redraws itself; nil or ok false means no terminal.
+	liveTerm func() (width, height int, ok bool)
 
 	// global flags
 	configFlag string
@@ -109,6 +114,14 @@ func Main(args []string) int {
 	a.readSecret = func() (string, error) {
 		b, err := term.ReadPassword(fd)
 		return string(b), err
+	}
+	a.liveTerm = func() (int, int, bool) {
+		out := int(os.Stdout.Fd())
+		if !term.IsTerminal(out) || os.Getenv("TERM") == "dumb" {
+			return 0, 0, false
+		}
+		w, h, err := term.GetSize(out)
+		return w, h, err == nil && w > 0 && h > 0
 	}
 	a.saveTerm = func() func() {
 		state, err := term.GetState(fd)

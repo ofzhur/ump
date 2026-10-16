@@ -485,6 +485,7 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 	if err := config.Save(path, cfg); err != nil {
 		return false, err
 	}
+	a.invalidateListingFor(name, 0)
 	ui.Printf("Saved account %s (%s) to %s\n", name, t.Name, config.AbbreviateHome(path))
 	return true, nil
 }

@@ -164,6 +164,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err != nil {
 		return err
 	}
+	defer a.invalidateListing(m.Account)
 	if m.IPv4 == "" && m.IPv6 == "" {
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}

@@ -31,7 +31,7 @@ and `ump COMMAND --help` say the same at the terminal.
 ```
 ump
 ├── server (s, srv)
-│   ├── list (ls, l)  [ref...] [-o table|wide|json|yaml|name] [--no-headers] [--diff] [--since <t>] [--cached]
+│   ├── list (ls, l)  [ref...] [-o table|wide|json|yaml|name] [--no-headers] [--diff] [--since <t>] [--cached] [--refresh]
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
@@ -138,7 +138,7 @@ code is 4. A reference that matches nothing gives exit code 1.
     "ipv6": "2001:db8:1:2::/64",
     "location": "fsn1-dc7",
     "product": "AX41-NVMe",
-    "status": "ready",
+    "status": "running",
     "labels": {"env": "prod"}
   }
 ]
@@ -154,7 +154,27 @@ sets the default format. `price` comes from the provider's API where it
 tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
 from `ump server set --attr`; see [inventory](inventory.md).
 
+All accounts are asked in parallel. On a terminal, the table is drawn
+while they answer: each account's servers appear as soon as it answered,
+with a line naming the accounts still being asked, and the finished
+table replaces the drawing. In a pipe, with `-o json`, `yaml` or `name`
+and with `-v`, the output is printed once, when every account answered.
+
 ### The listing cache and `--diff`
+
+A listing a provider confirmed less than the cache TTL ago is served
+from the cache without asking it: 5 minutes by default, `cache_ttl` in
+the [configuration](configuration.md) or `UMP_CACHE_TTL` for one run
+(`1m`, `30s`; `0` asks every time). The commands that look a server up
+(`show`, `ssh`, `reboot`, `reinstall`, ...) use the cache the same way. A
+command that changes a server (`reinstall`, `install`, `rescue`,
+`unrescue`, `start`, `stop`, `reboot`, `rename`, `rdns set`) makes the
+listings of its account ask the provider again, until 3 minutes after it
+finished, because a provider shows some changes only after a while (a
+server switched off runs on for a minute); adding, replacing or removing
+an account drops its cached listing. `--refresh` asks the providers
+anyway. The cache is per machine: a change made from another machine
+shows here when the TTL ran out.
 
 Every successful listing of an account (by `list`, `show` or `config isp
 test`) is recorded under `~/.cache/ump/listings/<config>/<account>/`. A
@@ -165,7 +185,8 @@ it is always safe.
 ```
 ump server list --diff                  # since the previous listing
 ump server list --since 7d              # since the state as of a week ago (also 12h, 2026-10-01, RFC 3339)
-ump server list --cached [ref...]       # the last listing, without any API call
+ump server list --cached [ref...]       # the last listing, however old, without any API call
+ump server list --refresh               # ask the providers even when the cached listing is fresh
 ```
 
 `--diff` lists the current servers, compares them with the previous

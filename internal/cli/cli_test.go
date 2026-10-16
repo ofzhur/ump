@@ -2678,7 +2678,7 @@ func TestConfigDiskLayout(t *testing.T) {
 	}
 }
 
-func TestListAccountsSameTypeInSequence(t *testing.T) {
+func TestListAccountsInParallel(t *testing.T) {
 	e := newTestEnv(t)
 	e.write("accounts:\n  a:\n    type: fake\n    login: a\n    password: s3cret\n  b:\n    type: fake\n    login: b\n    password: s3cret\n  c:\n    type: fake\n    login: c\n    password: s3cret\n  lo:\n    type: listonly\n    password: s3cret\n")
 	var (
@@ -2717,8 +2717,8 @@ func TestListAccountsSameTypeInSequence(t *testing.T) {
 	if code != 0 || strings.Count(out, "\n") != 8 {
 		t.Fatalf("list: code %d\n%s", code, out)
 	}
-	if maxSame["fake"] != 1 || !fakeSeen {
-		t.Errorf("accounts of one type must run one after the other, saw %d at once", maxSame["fake"])
+	if maxSame["fake"] != 3 || !fakeSeen {
+		t.Errorf("accounts of one type should run at the same time, saw %d of 3 at once", maxSame["fake"])
 	}
 	if !overlap {
 		t.Error("different types should run at the same time, but did not overlap")
@@ -3753,5 +3753,173 @@ func TestProfileListSkipsNamedFiles(t *testing.T) {
 	}
 	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--profile", "users", "--yes", "--dry-run"); code == 0 || !strings.Contains(errOut, "users is not a profile") {
 		t.Errorf("reinstall --profile users: code %d, %q", code, errOut)
+	}
+}
+
+func TestListingCache(t *testing.T) {
+	e := newTestEnv(t)
+	cfg := "accounts:\n  one:\n    type: fake\n    login: a\n    password: s3cret\n"
+	e.write(cfg)
+	var mu sync.Mutex
+	calls := 0
+	listGate = func(typ string, start bool) {
+		if start {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+		}
+	}
+	defer func() { listGate = nil }()
+	list := func(args ...string) {
+		t.Helper()
+		if _, errOut, code := e.run("", false, append([]string{"server", "list", "-o", "name"}, args...)...); code != 0 {
+			t.Fatalf("list %v: code %d, %s", args, code, errOut)
+		}
+	}
+	expect := func(want int, what string) {
+		t.Helper()
+		mu.Lock()
+		defer mu.Unlock()
+		if calls != want {
+			t.Fatalf("%s: the provider was asked %d times, want %d", what, calls, want)
+		}
+	}
+
+	list()
+	expect(1, "first listing")
+	e.now = e.now.Add(4 * time.Minute)
+	list()
+	expect(1, "within the TTL")
+	list("--refresh")
+	expect(2, "--refresh")
+	e.now = e.now.Add(5 * time.Minute)
+	list()
+	expect(3, "after the TTL")
+
+	// A change is looked up in the cache, and the listings until it has
+	// settled ask the provider.
+	if _, errOut, code := e.run("", false, "server", "reboot", "web-01", "--yes"); code != 0 {
+		t.Fatalf("reboot: code %d, %s", code, errOut)
+	}
+	expect(3, "reboot looks the server up in the cache")
+	list()
+	expect(4, "right after the reboot")
+	e.now = e.now.Add(time.Minute)
+	list()
+	expect(5, "while the change settles")
+	e.now = e.now.Add(3 * time.Minute)
+	list()
+	list()
+	expect(6, "after the change settled")
+
+	t.Setenv("UMP_CACHE_TTL", "0")
+	list()
+	expect(7, "UMP_CACHE_TTL=0")
+	t.Setenv("UMP_CACHE_TTL", "")
+	e.write(cfg + "cache_ttl: 0s\n")
+	list()
+	expect(8, "cache_ttl: 0s")
+	e.write(cfg + "cache_ttl: 1h\n")
+	e.now = e.now.Add(30 * time.Minute)
+	list()
+	expect(8, "cache_ttl: 1h")
+	if _, _, code := e.run("", false, "server", "list", "--cached", "--refresh"); code != exitUsage {
+		t.Errorf("--cached --refresh: code %d, want a usage error", code)
+	}
+}
+
+// fakeTerm records what a live table writes.
+type fakeTerm struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (f *fakeTerm) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.buf.Write(p)
+}
+
+func (f *fakeTerm) String() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.buf.String()
+}
+
+func TestLiveTable(t *testing.T) {
+	var term fakeTerm
+	height := 10
+	rows := []string{"NAME"}
+	render := func() string { return strings.Join(rows, "\n") + "\n" }
+	size := func() (int, int, bool) { return 12, height, true }
+	live := newLiveTable(&term, size, render)
+
+	// Nothing is drawn before the delay: cached listings come at once.
+	live.update(func() bool { rows = append(rows, "web-01"); return true })
+	if term.String() != "" {
+		t.Fatalf("drawn before the delay: %q", term.String())
+	}
+	time.Sleep(liveDelay + 100*time.Millisecond)
+	if got := term.String(); got != "NAME\nweb-01\n" {
+		t.Fatalf("first drawing %q", got)
+	}
+	// Each update erases the drawing and draws anew, cut at the width.
+	live.update(func() bool { rows = append(rows, "a-very-long-server-name"); return true })
+	if got := term.String(); !strings.HasSuffix(got, "\x1b[2A\r\x1b[JNAME\nweb-01\na-very-long\n") {
+		t.Fatalf("redrawing %q", got)
+	}
+	// A drawing taller than the terminal is not drawn.
+	height = 3
+	before := term.String()
+	live.update(func() bool { rows = append(rows, "db-01"); return true })
+	if term.String() != before {
+		t.Fatalf("drew a table taller than the terminal: %q", term.String())
+	}
+	// The last answer erases the drawing; finish then has nothing to do.
+	live.update(func() bool { return false })
+	if got := term.String(); !strings.HasSuffix(got, "\x1b[3A\r\x1b[J") {
+		t.Fatalf("the last answer did not erase: %q", got)
+	}
+	live.finish()
+	live.update(func() bool { return true })
+	if strings.Count(term.String(), "\x1b[J") != 2 {
+		t.Fatalf("drew or erased after the end: %q", term.String())
+	}
+}
+
+func TestServerListLive(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  one:\n    type: fake\n    login: a\n    password: s3cret\n  slow:\n    type: listonly\n    password: s3cret\n")
+	release := make(chan struct{})
+	listGate = func(typ string, start bool) {
+		if typ == "listonly" && start {
+			<-release
+		}
+	}
+	defer func() { listGate = nil }()
+	var term fakeTerm
+	a := &app{stdin: strings.NewReader(""), stdout: &term, stderr: io.Discard, now: func() time.Time { return e.now }, tz: time.UTC,
+		liveTerm: func() (int, int, bool) { return 200, 50, true }}
+	done := make(chan int)
+	go func() { done <- a.run(context.Background(), []string{"--config", e.cfgPath, "server", "list"}) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(term.String(), "Waiting for slow ...") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no live drawing: %q", term.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(term.String(), "web-01") {
+		t.Errorf("the answered account's servers are not drawn: %q", term.String())
+	}
+	close(release)
+	if code := <-done; code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	// The drawing is erased and the full table printed as without a terminal.
+	out := term.String()
+	final := out[strings.LastIndex(out, "\x1b[J")+len("\x1b[J"):]
+	if !strings.HasPrefix(final, "ACCOUNT") || strings.Contains(final, "Waiting") || !strings.Contains(final, "slow") {
+		t.Errorf("final output %q", final)
 	}
 }

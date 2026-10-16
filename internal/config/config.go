@@ -50,6 +50,11 @@ type Config struct {
 	// provider, as a Go duration (20m, 1h). Default: 15 minutes;
 	// UMP_WAIT does the same for one run.
 	Wait string `yaml:"wait,omitempty"`
+	// CacheTTL is how long a server listing is served from the cache
+	// before the providers are asked again, as a Go duration (1m, 30s);
+	// 0 asks them every time. Default: 5 minutes; UMP_CACHE_TTL does the
+	// same for one run.
+	CacheTTL string `yaml:"cache_ttl,omitempty"`
 	// Rest keeps top-level sections this version does not know about, so
 	// that saving the file does not drop them.
 	Rest map[string]any `yaml:",inline"`

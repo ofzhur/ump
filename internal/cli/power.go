@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ofzhur/ump/internal/cache"
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
@@ -149,6 +151,7 @@ func (a *app) powerCommand(cmd *cobra.Command, ref, verb string, o powerOptions)
 	if err != nil {
 		return err
 	}
+	defer a.invalidateListing(m.Account)
 	pw, ok := prov.(provider.Power)
 	if !ok {
 		return fmt.Errorf("account %s: provider type %s cannot control power", m.Account, m.Provider)
@@ -279,6 +282,55 @@ func (a *app) waitLimit(def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// defaultCacheTTL is how long a listing is served from the cache.
+const defaultCacheTTL = 5 * time.Minute
+
+// cacheTTL is how long a server listing is served from the cache:
+// UMP_CACHE_TTL, else cache_ttl from the configuration, else
+// defaultCacheTTL; 0 turns the cache off.
+func (a *app) cacheTTL(cfg *config.Config) time.Duration {
+	v, from := os.Getenv("UMP_CACHE_TTL"), "UMP_CACHE_TTL"
+	if v == "" && cfg != nil {
+		v, from = cfg.CacheTTL, "cache_ttl in the configuration"
+	}
+	if v == "" {
+		return defaultCacheTTL
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		if !a.ttlWarned {
+			fmt.Fprintf(a.stderr, "ump: %s is %q, not a duration such as 5m or 0; caching listings for %s\n", from, v, fmtWait(defaultCacheTTL))
+			a.ttlWarned = true
+		}
+		return defaultCacheTTL
+	}
+	return d
+}
+
+// settleTime is how long after a change listings of the account are not
+// served from the cache: providers show some changes only after a while
+// (a machine switched off runs on for a minute).
+const settleTime = 3 * time.Minute
+
+// invalidateListing tells the listing cache that a command changed one of
+// the account's servers, so that the listings of the next settleTime ask
+// the provider.
+func (a *app) invalidateListing(account string) {
+	a.invalidateListingFor(account, settleTime)
+}
+
+// invalidateListingFor makes the listings of the next settle ask the
+// provider; 0 only drops what the cache holds, for a changed account.
+func (a *app) invalidateListingFor(account string, settle time.Duration) {
+	_, path, err := a.loadConfig()
+	if err != nil {
+		return
+	}
+	if err := cache.Open(path).Invalidate(account, a.now().Add(settle)); err != nil {
+		fmt.Fprintf(a.stderr, "ump: account %s: cache: %v\n", account, err)
+	}
 }
 
 // waitTicker returns what a wait loop calls after each poll: a dot every

@@ -131,3 +131,46 @@ func TestDiff(t *testing.T) {
 		t.Error("Equal")
 	}
 }
+
+func TestFresh(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := Open(filepath.Join(t.TempDir(), "config.yaml"))
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	ms := []provider.Machine{{Account: "a", Provider: "hcloud", ID: "1", Name: "x"}}
+
+	if snap, err := s.Fresh("a", 5*time.Minute, now); err != nil || snap != nil {
+		t.Fatalf("Fresh without a listing = %v, %v", snap, err)
+	}
+	if _, _, err := s.Record("a", "hcloud", ms, now); err != nil {
+		t.Fatal(err)
+	}
+	if snap, _ := s.Fresh("a", 5*time.Minute, now.Add(4*time.Minute)); snap == nil || len(snap.Machines) != 1 {
+		t.Fatalf("Fresh within the TTL = %v", snap)
+	}
+	if snap, _ := s.Fresh("a", 5*time.Minute, now.Add(5*time.Minute)); snap != nil {
+		t.Fatal("Fresh served a listing as old as the TTL")
+	}
+	if snap, _ := s.Fresh("a", 0, now); snap != nil {
+		t.Fatal("Fresh served a listing with the cache off")
+	}
+
+	// A change invalidates the listing until it has settled.
+	if err := s.Invalidate("a", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if snap, _ := s.Fresh("a", 5*time.Minute, now.Add(time.Minute)); snap != nil {
+		t.Fatal("Fresh served an invalidated listing")
+	}
+	if _, _, err := s.Record("a", "hcloud", ms, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if snap, _ := s.Fresh("a", 5*time.Minute, now.Add(90*time.Second)); snap != nil {
+		t.Fatal("Fresh served a listing seen before the change settled")
+	}
+	if _, _, err := s.Record("a", "hcloud", ms, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if snap, _ := s.Fresh("a", 5*time.Minute, now.Add(4*time.Minute)); snap == nil {
+		t.Fatal("Fresh did not serve a listing seen after the change settled")
+	}
+}

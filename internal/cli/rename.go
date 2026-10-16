@@ -86,7 +86,7 @@ func (a *app) renameServer(cmd *cobra.Command, ref, newName, output string, forc
 		return err
 	}
 	ctx := cmd.Context()
-	results := a.listAccounts(ctx, cfg, names, cache.Open(path))
+	results := a.listAccounts(ctx, cfg, names, cache.Open(path), a.cachedListing(cfg))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -127,6 +127,7 @@ func (a *app) renameServer(cmd *cobra.Command, ref, newName, output string, forc
 		return fmt.Errorf("the name %q is already used by %s; pick another name or use --force", newName, candidates(taken))
 	}
 
+	defer a.invalidateListing(m.Account)
 	renamed, err := renamer.Rename(ctx, m, newName)
 	if err != nil {
 		return fmt.Errorf("account %s: %w", m.Account, err)

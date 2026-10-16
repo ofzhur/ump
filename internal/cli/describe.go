@@ -63,7 +63,7 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 		return err
 	}
 	ctx := cmd.Context()
-	results := a.listAccounts(ctx, cfg, names, cache.Open(path))
+	results := a.listAccounts(ctx, cfg, names, cache.Open(path), a.cachedListing(cfg))
 	if err := ctx.Err(); err != nil {
 		return err
 	}

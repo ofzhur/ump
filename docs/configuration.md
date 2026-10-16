@@ -24,7 +24,7 @@ the rest is optional.
 │   └── users.yaml           the named users
 ├── keys.yaml                the named public keys (ump config key add)
 ├── state.yaml               what ump knows about servers beyond the providers: profile, price, attributes, manual servers, installations
-├── cache/                   the listing cache (ump server list --diff, --cached)
+├── cache/                   the listing cache (cache_ttl, ump server list --diff, --cached)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)
 ├── staging_ed25519          UMP's own SSH key, generated on first use
 ├── staging_ed25519.pub
@@ -70,6 +70,7 @@ updates: true                          # once a day, after a command, say when a
 default_profile: ubuntu-26.04          # what ump server reinstall takes without --profile and without a profile
                                        # set for the server; ump config os default NAME changes it
 wait: 15m                              # how long ump waits for a machine to answer (the default)
+cache_ttl: 5m                          # how long a server listing is served from the cache (the default)
 
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
@@ -89,6 +90,7 @@ backend](state.md).
 | `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
 | `wait` | How long ump waits for a machine to answer: after a reboot with `--wait`, for the UMP rescue system after the jump into it, and after a provider reinstalled a machine with UMP's key. A Go duration (`20m`, `1h`); default `15m`, which covers slow providers and large machines while a kexec usually answers within a minute. Every wait prints its limit and marks each minute waited (`Waiting for ... (up to 15m) .....1m.....`); `UMP_WAIT=30m` sets it for one run. A provider whose reinstall takes longer (a Vultr bare metal server) waits its own longer limit unless `wait` is set. |
+| `cache_ttl` | How long a server listing is served from the cache before the providers are asked again, by `ump server list` and every command that looks a server up. A Go duration (`1m`, `30s`); default `5m`; `0` asks the providers every time. A command that changes a server makes its account's listings ask the provider again; `--refresh` does for one listing, `UMP_CACHE_TTL=0` for one run. See [the listing cache](cli.md#the-listing-cache-and---diff). |
 | `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage and says when a newer release is published, with the one-liner that installs it; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks. |
 
 Sections this version of ump does not know are kept when the file is

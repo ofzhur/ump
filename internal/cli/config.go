@@ -280,6 +280,7 @@ func (a *app) configAdd(cmd *cobra.Command, typeName, name string, sets []string
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
+	a.invalidateListingFor(name, 0)
 	verb := "Added"
 	if replaced {
 		verb = "Replaced"
@@ -334,6 +335,7 @@ func (a *app) newConfigRemoveCmd() *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
+			a.invalidateListingFor(name, 0)
 			fmt.Fprintf(a.stdout, "Removed account %s (%s) from %s\n", name, acct.Type, config.AbbreviateHome(path))
 			secretsDir := config.SecretsDir()
 			for _, v := range acct.Settings {
@@ -383,7 +385,7 @@ the result. All accounts are tested when no name is given.`,
 				}
 			}
 			sort.Strings(names)
-			results := a.listAccounts(cmd.Context(), cfg, names, cache.Open(path))
+			results := a.listAccounts(cmd.Context(), cfg, names, cache.Open(path), listOptions{})
 			tw := tabwriter.NewWriter(a.stdout, 0, 8, 3, ' ', 0)
 			fmt.Fprintln(tw, "ACCOUNT\tTYPE\tRESULT")
 			failed := 0

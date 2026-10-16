@@ -4,12 +4,16 @@
 // the store holds the history of observed states: `ump get servers
 // --diff` compares the current listing with the previous one (or with the
 // state as of an earlier time), and --cached answers without calling the
-// providers. Deleting the cache is always safe.
+// providers. A listing confirmed less than the cache TTL ago is served
+// without calling the provider (Fresh), unless a command changed one of
+// the account's servers since (Invalidate). Deleting the cache is always
+// safe.
 //
 // Layout:
 //
 //	<home>/cache/listings/<config id>/config-path
 //	<home>/cache/listings/<config id>/<account>/<listed at, UTC>.json
+//	<home>/cache/listings/<config id>/<account>/invalidated
 //
 // The config id is derived from the configuration file's path, because
 // account names are only unique within one file.
@@ -147,6 +151,51 @@ func (s *Store) Oldest(account string) (time.Time, bool) {
 	}
 	ts, err := time.Parse(nameLayout, strings.TrimSuffix(files[0], ".json"))
 	return ts, err == nil
+}
+
+// invalidatedFile holds the time until which listings of the account
+// are not trusted, because a command changed one of its servers.
+const invalidatedFile = "invalidated"
+
+// Fresh returns the newest snapshot of an account when a listing
+// confirmed it less than ttl ago and no command changed one of the
+// account's servers since; nil otherwise, and always when ttl is not
+// positive.
+func (s *Store) Fresh(account string, ttl time.Duration, now time.Time) (*Snapshot, error) {
+	if ttl <= 0 {
+		return nil, nil
+	}
+	snap, err := s.Latest(account)
+	if err != nil || snap == nil {
+		return nil, err
+	}
+	if age := now.Sub(snap.SeenAt); age < 0 || age >= ttl {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, account, invalidatedFile))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return snap, nil
+	case err != nil:
+		return nil, err
+	}
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	if err != nil || !snap.SeenAt.After(t) {
+		return nil, nil
+	}
+	return snap, nil
+}
+
+// Invalidate records that a command changed one of the account's
+// servers: Fresh serves no listing seen before until. A change takes a
+// while to show at the provider (a machine switched off still runs for a
+// minute), so until is usually some time ahead.
+func (s *Store) Invalidate(account string, until time.Time) error {
+	dir := filepath.Join(s.dir, account)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, invalidatedFile), []byte(until.UTC().Format(time.RFC3339Nano)+"\n"), 0o600)
 }
 
 // Record stores a listing. When it equals the newest snapshot, only that

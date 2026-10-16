@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/provider/manual"
 )
 
 var getResources = []string{"servers", "rdns"}
@@ -26,6 +28,7 @@ type getServersOptions struct {
 	diff      bool
 	since     string
 	cached    bool
+	refresh   bool
 }
 
 func (a *app) newServerListCmd() *cobra.Command {
@@ -38,15 +41,20 @@ func (a *app) newServerListCmd() *cobra.Command {
 configured provider account, or from the accounts given with --account.
 
 Positional arguments select single servers by name, provider ID, IP
-address or "provider/id". Accounts of different provider types are
-queried in parallel, accounts of one type one after the other; an account
-whose API fails is reported on stderr and the others are still listed.
+address or "provider/id". All accounts are queried in parallel; on a
+terminal the table shows each account's servers as soon as it answered,
+with the accounts still being asked under it. An account whose API fails
+is reported on stderr and the others are still listed.
 
-Every listing is recorded in the cache under ~/.cache/ump, as a new
-snapshot only when something changed. --diff compares the current
-listing with the previous one and prints what was added, removed or
-changed; --since compares with the state as of an earlier time; --cached
-prints the last listing without calling the providers.`,
+Every listing is recorded in the cache, as a new snapshot only when
+something changed. A listing a provider confirmed less than the cache TTL
+ago (cache_ttl in the configuration or UMP_CACHE_TTL; 5m by default, 0
+turns it off) is served from the cache; a command that changes a server
+(reinstall, rescue, reboot, rename, ...) makes the next listings of its
+account ask the provider again, and --refresh always asks. --diff
+compares the current listing with the previous one and prints what was
+added, removed or changed; --since compares with the state as of an
+earlier time; --cached prints the last listing however old it is.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.getServers(cmd, args, opts)
 		},
@@ -55,7 +63,8 @@ prints the last listing without calling the providers.`,
 	cmd.Flags().BoolVar(&opts.noHeaders, "no-headers", false, "omit the header line of table output")
 	cmd.Flags().BoolVar(&opts.diff, "diff", false, "show what changed since the previous listing: added, removed and changed servers")
 	cmd.Flags().StringVar(&opts.since, "since", "", "compare with the listing as of this time (7d, 12h, 2026-10-01, RFC 3339); implies --diff")
-	cmd.Flags().BoolVar(&opts.cached, "cached", false, "print the last listing from the cache without calling the providers")
+	cmd.Flags().BoolVar(&opts.cached, "cached", false, "print the last listing from the cache, however old, without calling the providers")
+	cmd.Flags().BoolVar(&opts.refresh, "refresh", false, "ask the providers even when the cached listing is fresh")
 	return cmd
 }
 
@@ -66,6 +75,8 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	switch {
 	case opts.cached && opts.diff:
 		return usageErrorf(cmd, "--cached cannot be combined with --diff or --since")
+	case opts.cached && opts.refresh:
+		return usageErrorf(cmd, "--cached and --refresh exclude each other")
 	case opts.diff && len(refs) > 0:
 		return usageErrorf(cmd, "--diff compares whole listings; it cannot be combined with server references")
 	}
@@ -106,7 +117,18 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		}
 		failCode = exitGeneric
 	} else {
-		results = a.listAccounts(ctx, cfg, names, store)
+		lo := listOptions{}
+		if !opts.refresh {
+			lo.ttl = a.cacheTTL(cfg)
+		}
+		var live *liveTable
+		if format == formatTable || format == formatWide {
+			live, lo.progress = a.liveListing(names, refs, format, opts.noHeaders)
+		}
+		results = a.listAccounts(ctx, cfg, names, store, lo)
+		if live != nil {
+			live.finish()
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -158,6 +180,41 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	return nil
 }
 
+// liveListing returns the live table of a listing on a terminal and the
+// progress function that fills it; nil and nil without a terminal, and
+// with -v, whose request log would run through the drawing.
+func (a *app) liveListing(names, refs []string, format outputFormat, noHeaders bool) (*liveTable, func(listResult)) {
+	if a.liveTerm == nil || a.verbose {
+		return nil, nil
+	}
+	if _, _, ok := a.liveTerm(); !ok {
+		return nil, nil
+	}
+	pending := append([]string{}, names...)
+	var machines []provider.Machine
+	render := func() string {
+		ms := append([]provider.Machine{}, machines...)
+		provider.SortMachines(ms)
+		if len(refs) > 0 {
+			ms, _ = selectMachines(ms, refs)
+		}
+		var buf strings.Builder
+		_ = printMachines(&buf, ms, format, noHeaders)
+		if len(pending) > 0 {
+			fmt.Fprintf(&buf, "Waiting for %s ...\n", strings.Join(pending, ", "))
+		}
+		return buf.String()
+	}
+	live := newLiveTable(a.stdout, a.liveTerm, render)
+	return live, func(r listResult) {
+		live.update(func() bool {
+			pending = slices.DeleteFunc(pending, func(n string) bool { return n == r.account })
+			machines = append(machines, r.machines...)
+			return len(pending) > 0
+		})
+	}
+}
+
 // diffReport is the result of `ump server list --diff`.
 type diffReport struct {
 	Accounts  []accountDiff  `json:"accounts" yaml:"accounts"`
@@ -199,7 +256,7 @@ func (a *app) diffServers(cmd *cobra.Command, store *cache.Store, cfg *config.Co
 		}
 		baselines[n] = snap
 	}
-	results := a.listAccounts(ctx, cfg, names, store)
+	results := a.listAccounts(ctx, cfg, names, store, listOptions{})
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -382,39 +439,52 @@ type listResult struct {
 	machines []provider.Machine
 	err      error
 	cacheErr error
+	// cachedAt is when the provider last confirmed a listing served from
+	// the cache; zero when the provider was asked.
+	cachedAt time.Time
 }
 
-// listAccounts queries the named accounts in parallel and records each
-// successful listing in the store (when one is given).
-// listAccounts queries the accounts: different provider types in parallel,
-// accounts of the same type one after the other, so that one provider's
-// API never sees several of our accounts at once (rate limits are per
-// API, and some count every account against the same client).
-func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store) []listResult {
+// listOptions say how listAccounts lists.
+type listOptions struct {
+	// ttl serves a listing that a provider confirmed less than ttl ago
+	// from the cache; 0 always asks the providers.
+	ttl time.Duration
+	// progress, when set, gets each account's result as soon as it is
+	// there, one call at a time.
+	progress func(listResult)
+}
+
+// cachedListing lists with the cache TTL of the configuration: what
+// commands that look servers up use.
+func (a *app) cachedListing(cfg *config.Config) listOptions {
+	return listOptions{ttl: a.cacheTTL(cfg)}
+}
+
+// listAccounts queries the named accounts, all in parallel (each account
+// has its own credentials, and providers limit requests per credential),
+// serves fresh listings from the cache, and records each listing the
+// providers returned in the store (when one is given).
+func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store, lo listOptions) []listResult {
 	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 	}
 	results := make([]listResult, len(names))
-	byType := map[string][]int{}
-	var types []string
-	for i, name := range names {
-		t := cfg.Accounts[name].Type
-		if _, seen := byType[t]; !seen {
-			types = append(types, t)
-		}
-		byType[t] = append(byType[t], i)
-	}
 	var wg sync.WaitGroup
-	for _, t := range types {
+	var mu sync.Mutex
+	for i, name := range names {
 		wg.Add(1)
-		go func(indexes []int) {
+		go func() {
 			defer wg.Done()
-			for _, i := range indexes {
-				results[i] = a.listAccount(ctx, names[i], cfg.Accounts[names[i]], store)
-				applyState(doc, results[i].machines)
+			r := a.listAccount(ctx, name, cfg.Accounts[name], store, lo.ttl)
+			mu.Lock()
+			defer mu.Unlock()
+			applyState(doc, r.machines)
+			results[i] = r
+			if lo.progress != nil {
+				lo.progress(r)
 			}
-		}(byType[t])
+		}()
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(i, j int) bool { return results[i].account < results[j].account })
@@ -422,11 +492,14 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 		if r.cacheErr != nil {
 			fmt.Fprintf(a.stderr, "ump: %v\n", r.cacheErr)
 		}
+		if a.verbose && !r.cachedAt.IsZero() {
+			fmt.Fprintf(a.stderr, "account %s: from the cache, listed %s ago\n", r.account, a.now().Sub(r.cachedAt).Round(time.Second))
+		}
 	}
 	return results
 }
 
-func (a *app) listAccount(ctx context.Context, name string, acct config.Account, store *cache.Store) listResult {
+func (a *app) listAccount(ctx context.Context, name string, acct config.Account, store *cache.Store, ttl time.Duration) listResult {
 	r := listResult{account: name, typ: acct.Type}
 	p, err := a.buildProvider(name, acct)
 	if err != nil {
@@ -438,6 +511,13 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 	if !ok {
 		r.err = fmt.Errorf("account %s: provider type %s cannot list servers", name, acct.Type)
 		return r
+	}
+	// Servers added by hand are listed from the state, without an API.
+	if store != nil && acct.Type != manual.TypeName {
+		if snap, err := store.Fresh(name, ttl, a.now()); err == nil && snap != nil {
+			r.machines, r.cachedAt = snap.Machines, snap.SeenAt
+			return r
+		}
 	}
 	ms, err := inv.List(ctx)
 	if err != nil {
