@@ -392,7 +392,7 @@ fi
 # --- the image: the manifest first, so that a missing image costs no disk ---
 
 log "fetching the manifest"
-manifest="$(curl -fsSL "$image_url/manifest.json")" || die "cannot fetch $image_url/manifest.json; the storage must serve the image (see images/ubuntu/README.md)"
+manifest="$(curl -fsSL "$image_url/manifest.json")" || die "cannot fetch $image_url/manifest.json; the storage must serve the image (see images/base/README.md)"
 family="$(printf '%s' "$manifest" | jq -r '.family // "image"')"
 image_version="$(printf '%s' "$manifest" | jq -r '.version // empty')"
 image_kernel="$(printf '%s' "$manifest" | jq -r '.kernel // empty')"

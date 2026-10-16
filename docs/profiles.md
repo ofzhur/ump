@@ -31,8 +31,10 @@ something to look at and start from.
 **Published and yours.** The published profiles
 ([`ubuntu-26.04.yaml`](../profiles/ubuntu-26.04.yaml),
 [`ubuntu-24.04.yaml`](../profiles/ubuntu-24.04.yaml),
-[`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml): the same profile
-with each image; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml), the
+[`ubuntu-22.04.yaml`](../profiles/ubuntu-22.04.yaml),
+[`debian-13.yaml`](../profiles/debian-13.yaml),
+[`debian-12.yaml`](../profiles/debian-12.yaml): the same profile with
+each image and the userdata of its distribution; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml), the
 same for NixOS) and the published entries of the named files (the
 layouts `lvm-*`, the firewalls `default`, `web` and `open`, the user
 `ump`) are templates: `ump config os update` fetches them again and
@@ -94,7 +96,7 @@ network:
 ```
 
 Installed with it, a server runs the [UMP Ubuntu 26.04 base
-image](../images/ubuntu/README.md) with every disk in one volume group
+image](../images/base/README.md) with every disk in one volume group
 and root as one linear volume over all of it (the
 [`lvm-linear`](disk-layouts.md#lvm-linear) layout), the server's name as
 hostname, the address and gateway it had before as a static netplan
@@ -105,7 +107,7 @@ and SSH in and nothing else ([`default`](firewalls.md#the-published-firewalls)),
 and a kernel command line with `mitigations=off`, `ipv6.disable=1` and
 `kho=off`. The image brings `tuned` with the `throughput-performance`
 profile, the `performance` CPU governor, no cloud-init and no snaps; its
-[README](../images/ubuntu/README.md#defaults) lists the rest.
+[README](../images/base/README.md#defaults) lists the rest.
 
 To make it yours, create a profile from it: `ump config os create mine
 --from ubuntu-26.04`, then `ump config os default mine`. The usual
@@ -116,7 +118,8 @@ true` for servers that need IPv6, and a firewall for the server's role.
 
 The image is the profile's `os` field: the name of a directory under
 `os/` on the storage, which holds one archive per architecture (see
-[the Ubuntu base image](../images/ubuntu/README.md)). The storage
+[the base images](../images/base/README.md); NixOS has a manifest only,
+see [operating systems](oses.md#nixos)). The storage
 publishes:
 
 | `os` | Release | Profile published with it |
@@ -124,6 +127,8 @@ publishes:
 | `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute) | `ubuntu-26.04`, the default |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` |
+| `debian-13` | Debian 13 (trixie) | `debian-13` |
+| `debian-12` | Debian 12 (bookworm) | `debian-12` |
 | `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](oses.md#nixos)) | `nixos-25.11` |
 
 The published Ubuntu profiles are the same apart from the image, and

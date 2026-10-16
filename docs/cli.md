@@ -399,7 +399,7 @@ ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
-image](../images/ubuntu/README.md) the way a [profile](profiles.md)
+image](../images/base/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS), or whose provider has none and whose running
 system does not let UMP in (Linode, Vultr), is first reinstalled by the
@@ -592,7 +592,7 @@ profile and opens it in your editor, `edit NAME` opens it and checks it
 afterwards (an invalid profile is kept, with the problem named; a
 published profile is refused, make your own from it), `delete NAME`
 removes it, `update` fetches the published profiles (`ubuntu-26.04`,
-`ubuntu-24.04`, `ubuntu-22.04`, `nixos-25.11`) and the published entries of
+`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`) and the published entries of
 `layouts.yaml`, `firewalls.yaml` and `users.yaml` again, replacing them
 and keeping yours, `default [NAME]` shows or sets the default profile. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with

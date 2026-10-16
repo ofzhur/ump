@@ -1,9 +1,11 @@
-# The UMP Ubuntu base image
+# The UMP base images: Ubuntu and Debian
 
-A complete Ubuntu LTS server system (26.04 by default; 24.04 and 22.04
-are built the same way) as a root file system archive,
-with the generic kernel and its firmware, LVM, netplan, SSH and the tools
-a server needs, plus the UMP defaults that do not depend on the machine.
+A complete server system as a root file system archive: Ubuntu LTS
+(26.04 by default, 24.04 and 22.04) or Debian (13 and 12), built the
+same way from one script, one package list and one set of defaults,
+with the distribution's kernel and its firmware, LVM, netplan, SSH and
+the tools a server needs, plus the UMP defaults that do not depend on
+the machine.
 [`ump server reinstall`](../../docs/cli.md#install-ump-server-reinstall) unpacks it
 onto a machine's disks from the UMP rescue system and
 [`install/install.sh`](../../install/README.md) does what depends on the
@@ -12,21 +14,29 @@ machine. One archive per architecture, `amd64` and `arm64`.
 ## Building
 
 ```console
-$ make os-image                                   # ubuntu-26.04: images/ubuntu/out/ubuntu-26.04/{amd64,arm64}/
+$ make os-image                                   # ubuntu-26.04: images/base/out/ubuntu-26.04/{amd64,arm64}/
 $ make os-image OS_ARCH=arm64                     # one architecture
-$ make os-image OS_LIST="ubuntu-24.04 ubuntu-22.04"   # the other releases (noble, jammy)
+$ make os-image OS_LIST="ubuntu-24.04 ubuntu-22.04"   # the other Ubuntu releases (noble, jammy)
+$ make os-image OS_LIST="debian-13 debian-12"     # Debian (trixie, bookworm)
 ```
 
 [`build.sh`](build.sh) runs as root in a privileged `debian:trixie`
 container (the Makefile starts it with Docker or Podman): `mmdebstrap`
-bootstraps Ubuntu `resolute` from the archive with the packages of
-[`packages.txt`](packages.txt), the kernel and the boot loader packages of
-the architecture, copies [`overlay/`](overlay) in and runs
+bootstraps the release from its distribution's archive
+(`archive.ubuntu.com` and `ports.ubuntu.com`, or `deb.debian.org`) with
+the packages of [`packages.txt`](packages.txt), the kernel
+(`linux-image-generic` on Ubuntu, `linux-image-amd64`/`arm64` on Debian)
+and the boot loader packages of the architecture, copies [`overlay/`](overlay) in and runs
 [`finish.sh`](finish.sh) inside. The other architecture is built from the
 same container through `qemu-user-static`, which takes several times as
 long. A line of `packages.txt` may end with `@suite,suite` (those
 releases only) or `!suite` (all but that one): `wtmpdb` exists from
-26.04 on, `systemd-resolved` as a package from 24.04 on. The result,
+Ubuntu 26.04 and Debian 13 on, `systemd-resolved` as a package from
+Ubuntu 24.04 on, the firmware packages are Debian's (Ubuntu's kernel
+brings `linux-firmware`), `cpufrequtils` is gone from Debian 13. The
+apt sources of the image are the distribution's, with its updates and
+security archives; Debian's static `/etc/motd` is emptied so that only
+UMP's banner shows. The result,
 per release and architecture:
 
 | File | What it is |
@@ -38,7 +48,9 @@ per release and architecture:
 
 ## What is in it
 
-Ubuntu's `linux-image-generic` with `linux-firmware`, GRUB for UEFI and,
+The distribution's kernel with its firmware (Ubuntu's `linux-image-generic`
+with `linux-firmware`; Debian's `linux-image-*` with the `firmware-*`
+packages of server NICs and storage controllers), GRUB for UEFI and,
 on amd64, for BIOS (`grub-efi-*-bin`, `grub-pc-bin`, `grub2-common`),
 `lvm2`, `mdadm`, the file system tools, `netplan.io` rendering to
 systemd-networkd, `systemd-resolved`, OpenSSH, `tuned`, `cpufrequtils`,

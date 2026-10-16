@@ -34,7 +34,8 @@
 # the target side. Per image, manifest.json is uploaded last, so a reader
 # never sees a manifest that points to files which are not there yet.
 #
-# Usage: upload.sh [rescue|os|index|bin|scripts|profiles]...  (default: everything that is built;
+# Usage: upload.sh [rescue|os|index|bin|scripts|profiles]...  (os: OS_LIST="a b" limits it to those images)
+#  (default: everything that is built;
 #        index alone rewrites os/index.json from what the target holds)
 #
 # Environment: UPLOAD_TARGET (required), S3_ENDPOINT (S3-compatible stores),
@@ -208,10 +209,12 @@ for w in "${what[@]}"; do
 		done
 		;;
 	os)
-		for d in "$HERE"/ubuntu/out/*/*/ "$HERE"/nixos/out/*/*/; do
+		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }
+			# OS_LIST="debian-13 debian-12" publishes those only
+			case " ${OS_LIST:-$name} " in *" $name "*) ;; *) continue ;; esac
 			publish_image "${d%/}" os "$name"; built=1
 		done
 		[ "$built" = 1 ] && publish_os_index

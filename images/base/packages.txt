@@ -1,8 +1,9 @@
-# Packages of the UMP Ubuntu base image, one per line. The kernel and the
-# boot loader packages of the architecture are added by build.sh.
-# Recommends are not installed. A line may end with "@suite,suite" to be
-# taken for those suites only, or "!suite" for all but that one
-# (resolute is 26.04, noble 24.04, jammy 22.04).
+# Packages of the UMP base images (Ubuntu and Debian), one per line. The
+# kernel and the boot loader packages of the architecture are added by
+# build.sh. Recommends are not installed. A line may end with
+# "@suite,suite" to be taken for those suites only, or "!suite" for all
+# but that one (Ubuntu: resolute is 26.04, noble 24.04, jammy 22.04;
+# Debian: trixie is 13, bookworm 12).
 
 # init and base system
 systemd
@@ -14,7 +15,8 @@ dbus
 kmod
 apt
 apt-utils
-ubuntu-keyring
+ubuntu-keyring @resolute,noble,jammy
+debian-archive-keyring @trixie,bookworm
 ca-certificates
 tzdata
 sudo
@@ -73,7 +75,7 @@ lshw
 
 # performance
 tuned
-cpufrequtils
+cpufrequtils !trixie
 numactl
 
 # tools
@@ -88,14 +90,25 @@ git
 # history (sar, iostat, mpstat, pidstat; atop), what a process does
 # (strace, ltrace, lsof, pstree), disks (ncdu) and the network (dig,
 # traceroute, iftop, nethogs, socat)
-wtmpdb @resolute
-libpam-wtmpdb @resolute
+wtmpdb @resolute,trixie
+libpam-wtmpdb @resolute,trixie
+
+# Debian's kernel package carries no firmware (Ubuntu's linux-firmware
+# comes with linux-image-generic): the firmware of server NICs and
+# storage controllers
+firmware-linux-free @trixie,bookworm
+firmware-misc-nonfree @trixie,bookworm
+firmware-realtek @trixie,bookworm
+firmware-bnx2 @trixie,bookworm
+firmware-bnx2x @trixie,bookworm
+firmware-qlogic @trixie,bookworm
+firmware-cavium @trixie,bookworm
 sysstat
 atop
 iotop-c
 lsof
 strace
-ltrace
+ltrace !bookworm
 psmisc
 ncdu
 bind9-dnsutils

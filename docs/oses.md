@@ -3,8 +3,8 @@
 ump gives you server operating systems out of the box, the same on
 every machine: a dedicated server at Hetzner, a cloud instance at Vultr
 or a box in your rack ends up with the same system, the same disk
-layout, the same users, network names, firewall and tools. Ubuntu comes
-as UMP's own prebuilt image from its storage; NixOS is installed from
+layout, the same users, network names, firewall and tools. Ubuntu and
+Debian come as UMP's own prebuilt images from its storage; NixOS is installed from
 NixOS's public servers with UMP's configuration on top. Both work on
 amd64 and arm64, boot from UEFI and, on amd64, from BIOS, and are meant
 to be used as they are: pick one, and the machine is a well-kept server
@@ -12,6 +12,7 @@ a few minutes later.
 
 ```console
 $ ump server reinstall web-01                          # the default: Ubuntu 26.04
+$ ump server reinstall web-01 --profile debian-13      # Debian
 $ ump server reinstall web-01 --profile nixos-25.11    # NixOS
 $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same profile
 ```
@@ -21,6 +22,8 @@ $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same pr
 | `ubuntu-26.04` | Ubuntu 26.04 LTS (resolute), the default | `ubuntu-26.04` | UMP's image, unpacked and configured in place |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (noble) | `ubuntu-24.04` | the same |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (jammy) | `ubuntu-22.04` | the same |
+| `debian-13` | Debian 13 (trixie) | `debian-13` | the same |
+| `debian-12` | Debian 12 (bookworm) | `debian-12` | the same |
 | `nixos-25.11` | NixOS 25.11, from its stable channel | `nixos-25.11` | `nixos-install` from NixOS's public servers, with the profile as NixOS modules |
 
 `ump config os create` lists what the storage offers (its
@@ -50,8 +53,8 @@ Whichever system it is, ump installs it the same way, from the same
   `mtr`, `dig`, `lsof`, `strace`, `jq`, `vim`, `tmux`, the disk and
   hardware tools, and a message of the day with UMP's banner, the host,
   its installation, load, memory, disk and addresses (`ump-motd`).
-- **Userdata:** what a system of yours needs on top: a script on Ubuntu,
-  a NixOS module on NixOS ([userdata](userdata.md)).
+- **Userdata:** what a system of yours needs on top: a script on Ubuntu
+  and Debian, a NixOS module on NixOS ([userdata](userdata.md)).
 - **A record** of what was installed, from which profile and layout, in
   `/etc/ump/install`, which `ump server show` reads back.
 
@@ -84,8 +87,24 @@ and configures what depends on the machine. Out of the box:
   first boot ([userdata](userdata.md)).
 
 Updates come from Ubuntu as usual (`apt`). [The Ubuntu base
-image](../images/ubuntu/README.md) has the full package list, every
+image](../images/base/README.md) has the full package list, every
 default, and how the image is built and published.
+
+## Debian
+
+Debian 13 (trixie) and 12 (bookworm), built by UMP exactly like the
+Ubuntu image: the same script, package list and defaults, from
+`deb.debian.org`, so a Debian machine has the same tools, network
+configuration (netplan with systemd-networkd), firewall, SSH policy,
+shell, performance settings and message of the day as an Ubuntu one.
+What differs is Debian's own: its kernel (`linux-image-amd64` or
+`arm64`) with the firmware of server NICs and storage controllers from
+the `firmware-*` packages, its apt sources (`deb.debian.org` with
+updates, `security.debian.org`), and the age of its packages. Debian 12
+has no `wtmpdb` (`last` reads the classic `wtmp`); Debian 13 has no
+`cpufrequtils` (`tuned` sets the CPU's performance settings). Userdata
+is bash, as on Ubuntu; the published entry is `debian`. See [the base
+images](../images/base/README.md).
 
 ## NixOS
 
@@ -221,12 +240,12 @@ an installation is always the current state of the stable channel and
 nothing on UMP's side goes stale. [`images/nixos/build.sh`](../images/nixos/build.sh)
 writes the manifest (the Nix version and checksum from the official Nix
 installer), `images/upload.sh os` publishes it, and
-[`images/nixos/test-install.sh`](../images/nixos/test-install.sh)
+[`images/test-install.sh`](../images/test-install.sh) (`images/test-install.sh nixos-25.11`)
 installs NixOS in QEMU from the UMP rescue image and checks the result.
 
 ## More systems
 
-Debian is next; systems that take a declarative configuration (Talos,
+Systems that take a declarative configuration (Talos,
 cloud-init images) may follow as further userdata types. An image of
 your own works too: the [storage layout](../images/rescue/README.md#your-own-storage)
 says what an `os/<name>/<arch>/` directory must hold, and any `os` name

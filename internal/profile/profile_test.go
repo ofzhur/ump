@@ -277,3 +277,23 @@ func TestNixOSProfileAndUserdataTypes(t *testing.T) {
 		t.Errorf("nix on ubuntu: %v", err)
 	}
 }
+
+func TestDebianProfiles(t *testing.T) {
+	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
+	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
+	users, _ := ParseUsers(repoFile(t, "users.yaml"))
+	userdata, _ := ParseUserdata(repoFile(t, "userdata.yaml"))
+	for _, name := range []string{"debian-13", "debian-12"} {
+		p, err := Parse(repoFile(t, name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, err := p.Resolve(layouts, firewalls, users, userdata, fakeResolver)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if spec.OS != name || Family(spec.OS) != "image" || len(spec.Userdata) != 1 || spec.Userdata[0].Name != "debian" || spec.Userdata[0].Type != "bash" {
+			t.Errorf("%s: os %s, userdata %+v", name, spec.OS, spec.Userdata)
+		}
+	}
+}

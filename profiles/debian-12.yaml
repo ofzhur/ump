@@ -1,0 +1,44 @@
+# The profile for Debian 12 (bookworm): what a server becomes with
+# --profile debian-12. Published profiles are replaced by ump config os
+# update, so make your own from this one (ump config os create NAME
+# --from debian-12) instead of editing it. Every field is described in
+# docs/profiles.md.
+name: debian-12
+description: Debian 12 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+
+os: debian-12
+timezone: UTC
+
+kernel:
+  mitigations: false   # the CPU vulnerability mitigations (mitigations=off when false); they cost performance
+  ipv6: false          # IPv6 (ipv6.disable=1 when false); turn it on when the server needs it
+  extra: ""            # anything else for the kernel command line
+
+# a layout from layouts.yaml (lvm-linear, lvm-striped, lvm-raid1, lvm-example), or an inline one
+disks: lvm-linear
+
+users: [ump]            # named users from users.yaml (ump config user): ump is the administrator,
+                        # the sudo user ump logs in as; add yours there, or inline one here:
+  # - name: ops
+  #   sudo: true
+  #   groups: [adm]
+  #   keys: [local, ~/.ssh/ops.pub]
+  # - name: root        # root over SSH, with keys only
+  #   keys: [ump, local]
+
+userdata: [debian]      # named entries from userdata.yaml (ump config userdata), run in order as root
+                        # in the new system before its first boot: packages, files, services; or inline:
+  # - name: web
+  #   script: |
+  #     apt-get install -y nginx
+
+# a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
+firewall: default
+
+provision:
+  type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
+                        # recorded in /etc/ump/install, not run yet
+
+network:
+  rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
+                        # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)

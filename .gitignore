@@ -6,5 +6,5 @@
 *.test
 *.out
 images/rescue/out/
-images/ubuntu/out/
+images/base/out/
 images/nixos/out/

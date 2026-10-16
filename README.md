@@ -12,8 +12,8 @@ Every provider has its own API, its own rescue system, its own stock
 images and its own way of doing networking. UMP hides all of that behind
 one CLI. `ump server list` shows the servers of every configured account;
 `ump server reinstall NAME` boots a server into UMP's own rescue system,
-erases its disks and installs the UMP Ubuntu base image the way a profile
-says; `ump ssh NAME` logs in. The result is a homogeneous fleet: the same
+erases its disks and installs an operating system (Ubuntu, Debian or
+NixOS) the way a profile says; `ump ssh NAME` logs in. The result is a homogeneous fleet: the same
 base system, disk layout, users and keys, firewall and interface names on
 every machine, whatever it is and wherever it runs, ready for Ansible or
 whatever configures it from there.
@@ -71,9 +71,10 @@ them up.
 
 **Operating systems.** Server systems out of the box, the same on every
 machine, for amd64 and arm64, booting from UEFI and, on amd64, BIOS:
-Ubuntu 26.04 (the default), 24.04 and 22.04 LTS, prebuilt by UMP with
-LVM, md, netplan, SSH and the tools a server needs, and nothing that
-does not belong there (no cloud-init, no snaps); and NixOS 25.11,
+Ubuntu 26.04 (the default), 24.04 and 22.04 LTS and Debian 13 and 12,
+prebuilt by UMP with LVM, md, netplan, SSH and the tools a server needs,
+and nothing that does not belong there (no cloud-init, no snaps); and
+NixOS 25.11,
 installed from NixOS's public servers and its stable channel, with the
 profile as NixOS modules. Each gets the
 same disks, users and keys, interface names, firewall and message of
@@ -102,7 +103,8 @@ each with its own `ump config` command (`list`, `get`, `create`,
 The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
 group, the sudo user `ump` with your keys, ICMP and SSH open),
-`ubuntu-24.04`, `ubuntu-22.04` and `nixos-25.11` (NixOS from its
+`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12` and
+`nixos-25.11` (NixOS from its
 stable channel, see [NixOS](docs/oses.md#nixos)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
 `web` and `open`, and the user `ump`. They are templates: make your own
@@ -161,8 +163,8 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
-| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04 and NixOS 25.11, what every system gets, how each is installed, NixOS configuration and userdata as modules |
-| [Ubuntu base image](images/ubuntu/README.md) | the Ubuntu system UMP builds, what it holds and its defaults |
+| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12 and NixOS 25.11, what every system gets, how each is installed, NixOS configuration and userdata as modules |
+| [Base images](images/base/README.md) | the Ubuntu and Debian systems UMP builds, what they hold and their defaults |
 
 **Reference**
 

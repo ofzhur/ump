@@ -113,7 +113,7 @@ image alone) and serve this below it:
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
 | `profiles/ubuntu-26.04.yaml`, `profiles/ubuntu-24.04.yaml`, `profiles/ubuntu-22.04.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml`, `profiles/users.yaml` | the published [profile](../../docs/profiles.md), [layouts](../../docs/disk-layouts.md) and [firewalls](../../docs/firewalls.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/index.json` | `{"images": ["ubuntu-22.04", ...]}`: the images the storage has, which the profile wizard offers (optional; the known names are tried without it) |
-| `os/<os>/<arch>/manifest.json` | an [OS image](../ubuntu/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
+| `os/<os>/<arch>/manifest.json` | an [OS image](../base/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
 | `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
 | `rescue/v/<version>/<arch>/...`, `os/<os>/v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |

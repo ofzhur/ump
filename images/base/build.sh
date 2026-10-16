@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build the UMP Ubuntu base image: a complete Ubuntu LTS server system as a
-# root file system archive, with the generic kernel, its firmware, LVM,
-# netplan, SSH and the tools a server needs, and the UMP defaults from
-# overlay/ and finish.sh. install.sh unpacks it onto a machine's disks and
-# does what depends on the machine; see README.md.
+# Build a UMP base image: a complete Ubuntu LTS or Debian server system as
+# a root file system archive, with the distribution's kernel, its
+# firmware, LVM, netplan, SSH and the tools a server needs, and the UMP
+# defaults from overlay/ and finish.sh. install.sh unpacks it onto a
+# machine's disks and does what depends on the machine; see README.md.
 #
-# Usage: build.sh [amd64|arm64] [ubuntu-26.04|ubuntu-24.04|ubuntu-22.04]
+# Usage: build.sh [amd64|arm64] [ubuntu-26.04|ubuntu-24.04|ubuntu-22.04|debian-13|debian-12]
 #
 # Runs as root on Debian trixie (natively or in a privileged container,
 # see the Makefile's os-image target). The other architecture is built
@@ -14,8 +14,9 @@
 # suite follows from it), SUITE (to override), MIRROR, VERSION (default:
 # today's date), OUT (default: ./out/<os>/<arch>).
 #
-# packages.txt lists the packages; a line may end with "@suite,suite" to
-# be taken for those suites only, or "!suite,suite" for all but those.
+# packages.txt lists the packages for both distributions; a line may end
+# with "@suite,suite" to be taken for those suites only, or "!suite,suite"
+# for all but those.
 set -euo pipefail
 
 ARCH="${1:-$(dpkg --print-architecture)}"
@@ -24,21 +25,35 @@ case "$OS" in
 ubuntu-26.04) default_suite=resolute ;;
 ubuntu-24.04) default_suite=noble ;;
 ubuntu-22.04) default_suite=jammy ;;
+debian-13) default_suite=trixie ;;
+debian-12) default_suite=bookworm ;;
 *) default_suite="" ;;
 esac
 SUITE="${SUITE:-$default_suite}"
-[ -n "$SUITE" ] || { echo "build.sh: unknown OS $OS; give SUITE= (ubuntu-26.04 resolute, ubuntu-24.04 noble, ubuntu-22.04 jammy)" >&2; exit 2; }
+[ -n "$SUITE" ] || { echo "build.sh: unknown OS $OS; give SUITE= (ubuntu-26.04 resolute, ubuntu-24.04 noble, ubuntu-22.04 jammy, debian-13 trixie, debian-12 bookworm)" >&2; exit 2; }
+DISTRO="${OS%%-*}"   # ubuntu or debian
 VERSION="${VERSION:-$(date -u +%Y.%m.%d)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${OUT:-$HERE/out/$OS/$ARCH}"
-WORK="$(mktemp -d /tmp/ump-ubuntu.XXXXXX)"
+WORK="$(mktemp -d /tmp/ump-base.XXXXXX)"
 ROOTFS="$WORK/rootfs"
 trap 'rm -rf "$WORK"' EXIT
 
 case "$ARCH" in
-	amd64) MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}"; boot="grub-efi-amd64-bin,grub-pc-bin" ;;
-	arm64) MIRROR="${MIRROR:-http://ports.ubuntu.com/ubuntu-ports}"; boot="grub-efi-arm64-bin" ;;
+	amd64) boot="grub-efi-amd64-bin,grub-pc-bin" ;;
+	arm64) boot="grub-efi-arm64-bin" ;;
 	*) echo "build.sh: unsupported architecture $ARCH (amd64 or arm64)" >&2; exit 2 ;;
+esac
+# the distribution: its archive, keyring, components and kernel
+case "$DISTRO:$ARCH" in
+	ubuntu:amd64) MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}" ;;
+	ubuntu:arm64) MIRROR="${MIRROR:-http://ports.ubuntu.com/ubuntu-ports}" ;;
+	debian:*) MIRROR="${MIRROR:-http://deb.debian.org/debian}" ;;
+esac
+case "$DISTRO" in
+	ubuntu) keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg; components=main,universe; kernel=linux-image-generic ;;
+	debian) keyring=/usr/share/keyrings/debian-archive-keyring.gpg; components=main,contrib,non-free,non-free-firmware; kernel="linux-image-$ARCH" ;;
+	*) echo "build.sh: unknown distribution $DISTRO" >&2; exit 2 ;;
 esac
 if [ "$(id -u)" != 0 ]; then
 	echo "build.sh: run as root, for example with 'make os-image' in a privileged container" >&2
@@ -50,7 +65,7 @@ log() { printf '\n==> %s\n' "$*"; }
 log "build dependencies"
 export DEBIAN_FRONTEND=noninteractive
 HOST_ARCH="$(dpkg --print-architecture)"
-deps=(mmdebstrap zstd ca-certificates ubuntu-keyring)
+deps=(mmdebstrap zstd ca-certificates ubuntu-keyring debian-archive-keyring)
 if [ "$ARCH" != "$HOST_ARCH" ]; then
 	deps+=(qemu-user-static binfmt-support arch-test)
 fi
@@ -72,15 +87,15 @@ packages="$(awk -v suite="$SUITE" '
 		if ($2 ~ /^@/) { take = 0; n = split(substr($2, 2), only, ","); for (i = 1; i <= n; i++) if (only[i] == suite) take = 1 }
 		if ($2 ~ /^!/) { n = split(substr($2, 2), not, ","); for (i = 1; i <= n; i++) if (not[i] == suite) take = 0 }
 		if (take) print pkg
-	}' "$HERE/packages.txt" | paste -sd, -),linux-image-generic,$boot"
+	}' "$HERE/packages.txt" | paste -sd, -),$kernel,$boot"
 
 log "bootstrapping $OS ($SUITE) for $ARCH from $MIRROR"
 mmdebstrap \
 	--arch="$ARCH" \
 	--variant=minbase \
 	--mode=root \
-	--keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg \
-	--components=main,universe \
+	--keyring="$keyring" \
+	--components="$components" \
 	--aptopt='Apt::Install-Recommends "false"' \
 	--dpkgopt='path-exclude=/usr/share/man/*' \
 	--dpkgopt='path-exclude=/usr/share/doc/*' \
@@ -90,7 +105,7 @@ mmdebstrap \
 	--include="$packages" \
 	--customize-hook="sync-in $HERE/overlay /" \
 	--customize-hook="copy-in $HERE/finish.sh /tmp" \
-	--customize-hook="chroot \"\$1\" env UMP_VERSION=$VERSION UMP_ARCH=$ARCH UMP_SUITE=$SUITE sh /tmp/finish.sh && rm -f \"\$1/tmp/finish.sh\"" \
+	--customize-hook="chroot \"\$1\" env UMP_VERSION=$VERSION UMP_ARCH=$ARCH UMP_SUITE=$SUITE UMP_DISTRO=$DISTRO sh /tmp/finish.sh && rm -f \"\$1/tmp/finish.sh\"" \
 	"$SUITE" "$ROOTFS" "$MIRROR"
 
 log "assembling the image"
@@ -108,7 +123,7 @@ cd "$OUT"
 sha256sum rootfs.tar.zst > SHA256SUMS
 {
 	printf '{\n'
-	printf '  "version": "%s",\n  "os": "%s",\n  "suite": "%s",\n  "arch": "%s",\n  "kernel": "%s",\n' "$VERSION" "$OS" "$SUITE" "$ARCH" "$kver"
+	printf '  "version": "%s",\n  "os": "%s",\n  "distro": "%s",\n  "suite": "%s",\n  "arch": "%s",\n  "kernel": "%s",\n' "$VERSION" "$OS" "$DISTRO" "$SUITE" "$ARCH" "$kver"
 	printf '  "built": "%s",\n  "unpacked_mb": %s,\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$size"
 	printf '  "files": {\n'
 	printf '    "rootfs.tar.zst": {"sha256": "%s", "size": %s}\n' "$(sha256sum rootfs.tar.zst | cut -d' ' -f1)" "$(stat -c %s rootfs.tar.zst)"

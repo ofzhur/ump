@@ -10,6 +10,7 @@ may also carry entries inline for what belongs to it alone.
 ```console
 $ ump config userdata list
 NAME     TYPE   LINES   STATE   DESCRIPTION
+debian   bash   8       ok      what every Debian gets; nothing yet
 nixos    nix    12      ok      what every NixOS gets; nothing yet
 ubuntu   bash   7       ok      what every Ubuntu gets; nothing yet
 ```

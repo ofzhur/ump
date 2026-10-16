@@ -1,7 +1,7 @@
 # The UMP installer
 
 [`install.sh`](install.sh) puts an operating system on a machine's disks
-from a [UMP base image](../images/ubuntu/README.md), or NixOS with
+from a [UMP base image](../images/base/README.md), or NixOS with
 `nixos-install` (see [NixOS](../docs/oses.md#nixos)), the way a specification
 says. It runs as root in the [UMP rescue
 system](../images/rescue/README.md), where no disk is in use, and

@@ -24,6 +24,18 @@ userdata:
       set -euo pipefail
       echo "userdata ubuntu: nothing to do on $(hostname)"
       # apt-get install -y --no-install-recommends htop
+  debian:
+    description: what every Debian gets; nothing yet
+    type: bash
+    script: |
+      #!/bin/bash
+      # Runs as root in the freshly installed Debian, before its first
+      # boot, with network. Put what every Debian of yours needs here,
+      # or make your own entry (ump config userdata create NAME) and
+      # list it in the profile after this one.
+      set -euo pipefail
+      echo "userdata debian: nothing to do on $(hostname)"
+      # apt-get install -y --no-install-recommends htop
   nixos:
     description: what every NixOS gets; nothing yet
     type: nix

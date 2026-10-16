@@ -25,7 +25,7 @@ export CGO_ENABLED := 0
 IMAGE_ARCHS ?= amd64 arm64
 RESCUE_ARCH ?= $(IMAGE_ARCHS)
 OS_ARCH     ?= $(IMAGE_ARCHS)
-# the Ubuntu releases to build: OS_LIST="ubuntu-24.04 ubuntu-22.04" for others
+# the base images to build: OS_LIST="ubuntu-24.04 ubuntu-22.04 debian-13 debian-12" for others
 OS_LIST     ?= ubuntu-26.04
 TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 # the images carry the day they were built as their version
@@ -56,8 +56,8 @@ fmt-check:
 	if [ -n "$$out" ]; then echo "files need gofmt:"; echo "$$out"; exit 1; fi
 
 scripts-check: ## syntax-check the shell scripts of the rescue image
-	@for f in images/*.sh images/rescue/*.sh images/ubuntu/*.sh install/install.sh; do bash -n "$$f" || exit 1; done
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/ubuntu/finish.sh install/get.sh
+	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh; do bash -n "$$f" || exit 1; done
+	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh
 
 check: fmt-check vet test scripts-check ## gofmt, go vet, the tests and the script syntax checks
 
@@ -87,10 +87,10 @@ rescue-image: ## build the rescue image for RESCUE_ARCH (default: amd64 and arm6
 			-v "$(CURDIR)/images/rescue:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch || exit 1; \
 	done
 
-os-image: ## build the Ubuntu base image(s) of OS_LIST (default: ubuntu-26.04) for OS_ARCH (default: amd64 and arm64) in a privileged Debian container
+os-image: ## build the base image(s) (Ubuntu, Debian) of OS_LIST (default: ubuntu-26.04) for OS_ARCH (default: amd64 and arm64) in a privileged Debian container
 	@for os in $(OS_LIST); do for arch in $(OS_ARCH); do \
 		$(CONTAINER) run --rm --privileged \
-			-v "$(CURDIR)/images/ubuntu:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch $$os || exit 1; \
+			-v "$(CURDIR)/images/base:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie ./build.sh $$arch $$os || exit 1; \
 	done; done
 
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH

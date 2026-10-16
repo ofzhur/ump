@@ -36,9 +36,8 @@ As of October 2026, ump does what the [README](../README.md) and the
   `ansible-bootstrap` are recorded on the installed system and reported,
   but not run yet. Running them after the first boot, and a plain
   `script` step, come next.
-- **More images.** A Debian base image next to the Ubuntu one; a profile
-  picks it with `os:`. NixOS is there (`nixos-25.11`, from its stable
-  channel); Talos and cloud-init images may follow as userdata types.
+- **More images.** Ubuntu, Debian and NixOS are there; Talos and
+  cloud-init images may follow as userdata types.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
   partition.
 - **Network.** IPv6 addresses from the provider's network information

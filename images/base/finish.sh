@@ -7,10 +7,28 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 
 echo "${UMP_VERSION:-dev}" > /etc/ump-image-version
-echo "ubuntu" > /etc/hostname
+echo "${UMP_DISTRO:-ubuntu}" > /etc/hostname
 printf '127.0.0.1\tlocalhost\n::1\t\tlocalhost\n' > /etc/hosts
 
 # package sources: the archive of the architecture, with updates and security
+if [ "${UMP_DISTRO:-ubuntu}" = debian ]; then
+	rm -f /etc/apt/sources.list
+	cat > /etc/apt/sources.list.d/debian.sources <<SRC
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: ${UMP_SUITE} ${UMP_SUITE}-updates
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: ${UMP_SUITE}-security
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+SRC
+	# Debian's static /etc/motd (the license text) would follow UMP's banner
+	: > /etc/motd
+else
 case "${UMP_ARCH:-amd64}" in
 amd64|i386)
 	archive="http://archive.ubuntu.com/ubuntu"; security="http://security.ubuntu.com/ubuntu" ;;
@@ -31,6 +49,7 @@ Suites: ${UMP_SUITE:-resolute}-security
 Components: main universe restricted multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 SRC
+fi
 
 # time, locale
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
