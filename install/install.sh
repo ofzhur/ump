@@ -729,8 +729,15 @@ run_in_target() { # run_in_target WHAT COMMAND...: the output is shown only when
 }
 in_target ssh-keygen -A >/dev/null
 
-# the message of the day, the same on every system: from the storage,
-# else the image's own stays
+# the shell setup and the message of the day, the same on every system:
+# from the storage, else the image's own stay
+if curl -fsSL -o "$TARGET/etc/skel/.bashrc.ump" "$storage/install/bashrc.sh"; then
+	mv "$TARGET/etc/skel/.bashrc.ump" "$TARGET/etc/skel/.bashrc"
+	cp "$TARGET/etc/skel/.bashrc" "$TARGET/root/.bashrc"
+else
+	rm -f "$TARGET/etc/skel/.bashrc.ump"
+	warn "cannot fetch $storage/install/bashrc.sh; the image's shell setup stays"
+fi
 mkdir -p "$TARGET/etc/update-motd.d"
 if curl -fsSL -o "$TARGET/etc/update-motd.d/00-ump" "$storage/install/motd.sh"; then
 	chmod 755 "$TARGET/etc/update-motd.d/00-ump"
@@ -938,6 +945,7 @@ install_nixos() {
 	mkdir -p "$TARGET/etc/nixos/ump" "$TARGET/etc/nixos/userdata"
 	curl -fsSL -o "$TARGET/etc/nixos/ump/default.nix" "$storage/install/nixos/ump.nix" || die "cannot fetch $storage/install/nixos/ump.nix"
 	curl -fsSL -o "$TARGET/etc/nixos/ump/motd.sh" "$storage/install/motd.sh" || die "cannot fetch $storage/install/motd.sh"
+	curl -fsSL -o "$TARGET/etc/nixos/ump/bashrc.sh" "$storage/install/bashrc.sh" || die "cannot fetch $storage/install/bashrc.sh"
 	printf '%s\n' "$spec" | jq 'del(.userdata)' > "$TARGET/etc/nixos/ump/spec.json"
 	nft_ruleset > "$TARGET/etc/nixos/ump/nftables.conf"
 	{

@@ -71,10 +71,13 @@ ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 # (install.sh); the administrator is the profile's sudo user
 passwd -l root >/dev/null 2>&1 || true
 
-# the shell: bash with the colored prompt and completion of /etc/skel;
-# root gets the same file (another shell is the configuration
-# management's business)
+# the shell: bash; UMP's prompt and aliases (install/bashrc.sh) are put
+# into /etc/skel/.bashrc and root's by the installer, the same on every
+# system (another shell is the configuration management's business)
 cp /etc/skel/.bashrc /root/.bashrc
+# Ubuntu's bash.bashrc tells every sudo user at login how to use sudo
+# until this file exists in their home; UMP's banner says what matters
+touch /etc/skel/.sudo_as_admin_successful
 
 # the message of the day: UMP's own script alone (no help text, no news);
 # the installer puts it in (install/motd.sh), the same on every system

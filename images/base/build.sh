@@ -46,9 +46,9 @@ case "$ARCH" in
 esac
 # the distribution: its archive, keyring, components and kernel
 case "$DISTRO:$ARCH" in
-	ubuntu:amd64) MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}" ;;
-	ubuntu:arm64) MIRROR="${MIRROR:-http://ports.ubuntu.com/ubuntu-ports}" ;;
-	debian:*) MIRROR="${MIRROR:-http://deb.debian.org/debian}" ;;
+	ubuntu:amd64) MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}"; SECURITY="${SECURITY:-http://security.ubuntu.com/ubuntu}" ;;
+	ubuntu:arm64) MIRROR="${MIRROR:-http://ports.ubuntu.com/ubuntu-ports}"; SECURITY="${SECURITY:-http://ports.ubuntu.com/ubuntu-ports}" ;;
+	debian:*) MIRROR="${MIRROR:-http://deb.debian.org/debian}"; SECURITY="${SECURITY:-http://security.debian.org/debian-security}" ;;
 esac
 case "$DISTRO" in
 	ubuntu) keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg; components=main,universe; kernel=linux-image-generic ;;
@@ -89,7 +89,13 @@ packages="$(awk -v suite="$SUITE" '
 		if (take) print pkg
 	}' "$HERE/packages.txt" | paste -sd, -),$kernel,$boot"
 
-log "bootstrapping $OS ($SUITE) for $ARCH from $MIRROR"
+# the release with its updates and its security fixes, so that an image
+# carries the current kernel and packages of its release, not those of
+# the day it came out
+comps="${components//,/ }"
+sources=("deb $MIRROR $SUITE $comps" "deb $MIRROR $SUITE-updates $comps" "deb $SECURITY $SUITE-security $comps")
+
+log "bootstrapping $OS ($SUITE, with -updates and -security) for $ARCH from $MIRROR"
 mmdebstrap \
 	--arch="$ARCH" \
 	--variant=minbase \
@@ -106,7 +112,7 @@ mmdebstrap \
 	--customize-hook="sync-in $HERE/overlay /" \
 	--customize-hook="copy-in $HERE/finish.sh /tmp" \
 	--customize-hook="chroot \"\$1\" env UMP_VERSION=$VERSION UMP_ARCH=$ARCH UMP_SUITE=$SUITE UMP_DISTRO=$DISTRO sh /tmp/finish.sh && rm -f \"\$1/tmp/finish.sh\"" \
-	"$SUITE" "$ROOTFS" "$MIRROR"
+	"$SUITE" "$ROOTFS" "${sources[@]}"
 
 log "assembling the image"
 mkdir -p "$OUT"

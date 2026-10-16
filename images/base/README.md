@@ -23,7 +23,9 @@ $ make os-image OS_LIST="debian-13 debian-12"     # Debian (trixie, bookworm)
 [`build.sh`](build.sh) runs as root in a privileged `debian:trixie`
 container (the Makefile starts it with Docker or Podman): `mmdebstrap`
 bootstraps the release from its distribution's archive
-(`archive.ubuntu.com` and `ports.ubuntu.com`, or `deb.debian.org`) with
+(`archive.ubuntu.com` and `ports.ubuntu.com`, or `deb.debian.org`),
+together with its updates and security archives, so that an image
+carries the current kernel and packages of its release, with
 the packages of [`packages.txt`](packages.txt), the kernel
 (`linux-image-generic` on Ubuntu, `linux-image-amd64`/`arm64` on Debian)
 and the boot loader packages of the architecture, copies [`overlay/`](overlay) in and runs
@@ -86,11 +88,14 @@ snaps, no recommends. The full list is in `packages.txt` of a build.
   `/etc/ssh/sshd_config.d/50-ump.conf`); the installer opens root with
   keys only (`10-ump-root.conf`) when the profile lists it. The
   administrator is the profile's sudo user, `ump` by default.
-- **Shell:** bash, with `/etc/skel/.bashrc` giving a colored prompt
-  (red for root), completion and the color aliases; `/root` has the
-  same file. Another shell is a matter for the configuration management
-  that follows the installation (a profile may still set `shell` for a
-  user to anything the image or its packages provide).
+- **Shell:** bash with a colored prompt (red for root), completion, the
+  color aliases and a long history, from
+  [`install/bashrc.sh`](../../install/bashrc.sh): the installer puts it
+  in `/etc/skel/.bashrc` and root's `.bashrc` on every system it
+  installs (NixOS too), so it changes without a new image. Another
+  shell is a matter for the configuration management that follows the
+  installation (a profile may still set `shell` for a user to anything
+  the image or its packages provide).
 - **History:** `last` and `last reboot` work from the first boot
   (`wtmpdb` on 26.04, with its PAM module recording logins; the classic
   `wtmp` on the older releases); `sar` has the load,

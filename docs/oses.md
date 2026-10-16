@@ -51,7 +51,8 @@ Whichever system it is, ump installs it the same way, from the same
   the profile turns them on, both for performance.
 - **Tools an operator wants:** `htop`, `atop`, `iotop`, `sar`, `tcpdump`,
   `mtr`, `dig`, `lsof`, `strace`, `jq`, `vim`, `tmux`, the disk and
-  hardware tools, and a message of the day with UMP's banner, the host,
+  hardware tools, the same bash prompt and aliases, and a message of the
+  day with UMP's banner, the host,
   its installation, load, memory, disk and addresses (`ump-motd`).
 - **Userdata:** what a system of yours needs on top: a script on Ubuntu
   and Debian, a NixOS module on NixOS ([userdata](userdata.md)).
@@ -76,7 +77,8 @@ and configures what depends on the machine. Out of the box:
   (`/etc/default/grub.d/ump-cmdline.cfg`, with how to change it).
 - **History:** `last` from the first boot, `sar` every ten minutes
   (`sysstat`), per-process history with `atop -r`.
-- **Shell:** bash with a colored prompt (red for root) and completion.
+- **Shell:** bash with a colored prompt (red for root), completion and
+  the color aliases, the same on every system ([`install/bashrc.sh`](../install/bashrc.sh)).
 - **SSH:** keys only, no root login unless the profile lists root
   (`/etc/ssh/sshd_config.d/50-ump.conf`, `10-ump-root.conf`).
 - **Network:** `/etc/netplan/10-ump.yaml` with the interfaces matched by

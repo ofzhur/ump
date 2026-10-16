@@ -63,7 +63,7 @@ mkdir -p "$WORK/storage/os/$OS/$ARCH" "$WORK/storage/install/nixos"
 cp "$IMAGE"/manifest.json "$WORK/storage/os/$OS/$ARCH/"
 [ -f "$IMAGE/rootfs.tar.zst" ] && ln -s "$IMAGE/rootfs.tar.zst" "$WORK/storage/os/$OS/$ARCH/rootfs.tar.zst"
 cp "$ROOT/install/nixos/ump.nix" "$WORK/storage/install/nixos/ump.nix"
-cp "$ROOT/install/motd.sh" "$WORK/storage/install/motd.sh"
+cp "$ROOT/install/motd.sh" "$ROOT/install/bashrc.sh" "$WORK/storage/install/"
 python3 -m http.server --bind 127.0.0.1 --directory "$WORK/storage" "$HTTP" >/dev/null 2>&1 &
 http_pid=$!
 
@@ -139,6 +139,7 @@ sudo -n nft list ruleset | grep -q "policy drop" && echo "firewall: input policy
 [ "$(awk 'NR > 1' /proc/swaps | wc -l)" -gt 0 ] && echo "swap: $(awk 'NR > 1 {print $1}' /proc/swaps | paste -sd" " -)"
 grep -q "^os=$OS" /etc/ump/install && echo "install record: $(grep "^image_version=" /etc/ump/install)"
 ump-motd | grep -q "Unus Mundus Provisioner" && echo "message of the day: ump-motd shows the banner"
+ump-motd | grep "host  \|uptime" | sed "s/\x1b\[[0-9;]*m//g; s/^ */message of the day: /"
 if [ "$FAMILY" = nixos ]; then
 	hello >/dev/null && echo "userdata: package hello installed"
 	[ "$(readlink /etc/localtime | sed "s#.*/zoneinfo/##")" = UTC ] && echo "userdata: time zone UTC wins over the profile's Europe/Berlin"
@@ -148,6 +149,8 @@ else
 	sudo -n grep -q "=== userdata test" /var/log/ump-userdata.log && echo "userdata: ran before the first boot (/var/log/ump-userdata.log)"
 fi
 CHECK
+# the prompt UMP gives bash on every system
+printf 'echo "PROMPT[$PS1]"; exit\n' | ssh "${ssh_opts[@]}" -tt ump@127.0.0.1 2>/dev/null | tr -d "\r" | grep -q 'PROMPT\[.*\\u@\\h.*\\w.* \$ \]' && echo "shell: UMP's prompt (user@host dir \$)" || echo "shell: NOT UMP's prompt"
 # the banner at an interactive login, as Ubuntu shows it
 printf 'exit\n' | ssh "${ssh_opts[@]}" -tt ump@127.0.0.1 2>/dev/null | tr -d "\r" | grep -q "Unus Mundus Provisioner" && echo "message of the day: shown at an interactive SSH login" || echo "message of the day: NOT shown at an interactive SSH login"
 echo "==> powering off"

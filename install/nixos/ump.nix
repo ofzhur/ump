@@ -8,6 +8,7 @@
 #                   disks, md arrays)
 #   nftables.conf   the firewall ruleset, the same UMP writes on Ubuntu
 #   motd.sh         the message of the day, the same script as on Ubuntu
+#   bashrc.sh       the shell setup (prompt, aliases), the same as on Ubuntu
 #
 # configuration.nix imports this module and every userdata module of the
 # profile (/etc/nixos/userdata/*.nix, in order), and NixOS merges them:
@@ -154,6 +155,10 @@ in
       ump-motd
     fi
   '';
+
+  # the shell: the same prompt, aliases and history settings as on Ubuntu
+  # and Debian, in place of NixOS's own prompt
+  programs.bash.promptInit = lib.mkDefault (builtins.readFile ./bashrc.sh);
 
   # --- what an operator wants on every server ------------------------------
 
