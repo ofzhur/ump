@@ -76,6 +76,15 @@ for t in sgdisk parted mdadm lvm cryptsetup wipefs mkfs.ext4 mkfs.xfs mkfs.vfat 
 	command -v "$t" >/dev/null || missing="$missing $t"
 done
 [ -z "$missing" ] && echo "tools: all present" || { echo "missing tools:$missing"; exit 1; }
+# the drivers of server NICs and storage load (without their hardware, a
+# driver loads and binds nothing); QEMU only has virtio, so this is what
+# catches a module left without its dependencies (igb without dca)
+broken=""
+for m in igb igc e1000e ixgbe i40e ice bnxt_en tg3 bnx2 bnx2x r8169 mlx4_en mlx5_core qede be2net sfc atlantic ena \
+	nvme ahci megaraid_sas mpt3sas aacraid hpsa smartpqi raid1 raid10 raid456; do
+	modprobe "$m" 2>/dev/null || broken="$broken $m"
+done
+[ -z "$broken" ] && echo "drivers: all load" || { echo "drivers that do not load:$broken"; exit 1; }
 echo "network: $(ip -br -4 addr show scope global | awk "{print \$1, \$3}" | paste -sd" " -)"
 echo "sshd: $(systemctl is-active ssh)   setup: $(systemctl is-active ump-rescue-setup)   resolved: $(systemctl is-active systemd-resolved)"
 systemctl --failed --no-legend | sed "s/^/failed unit: /"

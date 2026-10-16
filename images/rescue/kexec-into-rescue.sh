@@ -175,6 +175,11 @@ if [ -n "$keylist" ]; then
 else
 	echo "warning: no authorized keys ($keys does not exist and no -K given); the rescue system will only be reachable on the console" >&2
 fi
+# A kernel that crashes reboots after 30 seconds instead of hanging: on a
+# server without a console the machine then comes back on its own,
+# with the system on its disk (the provider's rescue system is armed for
+# one boot only), rather than waiting for a hardware reset.
+cmdline="$cmdline panic=30"
 [ -n "$extra" ] && cmdline="$cmdline $extra"
 
 echo "==> interface $iface ($mac): $ip4 via ${gw4:-?}${ip6:+, $ip6 via ${gw6:-?}}; DNS $dns; hostname $host"

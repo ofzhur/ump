@@ -53,7 +53,7 @@ for d in kernel/sound kernel/drivers/media kernel/drivers/net/wireless kernel/ne
 	kernel/drivers/gpu/drm/i915 kernel/drivers/gpu/drm/xe kernel/drivers/gpu/drm/msm kernel/drivers/gpu/drm/panfrost \
 	kernel/drivers/gpu/drm/etnaviv kernel/drivers/gpu/drm/lima kernel/drivers/gpu/drm/v3d kernel/drivers/gpu/drm/vc4 \
 	kernel/drivers/gpu/drm/tegra kernel/drivers/gpu/drm/nvidia kernel/drivers/comedi kernel/drivers/greybus \
-	kernel/drivers/most kernel/drivers/leds kernel/drivers/hwmon/pmbus kernel/drivers/mtd kernel/drivers/w1 \
+	kernel/drivers/most kernel/drivers/leds kernel/drivers/hwmon/pmbus kernel/drivers/w1 \
 	kernel/drivers/pcmcia kernel/drivers/parport kernel/drivers/infiniband kernel/drivers/net/wwan \
 	kernel/drivers/net/can kernel/drivers/net/usb kernel/drivers/net/ieee802154 kernel/drivers/net/hamradio \
 	kernel/drivers/net/wan kernel/drivers/net/ppp kernel/drivers/net/slip kernel/drivers/net/arcnet \
@@ -62,7 +62,7 @@ for d in kernel/sound kernel/drivers/media kernel/drivers/net/wireless kernel/ne
 	kernel/net/sched kernel/net/openvswitch kernel/net/batman-adv kernel/net/can kernel/net/dccp kernel/net/sctp \
 	kernel/net/tipc kernel/net/rds kernel/net/l2tp kernel/net/nfc kernel/net/ieee802154 kernel/net/6lowpan \
 	kernel/net/ax25 kernel/net/netrom kernel/net/rose kernel/net/x25 kernel/net/appletalk kernel/net/atm \
-	kernel/net/phonet kernel/net/caif kernel/net/mpls kernel/net/hsr kernel/net/xfrm kernel/net/key \
+	kernel/net/phonet kernel/net/caif kernel/net/mpls kernel/net/hsr kernel/net/key \
 	kernel/net/smc kernel/net/rxrpc kernel/net/qrtr kernel/net/vmw_vsock kernel/net/mptcp \
 	kernel/fs/ocfs2 kernel/fs/gfs2 kernel/fs/dlm kernel/fs/orangefs kernel/fs/ceph kernel/fs/afs kernel/fs/9p \
 	kernel/fs/coda kernel/fs/ubifs kernel/fs/jffs2 kernel/fs/cramfs kernel/fs/romfs kernel/fs/minix \
@@ -70,19 +70,49 @@ for d in kernel/sound kernel/drivers/media kernel/drivers/net/wireless kernel/ne
 	kernel/fs/freevxfs kernel/fs/qnx4 kernel/fs/qnx6 kernel/fs/adfs kernel/fs/affs kernel/fs/omfs \
 	kernel/fs/smb kernel/fs/ksmbd kernel/fs/erofs kernel/fs/zonefs kernel/fs/exfat kernel/fs/jfs \
 	kernel/drivers/misc/lis3lv02d kernel/drivers/misc/cardreader kernel/drivers/platform/x86/intel \
-	kernel/drivers/spi kernel/drivers/i3c kernel/drivers/pps kernel/drivers/ptp kernel/drivers/rapidio \
+	kernel/drivers/spi kernel/drivers/i3c kernel/drivers/rapidio \
 	kernel/drivers/siox kernel/drivers/slimbus kernel/drivers/soundwire kernel/drivers/thunderbolt \
 	kernel/drivers/usb/serial kernel/drivers/usb/misc kernel/drivers/usb/image kernel/drivers/usb/class \
 	kernel/drivers/video/backlight kernel/drivers/vdpa kernel/drivers/vfio kernel/drivers/visorbus \
 	kernel/drivers/zorro kernel/drivers/target kernel/drivers/memstick kernel/drivers/mmc kernel/drivers/mfd \
 	kernel/drivers/regulator kernel/drivers/accessibility kernel/drivers/auxdisplay kernel/drivers/firewire \
-	kernel/drivers/gnss kernel/drivers/hte kernel/drivers/mcb kernel/drivers/nfc kernel/drivers/ntb \
+	kernel/drivers/hte kernel/drivers/mcb kernel/drivers/nfc kernel/drivers/ntb \
 	kernel/drivers/peci kernel/drivers/power kernel/drivers/rpmsg kernel/drivers/ssb kernel/drivers/bcma \
-	kernel/drivers/uio kernel/drivers/uwb kernel/drivers/ipack kernel/drivers/fpga kernel/drivers/extcon \
-	kernel/drivers/counter kernel/drivers/dca kernel/drivers/cxl kernel/drivers/dax kernel/drivers/nvdimm \
+	kernel/drivers/uwb kernel/drivers/ipack kernel/drivers/fpga kernel/drivers/extcon \
+	kernel/drivers/counter kernel/drivers/cxl kernel/drivers/dax kernel/drivers/nvdimm \
 	kernel/drivers/crypto/ccp kernel/drivers/crypto/qat kernel/drivers/crypto/intel kernel/drivers/crypto/hisilicon \
 	kernel/sound kernel/drivers/tty/serial/8250/8250_pci.ko; do
 	rm -rf "/lib/modules/$kver/$d"
+done
+# Some of the remaining modules need one of those (igb needs dca, ixgbe
+# xfrm_algo, ice gnss, sfc mtd), and depmod quietly drops the missing
+# dependency: modprobe then fails on unknown symbols, and a bare-metal
+# server boots without its network. Those directories stay above; any
+# other module left without what it needs goes too, and the build stops
+# when that would be one of the network and storage drivers below
+# (test-boot.sh loads the same list).
+keep=" igb igc e1000e ixgbe i40e ice bnxt_en tg3 bnx2 bnx2x r8169 mlx4_en mlx5_core qede be2net sfc atlantic ena
+	virtio_net nvme ahci megaraid_sas mpt3sas aacraid hpsa smartpqi raid1 raid10 raid456 dm_mod "
+moddir="/lib/modules/$kver"
+while :; do
+	have="$(find "$moddir" -name '*.ko*' | sed 's#.*/##; s/\.ko.*//; s/-/_/g' | sort -u)"
+	broken=""
+	for f in $(find "$moddir/kernel" -name '*.ko*'); do
+		for dep in $(modinfo -F depends "$f" | tr ',' ' '); do
+			echo "$have" | grep -qx "$(echo "$dep" | tr - _)" || { broken="$broken $f"; break; }
+		done
+	done
+	[ -n "$broken" ] || break
+	for f in $broken; do
+		name="$(basename "$f" | sed 's/\.ko.*//; s/-/_/g')"
+		case "$keep" in
+		*[[:space:]]"$name"[[:space:]]*)
+			echo "finish.sh: the module pruning leaves $name without what it needs; keep its dependencies" >&2
+			exit 1 ;;
+		esac
+		echo "removing ${f#"$moddir/"}: it needs a removed module"
+		rm -f "$f"
+	done
 done
 depmod -a "$kver"
 

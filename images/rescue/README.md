@@ -147,7 +147,13 @@ networkd and resolved, OpenSSH, iproute2 and ethtool, the disk tools
 `lshw`, `jq`, `tmux`, and the firmware packages for NICs and storage
 controllers. [`finish.sh`](finish.sh) removes firmware for GPUs, Wi-Fi,
 Bluetooth and sound, documentation and locales, because none of it
-belongs on a server rescue system that lives in RAM.
+belongs on a server rescue system that lives in RAM, and kernel modules
+of the same kind. A module whose dependency went with them goes too,
+since modprobe would fail on it anyway; the build stops when that would
+be a server NIC or storage driver (`igb` needs `dca`, `ixgbe`
+`xfrm_algo`, `ice` `gnss`, `sfc` `mtd`, so those stay). Until 2026-10-17
+the image removed `dca`, and Intel I210 NICs (`igb`, Hetzner's AX
+servers) booted without network.
 
 Root has no password. It logs in over SSH with the keys from the kernel
 command line only, and on the console (serial or local) without a
@@ -216,7 +222,10 @@ address, gateway, hostname, `console=` settings and `root`'s
 `authorized_keys` (which is where `ump server rescue` put UMP's key) plus any
 `-K` keys, loads the image with `kexec` (the published static one, or the
 system's), syncs and remounts the file systems of a system that runs
-from disk read-only, and boots it. Reconnect as root
+from disk read-only, and boots it with `panic=30`: a kernel that
+crashes reboots after 30 seconds instead of hanging, so a server without
+a console comes back by itself, with the system on its disk (a
+provider's rescue system is armed for one boot only). Reconnect as root
 to the same address; the host key is new. `--dry-run` prints what would
 be loaded, `--no-exec` loads without booting. When the script runs over
 an SSH session, that session dies with the kernel without a proper
@@ -233,7 +242,9 @@ boots the built image in QEMU (`-kernel`/`-initrd`, 2 GB, a virtio disk
 that must stay unmounted, user networking with SSH forwarded to
 `127.0.0.1:2222`), waits for SSH with a throwaway key passed through
 `ump.authorized_keys`, and checks the hostname, the root file system,
-every tool the installer needs, the network, the services and that nothing
+every tool the installer needs, that the drivers of the common server
+NICs and storage controllers load (QEMU only has virtio, and a driver
+loads without its hardware), the network, the services and that nothing
 failed. Then it does what a provider rescue system will do: inside the
 guest it runs `kexec-into-rescue.sh` against an HTTP server on the host,
 which downloads and verifies the image, reads the DHCP configuration,
