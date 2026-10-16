@@ -193,6 +193,30 @@ func profilePath(name string) string {
 }
 
 // localProfiles lists the profiles in the directory, by name.
+// isNamedFile reports whether a file of the profiles directory is one of
+// the named sets (layouts.yaml, firewalls.yaml, users.yaml, userdata.yaml,
+// ...) rather than a profile.
+func isNamedFile(file string) bool {
+	for _, set := range namedFiles {
+		if set.file == file {
+			return true
+		}
+	}
+	return false
+}
+
+// checkProfileName refuses a profile name that is not valid, or that
+// would be the file of a named set.
+func checkProfileName(name string) error {
+	if err := config.ValidateAccountName(name); err != nil {
+		return err
+	}
+	if isNamedFile(name + ".yaml") {
+		return fmt.Errorf("%s.yaml holds the named %s entries; give the profile another name", name, name)
+	}
+	return nil
+}
+
 func localProfiles() ([]string, error) {
 	entries, err := os.ReadDir(config.ProfilesDir())
 	if err != nil {
@@ -201,7 +225,7 @@ func localProfiles() ([]string, error) {
 	var names []string
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || n == "layouts.yaml" || n == "firewalls.yaml" || n == "users.yaml" {
+		if e.IsDir() || !strings.HasSuffix(n, ".yaml") || isNamedFile(n) {
 			continue
 		}
 		names = append(names, strings.TrimSuffix(n, ".yaml"))
@@ -342,7 +366,7 @@ the only way.`,
 					return err
 				}
 			}
-			if err := config.ValidateAccountName(name); err != nil {
+			if err := checkProfileName(name); err != nil {
 				return usageErrorf(cmd, "profile name: %v", err)
 			}
 			if _, err := os.Stat(profilePath(name)); err == nil {

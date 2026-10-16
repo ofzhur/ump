@@ -94,7 +94,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 			if name, err = ui.Line("Name of the new profile", ""); err != nil {
 				return err
 			}
-			if err := config.ValidateAccountName(name); err != nil {
+			if err := checkProfileName(name); err != nil {
 				ui.Printf("%v\n", err)
 				continue
 			}

@@ -3728,3 +3728,30 @@ func TestDirectEntrySetsUpUMPKey(t *testing.T) {
 		t.Errorf("UMP's key works already: code %d, %v, %q", code, e.keyAdds, errOut)
 	}
 }
+
+func TestProfileListSkipsNamedFiles(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	out, _, code := e.run("", false, "config", "os", "list", "--no-headers")
+	if code != 0 {
+		t.Fatalf("list: code %d\n%s", code, out)
+	}
+	for _, set := range namedFiles {
+		name := strings.TrimSuffix(set.file, ".yaml")
+		for _, line := range strings.Split(out, "\n") {
+			if f := strings.Fields(strings.TrimPrefix(line, "*")); len(f) > 0 && f[0] == name {
+				t.Errorf("%s listed as a profile:\n%s", set.file, out)
+			}
+		}
+	}
+	if !strings.Contains(out, "debian-13") || strings.Contains(out, "invalid") {
+		t.Errorf("list:\n%s", out)
+	}
+	if _, errOut, code := e.run("", false, "config", "os", "create", "userdata", "--from", "ubuntu-26.04"); code != 2 || !strings.Contains(errOut, "userdata.yaml holds the named userdata entries") {
+		t.Errorf("create userdata: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--profile", "users", "--yes", "--dry-run"); code == 0 || !strings.Contains(errOut, "users is not a profile") {
+		t.Errorf("reinstall --profile users: code %d, %q", code, errOut)
+	}
+}

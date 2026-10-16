@@ -430,6 +430,9 @@ func (a *app) loadProfile(ctx context.Context, name, storage string) (*profile.P
 		}
 		return p, name, nil
 	}
+	if isNamedFile(name + ".yaml") {
+		return nil, "", fmt.Errorf("%s is not a profile: %s.yaml holds the named %s entries (ump config os list shows the profiles)", name, name, name)
+	}
 	if err := a.ensureProfiles(ctx, storage); err != nil {
 		return nil, "", err
 	}
