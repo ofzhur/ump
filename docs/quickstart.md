@@ -245,3 +245,7 @@ uptime, memory, the root disk and the addresses.
   README](../images/rescue/README.md#your-own-storage) says what to serve
   to run your own, and `storage:` in the [configuration](configuration.md)
   points ump at it.
+- **What comes after the installation.** A repository for the rest of
+  the infrastructure, Ansible by pull or push with ump as its inventory,
+  the `provision` step, security profiles, and where to get help: [next
+  steps](next-steps.md).

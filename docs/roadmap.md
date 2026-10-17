@@ -64,6 +64,7 @@ As of October 2026, ump does what the [README](../README.md) and the
   addresses, interfaces, attributes) as its inventory; the provision step
   of the profile is where it starts. It becomes the third kind of
   [platform](platforms.md), next to providers and operating systems.
+  [Next steps](next-steps.md) describes the setup it is meant for.
 - **The skill.** Packaged operating knowledge for AI agents that run a
   fleet with ump, Terraform and Ansible, with an approval step that stays
   human. [The design outline](skill.md) is written; the tool-side
