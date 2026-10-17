@@ -183,6 +183,47 @@ func entryCommand(url, hostname string, keys []provider.PublicKey, sudo bool) st
 	return cmd
 }
 
+// jumpNoise is what ssh says when the kexec cuts its session; the jump
+// is expected to end that way, so these lines are not shown.
+var jumpNoise = []string{"Read from remote host ", "client_loop: send disconnect", "Connection to ", "packet_write_wait: "}
+
+// dropLines passes what is written to w line by line, without the lines
+// that start with one of prefixes.
+type dropLines struct {
+	w        io.Writer
+	prefixes []string
+	partial  []byte
+}
+
+func (d *dropLines) Write(p []byte) (int, error) {
+	d.partial = append(d.partial, p...)
+	for {
+		i := bytes.IndexByte(d.partial, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		d.emit(d.partial[:i+1])
+		d.partial = d.partial[i+1:]
+	}
+}
+
+// Flush passes on a last line without a newline.
+func (d *dropLines) Flush() {
+	if len(d.partial) > 0 {
+		d.emit(d.partial)
+		d.partial = nil
+	}
+}
+
+func (d *dropLines) emit(line []byte) {
+	for _, p := range d.prefixes {
+		if bytes.HasPrefix(bytes.TrimLeft(line, "\r"), []byte(p)) {
+			return
+		}
+	}
+	_, _ = d.w.Write(line)
+}
+
 // enterImage loads the image on the machine as user (through sudo when
 // it is not root): the entry script downloads it from url, carries the
 // network configuration, the hostname and the keys over and kexecs. It
@@ -191,8 +232,10 @@ func entryCommand(url, hostname string, keys []provider.PublicKey, sudo bool) st
 func (a *app) enterImage(ctx context.Context, user, addr string, identities []string, identitiesOnly bool, url, hostname string, keys []provider.PublicKey) error {
 	argv := withSSHOptions(sshArgs(user, addr, identities, identitiesOnly, true, []string{entryCommand(url, hostname, keys, user != "root")}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
-	w := io.MultiWriter(a.stderr, &buf)
+	shown := &dropLines{w: a.stderr, prefixes: jumpNoise}
+	w := io.MultiWriter(shown, &buf)
 	code, err := a.sshExec(ctx, argv, nil, w, w)
+	shown.Flush()
 	if err != nil {
 		return err
 	}
@@ -385,11 +428,15 @@ type imageEntry struct {
 // enableProviderRescue arms the provider's rescue system with the keys,
 // resets the server into it unless noReboot, and prints what the provider
 // gave (password, host keys, notes) to out.
-func (a *app) enableProviderRescue(ctx context.Context, m provider.Machine, rs provider.Rescue, pw provider.Power, keys []provider.PublicKey, keyPaths []string, out io.Writer, noReboot bool) (info *provider.RescueInfo, user string, rebooted, wasUp bool, err error) {
+func (a *app) enableProviderRescue(ctx context.Context, m provider.Machine, rs provider.Rescue, pw provider.Power, keys []provider.PublicKey, keyPath string, keyPaths []string, out io.Writer, noReboot bool) (info *provider.RescueInfo, user string, rebooted, wasUp bool, err error) {
 	wasUp = !noReboot && a.probe(ctx, m.IPv4)
-	info, err = rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys})
+	info, err = rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys, Identity: keyPath, NoReboot: noReboot})
 	if err != nil {
 		return nil, "", false, false, fmt.Errorf("account %s: %w", m.Account, err)
+	}
+	if info.Ready {
+		// it rebooted and answers already; there is no going down to see
+		wasUp = false
 	}
 	rebooted = info.Reboots
 	if !noReboot && !info.Reboots {
@@ -488,7 +535,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
 				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and the running system does not let UMP in", m.Provider))
 			}
-			return nil, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system: ump installs such a server only through its running system, so it must let UMP in (as root or a sudo user, with one of your keys, ~/.ssh or the ssh-agent, or UMP's own, ump config key show); put one there, at the provider when the server is created, and run this again. Nothing was changed", addr, m.Provider)
+			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system: ump installs such a server only through its running system, so it must let UMP in (as root or a sudo user, with one of your keys, ~/.ssh or the ssh-agent, or UMP's own, ump config key show); put one there, at the provider when the server is created, and run this again. Nothing was changed", addr, m.Provider))
 		}
 		fmt.Fprintln(a.stderr, "Going through the provider's rescue system.")
 	}
@@ -513,7 +560,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if o.quiet {
 		out = a.stderr
 	}
-	info, user, _, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPaths, out, false)
+	info, user, _, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPath, keyPaths, out, false)
 	if err != nil {
 		return nil, err
 	}

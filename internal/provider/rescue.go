@@ -23,6 +23,13 @@ type PublicKey struct {
 // RescueOptions configure the rescue system.
 type RescueOptions struct {
 	Keys []PublicKey
+	// Identity is the path of UMP's private key, for a provider that sets
+	// the rescue system up through a console gateway reached over SSH
+	// (Linode's Lish).
+	Identity string
+	// NoReboot asks to only arm the rescue system for the next boot; a
+	// provider whose rescue system starts with a reboot refuses it.
+	NoReboot bool
 }
 
 // RescueInfo describes an enabled rescue system.
@@ -39,6 +46,10 @@ type RescueInfo struct {
 	// Reboots is set when the provider reboots the machine into the
 	// rescue system itself, so the caller must not reboot it again.
 	Reboots bool `json:"reboots,omitempty"`
+	// Ready is set when EnableRescue returns only once the rescue system
+	// answers on SSH, so the caller must not wait for the machine to go
+	// down first.
+	Ready bool `json:"-"`
 	// HostKeys are the fingerprints of the rescue system's SSH host keys
 	// when the provider reports them, for the operator to compare.
 	HostKeys []string `json:"host_keys,omitempty"`

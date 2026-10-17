@@ -13,7 +13,7 @@ systems](oses.md).
 | [`hetzner-cloud`](#hetzner-cloud-hetzner-cloud) | Hetzner Cloud | yes | goes through the provider's rescue system |
 | [`ovh`](#ovhcloud-ovh) | OVHcloud dedicated servers, VPS, Public Cloud | yes (a VPS: no key) | goes through the provider's rescue system; a VPS is rebuilt with UMP's key |
 | [`digitalocean`](#digitalocean-digitalocean) | DigitalOcean droplets | no | stops: the droplet must let ump in beforehand |
-| [`linode`](#linode-linode) | Linode (Akamai Cloud Computing) | no | Linode rebuilds the instance with UMP's key |
+| [`linode`](#linode-linode) | Linode (Akamai Cloud Computing) | yes: rescue mode (Finnix), set up through Lish | goes through the provider's rescue system |
 | [`vultr`](#vultr-vultr) | Vultr instances and bare metal | no | Vultr reinstalls the machine with UMP's key |
 | [`manual`](#manual-servers-manual) | servers added by hand | no | stops: the server must let ump in beforehand |
 
@@ -165,19 +165,29 @@ the IPv6 is the SLAAC address.
   addresses in the instance's IPv6 ranges; deleting an entry restores
   Linode's default (`*.ip.linodeusercontent.com`). Linode checks that
   the name resolves to the address, so create the forward record first.
-- Rescue: Linode's rescue mode boots Finnix, which has no SSH with keys,
-  so ump does not use it. `ump server rescue` and `ump server reinstall`
-  go in over SSH into the running system (as root or a sudo user, with
-  UMP's key or yours) and load the rescue image with kexec. When the
-  running system does not let UMP in, `ump server reinstall`, which
-  erases the instance anyway, has Linode rebuild it first with its
-  newest Debian image (Ubuntu when there is none), UMP's key for root
-  and a random root password nobody needs; UMP's key is also added to
-  your profile's SSH keys when the token may do that. ump waits up to
-  15 minutes and goes on from there. `ump server rescue` jumps into the
-  UMP rescue system only with `--force`, since nothing but the provider's console
-  brings the server back when it fails; it never rebuilds or erases. A system that does not boot is recovered with Lish, Linode's
-  console, or a rebuild in Cloud Manager.
+- Rescue: Linode's rescue mode, which boots Finnix from RAM with the
+  instance's disks attached, for one boot. Finnix takes no SSH key, so
+  ump sets it up through Lish, Linode's console gateway:
+  1. UMP's key goes into your profile's Lish keys (Cloud Manager:
+     profile → LISH Console Settings), next to the keys there, and stays
+     for the next time;
+  2. the instance is booted into rescue mode with the disks of its
+     configuration;
+  3. ump logs in to `lish-<region>.linode.com` as your Linode user with
+     UMP's key, waits for Finnix's root prompt on the console, and types
+     root's `authorized_keys` and the start of sshd.
+
+  From there it is a rescue system like Hetzner's: `ump server rescue`
+  loads the UMP rescue image from it, and `ump server reinstall` installs
+  through it, without `--force` and without touching the disks first.
+  About a minute and a quarter on a nanode, measured on 2026-10-17. The
+  next reboot boots the instance's configuration again, so `unrescue`
+  has nothing to disarm, and `rescue --no-reboot` is refused: rescue
+  mode cannot be armed for a later boot. When the running system lets UMP in over SSH,
+  that way is taken first, as everywhere. Lish must not be disabled in
+  the profile, and the token must be allowed to change the profile;
+  either refusal is reported. A system that does not boot is recovered
+  the same way, or with Lish by hand.
 - `ump server show` adds the image, hypervisor, group, tags, watchdog
   and backups, the type's CPUs, memory, disk and transfer with the
   price, the region's name and country, and the addresses (public and

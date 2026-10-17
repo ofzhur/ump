@@ -1828,7 +1828,7 @@ func TestRescueCommands(t *testing.T) {
 	}
 	e.write("accounts:\n  lo:\n    type: listonly\n    password: s3cret\n")
 	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--yes")
-	if code != 1 || !strings.Contains(errOut, "provider type listonly has no rescue system") {
+	if code != 5 || !strings.Contains(errOut, "provider type listonly has no rescue system") {
 		t.Errorf("no rescue: code %d, %q", code, errOut)
 	}
 }
@@ -3365,7 +3365,7 @@ func TestManualServers(t *testing.T) {
 	e.directRoot = false
 	e.inImage = false
 	_, errOut, code = e.run("", false, "server", "rescue", "rack-07", "--yes", "--account", "manual")
-	if code != 1 || !strings.Contains(errOut, "Warning: manual/rack-07") || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH, and provider type manual has no rescue system") {
+	if code != 5 || !strings.Contains(errOut, "Warning: manual/rack-07") || !strings.Contains(errOut, "no root access to 203.0.113.10 over SSH, and provider type manual has no rescue system") {
 		t.Errorf("rescue without access: code %d, %q", code, errOut)
 	}
 	if _, errOut, code := e.run("", false, "server", "reboot", "rack-07", "--yes", "--account", "manual"); code == 0 || !strings.Contains(errOut, "cannot") {
@@ -3928,5 +3928,16 @@ func TestServerListLive(t *testing.T) {
 	final := out[strings.LastIndex(out, "\x1b[J")+len("\x1b[J"):]
 	if !strings.HasPrefix(final, "ACCOUNT") || strings.Contains(final, "Waiting") || !strings.Contains(final, "slow") {
 		t.Errorf("final output %q", final)
+	}
+}
+
+func TestDropLines(t *testing.T) {
+	var out bytes.Buffer
+	d := &dropLines{w: &out, prefixes: jumpNoise}
+	io.WriteString(d, "==> booting into the UMP rescue system; reconnect as root@203.0.113.10\nRead from remote ")
+	io.WriteString(d, "host 203.0.113.10: Connection reset by peer\r\nclient_loop: send disconnect: Broken pipe\nlast")
+	d.Flush()
+	if got := out.String(); got != "==> booting into the UMP rescue system; reconnect as root@203.0.113.10\nlast" {
+		t.Errorf("%q", got)
 	}
 }

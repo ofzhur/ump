@@ -354,7 +354,7 @@ the image version, the provider's password where it issues one, the
 `ssh` command) without connecting.
 
 `rescue` never erases a server. Where the provider has no rescue
-system for ump (DigitalOcean, Linode, Vultr, servers added by hand),
+system for ump (DigitalOcean, Vultr, servers added by hand),
 the only way is the jump over SSH from the running system, and when
 that jump fails nothing but the provider's console brings the server
 back; so `rescue` refuses it with exit code 3 unless `--force` is
@@ -427,7 +427,7 @@ Puts an operating system on the server's disks from a [UMP base
 image](../images/base/README.md) the way a [profile](profiles.md)
 says, and boots it. A server whose provider rescue system takes no SSH
 key (an OVHcloud VPS), or whose provider has none and whose running
-system does not let UMP in (Linode, Vultr), is first reinstalled by the
+system does not let UMP in (Vultr), is first reinstalled by the
 provider with its stock Linux and UMP's key, which `reinstall` may do
 since it erases the server anyway; `rescue` never does. Where the
 provider can do neither (DigitalOcean, servers added by hand), the

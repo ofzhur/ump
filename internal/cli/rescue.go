@@ -258,7 +258,7 @@ func (a *app) providerRescueOnly(cmd *cobra.Command, m provider.Machine, prov pr
 	if format != "" {
 		out = io.Discard
 	}
-	info, user, rebooted, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPaths, out, o.noReboot)
+	info, user, rebooted, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPath, keyPaths, out, o.noReboot)
 	if err != nil {
 		return err
 	}

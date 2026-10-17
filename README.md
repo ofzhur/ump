@@ -61,7 +61,7 @@ reinstalls them and sets their reverse DNS:
 | Hetzner Cloud | `hetzner-cloud` | the servers of a project | yes |
 | OVHcloud | `ovh` | dedicated servers, VPS and Public Cloud instances | yes |
 | DigitalOcean | `digitalocean` | droplets | no: ump must be able to log in before it installs |
-| Linode (Akamai) | `linode` | cloud instances | no: Linode rebuilds with UMP's key when needed |
+| Linode (Akamai) | `linode` | cloud instances | yes: Linode's rescue mode, set up through its console |
 | Vultr | `vultr` | cloud instances and bare metal servers | no: Vultr reinstalls with UMP's key when needed |
 | by hand | `manual` | any machine with an address (`ump server add`) | no: ump must be able to log in |
 

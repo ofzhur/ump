@@ -32,7 +32,7 @@ Whatever happened, these bring a server back to a known state:
   leaves it.
 - **The provider's rescue system.** `ump server rescue NAME --via
   provider --no-image` resets into the provider's rescue system and
-  stops there (Hetzner Robot, Hetzner Cloud, OVH). Log in with the
+  stops there (Hetzner Robot, Hetzner Cloud, OVH, Linode's Finnix). Log in with the
   printed `ssh` command and look around; nothing is written to the
   disks.
 - **A hard reset.** `ump server reboot NAME --hard --yes` cuts the

@@ -8,9 +8,10 @@ As of October 2026, ump does what the [README](../README.md) and the
 - **Providers:** Hetzner Robot, Hetzner Cloud and OVHcloud (dedicated
   servers, VPS, Public Cloud instances), with listing, details, rename,
   reverse DNS, power, rescue and reinstall for all of them; Linode
-  (instances) and Vultr (instances, bare metal) with the same except a
-  provider rescue, so they are installed over SSH, after the provider's
-  own rebuild with UMP's key when SSH does not let UMP in; DigitalOcean
+  (instances) the same, its rescue mode set up for SSH through the Lish
+  console; Vultr (instances, bare metal) with the same except a
+  provider rescue, so it is installed over SSH, after Vultr's own
+  reinstall with UMP's key when SSH does not let UMP in; DigitalOcean
   (droplets) with listing, details, rename, power and an install over
   SSH, which needs SSH access to the droplet beforehand; the account
   wizard and the non-interactive form, secret references, the listing

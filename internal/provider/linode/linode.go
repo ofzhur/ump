@@ -1,12 +1,11 @@
 // Package linode integrates Linode instances (Akamai Cloud Computing)
 // through the Linode API v4 (https://techdocs.akamai.com/linode-api/).
 //
-// Linode's rescue mode boots Finnix, which offers no SSH with keys, so
-// this provider has no rescue system for ump: it lists, describes,
-// renames, powers and sets reverse DNS, and ump reaches an instance for
-// a reinstall over SSH into its running system; when that does not let
-// it in, Linode rebuilds the instance with a stock image and UMP's key
-// (StockInstaller).
+// It lists, describes, renames, powers and sets reverse DNS. Its rescue
+// system is Linode's rescue mode, Finnix, set up for SSH with UMP's key
+// through the Lish console (rescue.go), so an instance is reached
+// without touching its disks; the rebuild with a stock image and UMP's
+// key (StockInstaller) remains for a caller that asks for it.
 package linode
 
 import (
@@ -47,7 +46,7 @@ var Type = provider.Type{
 		{
 			Key:      "token",
 			Label:    "Personal access token",
-			Help:     "Cloud Manager: your profile → API Tokens → Create a Personal Access Token, with Linodes and IPs read/write and Images read only",
+			Help:     "Cloud Manager: your profile → API Tokens → Create a Personal Access Token, with Linodes and IPs read/write and Images read only (the rescue system also adds UMP's key to the profile's Lish keys)",
 			Secret:   true,
 			Required: true,
 		},
@@ -61,7 +60,7 @@ var Type = provider.Type{
 	New: newProvider,
 }
 
-var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS, provider.CapPower}
+var capabilities = []provider.Capability{provider.CapInventory, provider.CapDescribe, provider.CapRename, provider.CapReverseDNS, provider.CapPower, provider.CapRescue}
 
 // stockWait is how long a rebuilt instance may take to let UMP in.
 var stockWait = 15 * time.Minute
@@ -73,6 +72,8 @@ type Provider struct {
 
 	mu      sync.Mutex
 	regions map[string]Region
+	// console opens an instance's console; nil means through Lish.
+	console consoleDialer
 }
 
 func newProvider(account string, settings map[string]string, opts provider.Options) (provider.Provider, error) {
