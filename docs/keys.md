@@ -91,6 +91,42 @@ and `agent` are taken. A key line must be a public key (`ssh-ed25519`,
 is yours: keys from another machine or from your password manager go in
 by hand just as well.
 
+## Keys in rescue systems
+
+Every rescue system ump boots, the provider's on the way and the UMP
+rescue system, gets UMP's own key: ump cannot do without it, so it is
+always there. Which of your keys go in too is your choice, made once
+with key references as above:
+
+```console
+$ ump config key rescue oleg work      # saved as staging.keys in the configuration
+$ ump config key rescue                # which ones go in
+$ ump config key rescue --clear        # UMP's key alone again
+$ ump server rescue web-01 --ssh-key laptop   # one more, for this run (a reference too)
+```
+
+`ump config key list` marks them. With none chosen and no `--ssh-key`,
+`ump server rescue` and `ump server reinstall` print a boxed warning
+before they start: only UMP's key opens the rescue system, you get there
+only through ump (`ump ssh NAME --staging`), and if UMP's key is lost
+nobody does. ump no longer puts the keys next to your `~/.ssh/id_*`
+files in by itself; choose `local` for that.
+
+The keys reach the providers the way each one takes them:
+
+| Provider | How the rescue keys get there |
+|---|---|
+| Hetzner Robot | registered in Robot's key management (under their ump names, unless Robot knows them already), and the rescue system is armed with their fingerprints |
+| Hetzner Cloud | registered as SSH keys of the project, and the rescue system is armed with them |
+| OVHcloud dedicated | the rescue system takes one key: UMP's; the others come with the UMP rescue system |
+| OVHcloud VPS | its rescue system takes no key; the VPS is rebuilt with UMP's key for a reinstall |
+| Linode | UMP's key in the profile's Lish keys, all of them typed into Finnix's `authorized_keys` through Lish; registered as profile SSH keys for a rebuild |
+| Vultr | registered as account SSH keys, and written to root's `authorized_keys` for its reinstall |
+| DigitalOcean | none: the droplet must already let ump in |
+
+Whatever the provider's rescue system took, the UMP rescue system that
+ump loads from it gets every one of them on its kernel command line.
+
 ## Using keys
 
 ```console

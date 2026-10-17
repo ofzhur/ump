@@ -78,6 +78,12 @@ More public keys are kept under names in ` + config.AbbreviateHome(keysPath()) +
 a user's keys may name them (keys: [ump, oleg, laptop]) next to local,
 agent, a file or a key line.
 
+Every rescue system ump boots gets UMP's key, which ump needs to get in,
+and the keys chosen with ump config key rescue (staging.keys), so that
+you get in without ump too; they are registered at the providers that
+keep keys (Hetzner Robot and Cloud, Vultr, Linode) under their names.
+Without any, ump warns before each rescue and reinstall.
+
 On a terminal, ump config key add without arguments asks for a name
 and where the key comes from.`,
 		Example: `  ump config key list                   # UMP's own key first, then the named ones
@@ -86,10 +92,12 @@ and where the key comes from.`,
   ump config key add oleg --file ~/.ssh/id_ed25519.pub
   ump config key add laptop --line 'ssh-ed25519 AAAA... oleg@laptop'
   ump config key add work --agent        # the keys ssh-add -L lists, one name each (work, work-2, ...)
+  ump config key rescue oleg work        # these go into every rescue system, next to UMP's
+  ump config key rescue                 # which ones do
   ump config key list
   ump config key remove laptop`,
 	}
-	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyRemoveCmd())
+	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyRemoveCmd(), a.newKeyRescueCmd())
 	return cmd
 }
 
@@ -196,7 +204,11 @@ func (a *app) newKeyListCmd() *cobra.Command {
 			}
 			rows := [][]string{}
 			if k, path, err := a.stagingKey(cfg); err == nil {
-				rows = append(rows, []string{"ump", keyType(k.Line()), keyComment(k.Line()), k.FingerprintSHA256(), "UMP's own key (" + config.AbbreviateHome(path) + ")"})
+				rows = append(rows, []string{"ump", keyType(k.Line()), keyComment(k.Line()), k.FingerprintSHA256(), "UMP's own key (" + config.AbbreviateHome(path) + "), in every rescue system"})
+			}
+			rescue := map[string]bool{}
+			for _, r := range cfg.Staging.Keys {
+				rescue[r] = true
 			}
 			names := make([]string, 0, len(keys))
 			for n := range keys {
@@ -208,7 +220,11 @@ func (a *app) newKeyListCmd() *cobra.Command {
 				if k, err := sshkey.Parse(keys[n]); err == nil {
 					fp = k.FingerprintSHA256()
 				}
-				rows = append(rows, []string{n, keyType(keys[n]), keyComment(keys[n]), fp, ""})
+				note := ""
+				if rescue[n] {
+					note = "in every rescue system"
+				}
+				rows = append(rows, []string{n, keyType(keys[n]), keyComment(keys[n]), fp, note})
 			}
 			return writeTable(a.stdout, []string{"NAME", "TYPE", "COMMENT", "FINGERPRINT", "NOTE"}, rows, noHeaders)
 		},
@@ -332,4 +348,71 @@ func truncateKey(s string) string {
 		return s[:40] + "..."
 	}
 	return s
+}
+
+func (a *app) newKeyRescueCmd() *cobra.Command {
+	var clear bool
+	cmd := &cobra.Command{
+		Use:   "rescue [REF...]",
+		Short: "Choose the keys that go into every rescue system next to UMP's",
+		Long: `Without arguments, show the keys that go into every rescue system ump
+boots, next to UMP's own key, which is always there. With arguments, set
+them: key references as in a user's keys (a named key from ump config
+key list, local, agent, a file, or a key line), saved as staging.keys in
+the configuration. They are registered at the providers that keep keys
+(Hetzner Robot and Cloud, Vultr, Linode) under their names. --clear
+leaves UMP's key alone again, and ump warns before each rescue and
+reinstall.`,
+		Example: `  ump config key rescue oleg work
+  ump config key rescue local
+  ump config key rescue --clear`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, path, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+			if clear && len(args) > 0 {
+				return usageErrorf(cmd, "--clear takes no key references")
+			}
+			if !clear && len(args) == 0 {
+				if len(cfg.Staging.Keys) == 0 {
+					fmt.Fprintln(a.stdout, "Only UMP's own key goes into rescue systems; ump config key rescue NAME... adds yours.")
+					return nil
+				}
+				_, labels, _, err := a.rescueKeys(cfg, nil)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(a.stdout, "Rescue systems get: %s\n", strings.Join(labels, ", "))
+				return nil
+			}
+			refs := dedupe(append([]string{}, args...))
+			for _, r := range refs {
+				if r == "ump" {
+					return usageErrorf(cmd, "ump is always in rescue systems; name your own keys")
+				}
+			}
+			old := cfg.Staging.Keys
+			cfg.Staging.Keys = refs
+			if clear {
+				cfg.Staging.Keys = nil
+			}
+			// every reference must resolve now, not at the next rescue
+			if _, _, _, err := a.rescueKeys(cfg, nil); err != nil {
+				cfg.Staging.Keys = old
+				return err
+			}
+			if err := config.Save(path, cfg); err != nil {
+				return err
+			}
+			if clear {
+				fmt.Fprintln(a.stdout, "Only UMP's own key goes into rescue systems now.")
+				return nil
+			}
+			fmt.Fprintf(a.stdout, "Rescue systems get UMP's key and %s (saved as staging.keys in %s).\n", strings.Join(refs, ", "), config.AbbreviateHome(path))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&clear, "clear", false, "no keys but UMP's")
+	return cmd
 }

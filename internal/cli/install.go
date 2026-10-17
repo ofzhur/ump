@@ -87,7 +87,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
-	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file for the administrator of the new system (repeatable)")
+	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "another key for the administrator of the new system and the rescue system on the way: a named key, local, agent, a file or a key line (repeatable)")
 	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, userdata='[ubuntu, web]'; repeatable)")
 	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
@@ -147,18 +147,15 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err != nil {
 		return err
 	}
-	// the administrator of the new system gets UMP's key, the user's own
-	// public keys (next to the usual ~/.ssh/id_* files) and the --ssh-key
-	// files
-	keyFiles := append([]string{}, o.keyFiles...)
-	for _, id := range sshkey.DefaultIdentityFiles() {
-		if _, err := os.Stat(id + ".pub"); err == nil {
-			keyFiles = append(keyFiles, id+".pub")
-		}
-	}
-	keys, keyPaths, keyPath, err := a.rescueKeys(cfg, keyFiles)
+	// the rescue system on the way gets UMP's key, the keys chosen for
+	// rescue systems and the --ssh-key references; the administrator of
+	// the new system gets the --ssh-key ones too (below)
+	keys, keyPaths, keyPath, err := a.rescueKeys(cfg, o.keyFiles)
 	if err != nil {
 		return err
+	}
+	if len(keys) == 1 {
+		a.warnUMPKeyOnly(ref)
 	}
 	m, prov, err := a.resolveOne(cmd, ref)
 	if err != nil {

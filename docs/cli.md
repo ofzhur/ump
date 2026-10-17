@@ -35,8 +35,8 @@ ump
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <file>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
-│   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <file>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
 │   ├── start        <ref> [--wait]
@@ -337,7 +337,7 @@ in time.
 ## Rescue: `ump server rescue|unrescue`
 
 ```
-ump server rescue REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key FILE]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-o json|yaml] [-- COMMAND...]
+ump server rescue REF [--image URL] [--via auto|direct|provider] [--no-image] [--ssh-key REF]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-o json|yaml] [-- COMMAND...]
 ump server unrescue REF [--reboot] [--wait] [--yes]
 ```
 
@@ -378,10 +378,15 @@ the way:
    DNS, hostname and keys over and kexecs into it, with no reboot
    through the provider. The running system is not shut down; its file
    systems are synced and remounted read-only first.
-3. Otherwise the provider's rescue system is enabled with UMP's key and
-   any `--ssh-key` files (registering keys the provider does not know
-   yet), the server is reset into it, and once it answers ump reports
-   it and loads the image from there the same way.
+3. Otherwise the provider's rescue system is enabled with UMP's key,
+   the keys chosen with `ump config key rescue` and any `--ssh-key`
+   references (registering keys the provider does not know yet), the
+   server is reset into it, and once it answers ump reports it and loads
+   the image from there the same way.
+
+The same keys go into the UMP rescue system. With none but UMP's, a
+boxed warning comes first; see [keys in rescue
+systems](keys.md#keys-in-rescue-systems).
 
 The terminal is handed over only once the UMP rescue system answers with
 its version. `--via direct` or `--via provider` forces one way (the
@@ -420,7 +425,7 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key FILE]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -477,7 +482,8 @@ carried over from the running system), uniform interface names (`ext01`,
 `int01`, ...; see [the profiles](profiles.md#interface-names)), resolvers
 1.1.1.1 and 8.8.8.8, the profile's users with their keys (the default:
 the sudo user `ump` with UMP's key and your `~/.ssh/id_*.pub` keys, and
-no root login over SSH; `--ssh-key` adds files to the administrator;
+no root login over SSH; `--ssh-key` adds keys (any key reference) to
+the administrator and to the rescue system on the way;
 `agent` in a profile takes what `ssh-add -L` lists), the time zone
 (`--timezone`), and a kernel command
 line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the kernel's
@@ -692,6 +698,9 @@ file; a second one becomes `NAME-2`), `add NAME --line 'ssh-... AAAA...'`,
 `add NAME --agent` (what `ssh-add -L` lists), `add` alone on a terminal
 (asks for the name and where the key comes from), `list` (with `ump`, UMP's
 own) and `remove NAME`. The names `ump`, `local` and `agent` are taken.
+`rescue REF...` chooses the keys that go into every rescue system next
+to UMP's (`staging.keys`), `rescue` alone shows them, `rescue --clear`
+drops them; see [keys in rescue systems](keys.md#keys-in-rescue-systems).
 
 ## Examples
 

@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
 )
@@ -70,7 +72,7 @@ to either way. rescue never rebuilds or erases a server.`,
 			return a.rescueServer(cmd, refs[0], command, o)
 		},
 	}
-	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "additional public key file to put into the rescue system (repeatable)")
+	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "another key for the rescue system, next to UMP's and staging.keys: a named key, local, agent, a file or a key line (repeatable)")
 	sub.Flags().StringVar(&o.image, "image", "", "base URL of the UMP rescue image (default: staging.image in the configuration)")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to get root first: direct (SSH into the running system), provider (its rescue system), or auto")
 	sub.Flags().BoolVar(&o.noImage, "no-image", false, "stop in the provider's rescue system instead of loading UMP's rescue image")
@@ -121,23 +123,94 @@ func (a *app) stagingKey(cfg *config.Config) (*sshkey.Key, string, error) {
 }
 
 // rescueKeys collects the public keys for the rescue system: UMP's own
-// key first, then the given files.
-func (a *app) rescueKeys(cfg *config.Config, files []string) (keys []provider.PublicKey, paths []string, keyPath string, err error) {
+// key first, which ump itself gets in with and which is always there,
+// then the keys chosen for rescue systems (staging.keys) and the
+// --ssh-key references of this run, each once. labels name them for
+// people: "ump (path)" and the references.
+func (a *app) rescueKeys(cfg *config.Config, refs []string) (keys []provider.PublicKey, labels []string, keyPath string, err error) {
 	k, keyPath, err := a.stagingKey(cfg)
 	if err != nil {
 		return nil, nil, "", err
 	}
 	keys = append(keys, provider.PublicKey{Name: keyName(k, keyPath+".pub"), Data: k.Line(), Fingerprint: k.FingerprintMD5()})
-	paths = append(paths, keyPath+".pub")
-	for _, p := range files {
-		k, err := sshkey.ReadFile(expandHome(p))
+	labels = append(labels, "ump ("+config.AbbreviateHome(keyPath+".pub")+")")
+	seen := map[string]bool{k.FingerprintSHA256(): true}
+	resolve := a.keyResolver(cfg)
+	for _, ref := range append(append([]string{}, cfg.Staging.Keys...), refs...) {
+		lines, err := resolve(ref)
 		if err != nil {
-			return nil, nil, "", err
+			return nil, nil, "", fmt.Errorf("rescue key %q: %w", ref, err)
 		}
-		keys = append(keys, provider.PublicKey{Name: keyName(k, p), Data: k.Line(), Fingerprint: k.FingerprintMD5()})
-		paths = append(paths, p)
+		added := 0
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			pk, err := sshkey.Parse(line)
+			if err != nil {
+				return nil, nil, "", fmt.Errorf("rescue key %q: %w", ref, err)
+			}
+			if seen[pk.FingerprintSHA256()] {
+				continue
+			}
+			seen[pk.FingerprintSHA256()] = true
+			name := keyName(pk, ref)
+			if isNamedKeyRef(ref) {
+				// registered at the providers under its ump name
+				name = ref
+				if added > 0 {
+					name = fmt.Sprintf("%s-%d", ref, added+1)
+				}
+			}
+			keys = append(keys, provider.PublicKey{Name: name, Data: pk.Line(), Fingerprint: pk.FingerprintMD5()})
+			added++
+		}
+		if added > 0 {
+			labels = append(labels, ref)
+		}
 	}
-	return keys, paths, keyPath, nil
+	return keys, labels, keyPath, nil
+}
+
+// isNamedKeyRef says whether a key reference names a key kept with ump
+// config key add (not ump, local, agent, a file or a key line).
+func isNamedKeyRef(ref string) bool {
+	switch ref {
+	case "ump", "local", "agent":
+		return false
+	}
+	return !profile.IsKeyLine(ref) && !strings.ContainsAny(ref, "/~ ") && !strings.HasSuffix(ref, ".pub")
+}
+
+// warnUMPKeyOnly says, so that nobody misses it, that only UMP's own key
+// opens the rescue system: nobody gets in but through ump, and losing
+// UMP's key loses the way in.
+func (a *app) warnUMPKeyOnly(name string) {
+	lines := []string{
+		"WARNING: only UMP's own key opens the rescue system of " + name + ".",
+		"",
+		"None of your keys goes in. You reach it only through ump (ump ssh",
+		name + " --staging), and if UMP's key is lost, nobody gets in.",
+		"",
+		"Choose your keys once:  ump config key rescue NAME...",
+		"  (a named key from ump config key list, local, agent, or a file)",
+		"or for this run:        --ssh-key NAME",
+	}
+	width := 0
+	for _, l := range lines {
+		if n := utf8.RuneCountInString(l); n > width {
+			width = n
+		}
+	}
+	bar := strings.Repeat("━", width+2)
+	var b strings.Builder
+	b.WriteString("┏" + bar + "┓\n")
+	for _, l := range lines {
+		b.WriteString("┃ " + l + strings.Repeat(" ", width-utf8.RuneCountInString(l)) + " ┃\n")
+	}
+	b.WriteString("┗" + bar + "┛\n")
+	fmt.Fprint(a.stderr, b.String())
 }
 
 // keyName is the name a key is registered under at a provider.
@@ -202,6 +275,9 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	keys, keyPaths, keyPath, err := a.rescueKeys(cfg, o.keyFiles)
 	if err != nil {
 		return err
+	}
+	if len(keys) == 1 {
+		a.warnUMPKeyOnly(ref)
 	}
 	m, prov, err := a.resolveOne(cmd, ref)
 	if err != nil {

@@ -75,6 +75,7 @@ cache_ttl: 5m                          # how long a server listing is served fro
 staging:
   key: ~/.config/ump/staging_ed25519   # UMP's own SSH key (the default; generated on first use)
   image: https://ump.zhurko.de/dl/rescue  # the rescue image alone, when it lives elsewhere than <storage>/rescue
+  keys: [oleg]                         # your keys in every rescue system, next to UMP's (ump config key rescue)
 
 ```
 
@@ -88,6 +89,7 @@ backend](state.md).
 | `accounts` | One entry per [provider account](providers.md): the `type` and the type's settings, each a plain value or a secret reference. `ump config isp types` lists the settings. |
 | `storage` | The base URL of the [storage](#storage), without a trailing slash. Default `https://ump.zhurko.de/dl`. |
 | `staging.key` | The path of UMP's own private SSH key; the public key is next to it with `.pub`. Default `staging_ed25519` in the configuration directory. |
+| `staging.keys` | Key references (a named key, `local`, `agent`, a file, a key line) that go into every rescue system next to UMP's key and are registered at the providers that keep keys; `ump config key rescue` sets them. Empty: only UMP's key, with a warning before each rescue and reinstall. |
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. |
 | `wait` | How long ump waits for a machine to answer: after a reboot with `--wait`, for the UMP rescue system after the jump into it, and after a provider reinstalled a machine with UMP's key. A Go duration (`20m`, `1h`); default `15m`, which covers slow providers and large machines while a kexec usually answers within a minute. Every wait prints its limit and marks each minute waited (`Waiting for ... (up to 15m) .....1m.....`); `UMP_WAIT=30m` sets it for one run. A provider whose reinstall takes longer (a Vultr bare metal server) waits its own longer limit unless `wait` is set. |
 | `cache_ttl` | How long a server listing is served from the cache before the providers are asked again, by `ump server list` and every command that looks a server up. A Go duration (`1m`, `30s`); default `5m`; `0` asks the providers every time. A command that changes a server makes its account's listings ask the provider again; `--refresh` does for one listing, `UMP_CACHE_TTL=0` for one run. See [the listing cache](cli.md#the-listing-cache-and---diff). |

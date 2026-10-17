@@ -1704,7 +1704,7 @@ func TestRescueCommands(t *testing.T) {
 	if fi, err := os.Stat(umpKey); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("ump key: %v %v", fi, err)
 	}
-	wantPrefix := "Rescue system enabled for fake/1 (web-01, 203.0.113.10); rebooting into it.\nSSH keys: " + umpKey + ".pub, " + keyFile + "\nPassword: r3scue\n"
+	wantPrefix := "Rescue system enabled for fake/1 (web-01, 203.0.113.10); rebooting into it.\nSSH keys: ump (" + umpKey + ".pub), " + keyFile + "\nPassword: r3scue\n"
 	if !strings.HasPrefix(out, wantPrefix) {
 		t.Errorf("rescue output:\n got %q\nwant prefix %q", out, wantPrefix)
 	}
@@ -2252,13 +2252,16 @@ func TestInstallServer(t *testing.T) {
 	}
 
 	// the options reach the installer; --storage moves the rescue image too;
-	// the user's own public key goes along
+	// the user's own public key goes along once chosen for rescue systems
 	resetFakePower()
 	e.directRoot = true
 	sshDir := filepath.Join(os.Getenv("HOME"), ".ssh")
 	os.MkdirAll(sshDir, 0o700)
 	os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("private\n"), 0o600)
 	os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop\n"), 0o644)
+	if out, errOut, code := e.run("", false, "config", "key", "rescue", "local"); code != 0 || !strings.Contains(out, "Rescue systems get UMP's key and local") {
+		t.Fatalf("config key rescue local: code %d, %q %q", code, out, errOut)
+	}
 	out, _, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--hostname", "db-01.example.net", "--ipv6", "--mitigations", "--disks", "/dev/sda,/dev/sdb", "--timezone", "Europe/Berlin", "--storage", "https://files.example.net/ump/", "-o", "json")
 	if code != 0 {
 		t.Fatalf("install with options: code %d\n%s", code, out)
@@ -3939,5 +3942,58 @@ func TestDropLines(t *testing.T) {
 	d.Flush()
 	if got := out.String(); got != "==> booting into the UMP rescue system; reconnect as root@203.0.113.10\nlast" {
 		t.Errorf("%q", got)
+	}
+}
+
+func TestRescueKeys(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	if _, _, code := e.run("", false, "config", "key", "add", "oleg", "--line", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 oleg@laptop"); code != 0 {
+		t.Fatal("key add")
+	}
+
+	// nothing chosen: the fat warning, and only UMP's key goes in
+	out, _, code := e.run("", false, "config", "key", "rescue")
+	if code != 0 || !strings.Contains(out, "Only UMP's own key goes into rescue systems") {
+		t.Errorf("show none: %d %q", code, out)
+	}
+	_, errOut, code := e.run("", false, "server", "rescue", "web-01", "--account", "one", "--via", "provider", "--no-image", "--no-connect", "--yes")
+	if code != 0 || !strings.Contains(errOut, "┃ WARNING: only UMP's own key opens the rescue system of web-01.") || !strings.Contains(errOut, "ump config key rescue NAME") {
+		t.Errorf("warning: code %d, %q", code, errOut)
+	}
+
+	// a named key, chosen once, goes in under its name; ump and unknown
+	// references are refused
+	if _, errOut, code := e.run("", false, "config", "key", "rescue", "ump"); code != exitUsage || !strings.Contains(errOut, "ump is always in rescue systems") {
+		t.Errorf("rescue ump: %d %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "rescue", "nobody"); code == 0 || !strings.Contains(errOut, `rescue key "nobody"`) {
+		t.Errorf("rescue nobody: %d %q", code, errOut)
+	}
+	if out, _, code := e.run("", false, "config", "key", "rescue", "oleg"); code != 0 || !strings.Contains(e.read(), "keys:\n    - oleg") {
+		t.Errorf("rescue oleg: %d %q\n%s", code, out, e.read())
+	}
+	if out, _, _ := e.run("", false, "config", "key", "list"); !strings.Contains(out, "in every rescue system") {
+		t.Errorf("list does not mark oleg: %q", out)
+	}
+	out, errOut, code = e.run("", false, "server", "rescue", "web-01", "--account", "one", "--via", "provider", "--no-image", "--no-connect", "--yes")
+	if code != 0 || strings.Contains(errOut, "WARNING") || !strings.Contains(out, "), oleg\n") {
+		t.Errorf("with oleg: code %d, out %q, stderr %q", code, out, errOut)
+	}
+	// registered at the provider under its ump name
+	if len(fakePower.keys) != 2 || !strings.HasPrefix(fakePower.keys[1], "oleg ") {
+		t.Errorf("keys at the provider %q", fakePower.keys)
+	}
+
+	// --ssh-key takes a reference for one run; a key given twice goes in once
+	_, errOut, code = e.run("", false, "server", "rescue", "web-01", "--account", "one", "--via", "provider", "--no-image", "--no-connect", "--yes", "--ssh-key", "oleg", "--ssh-key", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 again")
+	if code != 0 || strings.Contains(errOut, "WARNING") {
+		t.Errorf("--ssh-key: code %d, %q", code, errOut)
+	}
+	if len(fakePower.keys) != 2 {
+		t.Errorf("a key given twice went in twice: %q", fakePower.keys)
+	}
+	if out, _, code := e.run("", false, "config", "key", "rescue", "--clear"); code != 0 || strings.Contains(e.read(), "- oleg") {
+		t.Errorf("clear: %d %q", code, out)
 	}
 }

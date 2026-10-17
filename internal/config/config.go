@@ -73,6 +73,11 @@ type Staging struct {
 	// next to it with ".pub". Default: staging_ed25519 in the user's
 	// configuration directory. The key is generated on first use.
 	Key string `yaml:"key,omitempty"`
+	// Keys are key references (a named key, local, agent, a file, a key
+	// line) that go into every rescue system next to UMP's own key, and
+	// are registered at the providers that keep keys; ump config key
+	// rescue sets them, --ssh-key adds to them for one run.
+	Keys []string `yaml:"keys,omitempty"`
 	// Image is the base URL of the UMP rescue image (the staging system):
 	// <arch>/manifest.json and the files it names live below it. Default:
 	// the rescue directory of the storage.
