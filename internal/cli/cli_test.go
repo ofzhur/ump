@@ -1419,6 +1419,13 @@ func TestRenameServer(t *testing.T) {
 		t.Errorf("same name: code %d, out %q, stderr %q", code, out, errOut)
 	}
 
+	// the server's own name or ID is not taken by another server (a rename
+	// that only changes the case of the name matches the server itself)
+	out, _, code = e.run("", false, "server", "rename", "web-01", "1", "--account", "one")
+	if code != 0 || out != "Renamed fake/1 (account one) from web-01 to 1\n" {
+		t.Errorf("own ID as the new name: code %d, %q", code, out)
+	}
+
 	// a name another server already has is refused unless forced
 	_, errOut, code = e.run("", false, "server", "rename", "web-01", "db-01", "--account", "one")
 	if code != 1 || !strings.Contains(errOut, `the name "db-01" is already used by fake/2 (account one); pick another name or use --force`) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -123,7 +124,12 @@ func (a *app) renameServer(cmd *cobra.Command, ref, newName, output string, forc
 	if !ok {
 		return fmt.Errorf("account %s: provider type %s cannot rename servers", m.Account, m.Provider)
 	}
-	if taken := matching(machines, newName); len(taken) > 0 && !force {
+	// The server itself does not take the name: renaming Web-01 to
+	// web-01 changes only the case, which names ignore when matching.
+	taken := slices.DeleteFunc(matching(machines, newName), func(o provider.Machine) bool {
+		return o.Account == m.Account && o.Ref() == m.Ref()
+	})
+	if len(taken) > 0 && !force {
 		return fmt.Errorf("the name %q is already used by %s; pick another name or use --force", newName, candidates(taken))
 	}
 
