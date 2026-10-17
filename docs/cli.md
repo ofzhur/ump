@@ -445,7 +445,9 @@ since it erases the server anyway; `rescue` never does. Where the
 provider can do neither (DigitalOcean, servers added by hand), the
 running system must let UMP in before the installation, with one of
 your keys or UMP's; without that, `reinstall` stops before it changes
-anything. The profile (`--profile`, default `default`: a file
+anything. So does an OS the storage has no image of for the machine's
+architecture (Arch Linux on arm64), told by the provider or the running
+system; when neither tells, ump warns and asks. The profile (`--profile`, default `default`: a file
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
 its own), the users with their keys, the userdata that runs in the new

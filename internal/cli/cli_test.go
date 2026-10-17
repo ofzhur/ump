@@ -257,6 +257,8 @@ type testEnv struct {
 	directRoot bool
 	// forgotHosts are the addresses whose old host keys ump removed
 	forgotHosts []string
+	// uname is what the running system says for uname -m; empty: nothing
+	uname string
 	// directSudo: the running system refuses root, but lets UMP in as
 	// ump, who has sudo without a password
 	directSudo bool
@@ -338,7 +340,8 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 			e.sshInteractive = append(e.sshInteractive, interactive)
 			return e.sshExit, nil
 		},
-		probe: func(ctx context.Context, addr string) bool { return true },
+		probe:      func(ctx context.Context, addr string) bool { return true },
+		httpClient: localOnlyClient,
 		forgetHostKey: func(addr string) (bool, error) {
 			e.forgotHosts = append(e.forgotHosts, addr)
 			return true, nil
@@ -403,6 +406,8 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 				return "", "root@203.0.113.10: Permission denied (publickey,password).\n", 255
 			}
 			return "0\n-\nDebian GNU/Linux 12 (bookworm)\n", "", 0
+		case e.directRoot && e.uname != "":
+			return "0\n-\nUbuntu 26.04 LTS\n-\n" + e.uname + "\n", "", 0
 		case e.directRoot:
 			return "0\n-\nUbuntu 26.04 LTS\n", "", 0
 		case e.directSudo && strings.Contains(strings.Join(argv, " "), " ump@"):
@@ -4133,5 +4138,70 @@ func TestForgetOldHostKey(t *testing.T) {
 	}
 	if forgot, _ := a.forgetOldHostKey("203.0.113.10"); forgot {
 		t.Error("forgot twice")
+	}
+}
+
+// localOnlyClient reaches the test servers (127.0.0.1) and nothing else:
+// the tests never depend on the network.
+var localOnlyClient = &http.Client{Transport: localOnly{}, Timeout: 10 * time.Second}
+
+type localOnly struct{}
+
+func (localOnly) RoundTrip(r *http.Request) (*http.Response, error) {
+	if h := r.URL.Hostname(); h != "127.0.0.1" && h != "localhost" && h != "::1" {
+		return nil, fmt.Errorf("no network in tests: %s", r.URL.Host)
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestReinstallChecksTheArchitecture(t *testing.T) {
+	e := newTestEnv(t)
+	e.writeProfiles()
+	resetFakePower()
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/os/archlinux/amd64/manifest.json", "/os/ubuntu-26.04/amd64/manifest.json", "/os/ubuntu-26.04/arm64/manifest.json":
+			io.WriteString(w, `{"family": "image"}`)
+		case "/os/archlinux/arm64/manifest.json":
+			io.WriteString(w, `{"family": "arch", "unsupported": "Arch Linux is built for x86_64 only"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer storage.Close()
+	e.write(testConfig + "storage: " + storage.URL + "\n")
+
+	// the running system says aarch64: refused before anything happens
+	e.directRoot, e.uname = true, "aarch64"
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--profile", "archlinux", "--yes", "--account", "one")
+	if code != exitUsage || !strings.Contains(errOut, "archlinux cannot be installed on web-01, which is arm64 (as its running system says): Arch Linux is built for x86_64 only. Nothing was changed") {
+		t.Errorf("arm64: code %d, %q", code, errOut)
+	}
+	if len(fakePower.actions) != 0 || e.kexeced || len(e.installs) != 0 {
+		t.Errorf("something happened: actions %v, kexec %v, installs %d", fakePower.actions, e.kexeced, len(e.installs))
+	}
+
+	// x86_64: no word about it
+	e.uname = "x86_64"
+	_, errOut, _ = e.run("", false, "server", "reinstall", "web-01", "--profile", "archlinux", "--yes", "--account", "one", "--dry-run")
+	if strings.Contains(errOut, "cannot be installed") || strings.Contains(errOut, "cannot tell the architecture") {
+		t.Errorf("amd64 was stopped: %q", errOut)
+	}
+
+	// nobody can tell: a warning and a question, which no answer refuses
+	resetFakePower()
+	e.directRoot, e.kexeced, e.inImage, e.uname = false, false, false, ""
+	_, errOut, code = e.run("n\n", true, "server", "reinstall", "web-01", "--profile", "archlinux", "--account", "one")
+	if code != exitAborted || !strings.Contains(errOut, "Warning: archlinux exists for amd64 only, and ump cannot tell the architecture of web-01") || !strings.Contains(errOut, "Is web-01 an amd64 machine?") {
+		t.Errorf("unknown: code %d, %q", code, errOut)
+	}
+	if len(fakePower.actions) != 0 {
+		t.Errorf("something happened: %v", fakePower.actions)
+	}
+
+	// an OS with an image for every architecture asks nobody anything
+	_, errOut, _ = e.run("", false, "server", "reinstall", "web-01", "--profile", "ubuntu-26.04", "--yes", "--account", "one", "--dry-run")
+	if strings.Contains(errOut, "architecture") {
+		t.Errorf("ubuntu was checked: %q", errOut)
 	}
 }

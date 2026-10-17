@@ -126,6 +126,7 @@ func (p *Provider) machine(d Droplet) provider.Machine {
 		ID:       strconv.FormatInt(d.ID, 10),
 		Name:     d.Name,
 		Kind:     provider.KindCloud,
+		Arch:     "amd64", // DigitalOcean has x86 droplets only
 		Product:  d.SizeSlug,
 		Status:   strings.ToLower(d.Status),
 	}

@@ -298,9 +298,15 @@ What is Arch's own:
 Updates are Arch's: `pacman -Syu`, regularly (a rolling release is
 meant to be kept current). Userdata is bash, as on Ubuntu; the published
 entry is `archlinux` (`pacman -S --noconfirm --needed ...` installs
-packages). On an arm64 machine the installer stops before touching the
-disks: Arch Linux is built for x86_64 only (Arch Linux ARM is a separate
-project).
+packages). Arch Linux is built for x86_64 only (Arch Linux ARM is a
+separate project), so `ump server reinstall` refuses it on an arm64
+machine before anything happens to the machine: not after a reboot into
+the rescue system or, on a provider without one, after the provider
+reinstalled it. The architecture comes from the provider (Hetzner Cloud
+says it; Linode and DigitalOcean have x86 only; Hetzner's RX servers are
+ARM) or from the running system over SSH; when neither tells, ump warns
+and asks whether the machine is amd64. The same holds for any OS the
+storage has no image of for an architecture.
 
 The manifest is written by [`images/arch/build.sh`](../images/arch/build.sh):
 the newest bootstrap release, its checksum, the mirror, and the package

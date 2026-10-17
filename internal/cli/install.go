@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -274,6 +275,16 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if o.dryRun {
 		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), what)
 	}
+	logins := a.loginUsers(cfg, m, doc)
+	if u := prof.Admin(users); u != "" && u != "root" {
+		logins = append([]string{"root", u}, logins[1:]...)
+	}
+	logins = dedupe(logins)
+	// an OS without an image for the machine's architecture stops here,
+	// before the reboot, the rescue system or a provider's reinstall
+	if err := a.checkArch(ctx, cmd, m, spec.OS, storage, logins, keyPath, o.yes); err != nil {
+		return err
+	}
 	if err := a.confirm(cmd, o.yes, question); err != nil {
 		return err
 	}
@@ -285,11 +296,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	defer unlock()
 	// everything on the way is progress (stderr); stdout is for the result
-	logins := a.loginUsers(cfg, m, doc)
-	if u := prof.Admin(users); u != "" && u != "root" {
-		logins = append([]string{"root", u}, logins[1:]...)
-	}
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, unguarded: true, users: dedupe(logins)})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, unguarded: true, users: logins})
 	if err != nil {
 		return err
 	}
@@ -665,4 +672,59 @@ func (a *app) forgetOldHostKey(addr string) (bool, error) {
 		return false, fmt.Errorf("ssh-keygen -R %s: %v: %s", addr, err, strings.TrimSpace(string(out)))
 	}
 	return true, nil
+}
+
+// checkArch keeps an installation from starting that cannot end well: the
+// storage has no image of the OS for the machine's architecture (Arch
+// Linux is x86_64 only), and the installer would find that out in the
+// rescue system, after the machine was rebooted into it or, without a
+// rescue system, reinstalled by its provider. The architecture comes
+// from the provider, else from the running system over SSH; when neither
+// tells, ump warns and asks. An OS with an image for every architecture,
+// or a storage that cannot be read, passes without a word (the installer
+// still checks before it touches a disk).
+func (a *app) checkArch(ctx context.Context, cmd *cobra.Command, m provider.Machine, os, storage string, logins []string, keyPath string, yes bool) error {
+	bad := map[string]string{}
+	good := 0
+	for _, arch := range []string{"amd64", "arm64"} {
+		data, err := a.fetch(ctx, storage+"/os/"+os+"/"+arch+"/manifest.json")
+		switch {
+		case err != nil && strings.HasSuffix(err.Error(), "HTTP 404"):
+			bad[arch] = "the storage has no image of " + os + " for " + arch
+		case err != nil:
+			return nil
+		default:
+			var mf struct {
+				Unsupported string `json:"unsupported"`
+			}
+			if json.Unmarshal(data, &mf) == nil && mf.Unsupported != "" {
+				bad[arch] = mf.Unsupported
+			} else {
+				good++
+			}
+		}
+	}
+	if len(bad) == 0 || good == 0 {
+		return nil
+	}
+	arch, how := m.Arch, "as the provider says"
+	if arch == "" && m.IPv4 != "" {
+		if _, p, ok, _ := a.probeAdmin(ctx, logins, m.IPv4, []string{keyPath}, false); ok {
+			arch, how = p.arch, "as its running system says"
+		}
+	}
+	if arch != "" {
+		if reason, no := bad[arch]; no {
+			return withExit(exitUsage, fmt.Errorf("%s cannot be installed on %s, which is %s (%s): %s. Nothing was changed", os, m.Name, arch, how, reason))
+		}
+		return nil
+	}
+	var only []string
+	for _, x := range []string{"amd64", "arm64"} {
+		if _, no := bad[x]; !no {
+			only = append(only, x)
+		}
+	}
+	fmt.Fprintf(a.stderr, "Warning: %s exists for %s only, and ump cannot tell the architecture of %s (its provider does not say, and its running system does not let ump in). On another architecture the installation stops in the rescue system, after the server was rebooted into it or, without a rescue system, reinstalled by its provider: a wiped server and no new system.\n", os, strings.Join(only, " and "), m.Name)
+	return a.confirm(cmd, yes, fmt.Sprintf("Is %s an %s machine?", m.Name, strings.Join(only, " or ")))
 }

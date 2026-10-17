@@ -47,6 +47,9 @@ type Machine struct {
 	Name string `json:"name" yaml:"name"`
 	// Kind says whether this is bare metal or a cloud VM.
 	Kind Kind `json:"kind" yaml:"kind"`
+	// Arch is the CPU architecture (amd64, arm64) where the provider
+	// says; empty when it does not.
+	Arch string `json:"arch,omitempty" yaml:"arch,omitempty"`
 	// IPv4 is the primary public IPv4 address, if any.
 	IPv4 string `json:"ipv4,omitempty" yaml:"ipv4,omitempty"`
 	// IPv6 is the primary public IPv6 address or the assigned prefix

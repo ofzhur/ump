@@ -550,6 +550,11 @@ func (p *Provider) machine(s Server) provider.Machine {
 		Product:  s.Product,
 		Status:   strings.ToLower(s.Status),
 	}
+	// Hetzner's Ampere servers are the RX line; of the others Robot says
+	// nothing that tells
+	if strings.HasPrefix(strings.ToUpper(s.Product), "RX") {
+		m.Arch = "arm64"
+	}
 	if m.Name == "" {
 		m.Name = m.ID
 	}

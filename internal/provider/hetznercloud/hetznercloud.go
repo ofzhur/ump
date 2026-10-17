@@ -395,6 +395,7 @@ func (p *Provider) machine(s Server) provider.Machine {
 		ID:       strconv.FormatInt(s.ID, 10),
 		Name:     s.Name,
 		Kind:     provider.KindCloud,
+		Arch:     map[string]string{"x86": "amd64", "arm": "arm64"}[s.ServerType.Architecture],
 		Location: strings.ToLower(s.location().Name),
 		Product:  s.ServerType.Name,
 		Status:   strings.ToLower(s.Status),

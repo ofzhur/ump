@@ -58,7 +58,7 @@ func TestListServersPaginates(t *testing.T) {
 	if len(pages) != 2 || len(ms) != 2 {
 		t.Fatalf("pages %v, machines %d", pages, len(ms))
 	}
-	want := provider.Machine{Provider: "hetzner-cloud", Account: "hc", ID: "1", Name: "edge-01", Kind: provider.KindCloud,
+	want := provider.Machine{Provider: "hetzner-cloud", Account: "hc", ID: "1", Name: "edge-01", Kind: provider.KindCloud, Arch: "amd64",
 		IPv4: "198.51.100.1", IPv6: "2001:db8:c0ff:ee1::/64", Location: "fsn1", Product: "cx22", Status: "running",
 		Labels: map[string]string{"env": "prod"}, Price: &provider.Price{Amount: 3.79, Currency: "EUR", Period: "month", Source: "provider", Note: "net"}}
 	got := ms[0]

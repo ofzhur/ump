@@ -145,6 +145,7 @@ func (p *Provider) machine(in Instance) provider.Machine {
 		ID:       strconv.FormatInt(in.ID, 10),
 		Name:     in.Label,
 		Kind:     provider.KindCloud,
+		Arch:     "amd64", // Linode has x86 instances only
 		IPv6:     strings.TrimSuffix(in.IPv6, "/128"),
 		Location: strings.ToLower(in.Region),
 		Product:  in.Type,

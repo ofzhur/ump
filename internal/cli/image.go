@@ -30,7 +30,7 @@ const bootMarker = "==> booting into the UMP rescue system"
 
 // probeCommand asks a machine who it is: the uid we got, the UMP rescue
 // version when it runs the image, and the name of the operating system.
-const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; echo; } | head -n 1; sudo -n true 2>/dev/null && echo sudo; true`
+const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; echo; } | head -n 1; sudo -n true 2>/dev/null && echo sudo || echo -; uname -m`
 
 // hostProbe is a machine's answer to probeCommand.
 type hostProbe struct {
@@ -38,6 +38,9 @@ type hostProbe struct {
 	sudo    bool
 	version string
 	os      string
+	// arch is the CPU architecture as Go names it (amd64, arm64), from
+	// uname -m; empty when unknown.
+	arch string
 }
 
 // admin reports whether the login can do what root can: it is root, or
@@ -119,6 +122,9 @@ func (a *app) probeHost(ctx context.Context, user, addr string, identities []str
 	}
 	if len(lines) > 3 {
 		p.sudo = lines[3] == "sudo"
+	}
+	if len(lines) > 4 {
+		p.arch = map[string]string{"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}[lines[4]]
 	}
 	return p, true
 }
