@@ -48,6 +48,18 @@ userdata:
       set -euo pipefail
       echo "userdata archlinux: nothing to do on $(hostname)"
       # pacman -S --noconfirm --needed docker
+  cachyos:
+    description: what every CachyOS gets; nothing yet
+    type: bash
+    script: |
+      #!/bin/bash
+      # Runs as root in the freshly installed CachyOS, before its first
+      # boot, with network. Put what every CachyOS of yours needs here,
+      # or make your own entry (ump config userdata create NAME) and list
+      # it in the profile after this one.
+      set -euo pipefail
+      echo "userdata cachyos: nothing to do on $(hostname)"
+      # pacman -S --noconfirm --needed docker
   nixos:
     description: what every NixOS gets; nothing yet
     type: nix

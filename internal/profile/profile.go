@@ -326,7 +326,7 @@ func (p *Profile) ResolveUserdata(userdata map[string]*Userdata) ([]Userdata, er
 		default:
 			known, ok := userdata[r.Name]
 			if !ok {
-				return nil, fmt.Errorf("profile %s: userdata %q is not in userdata.yaml (known: %s)", p.Name, r.Name, strings.Join(sortedKeys(userdata), ", "))
+				return nil, fmt.Errorf("profile %s: userdata %q is not in userdata.yaml (known: %s; ump config os update fetches the published ones)", p.Name, r.Name, strings.Join(sortedKeys(userdata), ", "))
 			}
 			u = *known
 		}
@@ -365,7 +365,7 @@ func (p *Profile) ResolveUsers(users map[string]*User) ([]User, error) {
 		case r.Name != "":
 			def, ok := users[r.Name]
 			if !ok {
-				return nil, fmt.Errorf("profile %s: user %q is not in users.yaml (known: %s)", p.Name, r.Name, strings.Join(sortedKeys(users), ", "))
+				return nil, fmt.Errorf("profile %s: user %q is not in users.yaml (known: %s; ump config os update fetches the published ones)", p.Name, r.Name, strings.Join(sortedKeys(users), ", "))
 			}
 			u = *def
 		default:
@@ -813,7 +813,7 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 	if layout == nil {
 		l, ok := layouts[p.Disks.Name]
 		if !ok {
-			return nil, fmt.Errorf("profile %s: layout %q is not in layouts.yaml (known: %s)", p.Name, p.Disks.Name, strings.Join(sortedKeys(layouts), ", "))
+			return nil, fmt.Errorf("profile %s: layout %q is not in layouts.yaml (known: %s; ump config os update fetches the published ones)", p.Name, p.Disks.Name, strings.Join(sortedKeys(layouts), ", "))
 		}
 		if err := l.Validate(); err != nil {
 			return nil, err
@@ -827,7 +827,7 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 	case p.Firewall.Name != "":
 		f, ok := firewalls[p.Firewall.Name]
 		if !ok {
-			return nil, fmt.Errorf("profile %s: firewall %q is not in firewalls.yaml (known: %s)", p.Name, p.Firewall.Name, strings.Join(sortedKeys(firewalls), ", "))
+			return nil, fmt.Errorf("profile %s: firewall %q is not in firewalls.yaml (known: %s; ump config os update fetches the published ones)", p.Name, p.Firewall.Name, strings.Join(sortedKeys(firewalls), ", "))
 		}
 		if err := f.Validate(); err != nil {
 			return nil, fmt.Errorf("profile %s: %w", p.Name, err)

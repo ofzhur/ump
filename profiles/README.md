@@ -14,6 +14,7 @@ reinstall NAME` works with the published `ubuntu-26.04` out of the box.
 | [`debian-13.yaml`](debian-13.yaml), [`debian-12.yaml`](debian-12.yaml) | the same for Debian 13 and 12, with the userdata `debian` | [Operating systems](../docs/oses.md#debian) |
 | [`nixos-25.11.yaml`](nixos-25.11.yaml) | the same for NixOS 25.11 from its stable channel, with the userdata `nixos` | [NixOS](../docs/oses.md#nixos) |
 | [`archlinux.yaml`](archlinux.yaml) | the same for Arch Linux, the rolling release from its mirrors (amd64 only), with the userdata `archlinux` | [Arch Linux](../docs/oses.md#arch-linux) |
+| [`cachyos.yaml`](cachyos.yaml) | the same for CachyOS, Arch Linux with CachyOS's x86-64-v3 packages and server kernel (amd64 only), with the userdata `cachyos` | [CachyOS](../docs/oses.md#cachyos) |
 | [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 | [`users.yaml`](users.yaml) | the named user `ump`, the administrator UMP provides | [Users](../docs/users.md) |

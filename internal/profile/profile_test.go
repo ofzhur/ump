@@ -162,7 +162,7 @@ func TestProfileErrors(t *testing.T) {
 		name, src, want string
 	}{
 		{"unknown field", base + "disks: lvm-linear\ncolour: red\n", "field colour not found"},
-		{"unknown layout", base + "disks: nope\n", `layout "nope" is not in layouts.yaml (known: lvm-example, lvm-linear, lvm-raid1, lvm-striped)`},
+		{"unknown layout", base + "disks: nope\n", `layout "nope" is not in layouts.yaml (known: lvm-example, lvm-linear, lvm-raid1, lvm-striped; ump config os update fetches the published ones)`},
 		{"no users", "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers: []\n", "no users"},
 		{"user without keys", "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: []}\n", "has no keys"},
 		{"bad user name", "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: Root, keys: [ump]}\n", `user name "Root" is not valid`},
@@ -172,7 +172,7 @@ func TestProfileErrors(t *testing.T) {
 		{"bad policy", base + "disks: lvm-linear\nfirewall: {policy: deny}\n", `policy "deny" is not accept or drop`},
 		{"unknown firewall", base + "disks: lvm-linear\nfirewall: nope\n", `firewall "nope" is not in firewalls.yaml`},
 		{"no admin", "os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, keys: [ump]}\n", "no user has sudo and root is not listed"},
-		{"unknown user", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [nobody]\n", `user "nobody" is not in users.yaml (known: ump)`},
+		{"unknown user", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [nobody]\n", `user "nobody" is not in users.yaml (known: ump; ump config os update fetches the published ones)`},
 		{"user twice", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump, {name: ump, sudo: true, keys: [ump]}]\n", "user ump is listed twice"},
 		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
 		{"bad userdata name", base + "disks: lvm-linear\nuserdata: [\"rm -rf\"]\n", "is not a userdata name"},

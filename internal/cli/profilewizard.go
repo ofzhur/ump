@@ -23,7 +23,7 @@ type osImage struct {
 }
 
 // knownImages are tried when the storage publishes no os/index.json.
-var knownImages = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux"}
+var knownImages = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux", "cachyos"}
 
 // osImages lists the images of the storage: the names from
 // os/index.json (or the known ones that answer), with the version and

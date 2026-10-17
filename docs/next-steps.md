@@ -294,8 +294,8 @@ Disk encryption (LUKS with remote unlock) is on the
 - **Disk layouts of your own:** md arrays and LVM with mirrored or
   striped volumes, matched to whatever disks a machine has
   ([disk layouts](disk-layouts.md)).
-- **Mixed fleets:** a profile per OS; userdata is bash on Ubuntu, Debian
-  and Arch Linux and a NixOS module on NixOS. On NixOS the configuration
+- **Mixed fleets:** a profile per OS; userdata is bash on Ubuntu, Debian,
+  Arch Linux and CachyOS and a NixOS module on NixOS. On NixOS the configuration
   is the system itself: keep the modules in the repository and deploy
   them with `nixos-rebuild --target-host`, `deploy-rs` or `colmena`
   instead of Ansible.

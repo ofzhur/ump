@@ -1,0 +1,16 @@
+# Packages CachyOS adds to the Arch Linux list (packages.txt), one per
+# line: CachyOS's kernel takes the place of Arch's linux (build.sh drops
+# that), its keyring and mirror lists keep the repositories working, and
+# its hooks brand the system (/etc/os-release says CachyOS). build.sh
+# checks every name against CachyOS's own repository. The desktop
+# settings (cachyos-settings: zram, NetworkManager, audio) are left out.
+
+# the kernel: CachyOS's server variant (300 Hz, no full preemption)
+linux-cachyos-server
+
+# the repositories
+cachyos-keyring
+cachyos-mirrorlist
+cachyos-v3-mirrorlist
+cachyos-v4-mirrorlist
+cachyos-hooks

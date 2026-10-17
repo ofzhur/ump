@@ -6,8 +6,9 @@ or a box in your rack ends up with the same system, the same disk
 layout, the same users, network names, firewall and tools. Ubuntu and
 Debian come as UMP's own prebuilt images from its storage; NixOS is installed from
 NixOS's public servers with UMP's configuration on top, and Arch Linux,
-a rolling release, from its mirrors with the packages of the day. They
-work on amd64 and arm64 (Arch Linux on amd64 only), boot from UEFI and,
+a rolling release, from its mirrors with the packages of the day, as is
+CachyOS, Arch with packages built for newer CPUs. They work on amd64 and
+arm64 (Arch Linux and CachyOS on amd64 only), boot from UEFI and,
 on amd64, from BIOS, and are meant to be used as they are: pick one, and
 the machine is a well-kept server a few minutes later.
 
@@ -16,6 +17,7 @@ $ ump server reinstall web-01                          # the default: Ubuntu 26.
 $ ump server reinstall web-01 --profile debian-13      # Debian
 $ ump server reinstall web-01 --profile nixos-25.11    # NixOS
 $ ump server reinstall web-01 --profile archlinux      # Arch Linux
+$ ump server reinstall web-01 --profile cachyos        # CachyOS
 $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same profile
 ```
 
@@ -28,6 +30,7 @@ $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same pr
 | `debian-12` | Debian 12 (bookworm) | `debian-12` | the same |
 | `nixos-25.11` | NixOS 25.11, from its stable channel | `nixos-25.11` | `nixos-install` from NixOS's public servers, with the profile as NixOS modules |
 | `archlinux` | Arch Linux, the rolling release, amd64 only | `archlinux` | `pacstrap` from the Arch mirrors, then configured in place like Ubuntu |
+| `cachyos` | CachyOS: Arch Linux with packages built for x86-64-v3 and CachyOS's server kernel, rolling, amd64 only | `cachyos` | the same as Arch Linux, with CachyOS's repositories in front |
 
 `ump config os create` lists what the storage offers (its
 `os/index.json`), and [profiles](profiles.md#choosing-the-operating-system) says how a
@@ -58,13 +61,14 @@ Whichever system it is, ump installs it the same way, from the same
   day with UMP's banner, the host,
   its installation, load, memory, disk and addresses (`ump-motd`).
 - **Userdata:** what a system of yours needs on top: a script on Ubuntu,
-  Debian and Arch Linux, a NixOS module on NixOS ([userdata](userdata.md)).
+  Debian, Arch Linux and CachyOS, a NixOS module on NixOS ([userdata](userdata.md)).
 - **A record** of what was installed, from which profile and layout, in
   `/etc/ump/install`, which `ump server show` reads back.
 
 Measured on 2026-10-17 with `ump server reinstall`, from the running system
 to the new one answering: Arch Linux in 95 s on a Hetzner Cloud server
-and 159 s on a Linode nanode.
+and 159 s on a Linode nanode; CachyOS in 80 to 97 s on Hetzner Cloud,
+100 s on OVHcloud, 158 s on Linode and 160 s on Vultr.
 
 ## Ubuntu
 
@@ -311,6 +315,58 @@ storage has no image of for an architecture.
 The manifest is written by [`images/arch/build.sh`](../images/arch/build.sh):
 the newest bootstrap release, its checksum, the mirror, and the package
 list, each package checked against the Arch package database.
+
+## CachyOS
+
+[CachyOS](https://cachyos.org) is Arch Linux with repositories of its
+own in front of Arch's: Arch's packages rebuilt for newer CPUs
+(x86-64-v3, which needs AVX2: Intel since Haswell, AMD since Zen; the
+project reports 5 to 20 % more speed than the plain x86-64 builds), its
+own kernels and pacman. ump installs it as it installs Arch Linux, with
+one step more, so everything said about [Arch Linux](#arch-linux) holds
+(network, boot, firewall, updates with `pacman -Syu`, amd64 only):
+
+1. The same **bootstrap tarball** and pacman keyring as Arch.
+2. **The CPU level:** the bootstrap's glibc tells which levels the
+   machine runs (`/usr/lib/ld-linux-x86-64.so.2 --help`). With
+   x86-64-v3, CachyOS's `cachyos-v3`, `cachyos-core-v3` and
+   `cachyos-extra-v3` repositories come first; without it, only the
+   plain x86_64 `cachyos` repository (its kernel and tools) and Arch's
+   packages. A virtual machine that hides AVX2 from its guest gets the
+   latter; Hetzner Cloud, Linode, OVHcloud and Vultr all show
+   x86-64-v3.
+3. **CachyOS's keyring:** the `cachyos-keyring` package, pinned by its
+   checksum in the manifest as the bootstrap is, makes pacman trust the
+   keys CachyOS signs its packages with.
+4. **`pacstrap`** installs Arch's package list with CachyOS's kernel,
+   `linux-cachyos-server` (CachyOS's variant for servers: 300 Hz, no
+   full preemption), in place of Arch's `linux`, and CachyOS's keyring,
+   mirror lists and hooks
+   ([`images/arch/cachyos-packages.txt`](../images/arch/cachyos-packages.txt)).
+   Where CachyOS has a package (glibc, systemd, python, pacman itself),
+   theirs wins.
+5. The new system's `/etc/pacman.conf` lists CachyOS's repositories in
+   front of Arch's, from CachyOS's mirror lists, with `Architecture =
+   auto`, as CachyOS's own installer writes it.
+
+The result reports itself as CachyOS (`/etc/os-release`), the
+installation record names the repositories it took (`rolling, packages
+of DATE, CachyOS repositories x86-64-v3`). CachyOS's desktop settings
+(`cachyos-settings`: zram, NetworkManager, audio) are left out; the
+tuning is UMP's (`tuned` with `throughput-performance`). The userdata
+entry is `cachyos`.
+
+Not x86-64-v4: those packages need AVX-512, gain little over v3 on most
+server work, and a virtual machine moved to a host without AVX-512 would
+no longer start its programs. The manifest's `cachyos.levels` lists
+the levels the installer may take, newest first.
+
+CachyOS is planning a Server Edition (hardened, pre-tuned); until it
+is out, this is CachyOS's packages with UMP's server setup. The
+manifest takes CachyOS's packages from `mirror.cachyos.org`, not their
+CDN (`cdn77.cachyos.org`), which answers a `+` in a file name
+(`glibc-2.44+r50...`) with 404 to Arch's pacman. CachyOS's own pacman, on
+the installed system, uses their mirror lists.
 
 ## More systems
 

@@ -1,0 +1,44 @@
+# The profile for CachyOS (Arch Linux with packages built for newer CPUs,
+# rolling release): what a server becomes with --profile cachyos.
+# Published profiles are replaced by ump config os update, so make your
+# own from this one (ump config os create NAME --from cachyos) instead of
+# editing it. Every field is described in docs/profiles.md.
+name: cachyos
+description: CachyOS (Arch Linux with x86-64-v3 packages and its server kernel, rolling) on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+
+os: cachyos
+timezone: UTC
+
+kernel:
+  mitigations: false   # the CPU vulnerability mitigations (mitigations=off when false); they cost performance
+  ipv6: false          # IPv6 (ipv6.disable=1 when false); turn it on when the server needs it
+  extra: ""            # anything else for the kernel command line
+
+# a layout from layouts.yaml (lvm-linear, lvm-striped, lvm-raid1, lvm-example), or an inline one
+disks: lvm-linear
+
+users: [ump]            # named users from users.yaml (ump config user): ump is the administrator,
+                        # the sudo user ump logs in as; add yours there, or inline one here:
+  # - name: ops
+  #   sudo: true
+  #   groups: [adm]
+  #   keys: [local, ~/.ssh/ops.pub]
+  # - name: root        # root over SSH, with keys only
+  #   keys: [ump, local]
+
+userdata: [cachyos]     # named entries from userdata.yaml (ump config userdata), run in order as root
+                        # in the new system before its first boot: packages, files, services; or inline:
+  # - name: web
+  #   script: |
+  #     pacman -S --noconfirm nginx
+
+# a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
+firewall: default
+
+provision:
+  type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
+                        # recorded in /etc/ump/install, not run yet
+
+network:
+  rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
+                        # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)

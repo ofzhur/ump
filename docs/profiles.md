@@ -35,7 +35,7 @@ something to look at and start from.
 [`debian-13.yaml`](../profiles/debian-13.yaml),
 [`debian-12.yaml`](../profiles/debian-12.yaml): the same profile with
 each image and the userdata of its distribution; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml) and
-[`archlinux.yaml`](../profiles/archlinux.yaml), the same for NixOS and Arch Linux) and the published entries of the named files (the
+[`archlinux.yaml`](../profiles/archlinux.yaml), the same for NixOS, Arch Linux and CachyOS) and the published entries of the named files (the
 layouts `lvm-*`, the firewalls `default`, `web` and `open`, the user
 `ump`) are templates: `ump config os update` fetches them again and
 replaces them, which is why `ump config os edit` refuses a published
@@ -131,6 +131,7 @@ publishes:
 | `debian-12` | Debian 12 (bookworm) | `debian-12` |
 | `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](oses.md#nixos)) | `nixos-25.11` |
 | `archlinux` | Arch Linux, the rolling release, installed by `pacstrap` from its mirrors, amd64 only (see [Arch Linux](oses.md#arch-linux)) | `archlinux` |
+| `cachyos` | CachyOS: Arch Linux with CachyOS's x86-64-v3 packages and server kernel, amd64 only (see [CachyOS](oses.md#cachyos)) | `cachyos` |
 
 The published Ubuntu profiles are the same apart from the image, and
 the NixOS one apart from the image and its userdata (`nixos`, a NixOS

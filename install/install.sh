@@ -428,7 +428,14 @@ arch)
 		[ -n "$(printf '%s' "$manifest" | jq -r ".$k // empty")" ] || die "the Arch Linux manifest names no $k"
 	done
 	[ "$(printf '%s' "$manifest" | jq -r '.packages | length')" -gt 0 ] || die "the Arch Linux manifest names no packages"
-	log "image $os: Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
+	if [ -n "$(printf '%s' "$manifest" | jq -r '.cachyos // empty')" ]; then
+		for k in cachyos.mirror cachyos.keyring.url cachyos.keyring.sha256; do
+			[ -n "$(printf '%s' "$manifest" | jq -r ".$k // empty")" ] || die "the CachyOS manifest names no $k"
+		done
+		log "image $os: CachyOS from $(printf '%s' "$manifest" | jq -r .cachyos.mirror) over Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
+	else
+		log "image $os: Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
+	fi
 	;;
 *) die "the manifest's family $family is not one this installer knows (image, nixos, arch)" ;;
 esac
@@ -439,7 +446,25 @@ bad_ud="$(jq -r --arg t "$want_ud" '[.userdata[] | select((.type // "bash") != $
 
 # --- the disks ---------------------------------------------------------
 
+# kill_chrooted: ends what still runs in the new system or a bootstrap
+# (a gpg-agent that pacman-key started there, a daemon a userdata
+# script left): it keeps the root file system busy, and an attempt
+# after a failed one could not release the disks. Every process whose
+# root is not the rescue system's: nothing of the rescue system runs
+# chrooted, and once its file system is unmounted lazily, the root of a
+# process left behind no longer reads as a path under $TARGET.
+kill_chrooted() {
+	local p r found=""
+	for p in /proc/[0-9]*; do
+		r="$(readlink "$p/root" 2>/dev/null)" || continue
+		[ "$r" = / ] || { kill -9 "${p#/proc/}" 2>/dev/null && found=1; }
+	done
+	[ -z "$found" ] || sleep 1
+	return 0
+}
+
 log "releasing the disks"
+kill_chrooted
 swapoff -a 2>/dev/null || true
 # a swap file of an earlier attempt whose file system was unmounted under
 # it cannot be found by its name any more, and keeps its disk busy
@@ -449,7 +474,19 @@ while read -r src tgt; do
 	case "$src" in /dev/*) ;; *) continue ;; esac
 	for x in "${disks[@]}"; do case "$src" in "$x"*|/dev/mapper/*|/dev/md*|/dev/dm-*) umount -l "$tgt" 2>/dev/null || true; break ;; esac; done
 done < <(awk '{print $1, $2}' /proc/mounts | sort -k2 -r)
+# whatever an earlier attempt left on $TARGET
+for _ in 1 2 3 4 5; do mountpoint -q "$TARGET" && umount -R -l "$TARGET" 2>/dev/null || break; done
 vgchange -an >/dev/null 2>&1 || true
+# a mapping LVM no longer knows (its metadata wiped by an earlier
+# attempt) still holds its disk: removed when it sits on one of ours
+for dm in /sys/block/dm-*; do
+	[ -d "$dm/slaves" ] || continue
+	for sl in "$dm"/slaves/*; do
+		for x in "${disks[@]}"; do
+			case "/dev/${sl##*/}" in "$x"*) dmsetup remove "$(cat "$dm/dm/name")" 2>/dev/null || true; continue 3 ;; esac
+		done
+	done
+done
 command -v mdadm >/dev/null && mdadm --stop --scan >/dev/null 2>&1 || true
 
 log "wiping the disks"
@@ -583,6 +620,17 @@ fi
 
 log "mounting the new system at $TARGET"
 mkdir -p "$TARGET"
+# the directory above $TARGET a private mount of its own, before the new
+# system is mounted: nothing mounted there is copied into the mount
+# namespaces of the rescue system's services (resolved, udevd, networkd).
+# A copy of a mount made private later (the Arch Linux bootstrap's) would
+# never see it unmounted, and keep the disks busy for the next attempt.
+# Not $TARGET itself: nixos-generate-config would take that mount for a
+# second root file system.
+target_parent="$(dirname "$TARGET")"
+if ! mountpoint -q "$target_parent"; then
+	mount --bind "$target_parent" "$target_parent" && mount --make-private "$target_parent" || die "cannot make $target_parent a private mount"
+fi
 for m in "${MOUNTS[@]}"; do
 	set -- $m
 	mkdir -p "$TARGET$1"
@@ -590,6 +638,7 @@ for m in "${MOUNTS[@]}"; do
 done
 cleanup() {
 	set +e
+	kill_chrooted
 	# a swap file on the new root keeps it busy: off before it is unmounted
 	[ -n "${target_swap:-}" ] && swapoff "$target_swap" 2>/dev/null && rm -f "$target_swap"
 	# what is mounted into the Arch Linux bootstrap
@@ -661,10 +710,78 @@ nft_ruleset() {
 # memory, and is removed afterwards.
 arch_umount() {
 	local m
+	kill_chrooted
 	for m in mnt dev sys proc; do
 		mountpoint -q "$arch_boot/$m" && umount -R -l "$arch_boot/$m" 2>/dev/null
 	done
 	return 0
+}
+
+# CachyOS: Arch Linux with CachyOS's repositories in front of Arch's,
+# whose packages are built for newer CPUs (x86-64-v3: AVX2 and more) and
+# win over Arch's of the same name, its own pacman and kernel among them.
+# The keyring package comes pinned by its checksum, as the bootstrap
+# does; it makes pacman trust the keys that sign CachyOS's packages.
+cachyos_level=""
+
+# cachyos_conf FILE Server|Include LEVEL: CachyOS's repositories in front
+# of the first repository of the pacman.conf FILE: those of LEVEL
+# (x86-64-v3, x86-64-v4; none for the plain x86_64 ones alone), with the
+# manifest's mirror (Server, for the bootstrap's stock pacman, which
+# knows no $arch_v3) or CachyOS's mirror lists (Include, for the new
+# system, whose pacman is CachyOS's)
+cachyos_conf() {
+	local file="$1" how="$2" level="$3" cmirror blocks="" r v=""
+	cmirror="$(jq -r .cachyos.mirror <<< "$manifest")"
+	case "$level" in x86-64-v3) v=v3 ;; x86-64-v4) v=v4 ;; esac
+	if [ -n "$v" ]; then
+		for r in "cachyos-$v" "cachyos-core-$v" "cachyos-extra-$v"; do
+			if [ "$how" = Server ]; then
+				blocks="$blocks[$r]\nServer = $cmirror/x86_64_$v/\$repo\n\n"
+			else
+				blocks="$blocks[$r]\nInclude = /etc/pacman.d/cachyos-$v-mirrorlist\n\n"
+			fi
+		done
+	fi
+	if [ "$how" = Server ]; then
+		blocks="$blocks[cachyos]\nServer = $cmirror/x86_64/\$repo\n\n"
+	else
+		blocks="$blocks[cachyos]\nInclude = /etc/pacman.d/cachyos-mirrorlist\n\n"
+	fi
+	awk -v b="$blocks" '!done && /^\[/ && $0 != "[options]" {printf "%s", b; done = 1} {print}' "$file" > "$file.ump" \
+		&& mv "$file.ump" "$file" || die "cannot add CachyOS's repositories to $file"
+	grep -q '^\[cachyos\]' "$file" || die "cannot add CachyOS's repositories to $file"
+}
+
+cachyos_repos() {
+	local url sum have l levels archs=x86_64
+	url="$(jq -r .cachyos.keyring.url <<< "$manifest")"
+	sum="$(jq -r .cachyos.keyring.sha256 <<< "$manifest")"
+	# the newest of the manifest's CPU levels this machine runs, as the
+	# bootstrap's glibc tells it
+	levels="$(in_boot /usr/lib/ld-linux-x86-64.so.2 --help 2>/dev/null || true)"
+	for l in $(jq -r '.cachyos.levels // [] | .[]' <<< "$manifest"); do
+		if grep -q "$l (supported, searched)" <<< "$levels"; then
+			cachyos_level="$l"
+			break
+		fi
+	done
+	if [ -n "$cachyos_level" ]; then
+		log "CachyOS: this CPU runs $cachyos_level; its repositories first"
+		archs="x86_64 x86_64_${cachyos_level#x86-64-}"
+	else
+		cachyos_level=x86-64
+		log "CachyOS: this CPU runs none of $(jq -r '.cachyos.levels // [] | join(", ")' <<< "$manifest"); the plain x86_64 repository"
+	fi
+	log "CachyOS keyring"
+	curl -fsSL -o "$arch_boot/root/cachyos-keyring.pkg.tar.zst" "$url" || die "cannot download $url"
+	have="$(sha256sum "$arch_boot/root/cachyos-keyring.pkg.tar.zst" | cut -d' ' -f1)"
+	[ "$have" = "$sum" ] || die "checksum mismatch for $url: manifest $sum, download $have"
+	{ in_boot pacman -U --noconfirm /root/cachyos-keyring.pkg.tar.zst && in_boot pacman-key --populate cachyos; } >> "$plog" 2>&1 \
+		|| { tail -n 20 "$plog" >&2; die "the CachyOS keyring could not be set up"; }
+	rm -f "$arch_boot/root/cachyos-keyring.pkg.tar.zst"
+	cachyos_conf "$arch_boot/etc/pacman.conf" Server "$cachyos_level"
+	sed -i "s/^#*Architecture = .*/Architecture = $archs/" "$arch_boot/etc/pacman.conf"
 }
 
 arch_pacstrap() {
@@ -711,6 +828,7 @@ arch_pacstrap() {
 	plog="$TARGET/.ump-pacstrap.log"
 	{ in_boot pacman-key --init && in_boot pacman-key --populate archlinux; } > "$plog" 2>&1 \
 		|| { tail -n 20 "$plog" >&2; die "the pacman keyring could not be set up"; }
+	[ -z "$(jq -r '.cachyos // empty' <<< "$manifest")" ] || cachyos_repos
 	# the newest keys first: the bootstrap's may predate who signs today
 	in_boot pacman -Sy --noconfirm archlinux-keyring >> "$plog" 2>&1 \
 		|| { tail -n 20 "$plog" >&2; die "cannot update archlinux-keyring from $mirror"; }
@@ -720,6 +838,12 @@ arch_pacstrap() {
 	# this installation a moment ago, instead of making and filling another
 	in_boot pacstrap /mnt "${pkgs[@]}" >> "$plog" 2>&1 \
 		|| { tail -n 40 "$plog" >&2; die "pacstrap failed"; }
+	# the new system's pacman.conf (CachyOS's pacman's, which knows only
+	# Arch's repositories) gets CachyOS's in front, from their mirror lists
+	if [ -n "$cachyos_level" ]; then
+		cachyos_conf "$TARGET/etc/pacman.conf" Include "$cachyos_level"
+		sed -i 's/^#*Architecture = .*/Architecture = auto/' "$TARGET/etc/pacman.conf"
+	fi
 
 	arch_umount
 	# the new system was mounted in there: nothing may be left mounted
@@ -731,7 +855,7 @@ arch_pacstrap() {
 	arch_boot=""
 	mkdir -p "$TARGET/var/log"
 	mv "$plog" "$TARGET/var/log/ump-pacstrap.log"
-	image_version="rolling, packages of $(date -u +%Y-%m-%d)"
+	image_version="rolling, packages of $(date -u +%Y-%m-%d)${cachyos_level:+, CachyOS repositories $cachyos_level}"
 	image_kernel="$(ls "$TARGET/usr/lib/modules" | head -n 1)"
 }
 

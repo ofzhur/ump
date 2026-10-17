@@ -12,7 +12,7 @@
 # configuration that nixos-rebuild still evaluates.
 #
 # Usage: test-install.sh OS [arm64|amd64]   (OS: debian-13, ubuntu-26.04,
-#        nixos-25.11, archlinux, ...; the architecture defaults to this machine's)
+#        nixos-25.11, archlinux, cachyos, ...; the architecture defaults to this machine's)
 # Needs the rescue image in images/rescue/out/<arch> and the image (or the
 # NixOS manifest) built. Environment: MEM (MB, default 2048), DISK (GB,
 # default 12), DISK2 (GB: a second disk, which the layouts span, as a
@@ -25,7 +25,7 @@ ROOT="$(cd "$HERE/.." && pwd)"
 RESCUE="$ROOT/images/rescue/out/$ARCH"
 case "$OS" in
 nixos-*) family=nixos; IMAGE="$HERE/nixos/out/$OS/$ARCH" ;;
-archlinux*) family=arch; IMAGE="$HERE/arch/out/$OS/$ARCH" ;;
+archlinux*|cachyos*) family=arch; IMAGE="$HERE/arch/out/$OS/$ARCH" ;;
 *) family=image; IMAGE="$HERE/base/out/$OS/$ARCH" ;;
 esac
 MANIFEST="$IMAGE/manifest.json"
