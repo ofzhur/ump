@@ -9,17 +9,16 @@ can have several accounts of the same type, say one per Hetzner Cloud
 project, and `ump server list` shows the servers of all of them together.
 
 ```console
-$ ump config isp view
-# ~/.config/ump/config.yaml
-accounts:
-  hcloud:
-    type: hetzner-cloud
-    token: {file: ~/.config/ump/secrets/hcloud.token}
-  hrobot:
-    type: hetzner-robot
-    login: '#ws+AbCdEfGh'
-    password: {file: ~/.config/ump/secrets/hrobot.password}
+$ ump config isp list
+NAME     TYPE            SERVERS   SETTINGS             SECRETS
+hcloud   hetzner-cloud   4         <none>               token=file
+hrobot   hetzner-robot   2         login=#ws+AbCdEfGh   password=file
 ```
+
+SERVERS is what the last listing found (from the cache, no API call;
+`-` before the first one); SECRETS says where each secret comes from,
+`-o wide` spells the references out (`token=file:~/.config/ump/secrets/hcloud.token`),
+and `-o json` or `yaml` carry everything.
 
 ## Provider types
 
@@ -127,15 +126,15 @@ is a plain string or a reference to where the secret is:
 | `{ command: "..." }` | `command:CMD` | the standard output of a command: `pass show ...`, `op read ...`, `sops -d ...`, `vault kv get ...` |
 
 References are resolved when a command needs the account. Plaintext
-values are accepted; `ump config isp view` redacts them and shows
-references as they are. The secret files stay under your own
+values are accepted; `ump config isp list` never shows them (it says
+`plain!`, a hint to move them out) and shows references as they are. The secret files stay under your own
 configuration directory even when `--config` points at a configuration in
 a repository, so a shared configuration carries references only.
 
 ## Managing accounts
 
 ```
-ump config isp view              # the configuration, plaintext secrets redacted
+ump config isp list              # the accounts: type, servers, settings, where the secrets come from
 ump config isp types             # the provider types, their capabilities and settings
 ump config isp add               # the wizard, on a terminal
 ump config isp add TYPE NAME --set KEY=VALUE ... [--no-test]

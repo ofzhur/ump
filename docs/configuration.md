@@ -40,7 +40,7 @@ configuration file (a directory means `config.yaml` inside it); a team can
 keep its accounts, as references, in a repository and point ump at it.
 The profiles directory, the secret files and UMP's key stay under your own
 `~/.config/ump/` whatever `--config` says, so a shared configuration never
-carries secrets. `ump config isp view` names the file in use.
+carries secrets. `ump config state view` names the files in use.
 
 ## `config.yaml`
 
@@ -111,8 +111,8 @@ Any setting of an account can be a reference instead of the value:
 
 The wizard writes `file` references to `~/.config/ump/secrets/ACCOUNT.KEY`
 and `ump config isp remove` deletes those files with the account.
-Plaintext values work too; `ump config isp view` shows them as
-`<redacted>` and references as they are. On the command line (`ump config
+Plaintext values work too; `ump config isp list` shows them as
+`plain!` (never their value) and references as they are. On the command line (`ump config
 isp add --set KEY=VALUE`) the same references are `env:NAME`, `file:PATH`
 and `command:CMD`.
 

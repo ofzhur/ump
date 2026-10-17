@@ -146,8 +146,8 @@ whose targets match no disk, or an array with too few members, stops the
 installation before any disk is touched; `ump server rescue` never takes
 a way in that would erase a machine (only `reinstall` may, on an OVH VPS,
 since it erases the machine anyway). Credentials are references, never
-plaintext in the configuration, and `ump config isp view` redacts what
-is.
+plaintext in the configuration, and `ump config isp list` never shows
+what is.
 
 ## Where state lives
 

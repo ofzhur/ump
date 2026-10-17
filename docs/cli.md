@@ -54,7 +54,7 @@ ump
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config (c, cfg)                                    each entity prints its help when called bare
 │   ├── isp (i, provider, account)                     the accounts
-│   │   ├── view     (v, show)                         the configuration, secrets redacted
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the accounts: type, servers, settings, where the secrets come from
 │   │   ├── types                                      provider types and their settings
 │   │   ├── add      (a, new, create) [<type> <name> --set k=v ...]   the wizard on a terminal: type, name, credentials, test; with arguments the non-interactive form (CI, agents)
 │   │   ├── remove   (rm, d, delete) <name>
@@ -575,7 +575,7 @@ keys and a returned password.
 ## `ump config`
 
 ```
-ump config isp         view|types|add|remove|test
+ump config isp         list|types|add|remove|test
 ump config os          list|get|create|edit|delete|update|default
 ump config disk-layout list|get|create|edit|delete
 ump config firewall    list|get|create|edit|delete
@@ -615,8 +615,11 @@ their own, so `ump c o ls` is `ump config os list`:
 `ump server` is `s` or `srv`, its `show` also `v` or `view`, and its
 `add` and `remove` take the short forms above.
 
-`ump config isp` is the [provider accounts](providers.md): `add` is
-the wizard on a terminal and the non-interactive form with arguments.
+`ump config isp` is the [provider accounts](providers.md): `list` shows
+them in a table (type, the servers the last listing found, settings,
+and where each secret comes from; `-o wide` spells the references out),
+`add` is the wizard on a terminal and the non-interactive form with
+arguments. A command group refuses an unknown word with exit code 2.
 `ump config os` is the [profiles](profiles.md): the first run
 downloads the published profiles, layouts, firewalls and users into
 `~/.config/ump/profiles`, `list` shows what is there (the default marked

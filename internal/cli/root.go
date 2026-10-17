@@ -228,6 +228,7 @@ licensed under the Apache License 2.0.`,
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
+	rejectUnknownSubcommands(root)
 	return root
 }
 
@@ -290,6 +291,33 @@ func withExit(code int, err error) error {
 
 func usageErrorf(cmd *cobra.Command, format string, args ...any) error {
 	return &exitError{code: exitUsage, err: fmt.Errorf(format, args...), cmd: cmd}
+}
+
+// rejectUnknownSubcommands makes every command group without a run of
+// its own show its help when bare and refuse an unknown word as a usage
+// error; cobra itself only does that at the top level, and shows the
+// help with exit status 0 below it (ump config isp view, after view was
+// gone).
+func rejectUnknownSubcommands(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		rejectUnknownSubcommands(sub)
+	}
+	if cmd.Parent() == nil || !cmd.HasSubCommands() || cmd.Run != nil || cmd.RunE != nil {
+		return
+	}
+	cmd.Args = cobra.ArbitraryArgs
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return c.Help()
+		}
+		var names []string
+		for _, s := range c.Commands() {
+			if s.IsAvailableCommand() {
+				names = append(names, s.Name())
+			}
+		}
+		return usageErrorf(c, "unknown command %q for %s (%s)", args[0], c.CommandPath(), strings.Join(names, ", "))
+	}
 }
 
 // usageArgs turns a cobra argument validator's error into a usage error.

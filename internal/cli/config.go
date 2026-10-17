@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -34,7 +35,7 @@ update (up), default (def), test (t). The entities: isp (i, provider,
 account), os (o, profile), disk-layout (dl, layout), firewall (fw),
 user (u), userdata (ud), key (k), state (st); config itself is c or cfg.`,
 		Example: `  ump config isp add              # the account wizard
-  ump config isp view             # the accounts, secrets redacted
+  ump config isp list             # the accounts: type, servers, settings, where the secrets come from
   ump config os create            # the profile wizard
   ump config os edit db           # a profile in your editor
   ump config disk-layout list     # the named disk layouts
@@ -72,7 +73,7 @@ only by you, an environment variable or a command), never as plaintext.`,
   ump config isp remove main`,
 	}
 	cmd.AddCommand(
-		a.newConfigViewCmd(),
+		a.newConfigISPListCmd(),
 		a.newConfigTypesCmd(),
 		a.newConfigAddCmd(),
 		a.newConfigRemoveCmd(),
@@ -81,52 +82,116 @@ only by you, an environment variable or a command), never as plaintext.`,
 	return cmd
 }
 
-func (a *app) newConfigViewCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "view",
-		Aliases: verbAliases("view"),
-		Short:   "Show the configuration with secrets redacted",
-		Args:    usageArgs(cobra.NoArgs),
+func (a *app) newConfigISPListCmd() *cobra.Command {
+	var output string
+	var noHeaders bool
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: verbAliases("list"),
+		Short:   "List the accounts: type, servers, settings and where their secrets come from",
+		Long: `List the configured provider accounts, one per row: the type, how
+many servers the last listing found (from the cache, without asking the
+provider; - when never listed), the settings that are not secret, and
+for each secret where it comes from (file, env, command). -o wide spells
+the secret references out; -o json and -o yaml carry everything. A
+secret written as plain text in the configuration is never shown; it
+reads "plain!", a hint to move it into a file or a secret store.`,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := a.loadConfig()
 			if err != nil {
 				return err
 			}
-			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(a.stdout, "# %s (does not exist yet; run `ump config isp add` to create it)\n", config.AbbreviateHome(path))
-			} else {
-				fmt.Fprintf(a.stdout, "# %s\n", config.AbbreviateHome(path))
+			format, err := parseFormat(output)
+			if err != nil || format == formatName {
+				return usageErrorf(cmd, "unknown output format %q (use one of table, wide, json, yaml)", output)
 			}
-			data, err := config.MarshalYAML(redactConfig(cfg))
-			if err != nil {
-				return err
+			rows := ispRows(cfg, cache.Open(path))
+			switch format {
+			case formatJSON, formatYAML:
+				return printEncoded(a.stdout, rows, format)
 			}
-			_, err = a.stdout.Write(data)
-			return err
+			if len(rows) == 0 {
+				fmt.Fprintf(a.stderr, "No accounts in %s; ump config isp add sets one up.\n", config.AbbreviateHome(path))
+				return nil
+			}
+			table := make([][]string, 0, len(rows))
+			for _, r := range rows {
+				servers := "-"
+				if r.Servers != nil {
+					servers = strconv.Itoa(*r.Servers)
+				}
+				var secrets []string
+				for _, k := range sortedKeys(r.Secrets) {
+					ref := r.Secrets[k]
+					if format != formatWide {
+						ref, _, _ = strings.Cut(ref, ":")
+					}
+					secrets = append(secrets, k+"="+ref)
+				}
+				var settings []string
+				for _, k := range sortedKeys(r.Settings) {
+					settings = append(settings, k+"="+r.Settings[k])
+				}
+				table = append(table, []string{r.Name, r.Type, servers, orNone(strings.Join(settings, " ")), orNone(strings.Join(secrets, " "))})
+			}
+			return writeTable(a.stdout, []string{"NAME", "TYPE", "SERVERS", "SETTINGS", "SECRETS"}, table, noHeaders)
 		},
 	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format: table, wide (the secret references in full), json or yaml")
+	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line of table output")
+	return cmd
 }
 
-// redactConfig returns a copy of cfg in which plaintext secrets are
-// replaced by "<redacted>". Secret references are kept: they are not
-// secret themselves.
-func redactConfig(cfg *config.Config) *config.Config {
-	out := &config.Config{Defaults: cfg.Defaults, Accounts: map[string]config.Account{}, Rest: cfg.Rest}
-	for name, acct := range cfg.Accounts {
+// ispRow is an account as ump config isp list shows it.
+type ispRow struct {
+	Name string `json:"name" yaml:"name"`
+	Type string `json:"type" yaml:"type"`
+	// Servers is what the last listing found; nil when never listed.
+	Servers *int `json:"servers,omitempty" yaml:"servers,omitempty"`
+	// Settings are the values that are not secret.
+	Settings map[string]string `json:"settings" yaml:"settings"`
+	// Secrets say where each secret comes from: file:PATH, env:NAME,
+	// command:CMD, or plain! for a secret written into the configuration.
+	Secrets map[string]string `json:"secrets" yaml:"secrets"`
+}
+
+func ispRows(cfg *config.Config, store *cache.Store) []ispRow {
+	rows := []ispRow{}
+	for _, name := range cfg.AccountNames() {
+		acct := cfg.Accounts[name]
 		t, known := provider.Lookup(acct.Type)
-		copied := config.Account{Type: acct.Type, Settings: map[string]config.Value{}}
+		r := ispRow{Name: name, Type: acct.Type, Settings: map[string]string{}, Secrets: map[string]string{}}
 		for k, v := range acct.Settings {
-			if !v.IsRef() {
-				f, isField := t.Field(k)
-				if !known || !isField || f.Secret {
-					v = config.PlainValue("<redacted>")
-				}
+			f, isField := t.Field(k)
+			secret := !known || !isField || f.Secret
+			switch {
+			case v.File != "":
+				r.Secrets[k] = "file:" + v.File
+			case v.Env != "":
+				r.Secrets[k] = "env:" + v.Env
+			case v.Command != "":
+				r.Secrets[k] = "command:" + v.Command
+			case secret:
+				r.Secrets[k] = "plain!"
+			default:
+				r.Settings[k] = v.Plain
 			}
-			copied.Settings[k] = v
 		}
-		out.Accounts[name] = copied
+		if snap, err := store.Latest(name); err == nil && snap != nil {
+			n := len(snap.Machines)
+			r.Servers = &n
+		}
+		rows = append(rows, r)
 	}
-	return out
+	return rows
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "<none>"
+	}
+	return s
 }
 
 func (a *app) newConfigTypesCmd() *cobra.Command {

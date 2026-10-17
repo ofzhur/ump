@@ -670,13 +670,35 @@ func TestConfigAddViewTestRemove(t *testing.T) {
 		t.Errorf("saved config:\n%s", text)
 	}
 
-	out, _, code = e.run("", false, "config", "isp", "view")
-	if code != 0 || !strings.HasPrefix(out, "# "+e.cfgPath+"\n") {
-		t.Fatalf("view: code %d\n%s", code, out)
+	out, _, code = e.run("", false, "config", "isp", "list")
+	if code != 0 {
+		t.Fatalf("list: code %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "password: <redacted>") || strings.Contains(out, "wrong") ||
-		!strings.Contains(out, "password: {env: FAKE_PASS}") || !strings.Contains(out, "login: alice") {
-		t.Errorf("view redaction:\n%s", out)
+	expectRows(t, out, [][]string{
+		{"NAME", "TYPE", "SERVERS", "SETTINGS", "SECRETS"},
+		{"one", "fake", "-", "login=bob", "password=env"},
+		{"three", "fake", "-", "login=carol", "region=us", "password=env"},
+		{"two", "fake", "-", "login=alice", "region=us", "password=plain!"},
+	})
+	if strings.Contains(out, "wrong") {
+		t.Errorf("a plain secret is shown:\n%s", out)
+	}
+	out, _, _ = e.run("", false, "config", "isp", "ls", "-o", "wide", "--no-headers")
+	if !strings.Contains(out, "password=env:FAKE_PASS") || strings.Contains(out, "NAME") {
+		t.Errorf("wide:\n%s", out)
+	}
+	out, _, _ = e.run("", false, "config", "isp", "list", "-o", "json")
+	if !strings.Contains(out, `"password": "plain!"`) || strings.Contains(out, `"servers"`) || strings.Contains(out, "wrong") {
+		t.Errorf("json:\n%s", out)
+	}
+	if _, _, code := e.run("", false, "config", "isp", "view"); code != exitUsage {
+		t.Errorf("isp view: code %d, want a usage error", code)
+	}
+	// after a listing, the number of servers comes from the cache
+	e.run("", false, "server", "list", "--account", "one")
+	out, _, _ = e.run("", false, "config", "isp", "list", "--no-headers")
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "one fake 2 login=bob password=env") {
+		t.Errorf("servers after a listing:\n%s", out)
 	}
 
 	out, errOut, code = e.run("", false, "config", "isp", "test")
@@ -783,8 +805,12 @@ func TestWizardNeedsTTY(t *testing.T) {
 	if out, _, code := e.run("", true, "config", "isp"); code != 0 || !strings.Contains(out, "Available Commands:") {
 		t.Errorf("bare: code %d, %q", code, out)
 	}
-	if out, _, code := e.run("", true, "c", "i", "v"); code != 0 || !strings.Contains(out, "does not exist yet") {
-		t.Errorf("short form: code %d, %q", code, out)
+	if _, errOut, code := e.run("", true, "c", "i", "l"); code != 0 || !strings.Contains(errOut, "No accounts in") {
+		t.Errorf("short form: code %d, %q", code, errOut)
+	}
+	// an unknown word below the top level is a usage error, not the help
+	if _, errOut, code := e.run("", false, "config", "isp", "view"); code != exitUsage || !strings.Contains(errOut, `unknown command "view" for ump config isp (add, list, remove, test, types)`) {
+		t.Errorf("unknown subcommand: code %d, %q", code, errOut)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "--set", "a=b"); code != 2 || !strings.Contains(errOut, "the flags need TYPE and NAME") {
 		t.Errorf("flags without arguments: code %d, %q", code, errOut)
@@ -2927,28 +2953,28 @@ func TestUpdateHint(t *testing.T) {
 	defer func() { Version = was }()
 
 	// a successful command checks once and says what is new
-	_, errOut, code := e.run("", false, "config", "isp", "view")
+	_, errOut, code := e.run("", false, "config", "isp", "list")
 	if code != 0 || !strings.Contains(errOut, "ump v0.2.0 is available (this is v0.1.0): curl -fsSL "+srv.URL+"/get.sh | sh") || hits != 1 {
 		t.Errorf("first run: code %d, hits %d, %q", code, hits, errOut)
 	}
 	// not again the same day; again the next day
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); strings.Contains(errOut, "available") || hits != 1 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); strings.Contains(errOut, "available") || hits != 1 {
 		t.Errorf("second run: hits %d, %q", hits, errOut)
 	}
 	e.now = e.now.Add(25 * time.Hour)
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); !strings.Contains(errOut, "available") || hits != 2 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); !strings.Contains(errOut, "available") || hits != 2 {
 		t.Errorf("next day: hits %d, %q", hits, errOut)
 	}
 	// nothing when up to date, off, for version, or for a development build
 	e.now = e.now.Add(25 * time.Hour)
 	Version = "v0.2.0"
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); strings.Contains(errOut, "available") || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); strings.Contains(errOut, "available") || hits != 3 {
 		t.Errorf("up to date: hits %d, %q", hits, errOut)
 	}
 	e.now = e.now.Add(25 * time.Hour)
 	Version = "v0.1.0"
 	t.Setenv("UMP_NO_UPDATE_CHECK", "1")
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); errOut != "" || hits != 3 {
 		t.Errorf("env off: hits %d, %q", hits, errOut)
 	}
 	t.Setenv("UMP_NO_UPDATE_CHECK", "")
@@ -2956,12 +2982,12 @@ func TestUpdateHint(t *testing.T) {
 		t.Errorf("version: hits %d, %q", hits, errOut)
 	}
 	e.write(testConfig + "storage: " + srv.URL + "\nupdates: false\n")
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); errOut != "" || hits != 3 {
 		t.Errorf("config off: hits %d, %q", hits, errOut)
 	}
 	e.write(testConfig + "storage: " + srv.URL + "\n")
 	Version = "dev"
-	if _, errOut, _ := e.run("", false, "config", "isp", "view"); errOut != "" || hits != 3 {
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); errOut != "" || hits != 3 {
 		t.Errorf("dev: hits %d, %q", hits, errOut)
 	}
 	// a failed command does not check
