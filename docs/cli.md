@@ -626,7 +626,7 @@ profile and opens it in your editor, `edit NAME` opens it and checks it
 afterwards (an invalid profile is kept, with the problem named; a
 published profile is refused, make your own from it), `delete NAME`
 removes it, `update` fetches the published profiles (`ubuntu-26.04`,
-`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`) and the published entries of
+`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`) and the published entries of
 `layouts.yaml`, `firewalls.yaml` and `users.yaml` again, replacing them
 and keeping yours, `default [NAME]` shows or sets the default profile. `ump server set
 REF --profile NAME` remembers which profile a server is reinstalled with

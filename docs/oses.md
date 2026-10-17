@@ -5,15 +5,17 @@ every machine: a dedicated server at Hetzner, a cloud instance at Vultr
 or a box in your rack ends up with the same system, the same disk
 layout, the same users, network names, firewall and tools. Ubuntu and
 Debian come as UMP's own prebuilt images from its storage; NixOS is installed from
-NixOS's public servers with UMP's configuration on top. Both work on
-amd64 and arm64, boot from UEFI and, on amd64, from BIOS, and are meant
-to be used as they are: pick one, and the machine is a well-kept server
-a few minutes later.
+NixOS's public servers with UMP's configuration on top, and Arch Linux,
+a rolling release, from its mirrors with the packages of the day. They
+work on amd64 and arm64 (Arch Linux on amd64 only), boot from UEFI and,
+on amd64, from BIOS, and are meant to be used as they are: pick one, and
+the machine is a well-kept server a few minutes later.
 
 ```console
 $ ump server reinstall web-01                          # the default: Ubuntu 26.04
 $ ump server reinstall web-01 --profile debian-13      # Debian
 $ ump server reinstall web-01 --profile nixos-25.11    # NixOS
+$ ump server reinstall web-01 --profile archlinux      # Arch Linux
 $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same profile
 ```
 
@@ -25,6 +27,7 @@ $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same pr
 | `debian-13` | Debian 13 (trixie) | `debian-13` | the same |
 | `debian-12` | Debian 12 (bookworm) | `debian-12` | the same |
 | `nixos-25.11` | NixOS 25.11, from its stable channel | `nixos-25.11` | `nixos-install` from NixOS's public servers, with the profile as NixOS modules |
+| `archlinux` | Arch Linux, the rolling release, amd64 only | `archlinux` | `pacstrap` from the Arch mirrors, then configured in place like Ubuntu |
 
 `ump config os create` lists what the storage offers (its
 `os/index.json`), and [profiles](profiles.md#choosing-the-operating-system) says how a
@@ -54,10 +57,14 @@ Whichever system it is, ump installs it the same way, from the same
   hardware tools, the same bash prompt and aliases, and a message of the
   day with UMP's banner, the host,
   its installation, load, memory, disk and addresses (`ump-motd`).
-- **Userdata:** what a system of yours needs on top: a script on Ubuntu
-  and Debian, a NixOS module on NixOS ([userdata](userdata.md)).
+- **Userdata:** what a system of yours needs on top: a script on Ubuntu,
+  Debian and Arch Linux, a NixOS module on NixOS ([userdata](userdata.md)).
 - **A record** of what was installed, from which profile and layout, in
   `/etc/ump/install`, which `ump server show` reads back.
+
+Measured on 2026-10-17 with `ump server reinstall`, from the running system
+to the new one answering: Arch Linux in 95 s on a Hetzner Cloud server
+and 159 s on a Linode nanode.
 
 ## Ubuntu
 
@@ -244,6 +251,60 @@ writes the manifest (the Nix version and checksum from the official Nix
 installer), `images/upload.sh os` publishes it, and
 [`images/test-install.sh`](../images/test-install.sh) (`images/test-install.sh nixos-25.11`)
 installs NixOS in QEMU from the UMP rescue image and checks the result.
+
+## Arch Linux
+
+Arch Linux is a rolling release: there are no versions to pick, and an
+image would be out of date within weeks. So ump installs it the way
+Arch's own installation guide does, at the time of the installation:
+
+1. The monthly **bootstrap tarball** from `archive.archlinux.org`, whose
+   URL and checksum the manifest pins, is unpacked onto the new disk
+   (not into the rescue system's memory, so 1 GB machines work).
+2. In it, the **pacman keyring** is set up and brought up to date, so
+   that the packages of the day verify; pacman checks every package's
+   signature.
+3. **`pacstrap`** installs the manifest's packages from the mirror
+   (`geo.mirror.pkgbuild.com`, Arch's CDN) as they are that day: the
+   counterpart of the Ubuntu image's package list, from `base`, `linux`
+   and `linux-firmware` to the same operator tools
+   ([`images/arch/packages.txt`](../images/arch/packages.txt)).
+4. From there the system is **configured in place like Ubuntu**: the
+   same fstab, users and keys, SSH policy, firewall, shell, message of
+   the day and userdata.
+
+What is Arch's own:
+
+- **Network:** systemd-networkd directly, without netplan: `.link`
+  files in `/etc/systemd/network/` give the interfaces their names by
+  MAC address, `20-ump-ext01.network` has the uplink's static
+  addresses; `systemd-resolved` with resolvers 1.1.1.1 and 8.8.8.8.
+- **Boot:** `mkinitcpio` with the `lvm2` hook (and `mdadm_udev` for md
+  arrays), GRUB for UEFI and BIOS, the CPU microcode of Intel and AMD;
+  the kernel command line in `/etc/default/grub` (`grub-mkconfig -o
+  /boot/grub/grub.cfg` after a change).
+- **Administrators** are in `wheel`, with their own sudoers file as
+  elsewhere.
+- **Message of the day:** Arch has no `update-motd.d`, so
+  `/etc/profile.d/ump-motd.sh` shows UMP's banner at an SSH login, as on
+  NixOS.
+- **The installation record** says `rolling, packages of DATE` as the
+  version, and the kernel installed (`7.2.10-arch1-1`).
+- **Firewall:** `nftables.service` loads `/etc/nftables.conf` at boot
+  and then shows as inactive (Arch's unit does not stay active, unlike
+  Debian's); `nft list ruleset` shows the rules in force.
+- **Logs:** what pacstrap did is in `/var/log/ump-pacstrap.log`.
+
+Updates are Arch's: `pacman -Syu`, regularly (a rolling release is
+meant to be kept current). Userdata is bash, as on Ubuntu; the published
+entry is `archlinux` (`pacman -S --noconfirm --needed ...` installs
+packages). On an arm64 machine the installer stops before touching the
+disks: Arch Linux is built for x86_64 only (Arch Linux ARM is a separate
+project).
+
+The manifest is written by [`images/arch/build.sh`](../images/arch/build.sh):
+the newest bootstrap release, its checksum, the mirror, and the package
+list, each package checked against the Arch package database.
 
 ## More systems
 

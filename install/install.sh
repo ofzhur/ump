@@ -400,6 +400,10 @@ image_version="$(printf '%s' "$manifest" | jq -r '.version // empty')"
 image_kernel="$(printf '%s' "$manifest" | jq -r '.kernel // empty')"
 # the size of the installed system: the root file system must hold twice it
 unpacked_mb="$(printf '%s' "$manifest" | jq -r '.unpacked_mb // empty')"
+# a manifest may say why there is nothing for this machine (Arch Linux on
+# arm64)
+unsupported="$(printf '%s' "$manifest" | jq -r '.unsupported // empty')"
+[ -z "$unsupported" ] || die "$os on $arch: $unsupported"
 case "$family" in
 image)
 	want_sum="$(printf '%s' "$manifest" | jq -r '.files["rootfs.tar.zst"].sha256 // empty')"
@@ -412,7 +416,14 @@ nixos)
 	done
 	log "image $os: NixOS from the channel $(printf '%s' "$manifest" | jq -r .channel), installed with nixos-install"
 	;;
-*) die "the manifest's family $family is not one this installer knows (image, nixos)" ;;
+arch)
+	for k in bootstrap.url bootstrap.sha256 mirror; do
+		[ -n "$(printf '%s' "$manifest" | jq -r ".$k // empty")" ] || die "the Arch Linux manifest names no $k"
+	done
+	[ "$(printf '%s' "$manifest" | jq -r '.packages | length')" -gt 0 ] || die "the Arch Linux manifest names no packages"
+	log "image $os: Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
+	;;
+*) die "the manifest's family $family is not one this installer knows (image, nixos, arch)" ;;
 esac
 # the userdata must be of the kind the system takes
 want_ud=bash; [ "$family" = nixos ] && want_ud=nix
@@ -574,6 +585,8 @@ cleanup() {
 	set +e
 	# a swap file on the new root keeps it busy: off before it is unmounted
 	[ -n "${target_swap:-}" ] && swapoff "$target_swap" 2>/dev/null && rm -f "$target_swap"
+	# what is mounted into the Arch Linux bootstrap
+	[ -n "${arch_boot:-}" ] && arch_umount
 	mountpoint -q /nix && umount -l /nix 2>/dev/null
 	for m in "$TARGET/dev/pts" "$TARGET/run" "$TARGET/sys" "$TARGET/proc" "$TARGET/dev"; do mountpoint -q "$m" && umount -l "$m" 2>/dev/null; done
 	for ((n = ${#MOUNTS[@]} - 1; n >= 0; n--)); do set -- ${MOUNTS[$n]}; mountpoint -q "$TARGET$1" && umount -l "$TARGET$1" 2>/dev/null; done
@@ -631,9 +644,96 @@ nft_ruleset() {
 	echo "}"
 }
 
-# --- an image (Ubuntu): unpacked, then configured in place -----------------
+# --- Arch Linux: pacstrap from the mirrors, out of the monthly bootstrap ---
+
+# Arch is a rolling release: there is no image to unpack, but the official
+# bootstrap tarball (pinned by the manifest, from archive.archlinux.org)
+# runs pacstrap, which installs the manifest's packages as the mirror has
+# them today; pacman checks every package's signature against the Arch
+# keyring. The bootstrap lives on the new disk, not in the rescue system's
+# memory, and is removed afterwards.
+arch_umount() {
+	local m
+	for m in mnt dev sys proc; do
+		mountpoint -q "$arch_boot/$m" && umount -R -l "$arch_boot/$m" 2>/dev/null
+	done
+	return 0
+}
+
+arch_pacstrap() {
+	local url sum mirror release have pkgs plog
+	url="$(jq -r .bootstrap.url <<< "$manifest")"
+	sum="$(jq -r .bootstrap.sha256 <<< "$manifest")"
+	release="$(jq -r .bootstrap.release <<< "$manifest")"
+	mirror="$(jq -r .mirror <<< "$manifest")"
+	mapfile -t pkgs < <(jq -r '.packages[]' <<< "$manifest")
+
+	arch_boot="$TARGET/.ump-arch-bootstrap"
+	log "downloading the Arch Linux bootstrap $release"
+	mkdir -p "$arch_boot"
+	have="$(mktemp)"
+	curl -fsSL "$url" | tee >(sha256sum | cut -d' ' -f1 > "$have") | zstd -dc | tar --warning=no-unknown-keyword -xpf - -C "$arch_boot" --strip-components=1 \
+		|| die "cannot download or unpack $url"
+	for _ in $(seq 1 100); do [ -s "$have" ] && break; sleep 0.1; done
+	[ "$(cat "$have")" = "$sum" ] || die "checksum mismatch for $url: manifest $sum, download $(cat "$have")"
+	rm -f "$have"
+
+	printf 'Server = %s/$repo/os/$arch\n' "$mirror" > "$arch_boot/etc/pacman.d/mirrorlist"
+	# parallel downloads; and no free space check, which needs the
+	# bootstrap's / to be a mount point (the installer checked the root's
+	# size already; the new system keeps Arch's pacman.conf with the check)
+	sed -i -e 's/^#ParallelDownloads.*/ParallelDownloads = 5/' -e 's/^CheckSpace/#CheckSpace/' "$arch_boot/etc/pacman.conf"
+	rm -f "$arch_boot/etc/resolv.conf"
+	printf 'nameserver %s\n' $dns > "$arch_boot/etc/resolv.conf"
+	# the new system with everything mounted in it (/boot, /boot/efi) as
+	# the bootstrap's /mnt, first, while the bootstrap has no mounts of its
+	# own yet; private, so that nothing mounted later shows up twice. /sys
+	# and /dev as arch-chroot binds them: slaves, so that unmounting them
+	# never reaches the rescue system's own.
+	mkdir -p "$arch_boot/mnt"
+	mount --rbind "$TARGET" "$arch_boot/mnt"
+	mount --make-rprivate "$arch_boot/mnt"
+	mount -t proc proc "$arch_boot/proc"
+	mount --rbind /sys "$arch_boot/sys"
+	mount --make-rslave "$arch_boot/sys"
+	mount --rbind /dev "$arch_boot/dev"
+	mount --make-rslave "$arch_boot/dev"
+	in_boot() { chroot "$arch_boot" /usr/bin/env -i HOME=/root LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/bin "$@"; }
+
+	log "pacman keyring"
+	plog="$TARGET/.ump-pacstrap.log"
+	{ in_boot pacman-key --init && in_boot pacman-key --populate archlinux; } > "$plog" 2>&1 \
+		|| { tail -n 20 "$plog" >&2; die "the pacman keyring could not be set up"; }
+	# the newest keys first: the bootstrap's may predate who signs today
+	in_boot pacman -Sy --noconfirm archlinux-keyring >> "$plog" 2>&1 \
+		|| { tail -n 20 "$plog" >&2; die "cannot update archlinux-keyring from $mirror"; }
+
+	log "pacstrap: ${#pkgs[@]} packages from $mirror (this takes a few minutes)"
+	# without -K: the new system takes the bootstrap's keyring, made for
+	# this installation a moment ago, instead of making and filling another
+	in_boot pacstrap /mnt "${pkgs[@]}" >> "$plog" 2>&1 \
+		|| { tail -n 40 "$plog" >&2; die "pacstrap failed"; }
+
+	arch_umount
+	# the new system was mounted in there: nothing may be left mounted
+	# before the bootstrap is deleted
+	if awk -v d="$arch_boot/" 'index($2, d) == 1 {found = 1} END {exit !found}' /proc/mounts; then
+		die "something is still mounted under $arch_boot; not deleting it (the new system is mounted in there)"
+	fi
+	rm -rf "$arch_boot"
+	arch_boot=""
+	mkdir -p "$TARGET/var/log"
+	mv "$plog" "$TARGET/var/log/ump-pacstrap.log"
+	image_version="rolling, packages of $(date -u +%Y-%m-%d)"
+	image_kernel="$(ls "$TARGET/usr/lib/modules" | head -n 1)"
+}
+
+# --- an image (Ubuntu, Debian), or Arch Linux: then configured in place ----
 
 install_image() {
+if [ "$family" = arch ]; then
+	arch_pacstrap
+else
 log "downloading and unpacking $image_url/rootfs.tar.zst"
 sumfile="$(mktemp)"
 rm -f "$sumfile"
@@ -645,6 +745,7 @@ for _ in $(seq 1 100); do [ -s "$sumfile" ] && break; sleep 0.1; done
 have_sum="$(cat "$sumfile" 2>/dev/null || true)"
 rm -f "$sumfile"
 [ "$have_sum" = "$want_sum" ] || die "checksum mismatch for rootfs.tar.zst: manifest $want_sum, download ${have_sum:-?}; nothing was configured"
+fi
 sync
 
 # --- the machine's own configuration ------------------------------------
@@ -671,6 +772,41 @@ echo "$timezone" > "$TARGET/etc/timezone"
 	for sw in "${SWAPS[@]:-}"; do [ -n "$sw" ] && printf 'UUID=%s  none  swap  sw  0 0\n' "$(blkid -s UUID -o value "$sw")"; done
 } > "$TARGET/etc/fstab"
 
+if [ "$family" = arch ]; then
+# Arch: systemd-networkd itself, the same configuration as netplan writes
+# on Ubuntu and Debian: names by MAC (.link), the uplink static
+nd="$TARGET/etc/systemd/network"
+mkdir -p "$nd"
+for i in "${!IF_MAC[@]}"; do
+	if [ "$rename" = yes ]; then
+		printf '# written by UMP at installation: the uniform name of this interface\n[Match]\nMACAddress=%s\n\n[Link]\nName=%s\n' \
+			"${IF_MAC[$i]}" "${IF_NAME[$i]}" > "$nd/10-ump-${IF_NAME[$i]}.link"
+	fi
+	[ "${IF_NAME[$i]}" = "$uplink" ] && continue
+	printf '# written by UMP at installation: up, without addresses\n[Match]\nMACAddress=%s\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nLinkLocalAddressing=no\n' \
+		"${IF_MAC[$i]}" > "$nd/20-ump-${IF_NAME[$i]}.network"
+done
+{
+	echo "# written by UMP at installation; networkctl reload after editing"
+	echo "[Match]"
+	echo "MACAddress=$mac"
+	echo
+	echo "[Network]"
+	if [ -z "$ip4$ip6" ]; then
+		echo "DHCP=ipv4"
+	else
+		[ -n "$ip4" ] && echo "Address=${ip4%%,*}"
+		[ "$ipv6" = true ] && [ -n "$ip6" ] && echo "Address=${ip6%%,*}"
+	fi
+	for d in $dns; do echo "DNS=$d"; done
+	if [ "$ipv6" = true ]; then echo "IPv6AcceptRA=no"; else echo "LinkLocalAddressing=no"; echo "IPv6AcceptRA=no"; fi
+	case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac
+	if [ "$ipv6" = true ]; then case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac; fi
+} > "$nd/20-ump-$uplink.network"
+ln -sf ../run/systemd/resolve/stub-resolv.conf "$TARGET/etc/resolv.conf"
+echo "LANG=C.UTF-8" > "$TARGET/etc/locale.conf"
+echo "KEYMAP=us" > "$TARGET/etc/vconsole.conf"
+else
 mkdir -p "$TARGET/etc/netplan"
 {
 	echo "# written by UMP at installation; netplan try / netplan apply after editing"
@@ -708,7 +844,18 @@ mkdir -p "$TARGET/etc/netplan"
 	echo "        addresses: [$(echo "$dns" | sed 's/ /, /g')]"
 } > "$TARGET/etc/netplan/10-ump.yaml"
 chmod 600 "$TARGET/etc/netplan/10-ump.yaml"
+fi
 
+if [ "$family" = arch ]; then
+	# Arch's GRUB reads /etc/default/grub alone (no grub.d)
+	[ -f "$TARGET/etc/default/grub" ] || die "the new system has no /etc/default/grub"
+	sed -i "/^GRUB_CMDLINE_LINUX_DEFAULT=/c\\
+# UMP: the kernel command line of this machine: mitigations=off and\\
+# ipv6.disable=1 unless the profile turns them on, kho=off always (see\\
+# docs/oses.md). Change it here, run grub-mkconfig -o /boot/grub/grub.cfg\\
+# and reboot.\\
+GRUB_CMDLINE_LINUX_DEFAULT=\"$kernel_cmdline\"" "$TARGET/etc/default/grub"
+else
 mkdir -p "$TARGET/etc/default/grub.d"
 cat > "$TARGET/etc/default/grub.d/ump-cmdline.cfg" <<GRUB
 # UMP: the kernel command line of this machine. By default the CPU
@@ -721,6 +868,7 @@ cat > "$TARGET/etc/default/grub.d/ump-cmdline.cfg" <<GRUB
 # server needs and which stops ump from re-entering its rescue system.
 GRUB_CMDLINE_LINUX_DEFAULT="$kernel_cmdline"
 GRUB
+fi
 
 : > "$TARGET/etc/machine-id"
 rm -f "$TARGET/var/lib/dbus/machine-id"
@@ -746,6 +894,22 @@ else
 	rm -f "$TARGET/etc/skel/.bashrc.ump"
 	warn "cannot fetch $storage/install/bashrc.sh; the image's shell setup stays"
 fi
+if [ "$family" = arch ]; then
+	# Arch has no update-motd.d: the login shell shows it, as on NixOS
+	mkdir -p "$TARGET/usr/local/bin" "$TARGET/etc/profile.d"
+	if curl -fsSL -o "$TARGET/usr/local/bin/ump-motd" "$storage/install/motd.sh"; then
+		chmod 755 "$TARGET/usr/local/bin/ump-motd"
+		cat > "$TARGET/etc/profile.d/ump-motd.sh" <<'MOTD'
+# the message of the day of UMP, once per SSH login
+if [ -n "${SSH_CONNECTION:-}" ] && [ -t 1 ] && [ -z "${UMP_MOTD_SHOWN:-}" ]; then
+	export UMP_MOTD_SHOWN=1
+	/usr/local/bin/ump-motd
+fi
+MOTD
+	else
+		warn "cannot fetch $storage/install/motd.sh; no message of the day"
+	fi
+else
 mkdir -p "$TARGET/etc/update-motd.d"
 if curl -fsSL -o "$TARGET/etc/update-motd.d/00-ump" "$storage/install/motd.sh"; then
 	chmod 755 "$TARGET/etc/update-motd.d/00-ump"
@@ -753,10 +917,13 @@ if curl -fsSL -o "$TARGET/etc/update-motd.d/00-ump" "$storage/install/motd.sh"; 
 else
 	warn "cannot fetch $storage/install/motd.sh; the image's message of the day stays"
 fi
+fi
 
 # --- users --------------------------------------------------------------
 
 log "users"
+# the group of the administrators: sudo on Ubuntu and Debian, wheel on Arch
+sudo_group=sudo; [ "$family" = arch ] && sudo_group=wheel
 nusers="$(jq '.users | length' <<< "$spec")"
 for ((n = 0; n < nusers; n++)); do
 	u="$(jq -c ".users[$n]" <<< "$spec")"
@@ -773,7 +940,7 @@ for ((n = 0; n < nusers; n++)); do
 			run_in_target "usermod $name" usermod -aG "$g" "$name"
 		done
 		if [ "$sudo" = true ]; then
-			run_in_target "usermod $name" usermod -aG sudo "$name"
+			run_in_target "usermod $name" usermod -aG "$sudo_group" "$name"
 			mkdir -p "$TARGET/etc/sudoers.d"
 			printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$name" > "$TARGET/etc/sudoers.d/90-ump-$name"
 			chmod 440 "$TARGET/etc/sudoers.d/90-ump-$name"
@@ -861,15 +1028,58 @@ fi
 
 # --- the boot loader ---------------------------------------------------
 
+if [ "$family" = arch ]; then
+	# What UMP's Ubuntu and Debian images bring from their build
+	# (images/base: overlay/ and finish.sh), done here: Arch's packages
+	# set nothing up and enable nothing.
+	mkdir -p "$TARGET/etc/ssh/sshd_config.d" "$TARGET/etc/systemd/resolved.conf.d" "$TARGET/etc/tuned"
+	cat > "$TARGET/etc/ssh/sshd_config.d/50-ump.conf" <<'SSHD'
+# UMP: no passwords over SSH, and no root login. The installer writes
+# 10-ump-root.conf (which wins, sshd keeps the first value it reads) with
+# "PermitRootLogin prohibit-password" when the profile lists root with
+# keys. The administrator is the profile's sudo user, ump by default.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+SSHD
+	grep -q '^Include /etc/ssh/sshd_config.d/\*\.conf' "$TARGET/etc/ssh/sshd_config" \
+		|| sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' "$TARGET/etc/ssh/sshd_config"
+	printf '# UMP: public resolvers, independent of the provider; the .network\n# file sets the same per interface. Replace both to use your own.\n[Resolve]\nDNS=%s\n' "$dns" \
+		> "$TARGET/etc/systemd/resolved.conf.d/ump.conf"
+	echo throughput-performance > "$TARGET/etc/tuned/active_profile"
+	echo manual > "$TARGET/etc/tuned/profile_mode"
+	# the boot menu: two seconds, no other systems searched
+	sed -i -e 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' -e '/^#*GRUB_DISABLE_OS_PROBER=/d' "$TARGET/etc/default/grub"
+	echo 'GRUB_DISABLE_OS_PROBER=true' >> "$TARGET/etc/default/grub"
+	in_target passwd -l root >/dev/null 2>&1 || true
+	# network, resolver, time, SSH, tuned; the activity history of sar and
+	# atop, where the packages have their units
+	run_in_target "enabling the services" systemctl enable systemd-networkd.service systemd-resolved.service sshd.service systemd-timesyncd.service tuned.service
+	for u in sysstat.service sysstat-collect.timer sysstat-summary.timer atop.service atop-rotate.timer; do
+		[ -f "$TARGET/usr/lib/systemd/system/$u" ] || continue
+		in_target systemctl enable "$u" >/dev/null 2>&1 || warn "could not enable $u"
+	done
+fi
+
 log "installing the boot loader"
 if [ ${#M_LEVEL[@]} -gt 0 ]; then
-	mkdir -p "$TARGET/etc/mdadm"
-	mdadm --detail --scan >> "$TARGET/etc/mdadm/mdadm.conf"
+	mdadm_conf=/etc/mdadm/mdadm.conf; [ "$family" = arch ] && mdadm_conf=/etc/mdadm.conf
+	mkdir -p "$TARGET$(dirname "$mdadm_conf")"
+	mdadm --detail --scan >> "$TARGET$mdadm_conf"
 fi
 need_initramfs=0
 [ ${#M_LEVEL[@]} -gt 0 ] && need_initramfs=1
 for k in "${!L_VG[@]}"; do [ "${L_RAID[$k]}" != none ] && need_initramfs=1; done
-if [ "$need_initramfs" = 1 ]; then
+if [ "$family" = arch ]; then
+	# Arch's initramfs knows neither LVM nor md without its hooks, and the
+	# root is always on a volume group
+	hooks="lvm2"
+	[ ${#M_LEVEL[@]} -gt 0 ] && hooks="mdadm_udev lvm2"
+	sed -i -E "/^HOOKS=/ s/ filesystems/ $hooks filesystems/" "$TARGET/etc/mkinitcpio.conf"
+	grep -q "^HOOKS=.* lvm2 filesystems" "$TARGET/etc/mkinitcpio.conf" || die "cannot add the lvm2 hook to /etc/mkinitcpio.conf"
+	log "initramfs (mkinitcpio, hooks $hooks)"
+	run_in_target "mkinitcpio" mkinitcpio -P
+elif [ "$need_initramfs" = 1 ]; then
 	log "initramfs (md or raid volumes)"
 	run_in_target "update-initramfs" update-initramfs -u -k all
 fi
@@ -888,7 +1098,11 @@ arm64)
 	[ "$has_efi" = 1 ] && run_in_target "grub-install (EFI)" grub-install --target=arm64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
 	;;
 esac
-run_in_target "update-grub" update-grub
+if [ "$family" = arch ]; then
+	run_in_target "grub-mkconfig" grub-mkconfig -o /boot/grub/grub.cfg
+else
+	run_in_target "update-grub" update-grub
+fi
 grep -q 'vmlinuz' "$TARGET/boot/grub/grub.cfg" || die "grub.cfg names no kernel"
 }
 
@@ -1013,7 +1227,7 @@ NIX
 }
 
 case "$family" in
-image) install_image ;;
+image|arch) install_image ;;
 nixos) install_nixos ;;
 esac
 

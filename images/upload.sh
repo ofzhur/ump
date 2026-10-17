@@ -209,7 +209,7 @@ for w in "${what[@]}"; do
 		done
 		;;
 	os)
-		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/; do
+		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/ "$HERE"/arch/out/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }

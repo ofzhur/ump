@@ -18,7 +18,7 @@ import (
 // profileFiles are what a profiles directory starts with.
 // publishedProfiles are the profiles the storage publishes; the named
 // files next to them hold the published entries and the user's own.
-var publishedProfiles = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11"}
+var publishedProfiles = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux"}
 
 var namedFiles = []*namedSet{layoutSet, firewallSet, userSet, userdataSet}
 

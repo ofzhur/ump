@@ -9,13 +9,15 @@ may also carry entries inline for what belongs to it alone.
 
 ```console
 $ ump config userdata list
-NAME     TYPE   LINES   STATE   DESCRIPTION
-debian   bash   8       ok      what every Debian gets; nothing yet
-nixos    nix    12      ok      what every NixOS gets; nothing yet
-ubuntu   bash   7       ok      what every Ubuntu gets; nothing yet
+NAME        TYPE   LINES   STATE   DESCRIPTION
+archlinux   bash   8       ok      what every Arch Linux gets; nothing yet
+debian      bash   8       ok      what every Debian gets; nothing yet
+nixos       nix    12      ok      what every NixOS gets; nothing yet
+ubuntu      bash   7       ok      what every Ubuntu gets; nothing yet
 ```
 
-An entry is a bash script (type `bash`) for Ubuntu, or a NixOS module
+An entry is a bash script (type `bash`) for Ubuntu, Debian and Arch
+Linux, or a NixOS module
 (type `nix`) for [NixOS](oses.md#nixos), where it is merged with UMP's own
 module instead of run. A profile takes the type its system takes, and
 ump refuses a mix before it touches the machine. Other systems that take
@@ -83,7 +85,7 @@ script: |                     # the script itself
 |---|---|
 | `name` | Lower-case letters, digits, `.`, `_` and `-`, starting with a letter or digit. In `userdata.yaml` the entry's key is the name. |
 | `description` | One line, shown by `ump config userdata list`. |
-| `type` | `bash`: a script run by bash, for Ubuntu (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](oses.md#userdata-on-nixos)). |
+| `type` | `bash`: a script run by bash, for Ubuntu, Debian and Arch Linux (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](oses.md#userdata-on-nixos)). |
 | `script` | The script or the module, not empty. A shebang line is not needed, bash runs it either way. |
 
 ## How it runs

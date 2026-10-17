@@ -13,6 +13,7 @@ reinstall NAME` works with the published `ubuntu-26.04` out of the box.
 | [`ubuntu-26.04.yaml`](ubuntu-26.04.yaml), [`ubuntu-24.04.yaml`](ubuntu-24.04.yaml), [`ubuntu-22.04.yaml`](ubuntu-22.04.yaml) | the published profiles, `ubuntu-26.04` the default: Ubuntu 26.04 on every disk as one linear volume group, the sudo user `ump` with your keys, ICMP and SSH open | [OS profiles](../docs/profiles.md) |
 | [`debian-13.yaml`](debian-13.yaml), [`debian-12.yaml`](debian-12.yaml) | the same for Debian 13 and 12, with the userdata `debian` | [Operating systems](../docs/oses.md#debian) |
 | [`nixos-25.11.yaml`](nixos-25.11.yaml) | the same for NixOS 25.11 from its stable channel, with the userdata `nixos` | [NixOS](../docs/oses.md#nixos) |
+| [`archlinux.yaml`](archlinux.yaml) | the same for Arch Linux, the rolling release from its mirrors (amd64 only), with the userdata `archlinux` | [Arch Linux](../docs/oses.md#arch-linux) |
 | [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 | [`users.yaml`](users.yaml) | the named user `ump`, the administrator UMP provides | [Users](../docs/users.md) |

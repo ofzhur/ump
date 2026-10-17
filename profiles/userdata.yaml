@@ -36,6 +36,18 @@ userdata:
       set -euo pipefail
       echo "userdata debian: nothing to do on $(hostname)"
       # apt-get install -y --no-install-recommends htop
+  archlinux:
+    description: what every Arch Linux gets; nothing yet
+    type: bash
+    script: |
+      #!/bin/bash
+      # Runs as root in the freshly installed Arch Linux, before its first
+      # boot, with network. Put what every Arch Linux of yours needs here,
+      # or make your own entry (ump config userdata create NAME) and list
+      # it in the profile after this one.
+      set -euo pipefail
+      echo "userdata archlinux: nothing to do on $(hostname)"
+      # pacman -S --noconfirm --needed docker
   nixos:
     description: what every NixOS gets; nothing yet
     type: nix

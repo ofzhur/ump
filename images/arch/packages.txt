@@ -1,0 +1,82 @@
+# Packages of an Arch Linux installation, one per line: what pacstrap puts
+# on the disk, the counterpart of the Ubuntu and Debian images' list
+# (images/base/packages.txt). build.sh checks every name against the
+# Arch package database and writes the list into the manifest; the
+# installer installs it at whatever version the mirrors have then.
+
+# the system
+base
+linux
+linux-firmware
+intel-ucode
+amd-ucode
+mkinitcpio
+sudo
+bash-completion
+inetutils
+logrotate
+less
+vim
+tmux
+htop
+rsync
+curl
+wget
+gnupg
+python
+
+# boot and disks
+grub
+efibootmgr
+lvm2
+mdadm
+e2fsprogs
+xfsprogs
+btrfs-progs
+dosfstools
+gptfdisk
+parted
+smartmontools
+nvme-cli
+hdparm
+
+# network
+openssh
+nftables
+iproute2
+iputils
+ethtool
+mtr
+tcpdump
+bind
+traceroute
+iftop
+nethogs
+socat
+ipcalc
+whois
+
+# hardware and tuning
+pciutils
+usbutils
+dmidecode
+lshw
+tuned
+cpupower
+numactl
+
+# tools
+jq
+unzip
+xz
+bzip2
+git
+sysstat
+atop
+iotop-c
+lsof
+strace
+ltrace
+psmisc
+ncdu
+tree

@@ -97,15 +97,16 @@ each with its own `ump config` command (`list`, `get`, `create`,
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
-| [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, a NixOS module for NixOS; listed by name in profiles |
+| [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, Debian and Arch Linux, a NixOS module for NixOS; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
 
 The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
 group, the sudo user `ump` with your keys, ICMP and SSH open),
-`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12` and
+`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`,
 `nixos-25.11` (NixOS from its
-stable channel, see [NixOS](docs/oses.md#nixos)), the layouts `lvm-linear`,
+stable channel, see [NixOS](docs/oses.md#nixos)) and `archlinux` (Arch
+Linux from its mirrors, see [Arch Linux](docs/oses.md#arch-linux)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
 `web` and `open`, and the user `ump`. They are templates: make your own
 from them (`ump config os create`, `ump config user create`, ...), and
