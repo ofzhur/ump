@@ -66,6 +66,11 @@ name (`ns1234.ip-1-2-3.eu`) and its name the display name when one is
 set; instances carry their project as labels; VPS are labelled
 `family: vps`.
 
+- OVHcloud's API front end now and then refuses a TLS handshake
+  (`remote error: tls: record overflow`) and takes the next one; ump
+  sends such a request again, up to twice, after 1 and 3 seconds. The
+  request had not gone out, so this is safe for every call (every
+  provider's client does it).
 - Credentials: an application key and secret, plus a consumer key with
   access rules. The wizard requests a consumer key with exactly the rules
   the commands need and shows the validation URL; a consumer key made

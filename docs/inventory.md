@@ -21,7 +21,8 @@ $ ump server show web-01                  # everything the provider knows, plus 
 
 `ump server list` asks every configured account, all in parallel (on a
 terminal each account's servers appear as soon as it answered), and
-prints one row per server: account, provider, ID, name, IPv4, location and status.
+prints one row per server: account, provider, ID, name, IPv4, location,
+status and the operating system ump installed last (from the state).
 `-o wide` adds IPv6, product, kind, price and attributes; `-o json` and
 `-o yaml` print every field, including the provider's labels; `-o name`
 prints `provider/id` per line. `--account NAME` restricts the listing,

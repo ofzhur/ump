@@ -67,6 +67,11 @@ type Machine struct {
 	// set --attr: an owner, a role, a cost center, anything the inventory
 	// should carry.
 	Attributes map[string]string `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+	// OS is the operating system ump installed last (ubuntu-26.04), and
+	// InstalledAt when; from the state, empty for a machine ump never
+	// installed.
+	OS          string     `json:"os,omitempty" yaml:"os,omitempty"`
+	InstalledAt *time.Time `json:"installed_at,omitempty" yaml:"installed_at,omitempty"`
 }
 
 // Price is what a machine costs per period.
@@ -234,19 +239,20 @@ func (o Options) httpClient() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-// Client returns the HTTP client to use, with request logging attached when
-// verbose output is on. Authorization headers are never logged.
+// Client returns the HTTP client to use: a request whose connection fails
+// in the TLS handshake is sent again (handshakeRetry), and with verbose
+// output on every request is logged (each try). Authorization headers are
+// never logged.
 func (o Options) Client() *http.Client {
-	c := o.httpClient()
-	if o.Logf == nil {
-		return c
-	}
-	cc := *c
+	cc := *o.httpClient()
 	rt := cc.Transport
 	if rt == nil {
 		rt = http.DefaultTransport
 	}
-	cc.Transport = &loggingTransport{next: rt, logf: o.Logf}
+	if o.Logf != nil {
+		rt = &loggingTransport{next: rt, logf: o.Logf}
+	}
+	cc.Transport = &handshakeRetry{next: rt, waits: handshakeWaits}
 	return &cc
 }
 

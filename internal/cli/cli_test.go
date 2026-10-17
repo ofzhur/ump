@@ -539,11 +539,11 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatalf("code %d, stderr %q", code, errOut)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>"},
 	})
-	if !strings.HasPrefix(out, "ACCOUNT   PROVIDER   ID   NAME     IPV4           LOCATION   STATUS\n") {
+	if !strings.HasPrefix(out, "ACCOUNT   PROVIDER   ID   NAME     IPV4           LOCATION   STATUS    OS\n") {
 		t.Errorf("unexpected column alignment:\n%s", out)
 	}
 
@@ -557,9 +557,9 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatal(out)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "m2", "cloud", "<none>", "<none>"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
 	})
 }
 
@@ -608,9 +608,9 @@ func TestGetServersRefs(t *testing.T) {
 		t.Errorf("code %d", code)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>"},
 	})
 	if errOut != "ump: server \"nope\" not found\nump: 1 of 4 servers not found\n" {
 		t.Errorf("stderr: %q", errOut)
@@ -1227,10 +1227,10 @@ func TestGetServersDiff(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("diff: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	want := `CHANGE    ACCOUNT   PROVIDER   ID   NAME       IPV4           LOCATION   STATUS         DETAILS
-added     one       fake       3    cache-01   203.0.113.13   eu-1       initializing
-removed   one       fake       2    db-01      203.0.113.11   eu-1       off
-changed   one       fake       1    web-01     203.0.113.12   eu-1       off            ipv4: 203.0.113.10 → 203.0.113.12; status: running → off
+	want := `CHANGE    ACCOUNT   PROVIDER   ID   NAME       IPV4           LOCATION   STATUS         OS       DETAILS
+added     one       fake       3    cache-01   203.0.113.13   eu-1       initializing   <none>
+removed   one       fake       2    db-01      203.0.113.11   eu-1       off            <none>
+changed   one       fake       1    web-01     203.0.113.12   eu-1       off            <none>   ipv4: 203.0.113.10 → 203.0.113.12; status: running → off
 `
 	if out != want {
 		t.Errorf("diff table:\n got %q\nwant %q", out, want)
@@ -1315,9 +1315,9 @@ func TestGetServersCached(t *testing.T) {
 		t.Errorf("cached: code %d, stderr %q", code, errOut)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>"},
 	})
 	out, _, code = e.run("", false, "server", "list", "--cached", "--account", "one", "db-01", "-o", "name")
 	if code != 0 || out != "fake/2\n" {
@@ -3292,7 +3292,7 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 		t.Errorf("state after set:\n%s", st)
 	}
 	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
-	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
 		t.Errorf("wide: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json")
@@ -4066,6 +4066,15 @@ func TestInstallBootsFromDiskWhereTheProviderWouldNot(t *testing.T) {
 	got := strings.Join(fakePower.actions, " ")
 	if !strings.HasSuffix(got, "bootdisk reboot:hard") || e.reboots != 0 {
 		t.Errorf("actions %q, reboots from inside %d", got, e.reboots)
+	}
+	// the listing shows what was installed, from the state
+	out, _, _ := e.run("", false, "server", "list")
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running ubuntu-26.04") {
+		t.Errorf("listing without the installed OS:\n%s", out)
+	}
+	out, _, _ = e.run("", false, "server", "list", "web-01", "-o", "json")
+	if !strings.Contains(out, `"os": "ubuntu-26.04"`) || !strings.Contains(out, `"installed_at": "2026-10-12T09:00:00Z"`) {
+		t.Errorf("json without the installed OS:\n%s", out)
 	}
 
 	resetFakePower()

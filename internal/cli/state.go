@@ -185,6 +185,10 @@ func applyState(d *state.Document, ms []provider.Machine) {
 		if len(s.Attributes) > 0 {
 			ms[i].Attributes = s.Attributes
 		}
+		if s.Installed != nil {
+			at := s.Installed.At
+			ms[i].OS, ms[i].InstalledAt = s.Installed.OS, &at
+		}
 	}
 }
 

@@ -54,6 +54,7 @@ var serverColumns = []column{
 	{header: "IPV4", value: func(m provider.Machine) string { return m.IPv4 }},
 	{header: "LOCATION", value: func(m provider.Machine) string { return m.Location }},
 	{header: "STATUS", value: func(m provider.Machine) string { return m.Status }},
+	{header: "OS", value: func(m provider.Machine) string { return m.OS }},
 	{header: "IPV6", wide: true, value: func(m provider.Machine) string { return m.IPv6 }},
 	{header: "PRODUCT", wide: true, value: func(m provider.Machine) string { return m.Product }},
 	{header: "KIND", wide: true, value: func(m provider.Machine) string { return string(m.Kind) }},

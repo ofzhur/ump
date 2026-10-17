@@ -147,7 +147,10 @@ code is 4. A reference that matches nothing gives exit code 1.
 `status` is the machine's power state where the provider tells it
 (`running`, `off`), else the provider's own status, lower-cased
 (`ready`, `cancelled`, `active`, ...); `location` is the datacenter or region,
-lower-cased; `labels` are present where the provider has them. `-o wide`
+lower-cased; `labels` are present where the provider has them. `os` is
+the operating system ump installed last (`ubuntu-26.04`) and
+`installed_at` when, from the [state](state.md); `<none>` in the table
+for a server ump never installed. `-o wide`
 adds the IPv6, product, kind, price and attributes columns; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
 sets the default format. `price` comes from the provider's API where it
