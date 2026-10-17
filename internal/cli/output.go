@@ -49,7 +49,7 @@ type column struct {
 var serverColumns = []column{
 	{header: "ACCOUNT", value: func(m provider.Machine) string { return m.Account }},
 	{header: "PROVIDER", value: func(m provider.Machine) string { return m.Provider }},
-	{header: "ID", value: func(m provider.Machine) string { return m.ID }},
+	{header: "ID", wide: true, value: func(m provider.Machine) string { return m.ID }},
 	{header: "NAME", value: func(m provider.Machine) string { return m.Name }},
 	{header: "IPV4", value: func(m provider.Machine) string { return m.IPv4 }},
 	{header: "LOCATION", value: func(m provider.Machine) string { return m.Location }},
