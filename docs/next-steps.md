@@ -323,7 +323,5 @@ commercial basis:
 - support for more providers, operating systems or setups in ump itself;
 - operating a fleet, or training your team to.
 
-Inquiries are welcome:
-
-<!-- TODO: contact details before this page goes public -->
-> **Contact:** _to be added_
+Inquiries are welcome through the contact form at
+[zhurko.de/contact](https://zhurko.de/contact/).
