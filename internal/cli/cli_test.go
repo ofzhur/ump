@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -254,6 +255,8 @@ type testEnv struct {
 	// entry script; versionAfter: how many version checks the kexec'd
 	// system needs before it answers.
 	directRoot bool
+	// forgotHosts are the addresses whose old host keys ump removed
+	forgotHosts []string
 	// directSudo: the running system refuses root, but lets UMP in as
 	// ump, who has sudo without a password
 	directSudo bool
@@ -336,6 +339,10 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 			return e.sshExit, nil
 		},
 		probe: func(ctx context.Context, addr string) bool { return true },
+		forgetHostKey: func(addr string) (bool, error) {
+			e.forgotHosts = append(e.forgotHosts, addr)
+			return true, nil
+		},
 		editor: func(path string) error {
 			if e.editorHook == nil {
 				return nil
@@ -2209,6 +2216,7 @@ func TestInstallServer(t *testing.T) {
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
 		"Waiting for SSH on 203.0.113.10 to go down ...",
 		"web-01 is up: Ubuntu 26.04.1 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).\n",
+		"Removed the old host key of 203.0.113.10 from ~/.ssh/known_hosts: the system is new, and so is its host key.\n",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("progress line missing: %q in\n%s", want, errOut)
@@ -3995,5 +4003,100 @@ func TestRescueKeys(t *testing.T) {
 	}
 	if out, _, code := e.run("", false, "config", "key", "rescue", "--clear"); code != 0 || strings.Contains(e.read(), "- oleg") {
 		t.Errorf("clear: %d %q", code, out)
+	}
+}
+
+// diskBootProvider is a fake that boots its own kernel unless switched to
+// the machine's disks, as Linode does; its reboot is the API's. Its type
+// name sorts last, after the types the wizard tests number.
+type diskBootProvider struct{ *fakeProvider }
+
+// fakeAPIReboot, when set, is called by the diskboot fake's reboot.
+var fakeAPIReboot func()
+
+func (d *diskBootProvider) Type() string { return "zdiskboot" }
+func (d *diskBootProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	ms, err := d.fakeProvider.List(ctx)
+	for i := range ms {
+		ms[i].Provider = "zdiskboot"
+	}
+	return ms, err
+}
+func (d *diskBootProvider) BootFromDisk(ctx context.Context, m provider.Machine) error {
+	fakePower.actions = append(fakePower.actions, "bootdisk")
+	return nil
+}
+func (d *diskBootProvider) Reboot(ctx context.Context, m provider.Machine, mode provider.RebootMode) error {
+	fakePower.actions = append(fakePower.actions, "reboot:"+string(mode))
+	if fakeAPIReboot != nil {
+		fakeAPIReboot()
+	}
+	return nil
+}
+
+func init() {
+	provider.Register(provider.Type{
+		Name: "zdiskboot", Kind: provider.KindCloud, Description: "Fake provider that boots its own kernel by default",
+		Fields: []provider.Field{{Key: "password", Secret: true, Required: true}},
+		New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
+			return &diskBootProvider{&fakeProvider{account: account, settings: s}}, nil
+		},
+	})
+}
+
+func TestInstallBootsFromDiskWhereTheProviderWouldNot(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("accounts:\n  db:\n    type: zdiskboot\n    password: s3cret\n")
+	e.writeProfiles()
+	resetFakePower()
+	fakeAPIReboot = func() {
+		if e.installed {
+			e.kexeced, e.inImage, e.booted = false, false, true
+		}
+	}
+	defer func() { fakeAPIReboot = nil }()
+	e.directRoot = true
+
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes")
+	if code != 0 || !strings.Contains(errOut, "web-01 is up: Ubuntu 26.04.1 LTS") {
+		t.Fatalf("install: code %d\n%s", code, errOut)
+	}
+	// switched to the disks after the installer, then rebooted through the
+	// provider: a reboot from inside would keep the old boot configuration
+	got := strings.Join(fakePower.actions, " ")
+	if !strings.HasSuffix(got, "bootdisk reboot:hard") || e.reboots != 0 {
+		t.Errorf("actions %q, reboots from inside %d", got, e.reboots)
+	}
+
+	resetFakePower()
+	e.installed, e.booted, e.directRoot = false, false, true
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-reboot")
+	if code != 0 || !strings.Contains(errOut, "a reboot through the provider (ump server reboot web-01) starts") || !strings.HasSuffix(strings.Join(fakePower.actions, " "), "bootdisk") {
+		t.Errorf("--no-reboot: code %d, actions %q\n%s", code, fakePower.actions, errOut)
+	}
+}
+
+func TestForgetOldHostKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	a := &app{}
+	if forgot, err := a.forgetOldHostKey("203.0.113.10"); forgot || err != nil {
+		t.Errorf("without known_hosts: %v %v", forgot, err)
+	}
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	kh := filepath.Join(home, ".ssh", "known_hosts")
+	other := "198.51.100.7 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2\n"
+	os.WriteFile(kh, []byte("203.0.113.10 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMfQTHz57JBKwKQ8qsT9F67//HGryJfg2HNo3rqYE/Wp\n"+other), 0o600)
+	if forgot, err := a.forgetOldHostKey("203.0.113.10"); !forgot || err != nil {
+		t.Fatalf("with an entry: %v %v", forgot, err)
+	}
+	if data, _ := os.ReadFile(kh); string(data) != other {
+		t.Errorf("known_hosts now %q", data)
+	}
+	if forgot, _ := a.forgetOldHostKey("203.0.113.10"); forgot {
+		t.Error("forgot twice")
 	}
 }

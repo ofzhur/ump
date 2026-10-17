@@ -14,7 +14,8 @@
 #        nixos-25.11, ...; the architecture defaults to this machine's)
 # Needs the rescue image in images/rescue/out/<arch> and the image (or the
 # NixOS manifest) built. Environment: MEM (MB, default 2048), DISK (GB,
-# default 12), PORT (default 2252), TIMEOUT (s).
+# default 12), DISK2 (GB: a second disk, which the layouts span, as a
+# Linode's swap disk; default none), PORT (default 2252), TIMEOUT (s).
 set -euo pipefail
 OS="${1:?usage: test-install.sh OS [arm64|amd64]}"
 ARCH="${2:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
@@ -104,12 +105,17 @@ wait_ssh() { # wait_ssh USER
 }
 
 truncate -s "${DISK}G" "$WORK/disk.img"
+drives=(-drive "file=$WORK/disk.img,format=raw,if=virtio")
+if [ -n "${DISK2:-}" ]; then
+	truncate -s "${DISK2}G" "$WORK/disk2.img"
+	drives+=(-drive "file=$WORK/disk2.img,format=raw,if=virtio")
+fi
 net=(-netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device virtio-net-pci,netdev=n0)
 echo "==> booting the rescue image ($ARCH, ${MEM}M, UEFI)"
 "$qemu" "${machine[@]}" "${firmware[@]}" -m "$MEM" -smp 2 -nographic \
 	-kernel "$RESCUE/vmlinuz" -initrd "$RESCUE/initrd.zst" \
 	-append "console=ttyS0 console=ttyAMA0 ump.hostname=rescue ump.authorized_keys=$(base64 < "$WORK/key.pub" | tr -d '\n')" \
-	"${net[@]}" -drive "file=$WORK/disk.img,format=raw,if=virtio" \
+	"${net[@]}" "${drives[@]}" \
 	-serial "file:$WORK/serial.log" -monitor none -display none </dev/null >/dev/null 2>"$WORK/qemu.err" &
 qemu_pid=$!
 wait_ssh root
@@ -123,7 +129,7 @@ grep -q "^==> installed: $OS" "$WORK/install.log" || { echo "the installation fa
 echo "==> installed in $(( $(date +%s) - start ))s; booting the disk"
 kill "$qemu_pid"; wait "$qemu_pid" 2>/dev/null || true
 "$qemu" "${machine[@]}" "${firmware[@]}" -m "$MEM" -smp 2 -nographic \
-	"${net[@]}" -drive "file=$WORK/disk.img,format=raw,if=virtio" \
+	"${net[@]}" "${drives[@]}" \
 	-serial "file:$WORK/serial-nixos.log" -monitor none -display none </dev/null >/dev/null 2>"$WORK/qemu.err" &
 qemu_pid=$!
 cp /dev/null "$WORK/serial.log"; ln -sf "$WORK/serial-nixos.log" "$WORK/serial.log"

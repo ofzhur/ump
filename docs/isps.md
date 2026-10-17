@@ -188,6 +188,17 @@ the IPv6 is the SLAAC address.
   the profile, and the token must be allowed to change the profile;
   either refusal is reported. A system that does not boot is recovered
   the same way, or with Lish by hand.
+- Booting what ump installed: Linode boots an instance with its own
+  GRUB 2 by default, which reads `grub.cfg` from a disk that is one bare
+  file system, and its helpers change files on that file system at boot.
+  A system ump installs has partitions and its own GRUB, so after the
+  installer ump switches the instance's configuration profiles to
+  Direct Disk with the helpers that touch the disk off (distro,
+  modules.dep, devtmpfs automount), and reboots through the API, since a
+  reboot from inside keeps the old configuration. Without the switch the
+  new system never starts and the console stays empty. A Linode stock
+  image needs Linode's GRUB 2 mode again: set it back in Cloud Manager
+  before rebuilding with one.
 - `ump server show` adds the image, hypervisor, group, tags, watchdog
   and backups, the type's CPUs, memory, disk and transfer with the
   price, the region's name and country, and the addresses (public and

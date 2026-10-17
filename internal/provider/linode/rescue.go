@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -438,4 +439,46 @@ func consoleTimeout(label, out string) error {
 		out = out[len(out)-300:]
 	}
 	return &provider.APIError{Provider: TypeName, Message: fmt.Sprintf("Finnix on %s gave no shell on the console within %s (last output: %q)", label, rescueConsole, out)}
+}
+
+// BootFromDisk implements provider.DiskBooter. Linode boots an instance
+// with its own GRUB 2 by default, which reads grub.cfg from a disk that
+// is one bare file system, and its helpers change files on that file
+// system at boot. A system ump installed has partitions and its own
+// GRUB, so every configuration of the instance is switched to Direct
+// Disk, which starts the boot loader on the first disk, with the
+// helpers that touch the disk off.
+func (p *Provider) BootFromDisk(ctx context.Context, m provider.Machine) error {
+	id, err := instanceID(m)
+	if err != nil {
+		return err
+	}
+	configs, err := list[struct {
+		ID      int64          `json:"id"`
+		Kernel  string         `json:"kernel"`
+		Helpers map[string]any `json:"helpers"`
+	}](ctx, p.client, path(id)+"/configs")
+	if err != nil {
+		return err
+	}
+	if len(configs) == 0 {
+		return &provider.APIError{Provider: TypeName, Message: "the instance has no configuration profile to boot"}
+	}
+	for _, c := range configs {
+		off := func(k string) bool { v, ok := c.Helpers[k].(bool); return !ok || !v }
+		if c.Kernel == "linode/direct-disk" && off("distro") && off("modules_dep") && off("devtmpfs_automount") {
+			continue
+		}
+		// the network helper is left alone: Linode refuses it on
+		// instances with Linode Interfaces, and it writes no file on a
+		// disk it cannot mount
+		body := map[string]any{
+			"kernel":  "linode/direct-disk",
+			"helpers": map[string]bool{"distro": false, "modules_dep": false, "devtmpfs_automount": false, "updatedb_disabled": true},
+		}
+		if err := p.client.do(ctx, http.MethodPut, path(id)+"/configs/"+strconv.FormatInt(c.ID, 10), body, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

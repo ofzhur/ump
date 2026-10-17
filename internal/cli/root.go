@@ -84,6 +84,10 @@ type app struct {
 	agentKeys func() ([]string, error)
 	// editor opens a file in the user's editor; nil means $VISUAL/$EDITOR.
 	editor func(path string) error
+	// forgetHostKey removes an address's entries from the user's
+	// known_hosts and says whether there were any; nil means ssh-keygen -R
+	// on ~/.ssh/known_hosts.
+	forgetHostKey func(addr string) (bool, error)
 	// waitWarned says that a bad wait setting was reported already.
 	waitWarned bool
 	// ttlWarned says that a bad cache TTL setting was reported already.

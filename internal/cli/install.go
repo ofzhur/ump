@@ -345,14 +345,31 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			}
 		}
 	}
+	// providers that boot their own kernel or boot loader by default are
+	// told to boot the installed system's
+	db, diskBoot := prov.(provider.DiskBooter)
+	if diskBoot {
+		if err := db.BootFromDisk(ctx, m); err != nil {
+			return fmt.Errorf("account %s: %s is installed, but the provider could not be switched to boot it from its disks: %w", m.Account, o.os, err)
+		}
+	}
 	if o.noReboot {
-		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, a reboot starts %s.\n", m.Name, spec.OS)
+		how := "a reboot"
+		if diskBoot {
+			how = "a reboot through the provider (ump server reboot " + ref + ")"
+		}
+		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, %s starts %s.\n", m.Name, how, spec.OS)
 		return a.installReport(result, format)
 	}
 
 	fmt.Fprintf(a.stderr, "Rebooting %s into %s ...\n", m.Name, spec.OS)
 	reboot := withSSHOptions(sshArgs(entry.user, entry.addr, []string{keyPath}, true, true, []string{"systemctl reboot"}), batchOptions(10*time.Second)...)
-	if code, err := a.sshExec(ctx, reboot, nil, io.Discard, io.Discard); err != nil || (code != 0 && code != 255) {
+	// a changed boot configuration takes effect with the provider's reboot
+	code, rerr := 0, error(nil)
+	if !diskBoot {
+		code, rerr = a.sshExec(ctx, reboot, nil, io.Discard, io.Discard)
+	}
+	if diskBoot || rerr != nil || (code != 0 && code != 255) {
 		pw, ok := prov.(provider.Power)
 		if !ok {
 			return fmt.Errorf("%s is installed, but could not be rebooted over SSH, and provider type %s cannot reboot it; reboot it yourself", m.Name, m.Provider)
@@ -372,6 +389,11 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	result.System = sys
 	result.Admin = admin
+	// the old system's host key would make ssh cry man-in-the-middle at
+	// the next login; this is the new system ump just installed
+	if forgot, err := a.forgetOldHostKey(entry.addr); err == nil && forgot {
+		fmt.Fprintf(a.stderr, "Removed the old host key of %s from ~/.ssh/known_hosts: the system is new, and so is its host key.\n", entry.addr)
+	}
 	// what was installed goes into the state, for the inventory
 	record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, sys.Details, a.now())
 	if err := a.updateState(ctx, func(d *state.Document) error {
@@ -618,4 +640,29 @@ func ensureKeysCommand(keys []provider.PublicKey) string {
 		parts = append(parts, shellJoin([]string{k.Data}))
 	}
 	return `mkdir -p -m 700 /root/.ssh && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && for k in ` + strings.Join(parts, " ") + `; do grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >> /root/.ssh/authorized_keys; done; `
+}
+
+// forgetOldHostKey removes the address's entries from ~/.ssh/known_hosts
+// (ssh-keygen keeps the previous file as known_hosts.old) and says
+// whether there were any.
+func (a *app) forgetOldHostKey(addr string) (bool, error) {
+	if a.forgetHostKey != nil {
+		return a.forgetHostKey(addr)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, err
+	}
+	path := filepath.Join(home, ".ssh", "known_hosts")
+	if _, err := os.Stat(path); err != nil {
+		return false, nil
+	}
+	// -F finds hashed entries too
+	if err := exec.Command("ssh-keygen", "-F", addr, "-f", path).Run(); err != nil {
+		return false, nil
+	}
+	if out, err := exec.Command("ssh-keygen", "-R", addr, "-f", path).CombinedOutput(); err != nil {
+		return false, fmt.Errorf("ssh-keygen -R %s: %v: %s", addr, err, strings.TrimSpace(string(out)))
+	}
+	return true, nil
 }

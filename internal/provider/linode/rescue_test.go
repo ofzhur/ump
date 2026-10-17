@@ -255,3 +255,35 @@ func TestEnableRescueLishDisabled(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+func TestBootFromDisk(t *testing.T) {
+	var mu sync.Mutex
+	var writes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /linode/instances/42/configs":
+			io.WriteString(w, `{"data":[
+				{"id":7,"kernel":"linode/grub2","helpers":{"updatedb_disabled":true,"distro":true,"modules_dep":true,"network":null,"devtmpfs_automount":true}},
+				{"id":8,"kernel":"linode/direct-disk","helpers":{"updatedb_disabled":true,"distro":false,"modules_dep":false,"network":null,"devtmpfs_automount":false}}],"page":1,"pages":1}`)
+		case "PUT /linode/instances/42/configs/7":
+			writes = append(writes, r.URL.Path+" "+strings.TrimSpace(string(body)))
+			io.WriteString(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p, _ := newProvider("lin", map[string]string{"token": "tok", "url": srv.URL}, provider.Options{})
+	m := provider.Machine{Provider: TypeName, Account: "lin", ID: "42"}
+	if err := p.(provider.DiskBooter).BootFromDisk(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	want := `/linode/instances/42/configs/7 {"helpers":{"devtmpfs_automount":false,"distro":false,"modules_dep":false,"updatedb_disabled":true},"kernel":"linode/direct-disk"}`
+	if len(writes) != 1 || writes[0] != want {
+		t.Errorf("writes %q", writes)
+	}
+}

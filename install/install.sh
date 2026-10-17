@@ -36,7 +36,7 @@
 #   --force          run outside the UMP rescue system too (it erases every disk
 #                    of the machine it runs on)
 #   --dry-run        print the plan and stop before touching a disk
-set -euo pipefail
+set -Eeuo pipefail
 
 spec_file=""
 storage="${UMP_STORAGE:-}"
@@ -89,8 +89,10 @@ command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old 
 log() { printf '==> %s\n' "$*"; }
 die() { dying=1; echo "install.sh: $*" >&2; exit 1; }
 # a command that fails under set -e names its line, so that a failure is
-# never silent (die says why on its own)
-trap 'rc=$?; [ "$rc" = 0 ] || [ -n "${dying:-}" ] || echo "install.sh: failed at line $LINENO (exit status $rc)" >&2' ERR
+# never silent (die says why on its own); set -E carries this into
+# functions, and only the main shell speaks, not a command substitution
+# whose status the caller looks at
+trap 'rc=$?; [ "$rc" = 0 ] || [ -n "${dying:-}" ] || [ "$BASHPID" != "$$" ] || echo "install.sh: failed at line $LINENO (exit status $rc)" >&2' ERR
 warn() { echo "install.sh: warning: $*" >&2; }
 TARGET=/mnt/target
 
@@ -421,6 +423,10 @@ bad_ud="$(jq -r --arg t "$want_ud" '[.userdata[] | select((.type // "bash") != $
 
 log "releasing the disks"
 swapoff -a 2>/dev/null || true
+# a swap file of an earlier attempt whose file system was unmounted under
+# it cannot be found by its name any more, and keeps its disk busy
+stale_swap="$(awk 'NR > 1 && $2 == "file" {print $1}' /proc/swaps)"
+[ -z "$stale_swap" ] || die "a swap file of an earlier attempt is still active ($stale_swap) and keeps a disk busy; reboot the rescue system (ump server rescue with a reboot) and run the installation again"
 while read -r src tgt; do
 	case "$src" in /dev/*) ;; *) continue ;; esac
 	for x in "${disks[@]}"; do case "$src" in "$x"*|/dev/mapper/*|/dev/md*|/dev/dm-*) umount -l "$tgt" 2>/dev/null || true; break ;; esac; done
@@ -566,6 +572,8 @@ for m in "${MOUNTS[@]}"; do
 done
 cleanup() {
 	set +e
+	# a swap file on the new root keeps it busy: off before it is unmounted
+	[ -n "${target_swap:-}" ] && swapoff "$target_swap" 2>/dev/null && rm -f "$target_swap"
 	mountpoint -q /nix && umount -l /nix 2>/dev/null
 	for m in "$TARGET/dev/pts" "$TARGET/run" "$TARGET/sys" "$TARGET/proc" "$TARGET/dev"; do mountpoint -q "$m" && umount -l "$m" 2>/dev/null; done
 	for ((n = ${#MOUNTS[@]} - 1; n >= 0; n--)); do set -- ${MOUNTS[$n]}; mountpoint -q "$TARGET$1" && umount -l "$TARGET$1" 2>/dev/null; done
@@ -952,7 +960,8 @@ install_nixos() {
 		printf '%s\n' "${IF_MAC[@]}" | paste -d'\t' - <(printf '%s\n' "${IF_NAME[@]}") <(printf '%s\n' "${IF_KIND[@]}") \
 			| jq -R 'split("\t") | {mac: .[0], name: .[1], kind: .[2]}' | jq -s .
 	} > "$TARGET/etc/nixos/ump/interfaces.json"
-	bios_disks="$(for x in "${disks[@]}"; do for i in "${!P_DISK[@]}"; do [ "${P_DISK[$i]}" = "$x" ] && [ "${P_FS[$i]}" = bios ] && { echo "$x"; break; }; done; done)"
+	# (true at the end: the last disk need not have a bios part)
+	bios_disks="$(for x in "${disks[@]}"; do for i in "${!P_DISK[@]}"; do [ "${P_DISK[$i]}" = "$x" ] && [ "${P_FS[$i]}" = bios ] && { echo "$x"; break; }; done; done; true)"
 	lvm_raid=false; for k in "${!L_VG[@]}"; do [ "${L_RAID[$k]}" != none ] && lvm_raid=true; done
 	jq -n --arg os "$os" --arg state_version "$(jq -r .state_version <<< "$manifest")" \
 		--slurpfile interfaces "$TARGET/etc/nixos/ump/interfaces.json" --arg uplink_mac "$mac" \

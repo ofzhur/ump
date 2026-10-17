@@ -91,6 +91,17 @@ type StockInstaller interface {
 	InstallStock(ctx context.Context, m Machine, keys []PublicKey) (*StockInstall, error)
 }
 
+// DiskBooter is implemented by providers that boot a machine with their
+// own kernel or boot loader unless told otherwise (Linode's GRUB 2 mode
+// reads the configuration from a bare file system). A system ump
+// installed brings its own boot loader on partitioned disks, so after an
+// installation the machine is switched to boot from its disks. The
+// switch takes effect with a reboot through the provider's API, not
+// with one from inside the machine.
+type DiskBooter interface {
+	BootFromDisk(ctx context.Context, m Machine) error
+}
+
 // KeylessRescue is implemented by providers whose rescue system, for some
 // machines, cannot be given an SSH key (the password goes by mail), so
 // that the caller can say so before enabling it.
