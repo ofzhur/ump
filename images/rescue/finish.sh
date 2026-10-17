@@ -58,7 +58,7 @@ for d in kernel/sound kernel/drivers/media kernel/drivers/net/wireless kernel/ne
 	kernel/drivers/net/can kernel/drivers/net/usb kernel/drivers/net/ieee802154 kernel/drivers/net/hamradio \
 	kernel/drivers/net/wan kernel/drivers/net/ppp kernel/drivers/net/slip kernel/drivers/net/arcnet \
 	kernel/drivers/net/appletalk kernel/drivers/net/fddi kernel/drivers/net/hippi kernel/drivers/net/plip \
-	kernel/net/netfilter kernel/net/ipv4/netfilter kernel/net/ipv6/netfilter kernel/net/bridge/netfilter \
+	kernel/net/bridge/netfilter \
 	kernel/net/sched kernel/net/openvswitch kernel/net/batman-adv kernel/net/can kernel/net/dccp kernel/net/sctp \
 	kernel/net/tipc kernel/net/rds kernel/net/l2tp kernel/net/nfc kernel/net/ieee802154 kernel/net/6lowpan \
 	kernel/net/ax25 kernel/net/netrom kernel/net/rose kernel/net/x25 kernel/net/appletalk kernel/net/atm \

@@ -177,8 +177,11 @@ listings of its account ask the provider again, until 3 minutes after it
 finished, because a provider shows some changes only after a while (a
 server switched off runs on for a minute); adding, replacing or removing
 an account drops its cached listing. `--refresh` asks the providers
-anyway. The cache is per machine: a change made from another machine
-shows here when the TTL ran out.
+anyway. The cache lives in the home, so with a shared [state
+backend](state.md) it is shared too: a listing or a change made by
+someone else's ump counts here as well, and when two list at the same
+moment the newer listing wins without a conflict being reported. A
+change made in a provider's own console shows when the TTL ran out.
 
 Every successful listing of an account (by `list`, `show` or `config isp
 test`) is recorded under `~/.cache/ump/listings/<config>/<account>/`. A

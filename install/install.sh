@@ -173,7 +173,14 @@ else
 	for d in "${all_disks[@]}"; do case "$d" in /dev/nvme*) ;; *) disks+=("$d") ;; esac; done
 fi
 [ ${#disks[@]} -gt 0 ] || die "no disk found"
+# "first" in layouts: the first disk of at least 4 GiB, so that a small
+# helper disk (a Linode's swap disk, a provider's configuration disk)
+# never takes the boot partitions, whatever name the kernel gave it this
+# boot; the first disk when none is that big
 boot_disk="${disks[0]}"
+for d in "${disks[@]}"; do
+	if [ "$(blockdev --getsize64 "$d")" -ge $((4 * 1024 * 1024 * 1024)) ]; then boot_disk="$d"; break; fi
+done
 describe_disk() {
 	local size rota tran model
 	size="$(lsblk -dnr -o SIZE "$1")"; rota="$(lsblk -dnr -o ROTA "$1")"
@@ -1216,9 +1223,16 @@ NIX
 	log "nixos-install (downloads from the binary cache; this takes a few minutes)"
 	log_file="$TARGET/var/log/ump-nixos-install.log"
 	mkdir -p "$(dirname "$log_file")"
+	# once more on a failure: a transient one (a download, a bus error seen
+	# once on an OVHcloud VPS) passes the second time, and nixos-install
+	# carries on with what the store already has
 	if ! "$tools/bin/nixos-install" --root "$TARGET" --no-root-passwd > "$log_file" 2>&1; then
-		tail -n 40 "$log_file" >&2
-		die "nixos-install failed (the whole output is in /var/log/ump-nixos-install.log of the new system)"
+		tail -n 3 "$log_file" >&2
+		warn "nixos-install failed (above); trying once more"
+		if ! "$tools/bin/nixos-install" --root "$TARGET" --no-root-passwd >> "$log_file" 2>&1; then
+			tail -n 40 "$log_file" >&2
+			die "nixos-install failed twice (the whole output is in /var/log/ump-nixos-install.log of the new system)"
+		fi
 	fi
 	image_version="$(jq -r .version <<< "$manifest")${nixos_rev:+ (nixpkgs ${nixos_rev:0:12})}"
 	image_kernel="$(basename "$(dirname "$(readlink -f "$TARGET/nix/var/nix/profiles/system/kernel")")" | sed 's/^[a-z0-9]*-linux-//')"

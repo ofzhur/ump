@@ -274,8 +274,10 @@ machine too small for the image keeps running what it runs.
 That is why [`finish.sh`](finish.sh) is so strict about what stays:
 no locales (the C.UTF-8 locale is built into glibc), no Python (which
 `xfsprogs` would pull in for `xfs_scrub`), no ICU, no device-tree
-blobs, no udev hardware database, no sound, media, wireless, InfiniBand,
-netfilter or exotic file system modules. Debian's arm64 kernel lacks
+blobs, no udev hardware database, no sound, media, wireless, InfiniBand
+or exotic file system modules. Netfilter stays (since 2026-10-17): the
+installer checks the new system's firewall rules with `nft -c`, which
+needs the kernel's nf_tables. Debian's arm64 kernel lacks
 `kexec_file_load`, so `kexec-into-rescue.sh` falls back to the classic
 `kexec_load`, which keeps one more copy in user space while loading; the
 image is sized so that this still works with 1 GB of RAM. Measured on

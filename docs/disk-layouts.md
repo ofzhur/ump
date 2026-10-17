@@ -46,8 +46,11 @@ medium, virtual media), and orders them NVMe first, then the rest by
 name. **Every one of them is erased**, whether a part targets it or not,
 unless `ump server reinstall --disks /dev/sda,/dev/sdb` names the disks
 to use; the others are then left alone. `first` is the first disk in
-that order, so an NVMe disk when there is one; it carries the boot
-partitions in the published layouts and `/boot` in all of them.
+that order of at least 4 GiB, so an NVMe disk when there is one, and
+never a small helper disk such as a Linode's 512 MB swap disk, whatever
+name the kernel gave it on this boot (the first disk when none is that
+big); it carries the boot partitions in the published layouts and
+`/boot` in all of them.
 
 A layout is applied in the rescue system, where no disk is in use, and
 planned in full before anything is touched: `ump server reinstall
@@ -69,7 +72,7 @@ A layout is a list of **parts**, applied in order. There are three kinds:
 
 | Field | slice | md | lvm |
 |---|---|---|---|
-| `target` | the disks: `first` (the first disk), or a regular expression on the device path (`nvme.*`, `sd.*`, `.*`); a list, each disk once | same | |
+| `target` | the disks: `first` (the first disk of at least 4 GiB), or a regular expression on the device path (`nvme.*`, `sd.*`, `.*`); a list, each disk once | same | |
 | `index` | the partition number, 1–128 (default: the next free one). The published layouts put the boot partitions at 127 and 128 on every disk, so the data partitions start at 1 | | |
 | `size` | `1M`, `512M`, `1G`, `8G` (also `K`, `T`), `20%` of the disk, or `rest` | the member partition on each disk, same forms | `8G`, `20%` of the volume group, or `rest` |
 | `raid` | | the md level: 0, 1, 4, 5, 6, 10 | 0 (striped over the physical volumes), 1 (mirrored), 5, 6, 10; absent: linear |

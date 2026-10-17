@@ -302,6 +302,13 @@ type Change struct {
 // Push writes what changed in the mirror to the backend, each file over
 // the version it was pulled at; a file that changed on both sides is
 // reported as a conflict and left as it is, locally and remotely.
+// disposable says whether a file may be overwritten whatever happened to
+// it meanwhile: the listing cache, which every listing rewrites and which
+// is always safe to lose.
+func disposable(path string) bool {
+	return strings.HasPrefix(path, "cache/")
+}
+
 func (m *Mirror) Push(ctx context.Context) ([]Change, error) {
 	mf, err := m.loadManifest()
 	if err != nil {
@@ -349,6 +356,16 @@ func (m *Mirror) Push(ctx context.Context) ([]Change, error) {
 			continue
 		}
 		version, err := m.Backend.Write(ctx, path, data, known.Version)
+		if errors.Is(err, backend.ErrConflict) && disposable(path) {
+			// someone else listed meanwhile: the newer listing wins
+			// without a word, the cache is only a cache
+			if _, current, rerr := m.Backend.Read(ctx, path); rerr == nil {
+				version, err = m.Backend.Write(ctx, path, data, current)
+			}
+			if err != nil {
+				continue
+			}
+		}
 		if errors.Is(err, backend.ErrConflict) {
 			changes = append(changes, Change{Path: path, Kind: "conflict"})
 			continue

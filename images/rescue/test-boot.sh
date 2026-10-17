@@ -85,6 +85,9 @@ for m in igb igc e1000e ixgbe i40e ice bnxt_en tg3 bnx2 bnx2x r8169 mlx4_en mlx5
 	modprobe "$m" 2>/dev/null || broken="$broken $m"
 done
 [ -z "$broken" ] && echo "drivers: all load" || { echo "drivers that do not load:$broken"; exit 1; }
+# the installer checks the firewall of a new system with its nft -c,
+# which needs nf_tables in this kernel
+modprobe nf_tables && modprobe nft_ct && echo "nf_tables: loads (for nft -c of the new system)" || { echo "nf_tables does not load"; exit 1; }
 echo "network: $(ip -br -4 addr show scope global | awk "{print \$1, \$3}" | paste -sd" " -)"
 echo "sshd: $(systemctl is-active ssh)   setup: $(systemctl is-active ump-rescue-setup)   resolved: $(systemctl is-active systemd-resolved)"
 systemctl --failed --no-legend | sed "s/^/failed unit: /"
