@@ -407,7 +407,8 @@ did not answer in time: no root access with `--via direct`, or the
 rescue system never came up after the kexec (reset the server with
 `ump server reboot --hard` and look at its console). A rescue kernel
 that crashes reboots by itself after 30 seconds, into the system on the
-disk.
+disk. [Troubleshooting](troubleshooting.md) says how to find out what
+went wrong without a console.
 
 `unrescue` disables the provider's rescue system so that the next boot
 is from disk, and with `--reboot` resets the server now. The UMP rescue

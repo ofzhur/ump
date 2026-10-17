@@ -153,7 +153,8 @@ since modprobe would fail on it anyway; the build stops when that would
 be a server NIC or storage driver (`igb` needs `dca`, `ixgbe`
 `xfrm_algo`, `ice` `gnss`, `sfc` `mtd`, so those stay). Until 2026-10-17
 the image removed `dca`, and Intel I210 NICs (`igb`, Hetzner's AX
-servers) booted without network.
+servers) booted without network; [troubleshooting](../../docs/troubleshooting.md#case-study-hetzner-ax41-nvme-2026-10-16)
+tells how that was found without a console.
 
 Root has no password. It logs in over SSH with the keys from the kernel
 command line only, and on the console (serial or local) without a
