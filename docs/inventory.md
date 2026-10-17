@@ -9,7 +9,7 @@ are added by hand, so the inventory is complete.
 
 ```console
 $ ump server list                         # every server of every account
-$ ump server list -o wide                 # with the ID, IPv6, product, kind, price and attributes
+$ ump server list -o wide                 # with the ID, IPv6, product, kind and attributes
 $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
 $ ump server list --refresh               # ask the providers, not the cache
@@ -22,8 +22,9 @@ $ ump server show web-01                  # everything the provider knows, plus 
 `ump server list` asks every configured account, all in parallel (on a
 terminal each account's servers appear as soon as it answered), and
 prints one row per server: account, provider, name, IPv4, location,
-status and the operating system ump installed last (from the state).
-`-o wide` adds the provider's ID, IPv6, product, kind, price and
+status, the operating system ump installed last (from the state) and
+the price.
+`-o wide` adds the provider's ID, IPv6, product, kind and
 attributes; `-o json` and
 `-o yaml` print every field, including the provider's labels; `-o name`
 prints `provider/id` per line. `--account NAME` restricts the listing,
@@ -41,7 +42,7 @@ touching an API. See [the CLI reference](cli.md#ump-server-list).
 
 ## Prices
 
-A server's price is shown in `-o wide` and `ump server show`, and
+A server's price is shown in the listing and `ump server show`, and
 carried in `-o json` as `price` (`amount`, `currency`, `period`
 and `source`):
 

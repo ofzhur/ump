@@ -58,7 +58,7 @@ var serverColumns = []column{
 	{header: "IPV6", wide: true, value: func(m provider.Machine) string { return m.IPv6 }},
 	{header: "PRODUCT", wide: true, value: func(m provider.Machine) string { return m.Product }},
 	{header: "KIND", wide: true, value: func(m provider.Machine) string { return string(m.Kind) }},
-	{header: "PRICE", wide: true, value: func(m provider.Machine) string { return m.Price.String() }},
+	{header: "PRICE", value: func(m provider.Machine) string { return m.Price.String() }},
 	{header: "ATTRIBUTES", wide: true, value: func(m provider.Machine) string { return joinMap(m.Attributes) }},
 }
 

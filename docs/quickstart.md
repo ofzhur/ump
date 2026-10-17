@@ -81,9 +81,9 @@ Where the credentials come from and what each provider can do is in
 
 ```console
 $ ump server list
-ACCOUNT   PROVIDER        NAME     IPV4            LOCATION   STATUS    OS
-hcloud    hetzner-cloud   web-01   198.51.100.22   hel1       running   <none>
-hrobot    hetzner-robot   db-01    203.0.113.10    fsn1-dc7   running   <none>
+ACCOUNT   PROVIDER        NAME     IPV4            LOCATION   STATUS    OS       PRICE
+hcloud    hetzner-cloud   web-01   198.51.100.22   hel1       running   <none>   3.79 EUR/mo
+hrobot    hetzner-robot   db-01    203.0.113.10    fsn1-dc7   running   <none>   <none>
 
 $ ump server show web-01            # everything the provider knows about it
 $ ump server list -o json           # for scripts; also yaml, wide, name

@@ -151,8 +151,8 @@ lower-cased; `labels` are present where the provider has them. `os` is
 the operating system ump installed last (`ubuntu-26.04`) and
 `installed_at` when, from the [state](state.md); `<none>` in the table
 for a server ump never installed. `-o wide`
-adds the ID, IPv6, product, kind, price and attributes columns (the ID
-right after the provider); `-o name`
+adds the ID, IPv6, product, kind and attributes columns (the ID right
+after the provider); the price is in the default table; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
 sets the default format. `price` comes from the provider's API where it
 tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
