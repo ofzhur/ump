@@ -137,6 +137,33 @@ func Main(args []string) int {
 	return a.run(ctx, args)
 }
 
+// offlineCommand says whether the arguments ask for something that
+// must work at once and without a network: shell completion (which a
+// bashrc runs, and which runs at every Tab), help and the version. Those
+// neither pull the home from its backend nor check for updates.
+func offlineCommand(args []string) bool {
+	first := ""
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; arg {
+		case "--":
+			return first == ""
+		case "-h", "--help", "--version":
+			return true
+		case "--config", "--account":
+			i++ // the global flags' values are not the command
+		default:
+			if first == "" && !strings.HasPrefix(arg, "-") {
+				first = arg
+			}
+		}
+	}
+	switch first {
+	case "", "completion", "help", "version", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return true // "": the help
+	}
+	return false
+}
+
 func (a *app) run(ctx context.Context, args []string) int {
 	if a.now == nil {
 		a.now = time.Now
@@ -161,7 +188,7 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
-	if err := a.resolveHome(ctx); err != nil {
+	if err := a.resolveHome(ctx, offlineCommand(args)); err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 		return exitGeneric
 	}

@@ -1477,6 +1477,10 @@ type Client struct {
 	mu        sync.Mutex
 	timeDelta time.Duration
 	timeKnown bool
+	// timeErr is why the clock could not be synchronized: the requests
+	// after a failed sync (a listing sends several) fail with it at once
+	// instead of each waiting for the API again
+	timeErr error
 }
 
 // ListDedicatedServers returns the service names of all dedicated servers.
@@ -1826,9 +1830,13 @@ func (c *Client) Time(ctx context.Context) (time.Time, error) {
 func (c *Client) timestamp(ctx context.Context) (int64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.timeErr != nil {
+		return 0, c.timeErr
+	}
 	if !c.timeKnown {
 		server, err := c.Time(ctx)
 		if err != nil {
+			c.timeErr = err
 			return 0, err
 		}
 		c.timeDelta = server.Sub(time.Now())

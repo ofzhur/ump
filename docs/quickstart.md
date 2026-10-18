@@ -49,8 +49,9 @@ Backend:   file:///srv/fleet/ump (backend.yaml)
 Mirror:    ~/.cache/ump/homes/3f9a1c2b7e4d
 ```
 
-From then on ump works on a mirror of the backend: pulled before every
-command, pushed after it, with conflicts named rather than overwritten.
+From then on ump works on a mirror of the backend: pulled before a
+command (at most every 30 seconds; completion and help never wait on
+it), pushed after it, with conflicts named rather than overwritten.
 `UMP_STATE=s3://fleet/ump` in the environment names a backend ahead of
 the file, which is how CI gets the same state without anything on
 disk. Mind that the state holds secrets in clear text: choose a backend

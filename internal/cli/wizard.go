@@ -244,7 +244,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 				if err := a.stateWizard(cmd, ui); err != nil {
 					return err
 				}
-				if err := a.resolveHome(ctx); err != nil {
+				if err := a.resolveHome(ctx, false); err != nil {
 					return err
 				}
 				if cfg, path, err = a.loadConfig(); err != nil {

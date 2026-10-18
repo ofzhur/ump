@@ -28,12 +28,34 @@ import (
 // pointer; the state document itself (state.yaml) is read and written
 // through the backend directly, with per-server locks.
 
+// pullFresh is how long a pull of the mirror holds: a command within it
+// of the last one works with the mirror as it is. Changes still go back
+// after the command, each over the version it was pulled at, so nothing
+// is lost to the shortcut.
+var pullFresh = 30 * time.Second
+
+// pullRetry is how long after a failed pull the next command tries
+// again: offline, ump does not wait for the backend at every command.
+// What the commands change meanwhile stays in the mirror and goes back
+// with the first push that reaches the backend.
+var pullRetry = 2 * time.Minute
+
+// pullTimeout bounds a pull: a backend that does not answer costs a
+// command this much at most.
+const pullTimeout = 10 * time.Second
+
 // resolveHome finds the home for this run and, behind a backend, brings
 // the mirror up to date. It never fails the command for a backend that
 // does not answer: the mirror is what there is, and the user is told.
-func (a *app) resolveHome(ctx context.Context) error {
+// offline (shell completion, help, the version) never touches the
+// backend, not even its credentials: those must not wait on anything.
+func (a *app) resolveHome(ctx context.Context, offline bool) error {
 	a.doc, a.store, a.manual = nil, nil, nil
-	h, err := home.Resolve(a.sshRunner(), a.httpClient)
+	resolve := func() (*home.Resolved, error) { return home.Resolve(a.sshRunner(), a.httpClient) }
+	if offline {
+		resolve = home.ResolveLocal
+	}
+	h, err := resolve()
 	if err != nil {
 		return err
 	}
@@ -42,10 +64,23 @@ func (a *app) resolveHome(ctx context.Context) error {
 	if h.Backend == nil {
 		return nil
 	}
-	m := &home.Mirror{Backend: h.Backend, Dir: h.Dir}
-	if _, _, err := m.Pull(ctx); err != nil {
+	m := &home.Mirror{Backend: h.Backend, Dir: h.Dir, Now: a.now}
+	pulled, failed := m.LastPull()
+	now := a.now()
+	switch {
+	case pulled.After(failed) && now.Sub(pulled) < pullFresh:
+		return nil
+	case failed.After(pulled) && now.Sub(failed) < pullRetry:
+		// told a moment ago; the mirror is what there is
+		a.pullFailed = true
+		return nil
+	}
+	pctx, cancel := context.WithTimeout(ctx, pullTimeout)
+	defer cancel()
+	if _, _, err := m.Pull(pctx); err != nil {
 		fmt.Fprintf(a.stderr, "ump: the state could not be pulled from %s (%v); working with the mirror as it is\n", h.Backend, err)
 		a.pullFailed = true
+		m.PullFailed()
 	}
 	return nil
 }
@@ -56,7 +91,7 @@ func (a *app) pushHome(ctx context.Context) {
 	if a.home == nil || a.home.Backend == nil || a.pullFailed {
 		return
 	}
-	m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
+	m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
 	changes, err := m.Push(ctx)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "ump: the home could not be pushed to %s: %v (ump config state push retries)\n", a.home.Backend, err)
@@ -139,7 +174,7 @@ func (a *app) updateState(ctx context.Context, fn func(d *state.Document) error)
 		return err
 	}
 	if a.home != nil && a.home.Backend != nil && st.Backend == a.home.Backend {
-		m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
+		m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
 		if _, _, err := m.Pull(ctx); err != nil {
 			fmt.Fprintf(a.stderr, "ump: %v\n", err)
 		}
@@ -484,7 +519,7 @@ func (a *app) newStatePullCmd() *cobra.Command {
 			if a.home.Backend == nil {
 				return errors.New("no backend configured; the state is in the local directory")
 			}
-			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
+			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
 			pulled, removed, err := m.Pull(cmd.Context())
 			if err != nil {
 				return err
@@ -509,7 +544,7 @@ mirror's copy over the backend's.`,
 			if a.home.Backend == nil {
 				return errors.New("no backend configured; the state is in the local directory")
 			}
-			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir}
+			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
 			changes, err := m.Push(cmd.Context())
 			if err != nil {
 				return err

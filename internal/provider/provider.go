@@ -10,6 +10,7 @@ package provider
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -239,8 +240,19 @@ func (o Options) httpClient() *http.Client {
 	if o.HTTPClient != nil {
 		return o.HTTPClient
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return &http.Client{Timeout: 60 * time.Second, Transport: defaultTransport}
 }
+
+// defaultTransport is http.DefaultTransport with a connection that must
+// be up in 10 seconds (not 30): without a network, a command gives up on
+// an API soon and says so, while a slow answer still has the client's
+// whole minute.
+var defaultTransport = func() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	t.TLSHandshakeTimeout = 10 * time.Second
+	return t
+}()
 
 // Client returns the HTTP client to use: a request whose connection fails
 // in the TLS handshake is sent again (handshakeRetry), and with verbose

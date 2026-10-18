@@ -134,11 +134,14 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		}
 	}
 	var machines []provider.Machine
-	var failed []listResult
+	var failed, stale []listResult
 	for _, r := range results {
 		if r.err != nil {
 			failed = append(failed, r)
 			continue
+		}
+		if r.stale != nil {
+			stale = append(stale, r)
 		}
 		machines = append(machines, r.machines...)
 	}
@@ -168,12 +171,15 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	for _, r := range failed {
 		fmt.Fprintf(a.stderr, "ump: %v\n", r.err)
 	}
+	for _, r := range stale {
+		fmt.Fprintf(a.stderr, "ump: %v; its servers as listed %s (%s ago)\n", r.stale, a.fmtTime(r.cachedAt), a.now().Sub(r.cachedAt).Round(time.Minute))
+	}
 	for _, ref := range notFound {
 		fmt.Fprintf(a.stderr, "ump: server %q not found\n", ref)
 	}
 	switch {
-	case len(failed) > 0:
-		return withExit(failCode, fmt.Errorf("%d of %d accounts could not be listed", len(failed), len(results)))
+	case len(failed)+len(stale) > 0:
+		return withExit(failCode, fmt.Errorf("%d of %d accounts could not be listed", len(failed)+len(stale), len(results)))
 	case len(notFound) > 0:
 		return withExit(exitGeneric, fmt.Errorf("%d of %d servers not found", len(notFound), len(refs)))
 	}
@@ -266,6 +272,10 @@ func (a *app) diffServers(cmd *cobra.Command, store *cache.Store, cfg *config.Co
 	var notes []string
 	for _, r := range results {
 		ad := accountDiff{Account: r.account}
+		if r.stale != nil {
+			// an old listing compared with older ones says nothing new
+			r.err, r.machines = r.stale, nil
+		}
 		switch {
 		case r.err != nil:
 			failed++
@@ -442,6 +452,9 @@ type listResult struct {
 	// cachedAt is when the provider last confirmed a listing served from
 	// the cache; zero when the provider was asked.
 	cachedAt time.Time
+	// stale is why the provider could not be asked when the listing is
+	// the cache's last one instead (offline, the API down).
+	stale error
 }
 
 // listOptions say how listAccounts lists.
@@ -523,9 +536,17 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			r.err = err
-		} else {
-			r.err = fmt.Errorf("account %s: %w", name, err)
+			return r
 		}
+		// the last listing there is, rather than none: it says where the
+		// servers are, and the user is told how old it is
+		if store != nil && acct.Type != manual.TypeName {
+			if snap, serr := store.Latest(name); serr == nil && snap != nil {
+				r.machines, r.cachedAt, r.stale = snap.Machines, snap.SeenAt, fmt.Errorf("account %s: %w", name, err)
+				return r
+			}
+		}
+		r.err = fmt.Errorf("account %s: %w", name, err)
 		return r
 	}
 	r.machines = ms

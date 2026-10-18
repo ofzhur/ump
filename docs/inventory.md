@@ -35,7 +35,8 @@ others are still listed; the exit code says so (4).
 A listing is served from the cache for 5 minutes (`cache_ttl` in the
 configuration, `UMP_CACHE_TTL` for one run, `0` turns it off), unless a
 command changed one of the account's servers since; `--refresh` asks the
-providers anyway. Every listing is recorded, so `--diff` shows what was added, removed or
+providers anyway. A provider that does not answer is listed from its
+last listing, with a note how old it is. Every listing is recorded, so `--diff` shows what was added, removed or
 changed since the previous one (`--since 2h`, `--since 2026-10-01` for
 an earlier point), and `--cached` prints the last listing without
 touching an API. See [the CLI reference](cli.md#ump-server-list).

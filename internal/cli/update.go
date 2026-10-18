@@ -56,20 +56,25 @@ func (a *app) updateHint(cmd *cobra.Command) {
 	if a.now().Sub(state.Checked) < updateCheckInterval {
 		return
 	}
-	ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
 	defer cancel()
 	client := a.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 3 * time.Second}
+		client = &http.Client{Timeout: 2 * time.Second}
 	}
 	latest, err := fetchVersion(ctx, client, cfg.StorageURL()+"/bin/latest/VERSION")
-	if err != nil {
-		return // offline, or a storage without binaries: no noise
+	// a failed check counts too: offline, or with a storage without
+	// binaries, the next try is a day later, not at the next command
+	state.Checked = a.now()
+	if err == nil {
+		state.Latest = latest
 	}
-	state = updateState{Checked: a.now(), Latest: latest}
 	if data, err := json.Marshal(state); err == nil {
 		os.MkdirAll(filepath.Dir(updateStatePath()), 0o700)
 		os.WriteFile(updateStatePath(), data, 0o600)
+	}
+	if err != nil {
+		return // no noise
 	}
 	if newerVersion(latest, Version) {
 		fmt.Fprintf(a.stderr, "ump %s is available (this is %s): curl -fsSL %s/get.sh | sh\n", latest, Version, cfg.StorageURL())

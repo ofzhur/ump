@@ -647,6 +647,26 @@ func TestGetServersPartialFailure(t *testing.T) {
 	}
 }
 
+// TestGetServersStale: an account whose API does not answer is listed
+// from its last listing, with how old it is, and the listing still fails.
+func TestGetServersStale(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	if _, _, code := e.run("", false, "server", "list", "--account", "one"); code != 0 {
+		t.Fatalf("first listing: code %d", code)
+	}
+	e.now = e.now.Add(2 * time.Hour)
+	t.Setenv("FAKE_PASS", "nope")
+	out, errOut, code := e.run("", false, "server", "list", "--account", "one")
+	if code != 4 || len(fields(out)) != 3 {
+		t.Errorf("stale listing: code %d\n%s", code, out)
+	}
+	if !strings.Contains(errOut, "ump: account one: fake: authentication failed (UNAUTHORIZED, HTTP 401); its servers as listed 2026-10-12 09:00 UTC (2h0m0s ago)") ||
+		!strings.Contains(errOut, "1 of 1 accounts could not be listed") {
+		t.Errorf("stderr: %q", errOut)
+	}
+}
+
 func TestGetServersNoConfig(t *testing.T) {
 	e := newTestEnv(t)
 	_, errOut, code := e.run("", false, "server", "list")
@@ -2940,6 +2960,67 @@ func TestConfigFirewall(t *testing.T) {
 	}
 }
 
+// TestOfflineCommands: completion, help and the version never wait on
+// the state backend; other commands try it, and after a failure not
+// again within pullRetry.
+func TestOfflineCommands(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	t.Setenv("UMP_STATE", "http://127.0.0.1:1/ump")
+	t.Setenv("UMP_NO_UPDATE_CHECK", "1")
+	for _, args := range [][]string{{"completion", "bash"}, {"version"}, {"--version"}, {"help"}, {}, {"server", "list", "--help"}, {"__complete", "server", "show", ""}} {
+		if _, errOut, _ := e.run("", false, args...); strings.Contains(errOut, "could not be pulled") {
+			t.Errorf("%v touched the backend: %q", args, errOut)
+		}
+	}
+	if !offlineCommand([]string{"server", "-h"}) || offlineCommand([]string{"ssh", "web-01", "--", "ls", "--help"}) || offlineCommand([]string{"server", "list"}) {
+		t.Error("offlineCommand")
+	}
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); !strings.Contains(errOut, "could not be pulled") {
+		t.Errorf("first command: %q", errOut)
+	}
+	if _, errOut, code := e.run("", false, "config", "isp", "list"); code != 0 || strings.Contains(errOut, "could not be pulled") {
+		t.Errorf("right after a failed pull: code %d, %q", code, errOut)
+	}
+	e.now = e.now.Add(pullFresh + time.Second)
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); strings.Contains(errOut, "could not be pulled") {
+		t.Errorf("within pullRetry: %q", errOut)
+	}
+	e.now = e.now.Add(pullRetry)
+	if _, errOut, _ := e.run("", false, "config", "isp", "list"); !strings.Contains(errOut, "could not be pulled") {
+		t.Errorf("past pullRetry: %q", errOut)
+	}
+}
+
+// TestUpdateHintOffline: a failed check counts, the next try is a day
+// later.
+func TestUpdateHintOffline(t *testing.T) {
+	e := newTestEnv(t)
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	e.write(testConfig + "storage: " + srv.URL + "\n")
+	was := Version
+	Version = "v0.1.0"
+	defer func() { Version = was }()
+	for i := 0; i < 3; i++ {
+		if _, errOut, _ := e.run("", false, "config", "isp", "list"); errOut != "" {
+			t.Errorf("run %d: %q", i, errOut)
+		}
+	}
+	if hits != 1 {
+		t.Errorf("hits %d, want 1", hits)
+	}
+	e.now = e.now.Add(25 * time.Hour)
+	e.run("", false, "config", "isp", "list")
+	if hits != 2 {
+		t.Errorf("next day: hits %d, want 2", hits)
+	}
+}
+
 func TestUpdateHint(t *testing.T) {
 	e := newTestEnv(t)
 	hits := 0
@@ -3535,9 +3616,20 @@ func TestConfigState(t *testing.T) {
 	// someone else changes a file in the backend: pull brings it; a file
 	// changed on both sides is a conflict until push --force
 	os.WriteFile(filepath.Join(remote, "profiles", "web.yaml"), []byte("os: ubuntu-24.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
-	// every command pulls first, so the explicit pull finds nothing left
-	if out, _, code := e.run("", false, "config", "state", "pull"); code != 0 || !strings.Contains(out, "Pulled 0 files from file://"+remote) {
+	// a command within pullFresh of the last pull works with the mirror
+	// as it is, so the explicit pull brings the change
+	if out, _, code := e.run("", false, "config", "state", "pull"); code != 0 || !strings.Contains(out, "Pulled 1 files from file://"+remote) {
 		t.Errorf("pull: code %d\n%s", code, out)
+	}
+	// past it, every command pulls first, and the explicit pull finds
+	// nothing left
+	os.WriteFile(filepath.Join(remote, "profiles", "web2.yaml"), []byte("os: ubuntu-24.04\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	e.now = e.now.Add(pullFresh + time.Second)
+	if _, _, code := e.run("", false, "config", "isp", "list"); code != 0 {
+		t.Errorf("isp list: code %d", code)
+	}
+	if out, _, code := e.run("", false, "config", "state", "pull"); code != 0 || !strings.Contains(out, "Pulled 0 files from file://"+remote) {
+		t.Errorf("pull after a command: code %d\n%s", code, out)
 	}
 	if data, _ := os.ReadFile(filepath.Join(mirror, "profiles", "web.yaml")); !strings.Contains(string(data), "ubuntu-24.04") {
 		t.Errorf("mirror after pull:\n%s", data)

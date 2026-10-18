@@ -177,7 +177,10 @@ listings of its account ask the provider again, until 3 minutes after it
 finished, because a provider shows some changes only after a while (a
 server switched off runs on for a minute); adding, replacing or removing
 an account drops its cached listing. `--refresh` asks the providers
-anyway. The cache lives in the home, so with a shared [state
+anyway. A provider that does not answer (offline, its API down; a
+connection must be up within 10 seconds) is listed from its last
+listing in the cache, whatever its age, with a note saying when that
+was; the exit code still says the account could not be listed (4). The cache lives in the home, so with a shared [state
 backend](state.md) it is shared too: a listing or a change made by
 someone else's ump counts here as well, and when two list at the same
 moment the newer listing wins without a conflict being reported. A

@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -103,6 +104,18 @@ type Resolved struct {
 // Resolve finds the home. env wins over the pointer file; creds come
 // from the environment where set, else from the pointer's references.
 func Resolve(runner backend.Runner, client Client) (*Resolved, error) {
+	return resolve(runner, client, true)
+}
+
+// ResolveLocal finds the home's directory without the backend: no
+// credentials resolved (a reference may run a password manager), nothing
+// opened, Backend nil. For the commands that must not wait on anything:
+// shell completion, help, the version.
+func ResolveLocal() (*Resolved, error) {
+	return resolve(nil, nil, false)
+}
+
+func resolve(runner backend.Runner, client Client, withBackend bool) (*Resolved, error) {
 	url := strings.TrimSpace(os.Getenv("UMP_STATE"))
 	source := "env"
 	var p *Pointer
@@ -119,9 +132,18 @@ func Resolve(runner backend.Runner, client Client) (*Resolved, error) {
 	if p == nil {
 		p = &Pointer{}
 	}
-	creds, err := credentials(p)
-	if err != nil {
-		return nil, err
+	var creds backend.Credentials
+	if withBackend {
+		var err error
+		if creds, err = credentials(p); err != nil {
+			return nil, err
+		}
+	} else {
+		// what names the backend (and so the mirror's directory) only;
+		// placeholders stand in for the secrets, which only a connection
+		// needs
+		creds = location(p)
+		creds.AccessKey, creds.SecretKey, creds.Token = "-", "-", "-"
 	}
 	creds.Runner = runner
 	creds.Client = client
@@ -130,7 +152,11 @@ func Resolve(runner backend.Runner, client Client) (*Resolved, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256([]byte(b.String()))
-	return &Resolved{Backend: b, Dir: filepath.Join(config.CacheDir(), "homes", hex.EncodeToString(sum[:6])), Source: source, URL: url}, nil
+	r := &Resolved{Backend: b, Dir: filepath.Join(config.CacheDir(), "homes", hex.EncodeToString(sum[:6])), Source: source, URL: url}
+	if !withBackend {
+		r.Backend = nil
+	}
+	return r, nil
 }
 
 // Client is the HTTP client type, named here so that callers need not
@@ -152,7 +178,7 @@ func OpenPointer(p *Pointer, runner backend.Runner, client Client) (backend.Back
 // credentials gathers what the backend needs: the environment wins
 // over the pointer, so that CI needs no file.
 func credentials(p *Pointer) (backend.Credentials, error) {
-	c := backend.Credentials{}
+	c := location(p)
 	resolve := func(v config.Value, env ...string) (string, error) {
 		for _, e := range env {
 			if x := os.Getenv(e); x != "" {
@@ -165,14 +191,6 @@ func credentials(p *Pointer) (backend.Credentials, error) {
 		return v.Resolve()
 	}
 	var err error
-	if c.Endpoint = os.Getenv("UMP_STATE_ENDPOINT"); c.Endpoint == "" {
-		c.Endpoint = p.Endpoint
-	}
-	if c.Region = os.Getenv("AWS_REGION"); c.Region == "" {
-		if c.Region = os.Getenv("AWS_DEFAULT_REGION"); c.Region == "" {
-			c.Region = p.Region
-		}
-	}
 	if c.AccessKey, err = resolve(p.AccessKey, "AWS_ACCESS_KEY_ID"); err != nil {
 		return c, fmt.Errorf("access_key: %w", err)
 	}
@@ -191,16 +209,44 @@ func credentials(p *Pointer) (backend.Credentials, error) {
 	return c, nil
 }
 
+// location is where the backend is: the endpoint and the region, which
+// need no secrets.
+func location(p *Pointer) backend.Credentials {
+	c := backend.Credentials{}
+	if c.Endpoint = os.Getenv("UMP_STATE_ENDPOINT"); c.Endpoint == "" {
+		c.Endpoint = p.Endpoint
+	}
+	if c.Region = os.Getenv("AWS_REGION"); c.Region == "" {
+		if c.Region = os.Getenv("AWS_DEFAULT_REGION"); c.Region == "" {
+			c.Region = p.Region
+		}
+	}
+	return c
+}
+
 // Mirror is the local copy of a backend's home.
 type Mirror struct {
 	Backend backend.Backend
 	Dir     string
+	// Now is the clock of the pull times (time.Now when nil).
+	Now func() time.Time
+}
+
+func (m *Mirror) now() time.Time {
+	if m.Now != nil {
+		return m.Now()
+	}
+	return time.Now()
 }
 
 // manifest is what the mirror knows of the backend: per file, the
 // version pulled and the hash of the content at that moment.
 type manifest struct {
 	Files map[string]manifestEntry `json:"files"`
+	// Pulled is when the last pull succeeded, Failed when the last one
+	// failed (the backend did not answer).
+	Pulled time.Time `json:"pulled,omitzero"`
+	Failed time.Time `json:"failed,omitzero"`
 }
 
 type manifestEntry struct {
@@ -277,6 +323,7 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 		mf.Files[path] = manifestEntry{Version: version, Hash: hash(data)}
 		pulled++
 	}
+	mf.Pulled = m.now()
 	for path, known := range mf.Files {
 		if _, still := remote[path]; still {
 			continue
@@ -290,6 +337,26 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 		removed++
 	}
 	return pulled, removed, m.saveManifest(mf)
+}
+
+// LastPull says when the last pull succeeded and when the last one
+// failed (zero when never).
+func (m *Mirror) LastPull() (pulled, failed time.Time) {
+	mf, err := m.loadManifest()
+	if err != nil {
+		return time.Time{}, time.Time{}
+	}
+	return mf.Pulled, mf.Failed
+}
+
+// PullFailed records that a pull failed now.
+func (m *Mirror) PullFailed() {
+	mf, err := m.loadManifest()
+	if err != nil {
+		return
+	}
+	mf.Failed = m.now()
+	m.saveManifest(mf)
 }
 
 // Change is one difference between the mirror and the backend.

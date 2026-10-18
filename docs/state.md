@@ -11,8 +11,9 @@ person on one machine never needs more.
 
 With a shared state backend, everyone who uses the same one has the
 same state, UMP's key included, so a team acts as one UMP. ump works
-on a **mirror** of it under its cache directory: pulled before every
-command, pushed after it, file by file with version tags, so the files
+on a **mirror** of it under its cache directory: pulled before a
+command (at most every 30 seconds, see [how the mirror
+works](#how-the-mirror-works)), pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
 overwritten in silence. `state.yaml` and the per-server locks of `ump
 server reinstall` and `rescue` go through the backend directly.
@@ -123,6 +124,22 @@ config state push --force` writes the mirror's copy over the backend's
 when that is what you want. When the backend does not answer, the
 command runs on the mirror as it is and says so; nothing is pushed
 until the backend is back.
+
+ump goes to the backend only when it has to, so that it never makes
+you wait for nothing:
+
+- **Shell completion, help and the version** never touch the backend,
+  not even its credentials (a reference may run a password manager):
+  they read the mirror. `eval "$(ump completion bash)"` in a bashrc and
+  every Tab answer at once, online or not.
+- **A pull holds 30 seconds:** a command within that of the last pull
+  works with the mirror as it is. A burst of commands, or a script,
+  pulls once.
+- **A pull takes 10 seconds at most**, and after one that failed
+  (offline, the backend down) the commands of the next 2 minutes do not
+  try again: they run on the mirror without a word, and what they
+  change goes back with the first push that reaches the backend. `ump
+  config state pull` pulls at once, whenever you want the latest.
 
 `state.yaml` is special: every change to it is a read-modify-write on
 the backend's version tag, retried on conflict, so two people setting
