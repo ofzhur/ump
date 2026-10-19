@@ -42,6 +42,9 @@ type namedSet struct {
 	// file is the user's alone, like keys.yaml).
 	dir   func() string
 	local bool
+	// saved, when set, runs after an edit is saved: with the entry's
+	// name, or "" after an edit of the whole file.
+	saved func(name string)
 }
 
 // plurals is what several entries are called.
@@ -373,6 +376,9 @@ func (set *namedSet) edit(a *app, ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("the file is kept, but it is not valid: %w", err)
 	}
+	if set.saved != nil {
+		set.saved("")
+	}
 	names := d.names()
 	fmt.Fprintf(a.stdout, "%d %s, all valid: %s.\n", len(names), set.plurals(), strings.Join(names, ", "))
 	return nil
@@ -422,6 +428,9 @@ func (set *namedSet) editEntry(a *app, cmd *cobra.Command, d *namedDoc, name str
 				return err
 			}
 			os.Remove(tmp)
+			if set.saved != nil {
+				set.saved(name)
+			}
 			fmt.Fprintf(a.stdout, "Saved the %s %s in %s.\n", set.noun, name, config.AbbreviateHome(set.path()))
 			return nil
 		}

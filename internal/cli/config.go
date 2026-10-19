@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
@@ -70,12 +71,14 @@ only by you, an environment variable or a command), never as plaintext.`,
   ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
   ump config isp add ovh ovh --set endpoint=ovh-eu --set application_key=... \
       --set application_secret=command:"pass show ovh/app-secret" --set consumer_key=env:OVH_CK
+  ump config isp edit main             # that account alone, in your editor
   ump config isp remove main`,
 	}
 	cmd.AddCommand(
 		a.newConfigISPListCmd(),
 		a.newConfigTypesCmd(),
 		a.newConfigAddCmd(),
+		a.newConfigEditCmd(),
 		a.newConfigRemoveCmd(),
 		a.newConfigTestCmd(),
 	)
@@ -514,4 +517,94 @@ func verbAliases(verb string) []string {
 		return []string{"t"}
 	}
 	return nil
+}
+
+// accountSet is the accounts of the configuration file as named
+// entries, for edit: the same as for users and firewalls. The file is
+// the one in use (--config, UMP_CONFIG), read when the command runs.
+func (a *app) accountSet() *namedSet {
+	path := config.ResolvePath(a.configFlag)
+	return &namedSet{
+		file: filepath.Base(path), key: "accounts", noun: "account",
+		use:   "isp",
+		dir:   func() string { return filepath.Dir(path) },
+		local: true,
+		check: checkAccountsFile,
+		saved: func(name string) {
+			names := []string{name}
+			if name == "" {
+				if cfg, err := config.Load(path); err == nil {
+					names = cfg.AccountNames()
+				}
+			}
+			for _, n := range names {
+				a.invalidateListingFor(n, 0)
+			}
+		},
+	}
+}
+
+// checkAccountsFile validates the accounts of a configuration file
+// without resolving their secrets: names, types, known and required
+// settings. ump config isp test checks the credentials themselves.
+func checkAccountsFile(data []byte) error {
+	cfg := config.New()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return err
+	}
+	for _, name := range sortedKeys(cfg.Accounts) {
+		acct := cfg.Accounts[name]
+		if err := config.ValidateAccountName(name); err != nil {
+			return err
+		}
+		t, ok := provider.Lookup(acct.Type)
+		if !ok || acct.Type == manual.TypeName {
+			return fmt.Errorf("account %s: unknown provider type %q (known: %s)", name, acct.Type, strings.Join(provider.TypeNames(), ", "))
+		}
+		for _, k := range sortedKeys(acct.Settings) {
+			if _, isField := t.Field(k); !isField {
+				return fmt.Errorf("account %s: %s has no setting %q (settings: %s)", name, t.Name, k, strings.Join(fieldKeys(t), ", "))
+			}
+		}
+		for _, f := range t.Fields {
+			if f.Required && acct.Settings[f.Key].IsZero() {
+				return fmt.Errorf("account %s: the setting %s is required for %s", name, f.Key, t.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (a *app) newConfigEditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "edit [NAME]",
+		Aliases: verbAliases("edit"),
+		Short:   "Edit one account in your editor, or all of them without a name",
+		Long: `With a name, open that account alone in your editor (its type and
+settings, values plain or as secret references); when the editor
+returns, the account is checked and put back into the configuration
+file, the other accounts and the rest of the file untouched. Without a
+name, open the whole configuration file and check every account
+afterwards. The check covers the type and the settings, not the
+credentials: ump config isp test NAME tries them.`,
+		Example: `  ump config isp edit hcloud
+  ump config isp edit`,
+		Args: usageArgs(cobra.MaximumNArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			set := a.accountSet()
+			if _, err := set.load(); err != nil {
+				if cfg, lerr := config.Load(set.path()); lerr == nil && len(cfg.Accounts) == 0 {
+					return fmt.Errorf("no accounts yet (ump config isp add)")
+				}
+				return err
+			}
+			if err := set.newEditCmd(a).RunE(cmd, args); err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				fmt.Fprintf(a.stdout, "ump config isp test %s tries its credentials.\n", args[0])
+			}
+			return nil
+		},
+	}
 }

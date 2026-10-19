@@ -834,7 +834,7 @@ func TestWizardNeedsTTY(t *testing.T) {
 		t.Errorf("short form: code %d, %q", code, errOut)
 	}
 	// an unknown word below the top level is a usage error, not the help
-	if _, errOut, code := e.run("", false, "config", "isp", "view"); code != exitUsage || !strings.Contains(errOut, `unknown command "view" for ump config isp (add, list, remove, test, types)`) {
+	if _, errOut, code := e.run("", false, "config", "isp", "view"); code != exitUsage || !strings.Contains(errOut, `unknown command "view" for ump config isp (add, edit, list, remove, test, types)`) {
 		t.Errorf("unknown subcommand: code %d, %q", code, errOut)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "--set", "a=b"); code != 2 || !strings.Contains(errOut, "the flags need TYPE and NAME") {
@@ -4454,5 +4454,61 @@ func TestEditOneEntry(t *testing.T) {
 	}
 	if _, errOut, code := e.run("", false, "config", "key", "edit", "laptop"); code != 1 || !strings.Contains(errOut, "not a public key line") {
 		t.Errorf("broken key: code %d, %q", code, errOut)
+	}
+}
+
+func TestEditAccount(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("# my accounts\n" + testConfig + "storage: https://mirror.example.org/ump\n")
+	cfg := func() string { b, _ := os.ReadFile(e.cfgPath); return string(b) }
+
+	// one account alone; the other, the comment and the rest of the file stay
+	e.editorHook = func(path string) error {
+		b, _ := os.ReadFile(path)
+		s := string(b)
+		if path == e.cfgPath || !strings.Contains(s, "\ntwo:\n") || strings.Contains(s, "one:") || strings.Contains(s, "storage:") {
+			t.Errorf("edited %s:\n%s", path, s)
+		}
+		return os.WriteFile(path, []byte(strings.Replace(s, "region: us", "region: eu", 1)), 0o600)
+	}
+	out, errOut, code := e.run("", true, "config", "isp", "edit", "two")
+	if code != 0 || !strings.Contains(out, "Saved the account two in ") || !strings.Contains(out, "ump config isp test two tries its credentials.") {
+		t.Fatalf("edit two: code %d\n%s%s", code, out, errOut)
+	}
+	if c := cfg(); !strings.Contains(c, "region: eu") || !strings.HasPrefix(c, "# my accounts\n") || !strings.Contains(c, "password: {env: FAKE_PASS}") || !strings.Contains(c, "storage: https://mirror.example.org/ump") {
+		t.Errorf("config after the edit:\n%s", c)
+	}
+	// what the check refuses: a missing required setting, an unknown one, an unknown type
+	for _, c := range []struct{ from, to, want string }{
+		{"  login: alice\n", "", "the setting login is required for fake"},
+		{"region: eu", "colour: blue", `fake has no setting "colour"`},
+		{"type: fake", "type: nope", `unknown provider type "nope"`},
+	} {
+		e.editorHook = func(path string) error {
+			b, _ := os.ReadFile(path)
+			return os.WriteFile(path, []byte(strings.Replace(string(b), c.from, c.to, 1)), 0o600)
+		}
+		before := cfg()
+		if _, errOut, code := e.run("", false, "config", "isp", "edit", "two"); code != 1 || !strings.Contains(errOut, c.want) || cfg() != before {
+			t.Errorf("%s: code %d, %q", c.want, code, errOut)
+		}
+	}
+	// without a name: the whole file; an unknown account is refused
+	e.editorHook = func(path string) error {
+		if path != e.cfgPath {
+			t.Errorf("edit without a name opened %s", path)
+		}
+		return nil
+	}
+	if out, _, code := e.run("", true, "config", "isp", "edit"); code != 0 || !strings.Contains(out, "2 accounts, all valid: one, two.") {
+		t.Errorf("edit all: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", true, "config", "isp", "edit", "three"); code == 0 || !strings.Contains(errOut, "three") {
+		t.Errorf("unknown account: code %d, %q", code, errOut)
+	}
+	// no accounts at all
+	e.write("storage: https://mirror.example.org/ump\n")
+	if _, errOut, code := e.run("", true, "config", "isp", "edit"); code == 0 || !strings.Contains(errOut, "no accounts yet") {
+		t.Errorf("no accounts: code %d, %q", code, errOut)
 	}
 }

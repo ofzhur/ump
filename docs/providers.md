@@ -139,8 +139,19 @@ ump config isp types             # the provider types, their capabilities and se
 ump config isp add               # the wizard, on a terminal
 ump config isp add TYPE NAME --set KEY=VALUE ... [--no-test]
 ump config isp test [NAME...]    # resolve the secrets and list once; all accounts without names
+ump config isp edit [NAME]       # that account alone in your editor, or the whole configuration file
 ump config isp remove NAME       # the account and the secret files the wizard created for it
 ```
+
+`edit NAME` opens that account alone (its type and settings, values
+plain or as [secret references](#secrets)); when the editor returns, it
+is checked (a known type, known settings, the required ones present)
+and put back into the configuration file, the other accounts, the rest
+of the file and its comments untouched. An invalid edit saves nothing:
+on a terminal ump offers to open it again, otherwise it says where the
+edit is kept. `edit` without a name opens the whole file and checks
+every account afterwards. The check does not resolve the secrets; `ump
+config isp test NAME` tries the credentials.
 
 `ump config isp` is also `i`, `provider` or `account`, and the verbs
 have the short forms of every `ump config` entity (`ump c i v`); see

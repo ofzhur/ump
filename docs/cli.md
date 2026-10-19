@@ -58,6 +58,7 @@ ump
 │   │   ├── list     (ls, l) [-o wide|json|yaml]       the accounts: type, servers, settings, where the secrets come from
 │   │   ├── types                                      provider types and their settings
 │   │   ├── add      (a, new, create) [<type> <name> --set k=v ...]   the wizard on a terminal: type, name, credentials, test; with arguments the non-interactive form (CI, agents)
+│   │   ├── edit     (e) [<name>]                      that account alone in your editor, or the whole configuration file; checked afterwards
 │   │   ├── remove   (rm, d, delete) <name>
 │   │   └── test     (t) [<name>...]                   check credentials and API access
 │   ├── os (o, profile)                                the profiles

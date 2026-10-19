@@ -92,7 +92,9 @@ comes next ([provisioning](docs/provisioning.md)).
 
 Seven kinds of things are configured, all as YAML in `~/.config/ump/`,
 each with its own `ump config` command (`list`, `get`, `create`,
-`edit`, `delete`; `create` and `add` ask their questions on a terminal):
+`edit`, `delete`; `create` and `add` ask their questions on a terminal;
+`edit NAME` opens that one entry in your editor, `edit` alone the whole
+file):
 
 | Object | Command | What it is |
 |---|---|---|
