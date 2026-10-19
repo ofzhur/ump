@@ -184,7 +184,10 @@ A few minutes on a cloud VM, longer on bare metal with many disks. The
 server's name at the provider becomes its hostname (`--hostname` for
 another), and the address, gateway and interface it had are carried over.
 `--profile NAME`, `--layout NAME` and `--firewall NAME` pick others for
-this installation; without a terminal, add `--yes`.
+this installation; without a terminal, add `--yes`. `--role NAME` also
+provisions the new system with that role after its first boot, which is
+the recommended way to give a server its roles; see
+[provisioning](provisioning.md).
 
 ## 7. Log in
 
@@ -205,22 +208,24 @@ uptime, memory, the root disk and the addresses.
 The server now runs the operating system with the profile's userdata,
 and nothing else: ready to use, by hand or by your own tools. Turning it
 into what it is for (a web server, a database) is provisioning, by
-roles that a strategy of the profile applies: Ansible run by ump
+roles that the profile's strategy applies: Ansible run by ump
 (`ansible-bootstrap`), or by the server itself on a timer
-(`ansible-pull`). Give the roles at the installation:
+(`ansible-pull`). `ump server provision` applies roles to a server
+that is already installed:
 
 ```console
-$ ump server reinstall web-01 --role web
-$ ump server reinstall db-01 --roles base,postgres
+$ ump server provision web-01 --role base
+$ ump server provision web-01 --roles base,monitoring
 ```
 
-A role can also be added to an installed server (`ump server provision
-web-01 --role monitoring`), which suits a basic role every server gets;
-anything else is best a reinstall with the new roles. Running the
-strategies is not implemented yet: ump checks the roles, shows them with
-the plan and records them with the server (`ump server show`). See
-[provisioning](provisioning.md) for the roles, the strategies and what
-works by hand today.
+The roles are added to those the server has (`ump server show` lists
+them); a role is removed only by a reinstall. Adding roles in place
+suits ones built for it, such as a basic role every server gets; for a
+server's main roles, a reinstall with `--role` (step 6) starts each on a
+fresh system. Running the strategies is not implemented yet: ump checks
+the roles and records them with the server, and says so. See
+[provisioning](provisioning.md) for the roles, the strategies, facts and
+secrets, and what works by hand today.
 
 ## Next
 
