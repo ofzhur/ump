@@ -162,6 +162,9 @@ func umpSection(doc *state.Document, m provider.Machine) []provider.Section {
 	if len(m.Attributes) > 0 {
 		items = append(items, provider.Item{Key: "attributes", Value: m.Attributes})
 	}
+	if len(s.Roles) > 0 {
+		items = append(items, provider.Item{Key: "roles", Value: strings.Join(s.Roles, ", ")})
+	}
 	if in := s.Installed; in != nil {
 		v := in.OS
 		if in.ImageVersion != "" {

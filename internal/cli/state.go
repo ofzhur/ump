@@ -224,6 +224,7 @@ func applyState(d *state.Document, ms []provider.Machine) {
 			at := s.Installed.At
 			ms[i].OS, ms[i].InstalledAt = s.Installed.OS, &at
 		}
+		ms[i].Roles = s.Roles
 	}
 }
 

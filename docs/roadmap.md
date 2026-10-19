@@ -33,10 +33,12 @@ As of October 2026, ump does what the [README](../README.md) and the
 
 ## Next
 
-- **The provision step.** `provision.type: ansible-pull` and
-  `ansible-bootstrap` are recorded on the installed system and reported,
-  but not run yet. Running them after the first boot, and a plain
-  `script` step, come next.
+- **Provisioning.** Roles (`ump server reinstall --role`, `ump server
+  provision`) are checked and recorded with the server; running the
+  strategies comes next: `ansible-bootstrap` with an exported inventory
+  or with ump as the inventory plugin, `ansible-pull` with the inventory
+  committed to the repository and a timer on every server, and a control
+  plane that runs the push on a schedule ([provisioning](provisioning.md)).
 - **More images.** Ubuntu, Debian and NixOS are there; Talos and
   cloud-init images may follow as userdata types.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
@@ -61,10 +63,10 @@ As of October 2026, ump does what the [README](../README.md) and the
 - **Configuration management.** Handing an installed machine over to the
   tool that keeps it configured (Ansible, Salt, Puppet, NixOS's own
   deployments), with the facts ump knows about it (provider, profile,
-  addresses, interfaces, attributes) as its inventory; the provision step
-  of the profile is where it starts. It becomes the third kind of
+  addresses, interfaces, roles, attributes) as its inventory; the
+  [provisioning](provisioning.md) strategies are where it starts. It becomes the third kind of
   [platform](platforms.md), next to providers and operating systems.
-  [Next steps](next-steps.md) describes the setup it is meant for.
+  [Next steps](next-steps.md) describes the repository it is meant for.
 - **The skill.** Packaged operating knowledge for AI agents that run a
   fleet with ump, Terraform and Ansible, with an approval step that stays
   human. [The design outline](skill.md) is written; the tool-side

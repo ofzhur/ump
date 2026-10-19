@@ -562,9 +562,9 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatal(out)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "IPV6", "PRODUCT", "KIND", "PRICE", "ROLES", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "m2", "cloud", "<none>", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>", "<none>"},
 	})
 }
 
@@ -2458,7 +2458,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	if code != 0 {
 		t.Fatalf("install with a profile file: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	if !strings.Contains(errOut, "Installing ubuntu-26.04 (profile db from "+prof+", layout inline) on web-01 as web-01 ...") || !strings.Contains(errOut, "The provision step ansible-pull is recorded in /etc/ump/install on the server; running it is not implemented yet.") {
+	if !strings.Contains(errOut, "Installing ubuntu-26.04 (profile db from "+prof+", layout inline) on web-01 as web-01 ...") || !strings.Contains(errOut, "The provision strategy ansible-pull is recorded in /etc/ump/install on the server; it runs only with roles (--role), and running it is not implemented yet.") {
 		t.Errorf("stderr: %q", errOut)
 	}
 	spec := e.lastSpec()
@@ -3215,7 +3215,7 @@ func TestProfileWizard(t *testing.T) {
 	}
 	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
 		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Users come from users.yaml (ump config user): ump.",
-		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): archlinux, cachyos, debian, nixos, ubuntu.", "Userdata (comma-separated, in order; none for nothing; bash for ubuntu-24.04) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Provision step", "Description",
+		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): archlinux, cachyos, debian, nixos, ubuntu.", "Userdata (comma-separated, in order; none for nothing; bash for ubuntu-24.04) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Provision strategy for roles", "Description",
 		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, errOut)
@@ -3404,7 +3404,7 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 		t.Errorf("state after set:\n%s", st)
 	}
 	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
-	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo <none> owner=alice,role=web") {
 		t.Errorf("wide: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json")
@@ -4295,5 +4295,60 @@ func TestReinstallChecksTheArchitecture(t *testing.T) {
 	_, errOut, _ = e.run("", false, "server", "reinstall", "web-01", "--profile", "ubuntu-26.04", "--yes", "--account", "one", "--dry-run")
 	if strings.Contains(errOut, "architecture") {
 		t.Errorf("ubuntu was checked: %q", errOut)
+	}
+}
+
+func TestRoles(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+
+	// reinstall with roles: shown with the plan, recorded with the server
+	resetFakePower()
+	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--role", "web", "--roles", "base,web, monitoring", "-o", "json")
+	if code != 0 {
+		t.Fatalf("install with roles: code %d, stderr %q\n%s", code, errOut, out)
+	}
+	if !strings.Contains(errOut, "Roles: web, base, monitoring, by the provision strategy none after the first boot (not run yet).") || !strings.Contains(errOut, "Provisioning the role(s) web, base, monitoring is not implemented yet") {
+		t.Errorf("install with roles, stderr: %q", errOut)
+	}
+	if !strings.Contains(out, `"roles": [`) || !strings.Contains(e.readState(), "    roles:\n      - web\n      - base\n      - monitoring\n") {
+		t.Errorf("install with roles: result\n%s\nstate\n%s", out, e.readState())
+	}
+	out, _, code = e.run("", false, "server", "show", "web-01", "--account", "one")
+	if code != 0 || !strings.Contains(out, "Roles:") || !strings.Contains(out, "web, base, monitoring") {
+		t.Errorf("show: code %d\n%s", code, out)
+	}
+
+	// provision adds roles; the order stays, nothing twice
+	out, errOut, code = e.run("", false, "server", "provision", "web-01", "--account", "one", "--roles", "base,db")
+	if code != 0 || !strings.Contains(out, "roles web, base, monitoring, db.") || !strings.Contains(errOut, "Provisioning the role(s) base, db is not implemented yet") {
+		t.Errorf("provision: code %d\n%s\n%s", code, out, errOut)
+	}
+	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "wide")
+	if code != 0 || !strings.Contains(out, " web,base,monitoring,db ") {
+		t.Errorf("wide: code %d\n%s", code, out)
+	}
+
+	// a dry run changes nothing; a reinstall without roles leaves none
+	resetFakePower()
+	if _, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run", "--account", "one", "--role", "cache"); code != 0 || !strings.Contains(e.readState(), "      - db\n") || strings.Contains(e.readState(), "cache") {
+		t.Errorf("dry run: code %d, stderr %q\n%s", code, errOut, e.readState())
+	}
+	resetFakePower()
+	if _, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 || strings.Contains(e.readState(), "roles:") || strings.Contains(errOut, "Roles:") {
+		t.Errorf("reinstall without roles: code %d, stderr %q\n%s", code, errOut, e.readState())
+	}
+
+	// usage errors: provision without roles, names that are not role names
+	for _, args := range [][]string{
+		{"server", "provision", "web-01"},
+		{"server", "provision", "web-01", "--role", "Web"},
+		{"server", "provision", "web-01", "--roles", "base,-x"},
+		{"server", "reinstall", "web-01", "--yes", "--role", "a b"},
+	} {
+		if _, errOut, code := e.run("", false, append(args, "--account", "one")...); code != 2 || (!strings.Contains(errOut, "give the role(s)") && !strings.Contains(errOut, "a role name is lower-case")) {
+			t.Errorf("%v: code %d, %q", args, code, errOut)
+		}
 	}
 }

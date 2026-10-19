@@ -9,7 +9,7 @@ are added by hand, so the inventory is complete.
 
 ```console
 $ ump server list                         # every server of every account
-$ ump server list -o wide                 # with the ID, IPv6, product, kind and attributes
+$ ump server list -o wide                 # with the ID, IPv6, product, kind, roles and attributes
 $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
 $ ump server list --refresh               # ask the providers, not the cache

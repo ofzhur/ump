@@ -50,6 +50,9 @@ type Server struct {
 	Note string `yaml:"note,omitempty"`
 	// Installed is what ump last installed on the server.
 	Installed *Install `yaml:"installed,omitempty"`
+	// Roles are what the server is provisioned as: set by ump server
+	// reinstall --role (none without), added to by ump server provision.
+	Roles []string `yaml:"roles,omitempty"`
 }
 
 // Install is the record of an installation, as ump saw it finish.
@@ -67,7 +70,7 @@ type Install struct {
 
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
-	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil
+	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Roles) == 0
 }
 
 // New returns an empty document.

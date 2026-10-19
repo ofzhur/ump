@@ -81,7 +81,7 @@ func (i osImage) String() string {
 // profileWizard asks what a new profile should hold and writes it:
 // the image, the layout, the firewall, the administrator and the keys,
 // the kernel switches, the time zone, the userdata, the interface names
-// and the provision step. The defaults are those of the default profile.
+// and the provision strategy. The defaults are those of the default profile.
 func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error {
 	ctx := cmd.Context()
 	cfg, _, err := a.loadConfig()
@@ -179,7 +179,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 		}
 	}
 
-	// the kernel, the time zone, the userdata, the interfaces, the provision step
+	// the kernel, the time zone, the userdata, the interfaces, the provision strategy
 	mit, err := ui.Confirm("CPU vulnerability mitigations on? (they cost performance; mitigations=off otherwise)", false)
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	}
 	p.Network.Rename = &rename
 	prov := []string{"none", "ansible-pull  (recorded only; not run yet)", "ansible-bootstrap  (recorded only; not run yet)"}
-	pi, err := ui.Choose("Provision step after the first boot", prov, 0)
+	pi, err := ui.Choose("Provision strategy for roles (ump server reinstall --role)", prov, 0)
 	if err != nil {
 		return err
 	}

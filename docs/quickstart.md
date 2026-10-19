@@ -1,6 +1,7 @@
 # Quickstart
 
-From nothing to a freshly installed server in six commands. You need a
+From nothing to a freshly installed server in six commands, and from
+there to its roles. You need a
 server at [Hetzner Robot, Hetzner Cloud, OVHcloud, DigitalOcean, Linode or Vultr](isps.md) with a
 public address, the API credentials of that account, and `ssh` on your
 machine. The server will be erased. At DigitalOcean, the droplet must
@@ -199,6 +200,28 @@ and your own keys, so `ssh ump@198.51.100.22` works just as well. The
 message of the day shows the host, the profile it was installed from,
 uptime, memory, the root disk and the addresses.
 
+## 8. Provision
+
+The server now runs the operating system with the profile's userdata,
+and nothing else: ready to use, by hand or by your own tools. Turning it
+into what it is for (a web server, a database) is provisioning, by
+roles that a strategy of the profile applies: Ansible run by ump
+(`ansible-bootstrap`), or by the server itself on a timer
+(`ansible-pull`). Give the roles at the installation:
+
+```console
+$ ump server reinstall web-01 --role web
+$ ump server reinstall db-01 --roles base,postgres
+```
+
+A role can also be added to an installed server (`ump server provision
+web-01 --role monitoring`), which suits a basic role every server gets;
+anything else is best a reinstall with the new roles. Running the
+strategies is not implemented yet: ump checks the roles, shows them with
+the plan and records them with the server (`ump server show`). See
+[provisioning](provisioning.md) for the roles, the strategies and what
+works by hand today.
+
 ## Next
 
 - **A profile per role.** `ump config os create web` copies the default
@@ -247,6 +270,6 @@ uptime, memory, the root disk and the addresses.
   to run your own, and `storage:` in the [configuration](configuration.md)
   points ump at it.
 - **What comes after the installation.** A repository for the rest of
-  the infrastructure, Ansible by pull or push with ump as its inventory,
-  the `provision` step, security profiles, and where to get help: [next
-  steps](next-steps.md).
+  the infrastructure, security profiles, and where to get help: [next
+  steps](next-steps.md); roles and Ansible by push or pull:
+  [provisioning](provisioning.md).

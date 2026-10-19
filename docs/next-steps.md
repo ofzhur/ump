@@ -1,18 +1,16 @@
 # Next steps: building your infrastructure
 
 > **Draft.** Recommendations for what comes after the first
-> installations, from the experience ump grew out of. Parts of it (the
-> `provision` step) describe what ump will do; what works today is said
-> so.
+> installations, from the experience ump grew out of.
 
 ump's job ends when a machine is installed and answers: the right
 system on the right disks, users and keys, network, a firewall, and the
 userdata that had to run before the first boot. From there the machine
 belongs to the tools that keep it configured and the pipeline that
 deploys onto it. This page is about that hand-over: where the line runs,
-how to lay out the repository that holds the rest, pull and push with
-Ansible, the `provision` section of a profile, security, and the
-configurations that go beyond the published defaults.
+how to lay out the repository that holds the rest, security, and the
+configurations that go beyond the published defaults. Applying roles to
+a server is [provisioning](provisioning.md).
 
 ## Where ump stops
 
@@ -81,155 +79,25 @@ system goes through review like any other:
 $ ump server reinstall web-03 --profile ump/profiles/web.yaml
 ```
 
-The grouping comes from attributes that ump keeps in its state, set once
-per machine:
+The servers get their roles when they are installed, and attributes of
+your own for the rest of the grouping:
 
 ```console
-$ ump server set web-03 --attr role=web --attr env=prod
+$ ump server reinstall web-03 --profile ump/profiles/web.yaml --role web
+$ ump server set web-03 --attr env=prod
 ```
 
-### The inventory from ump
+The grouping comes from the roles ump records with each server (`ump
+server reinstall --role`, `ump server provision`) and from attributes you
+set; [provisioning](provisioning.md) has the inventory script and the
+strategies that apply the roles.
 
-ump already knows every machine of every account; the inventory is a
-view of it, not a second list to keep in step. This script groups the
-servers by the attributes `role` and `env`, by account and by the
-operating system ump installed, and hands Ansible the address, the
-administrator and ump's facts:
+## Provisioning
 
-```bash
-#!/usr/bin/env bash
-# ansible/inventory/ump.sh: the fleet as ump lists it, as an Ansible inventory
-set -euo pipefail
-[ "${1:-}" = --host ] && { echo '{}'; exit 0; }
-ump server list -o json | jq '
-  def group: gsub("[^A-Za-z0-9_]"; "_");
-  reduce (.[] | select(.ipv4 != null)) as $m ({_meta: {hostvars: {}}};
-    ._meta.hostvars[$m.name] = {
-      ansible_host: $m.ipv4, ansible_user: "ump",
-      ump_ref: "\($m.provider)/\($m.id)", ump_account: $m.account,
-      ump_os: $m.os, ump_location: $m.location, ump_attributes: ($m.attributes // {})}
-    | reduce (["role_\($m.attributes.role // "none")", "env_\($m.attributes.env // "none")",
-               "account_\($m.account)", "os_\($m.os // "unknown")"][] | group) as $g
-        (.; .[$g].hosts += [$m.name]))'
-```
-
-```console
-$ ansible-inventory -i ansible/inventory/ump.sh --graph
-$ ansible -i ansible/inventory/ump.sh role_web -m ping
-```
-
-The listing is [cached](cli.md#the-listing-cache-and---diff) for five
-minutes, so running the inventory often costs no API calls. Ansible logs
-in as the administrator (`ump`, with sudo and no password) with your own
-key, which the published user carries (`keys: [ump, local]`); in CI,
-give the pipeline its own key as a [named key](keys.md) in the users of
-your profiles, rather than UMP's.
-
-## Pull or push
-
-Configuration management reaches machines in one of two ways, and a
-fleet often uses both.
-
-| | Push | Pull |
-|---|---|---|
-| How | `ansible-playbook site.yml` from your machine or CI, over SSH | every machine runs `ansible-pull` on a timer against the repository |
-| Good at | changes rolled out in order (`serial`), orchestration across machines, seeing the result at once | large fleets, machines CI cannot reach, converging back by itself after drift |
-| Needs | SSH from CI to every machine, a key in CI | read access to the repository from every machine, monitoring to see failures |
-| Fails | loudly, in the pipeline | quietly, on the machine, unless reported |
-
-A common split: **pull** for the baseline every machine needs (users
-added later, hardening, monitoring agent, package updates), applied
-every half hour, so that a machine converges back to the baseline by
-itself; **push** for changes to services, rolled out on purpose and
-watched.
-
-### Pull from the first boot, today
-
-The `provision` step below will set this up by itself; until then, a
-userdata entry does it. It installs Ansible, writes a service and a
-timer, and enables them; the first run happens at the first boot:
-
-```yaml
-# in userdata.yaml (ump config userdata create ansible-pull), listed in the profile after ubuntu
-ansible-pull:
-  description: converge with the repository every 30 minutes
-  type: bash
-  script: |
-    #!/bin/bash
-    set -euo pipefail
-    apt-get install -y --no-install-recommends ansible-core git      # Arch: pacman -S --noconfirm --needed ansible-core git
-    cat > /etc/systemd/system/ansible-pull.service <<'UNIT'
-    [Unit]
-    Description=Converge with the infrastructure repository
-    Wants=network-online.target
-    After=network-online.target
-
-    [Service]
-    Type=oneshot
-    ExecStart=/usr/bin/ansible-pull -U https://git.example.com/infra.git -C main \
-      -d /var/lib/ansible-pull -i localhost, ansible/local.yml
-    UNIT
-    cat > /etc/systemd/system/ansible-pull.timer <<'UNIT'
-    [Timer]
-    OnBootSec=2min
-    OnUnitActiveSec=30min
-    RandomizedDelaySec=5min
-
-    [Install]
-    WantedBy=timers.target
-    UNIT
-    systemctl enable ansible-pull.timer
-```
-
-`local.yml` runs against `localhost` and picks its roles from the facts
-the machine has, for example the record ump left in `/etc/ump/install`
-(profile, OS, layout, interfaces) or the role set as an attribute. A
-private repository needs a credential on every machine: a read-only
-deploy token fetched at the first boot from your secret store, not one
-written into the userdata, which ends up in the profile, in git and in
-`/etc/ump/userdata` on the machine.
-
-### Push
-
-```console
-$ ansible-playbook -i ansible/inventory/ump.sh ansible/site.yml --limit role_web --check --diff
-$ ansible-playbook -i ansible/inventory/ump.sh ansible/site.yml --limit role_web
-```
-
-A newly installed machine is part of the next push by itself, since the
-inventory comes from ump; `ump server reinstall` followed by a push of
-that one host (`--limit web-03`) brings a rebuilt machine back to its
-role.
-
-## The provision section
-
-A profile names the step that hands a machine over after its first boot:
-
-```yaml
-provision:
-  type: ansible-pull          # none | ansible-pull | ansible-bootstrap
-  repo: https://git.example.com/infra.git
-  branch: main
-  playbook: ansible/local.yml
-```
-
-**Today** ump checks the type, keeps the section, and records it on the
-installed machine in `/etc/ump/install` (`provision=ansible-pull`,
-`provision_repo=...`, `provision_branch=...`); `ump server reinstall`
-says that it is not run yet. Your own tooling can read it from there: a
-playbook, a first-boot unit from the userdata above, or the inventory.
-
-**Planned** (see the [roadmap](roadmap.md)):
-
-- `ansible-pull`: the machine runs the playbook from the repository
-  itself after its first boot, and a timer keeps it doing so, as the
-  userdata above does by hand;
-- `ansible-bootstrap`: ump runs the playbook against the new machine
-  from where ump runs, once it answers, and reports the result with the
-  installation;
-- a plain `script` step for anything else.
-
-Until then, the userdata entry and a push after the reinstall cover both.
+Turning an installed system into what the server is for (its roles) is
+[provisioning](provisioning.md): the roles, the commands, push and pull
+with Ansible (`ansible-bootstrap`, `ansible-pull`), a control plane, and
+what works by hand until the strategies run.
 
 ## Security profiles
 

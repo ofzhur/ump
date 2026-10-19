@@ -76,6 +76,9 @@ type Machine struct {
 	// installed.
 	OS          string     `json:"os,omitempty" yaml:"os,omitempty"`
 	InstalledAt *time.Time `json:"installed_at,omitempty" yaml:"installed_at,omitempty"`
+	// Roles are what ump provisions the machine as (ump server reinstall
+	// --role, ump server provision); from the state.
+	Roles []string `json:"roles,omitempty" yaml:"roles,omitempty"`
 }
 
 // Price is what a machine costs per period.

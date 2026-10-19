@@ -41,6 +41,7 @@ type installOptions struct {
 	dryRun      bool
 	via         string
 	output      string
+	roles       roleFlags
 }
 
 func (a *app) newServerReinstallCmd() *cobra.Command {
@@ -63,13 +64,20 @@ default; a file of that name in the profiles directory of the
 configuration, else the published one) says which image, which disk
 layout (by name from layouts.yaml, or its own), which users with which
 keys, which userdata runs in it, what the firewall lets in, and the provision
-step after the first boot. The default profile puts Ubuntu 26.04 on
+strategy for roles. The default profile puts Ubuntu 26.04 on
 every disk as one linear volume group, gives the sudo user ump UMP's key
 and your ~/.ssh/id_*.pub keys (root has no SSH login), lets ICMP and SSH
 in and nothing else, and a kernel command line with mitigations=off and
 ipv6.disable=1; --mitigations and --ipv6 keep them on (install/README.md
 says how to turn them on later). The other flags override the profile for
 this one installation.
+
+Without --role, the server ends up as the operating system ready to use
+with the profile's userdata, and nothing more. --role (or --roles) names
+the roles to provision it with after the first boot, by the profile's
+provision strategy; running that is not implemented yet, the roles are
+recorded with the server (ump server provision adds roles later;
+docs/provisioning.md).
 
 --dry-run brings the server into the rescue system and prints the
 installer's plan without touching a disk; --no-reboot leaves the server
@@ -97,6 +105,7 @@ terminal; without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.noReboot, "no-reboot", false, "leave the server in the rescue system after the installation")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the result as json or yaml")
+	o.roles.add(sub, "a role to provision the new system with after the first boot")
 	return sub
 }
 
@@ -110,6 +119,8 @@ type installResult struct {
 	Via              string `json:"via" yaml:"via"`
 	DryRun           bool   `json:"dry_run,omitempty" yaml:"dry_run,omitempty"`
 	Rebooted         bool   `json:"rebooted" yaml:"rebooted"`
+	// Roles are the roles the server is to be provisioned with.
+	Roles []string `json:"roles,omitempty" yaml:"roles,omitempty"`
 	// Admin is the user ump (and you) log in as.
 	Admin string `json:"admin,omitempty" yaml:"admin,omitempty"`
 	// System is what answered after the reboot.
@@ -135,6 +146,10 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	case "", "auto", "direct", "provider":
 	default:
 		return usageErrorf(cmd, "unknown --via %q (use one of auto, direct, provider)", o.via)
+	}
+	roles, err := o.roles.list(cmd)
+	if err != nil {
+		return err
 	}
 	if o.os != "" && strings.ContainsAny(o.os, "/ ") {
 		return usageErrorf(cmd, "invalid --os %q", o.os)
@@ -313,6 +328,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	} else {
 		fmt.Fprintf(a.stderr, "Installing %s on %s as %s ...\n", what, m.Name, hostname)
 	}
+	if len(roles) > 0 {
+		fmt.Fprintf(a.stderr, "Roles: %s, by the provision strategy %s after the first boot (not run yet).\n", strings.Join(roles, ", "), spec.Provision.Type)
+	}
 	installer := storage + "/install/install.sh"
 	// the keys go into the rescue system too, so that it stays reachable
 	// with them while the installation runs
@@ -338,7 +356,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	case code != 0:
 		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh %s --staging)", m.Name, code, ref)
 	}
-	result := installResult{Machine: m, Profile: prof.Name, Layout: spec.Layout.Name, OS: spec.OS, Hostname: hostname, Via: entry.via, DryRun: o.dryRun}
+	result := installResult{Machine: m, Profile: prof.Name, Layout: spec.Layout.Name, OS: spec.OS, Hostname: hostname, Via: entry.via, DryRun: o.dryRun, Roles: roles}
 	if o.dryRun {
 		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh %s --staging).\n", m.Name, ref)
 		return a.installReport(result, format)
@@ -407,14 +425,18 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err := a.updateState(ctx, func(d *state.Document) error {
 		s := d.Servers[m.Ref()]
 		s.Installed = &record
+		// a new system has the roles it is installed with, none without
+		s.Roles = roles
 		d.Servers[m.Ref()] = s
 		return nil
 	}); err != nil {
 		fmt.Fprintf(a.stderr, "ump: the installation is not recorded in the state: %v\n", err)
 	}
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, hostname, sys.Root, admin, m.Name)
-	if spec.Provision.Type != "none" {
-		fmt.Fprintf(a.stderr, "The provision step %s is recorded in /etc/ump/install on the server; running it is not implemented yet.\n", spec.Provision.Type)
+	if len(roles) > 0 {
+		fmt.Fprintln(a.stderr, provisionNotYet(roles))
+	} else if spec.Provision.Type != "none" {
+		fmt.Fprintf(a.stderr, "The provision strategy %s is recorded in /etc/ump/install on the server; it runs only with roles (--role), and running it is not implemented yet.\n", spec.Provision.Type)
 	}
 	return a.installReport(result, format)
 }

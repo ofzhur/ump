@@ -205,7 +205,7 @@ network:                      # optional
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
-| `provision.type` | The step after the first boot: `none`, `ansible-pull` or `ansible-bootstrap`. The type and the other keys of the section are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`); running the step is not implemented yet, `ump server reinstall` says so. |
+| `provision.type` | The strategy that applies a server's roles after the first boot: `none` (the default), `ansible-bootstrap` or `ansible-pull`; the other keys of the section belong to the strategy. It runs only for a server given roles (`ump server reinstall --role`, `ump server provision`). The type and the other keys are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`); running the strategy is not implemented yet, and ump says so. See [provisioning](provisioning.md). |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
 
 Unknown fields are an error, so a typo in a field name is caught by

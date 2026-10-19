@@ -59,6 +59,7 @@ var serverColumns = []column{
 	{header: "PRODUCT", wide: true, value: func(m provider.Machine) string { return m.Product }},
 	{header: "KIND", wide: true, value: func(m provider.Machine) string { return string(m.Kind) }},
 	{header: "PRICE", value: func(m provider.Machine) string { return m.Price.String() }},
+	{header: "ROLES", wide: true, value: func(m provider.Machine) string { return strings.Join(m.Roles, ",") }},
 	{header: "ATTRIBUTES", wide: true, value: func(m provider.Machine) string { return joinMap(m.Attributes) }},
 }
 

@@ -36,8 +36,9 @@ userdata: [debian]      # named entries from userdata.yaml (ump config userdata)
 firewall: default
 
 provision:
-  type: none            # none | ansible-pull | ansible-bootstrap: the step after the first boot;
-                        # recorded in /etc/ump/install, not run yet
+  type: none            # none | ansible-bootstrap | ansible-pull: how the roles given with
+                        # ump server reinstall --role are applied after the first boot;
+                        # recorded in /etc/ump/install, not run yet (docs/provisioning.md)
 
 network:
   rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),

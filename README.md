@@ -38,6 +38,7 @@ $ ump config os edit default                     # the profile: image, disks, us
 $ ump server reinstall web-01 --dry-run          # the plan on that machine, nothing erased
 $ ump server reinstall web-01                    # erase, install, reboot, verify
 $ ump ssh web-01
+$ ump server reinstall web-02 --role web         # with roles to provision (work in progress)
 ```
 
 The [quickstart](docs/quickstart.md) walks through these with their
@@ -80,9 +81,12 @@ profile as NixOS modules. Each gets the
 same disks, users and keys, interface names, firewall and message of
 the day. See [operating systems](docs/oses.md).
 
-**Configuration management** is planned: handing an installed machine
-over to the tool that keeps it configured, with what ump knows about it
-([roadmap](docs/roadmap.md)).
+**Provisioning** is in progress: a server given roles (`ump server
+reinstall --role web`, `ump server provision`) gets them applied after
+the first boot by a strategy of its profile: Ansible run by ump with an
+exported inventory or with ump as the inventory, or Ansible pulled by
+the server itself. The roles are recorded today; running the strategies
+comes next ([provisioning](docs/provisioning.md)).
 
 ## The objects
 
@@ -93,7 +97,7 @@ each with its own `ump config` command (`list`, `get`, `create`,
 | Object | Command | What it is |
 |---|---|---|
 | [Provider accounts](docs/providers.md) | `ump config isp` | credentials for a provider API; secrets as references to files, environment variables or commands, never plaintext |
-| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line, the step after the first boot |
+| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line, the provision strategy for roles |
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
@@ -176,7 +180,8 @@ own](images/rescue/README.md#your-own-storage).
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, Ansible by pull or push with ump as the inventory, the provision step, security profiles, advanced configurations, and professional help |
+| [Provisioning](docs/provisioning.md) | after the installation (work in progress): roles (`--role`, `ump server provision`), the strategies (Ansible by push with an exported inventory or ump as the inventory, Ansible by pull, a control plane), and what works by hand today |
+| [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
 | [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, users and userdata come from |

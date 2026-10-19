@@ -35,7 +35,8 @@ ump
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--role <role>]... [--roles <list>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── provision    <ref> --role <role>... | --roles <list>
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
@@ -454,7 +455,7 @@ system; when neither tells, ump warns and asks. The profile (`--profile`, defaul
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
 its own), the users with their keys, the userdata that runs in the new
-system, what the firewall lets in, and the provision step after the first boot. The server is
+system, what the firewall lets in, and the provision strategy for roles. The server is
 brought into the UMP rescue system the way `rescue` does it (as it is
 when it runs it already, by a kexec from the running system when that
 lets UMP in as root, else through the provider's rescue system); the
@@ -519,15 +520,40 @@ network, users, userdata, firewall, provision) and leaves it there
 without touching a disk; a layout whose targets match no disk, or a raid
 level with too few members, stops there too. `--no-reboot` installs and leaves the
 server in the rescue system. `-o json` prints the result (the profile and layout, the way in, the
-hostname, what answered after the reboot). A provision step other than
-`none` is recorded on the server and reported; running it is not
-implemented yet. Exit status 1 means the
+hostname, what answered after the reboot, the roles).
+
+Without `--role`, the new system is the operating system ready to use
+with the profile's userdata, and nothing more. `--role ROLE` (repeatable)
+or `--roles A,B` names the roles to [provision](provisioning.md) it with
+after the first boot, by the profile's provision strategy; the plan shows
+them, and a successful installation records them with the server, or
+records none without `--role` (the disks were wiped). Running the
+strategy is not implemented yet, and ump says so. A role name is
+lower-case letters, digits, `-`, `_` and `.`. Exit status 1 means the
 installer failed (its output says where; the server stays in the rescue
 system, `ump ssh REF --staging` gets there), 5 that the new system
 did not answer after the reboot (look at the server's console). Providers
 that keep their rescue system as the boot option (OVHcloud) have it
 disabled before the reboot. Asks for confirmation on a terminal; without
 one, `--yes` is required.
+
+## Provision: `ump server provision`
+
+```console
+$ ump server provision web-01 --role monitoring
+$ ump server provision web-01 --roles base,monitoring
+```
+
+Adds roles to a server ump installed, to be applied by the strategy its
+profile names, without reinstalling it; `--role` or `--roles` is
+required. Roles are best given at the installation (`ump server
+reinstall --role`), so that each starts on a fresh system, and a server
+that changes roles is reinstalled; adding a role in place suits roles
+built for it, such as a basic one every server gets. A role is removed
+only by a reinstall. Running the strategy is not implemented yet: the
+roles are checked and recorded (`ump server show`, the `ROLES` column of
+`ump server list -o wide`, `roles` in `-o json`), and ump says so. See
+[provisioning](provisioning.md).
 
 ## `ump server set`, `add` and `remove`
 

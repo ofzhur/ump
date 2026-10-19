@@ -169,7 +169,7 @@ configuration (` + config.AbbreviateHome(config.ProfilesDir()) + `), one per nam
 plus layouts.yaml with the named disk layouts. The first run puts the
 published default profile and layouts there. A profile names the image,
 the disk layout, the users with their keys, the userdata that runs in
-the new system, the firewall and the provision step; docs/profiles.md in the repository describes
+the new system, the firewall and the provision strategy; docs/profiles.md in the repository describes
 every field. ump server reinstall NAME --profile NAME installs with one,
 ump server set NAME --profile NAME remembers it for a server.
 
@@ -341,7 +341,7 @@ func (a *app) newOSCreateCmd() *cobra.Command {
 when none is given, then what the profile should hold (the image from
 the storage, the disk layout, the firewall, the administrator with shell
 and keys, the kernel switches, the time zone, the userdata, the
-interface names, the provision step) and writes it. --from NAME copies another
+interface names, the provision strategy) and writes it. --from NAME copies another
 profile instead and opens it in your editor; without a terminal that is
 the only way.`,
 		Args: usageArgs(cobra.MaximumNArgs(1)),

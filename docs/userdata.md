@@ -111,8 +111,9 @@ output shown, and the server stays in the rescue system for a look.
 `/etc/ump/install` records the names that ran (`userdata=ubuntu,web`).
 
 What does not fit a script that runs once at installation, such as
-keeping a system configured over time, belongs to the provision step
-after the first boot (`provision` in the profile) or to your
+keeping a system configured over time, belongs to
+[provisioning](provisioning.md) after the first boot (roles applied by
+the profile's `provision` strategy) or to your
 configuration management.
 
 ## Managing userdata
