@@ -37,8 +37,9 @@ As of October 2026, ump does what the [README](../README.md) and the
   provision`) are checked and recorded with the server; running the
   strategies comes next: `ansible-bootstrap` with an exported inventory
   or with ump as the inventory plugin, `ansible-pull` with the inventory
-  committed to the repository and a timer on every server, and a control
-  plane that runs the push on a schedule ([provisioning](provisioning.md)).
+  committed to the repository, a timer on every server and an
+  S3-compatible bucket as the exchange of facts, and a control plane that
+  runs the push on a schedule ([provisioning](provisioning.md)).
 - **More images.** Ubuntu, Debian and NixOS are there; Talos and
   cloud-init images may follow as userdata types.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain

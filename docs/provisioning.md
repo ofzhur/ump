@@ -134,17 +134,20 @@ reach the servers from outside.
 ```yaml
 provision:
   type: ansible-pull
-  repo: git@git.example.com:infra/infra.git
+  repo: git@github.com:example/infra.git
   branch: main
   playbook: local.yml
   schedule: 30min             # how often the server pulls
+  facts: s3://example-infra-facts/   # the facts exchange (S3, R2 or any S3-compatible store)
 ```
 
 The servers need read access to the repository over SSH: the key of a
 [user](users.md) of the profile, or a deploy key, registered with the
-repository as read-only. Never write a token or a private key into a
-profile or userdata: both end up in git and on the server; fetch it at
-the first boot from your secret store instead.
+repository as read-only. Unlike a push, a pull also needs an exchange
+for the facts and secrets the servers cannot get from each other (see
+[facts and secrets](#facts-and-secrets) below). Never write a token or a
+private key into a profile or userdata: both end up in git and on the
+server; fetch it at the first boot from your secret store instead.
 
 ### A control plane for a) and b)
 
@@ -166,10 +169,62 @@ the rest of UMP is.
 | Needs | SSH from where Ansible runs to the servers | the same, plus ump and its state | read access to the repository from every server |
 | Good at | reviewed changes, CI without ump | interactive work, fleets that change often | large fleets, servers nobody can reach, converging after drift |
 | Fails | loudly, in the run | loudly, in the run | quietly, on the server, unless monitored |
+| Facts | gathered over SSH by the control machine, for every server at once | the same | each server knows its own; the others' come from an exchange |
+| Secrets on the servers | almost none: they stay with the control machine | the same | what the server needs to pull, read the exchange and run its roles |
 
 A common combination: `ansible-pull` (or the control plane) for a `base`
 role on every server, and a push for the roles that change services,
 rolled out on purpose and watched.
+
+### Facts and secrets
+
+Roles need more than their own server: a web server needs the address
+of its database, a monitoring node the list of what to watch, every
+server the certificates and passwords of its services. Where that
+comes from is the real difference between the strategies.
+
+**Push (a, b): exchanged over the control plane.** Ansible runs on one
+machine (a CI runner, a bastion, or your laptop), connects to every
+server of the run, gathers their facts and hands each role what it needs
+from the others in the same run. Secrets are needed only there, while
+the playbook runs: they live encrypted in the infrastructure repository
+([git-crypt](https://github.com/AGWA/git-crypt), [sops](https://github.com/getsops/sops)
+or `ansible-vault`) and are decrypted on the control machine, so the
+servers end up holding almost nothing but what their services use. This
+is the more secure setup, and the simplest: the repository and a key
+that opens it is all there is.
+
+**Pull (c): an exchange the servers share.** Every server runs Ansible
+for itself and sees only its own facts, so the facts of the others, and
+the secrets, have to come from somewhere the servers can all reach:
+
+- a **facts exchange**, where every server writes its own facts after a
+  run and reads the others' before the next; an S3 bucket, Cloudflare
+  R2, or any S3-compatible store is enough, and cheap;
+- a **secrets store** the servers can read their own secrets from:
+  HashiCorp Vault or OpenBao with a policy per role, or, for a small
+  fleet, the same kind of bucket, with the secrets encrypted per server
+  or per role and credentials that can read only them;
+- **access to the repository** for every server (a read-only deploy
+  key), and the credentials of the exchange, put on the server at the
+  installation from your secret store, never written into a profile.
+
+The basic setup for a pull is therefore three things:
+
+1. a bucket (S3, R2 or another S3-compatible store) for the facts
+   exchange, with credentials the servers use;
+2. access to the infrastructure repository on GitHub (or any git host)
+   for UMP's commits of the inventory (UMP's key, or a deploy key with
+   write access) and for the servers to pull (a read-only deploy key);
+   UMP's private key itself never goes onto a server, since it opens
+   every machine;
+3. the exchange's address and credentials injected into each server at
+   the installation, which ump will do from the profile's `provision`
+   section and your secret references.
+
+More moving parts mean more to secure: every server holds a key to the
+repository and credentials for the exchange, so give each the narrowest
+access its roles need, and rotate them like any other secret.
 
 ## Until the strategies run
 
@@ -256,8 +311,9 @@ The pieces work by hand today:
 
 ## Repositories
 
-- **UMP's Ansible collection:** the inventory plugin (for a, b and c) and
-  the control-plane role. Link to follow.
+- **UMP's Ansible collection:** the inventory plugin (for a, b and c),
+  the control-plane role, and the facts exchange for `ansible-pull`
+  (an S3-compatible bucket). Link to follow.
 - **An example infrastructure repository** laid out for the three
   strategies. Link to follow.
 
