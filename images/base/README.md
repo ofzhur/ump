@@ -50,9 +50,12 @@ per release and architecture:
 
 ## What is in it
 
-The distribution's kernel with its firmware (Ubuntu's `linux-image-generic`
-with `linux-firmware`; Debian's `linux-image-*` with the `firmware-*`
-packages of server NICs and storage controllers), GRUB for UEFI and,
+The distribution's kernel with its firmware and, on amd64, the CPU
+microcode of Intel and AMD (Ubuntu's `linux-image-generic` with
+`linux-firmware`, `intel-microcode` and `amd64-microcode`; Debian's
+`linux-image-*` with the `firmware-*` packages of server NICs and storage
+controllers, and `intel-microcode`, `iucode-tool` and `amd64-microcode`
+added by `build.sh`), GRUB for UEFI and,
 on amd64, for BIOS (`grub-efi-*-bin`, `grub-pc-bin`, `grub2-common`),
 `lvm2`, `mdadm`, the file system tools, `netplan.io` rendering to
 systemd-networkd, `systemd-resolved`, OpenSSH, `tuned`, `cpufrequtils`,

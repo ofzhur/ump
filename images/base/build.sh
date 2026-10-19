@@ -44,6 +44,12 @@ case "$ARCH" in
 	arm64) boot="grub-efi-arm64-bin" ;;
 	*) echo "build.sh: unsupported architecture $ARCH (amd64 or arm64)" >&2; exit 2 ;;
 esac
+# the CPU microcode, loaded from the initramfs from the first boot on:
+# Ubuntu's linux-image-generic brings it, Debian's kernel does not (the
+# installer rebuilds the initramfs on the machine, for its own CPU)
+if [ "$DISTRO" = debian ] && [ "$ARCH" = amd64 ]; then
+	boot="$boot,intel-microcode,iucode-tool,amd64-microcode"
+fi
 # the distribution: its archive, keyring, components and kernel
 case "$DISTRO:$ARCH" in
 	ubuntu:amd64) MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}"; SECURITY="${SECURITY:-http://security.ubuntu.com/ubuntu}" ;;

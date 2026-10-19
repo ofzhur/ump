@@ -78,8 +78,9 @@ the default), 24.04 (noble) and 22.04 (jammy), built the same way and
 differing only in their packages' versions. The installer unpacks it
 and configures what depends on the machine. Out of the box:
 
-- **Base:** the generic kernel with its firmware, GRUB for UEFI and, on
-  amd64, BIOS, LVM, md, the file system tools, netplan rendering to
+- **Base:** the generic kernel with its firmware and, on amd64, the CPU
+  microcode of Intel and AMD (applied from the first boot), GRUB for
+  UEFI and, on amd64, BIOS, LVM, md, the file system tools, netplan rendering to
   systemd-networkd, `systemd-resolved`, OpenSSH. No cloud-init, no
   snaps, no recommends.
 - **Performance:** `tuned` with the `throughput-performance` profile and
@@ -112,7 +113,9 @@ configuration (netplan with systemd-networkd), firewall, SSH policy,
 shell, performance settings and message of the day as an Ubuntu one.
 What differs is Debian's own: its kernel (`linux-image-amd64` or
 `arm64`) with the firmware of server NICs and storage controllers from
-the `firmware-*` packages, its apt sources (`deb.debian.org` with
+the `firmware-*` packages and, on amd64, `intel-microcode` and
+`amd64-microcode` (Debian's kernel does not pull them in as Ubuntu's
+does), its apt sources (`deb.debian.org` with
 updates, `security.debian.org`), and the age of its packages. Debian 12
 has no `wtmpdb` (`last` reads the classic `wtmp`); Debian 13 has no
 `cpufrequtils` (`tuned` sets the CPU's performance settings). Userdata
