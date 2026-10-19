@@ -285,6 +285,7 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 	}
 	defer a.invalidateListing(m.Account)
 	a.warnNoRescue(m, prov)
+	a.warnPreflight(cmd.Context(), m, prov)
 	doc, err := a.loadState(cmd.Context(), cfg)
 	if err != nil {
 		return err

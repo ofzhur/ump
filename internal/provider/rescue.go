@@ -110,3 +110,11 @@ type KeylessRescue interface {
 	// only be entered with a password UMP does not get.
 	RescueTakesNoKey(m Machine) bool
 }
+
+// Preflight is implemented by providers whose settings can stand in the
+// way of a rescue system or an installation, such as a firewall at the
+// provider. Preflight returns one warning per finding, none when nothing
+// stands in the way.
+type Preflight interface {
+	Preflight(ctx context.Context, m Machine) ([]string, error)
+}

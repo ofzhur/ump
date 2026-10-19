@@ -51,6 +51,9 @@ in
   networking.enableIPv6 = lib.mkDefault ipv6;
   system.stateVersion = lib.mkDefault facts.state_version;
   nix.settings.experimental-features = lib.mkDefault [ "nix-command" "flakes" ];
+  # the performance CPU governor, what tuned's throughput-performance sets
+  # on Ubuntu; NixOS's own default is powersave
+  powerManagement.cpuFreqGovernor = lib.mkDefault "performance";
 
   # --- the boot loader: GRUB, on every disk with a BIOS boot partition and
   # in the EFI system partition (as the removable path, so no firmware

@@ -481,7 +481,7 @@ func (e *testEnv) entryCommands() []string {
 // entryPrefix is how the entry command for a base URL starts: the server
 // fetches the published script and runs it with the URL.
 func entryPrefix(url string) string {
-	return `f=/tmp/kexec-into-rescue.sh; if command -v curl >/dev/null; then curl -fsSL ` + url + `/kexec-into-rescue.sh -o "$f"; else wget -q -O "$f" ` + url + `/kexec-into-rescue.sh; fi && bash "$f" -u ` + url + ` `
+	return `f=/tmp/kexec-into-rescue.sh; i=0; until if command -v curl >/dev/null; then curl -fsSL --connect-timeout 10 ` + url + `/kexec-into-rescue.sh -o "$f"; else wget -q -T 10 -O "$f" ` + url + `/kexec-into-rescue.sh; fi; do r=$?; i=$((i+1)); [ $i -lt 6 ] || exit $r; sleep 5; done; bash "$f" -u ` + url + ` `
 }
 
 // writeProfiles puts the repository's profiles into the configuration
@@ -2244,7 +2244,7 @@ func TestRescueWaysAndFailures(t *testing.T) {
 }
 
 func installerPrefix(storage string) string {
-	return `cat > /tmp/ump-install.json && f=/tmp/ump-install.sh; if command -v curl >/dev/null; then curl -fsSL ` + storage + `/install/install.sh -o "$f"; else wget -q -O "$f" ` + storage + `/install/install.sh; fi && bash "$f" --spec /tmp/ump-install.json`
+	return `cat > /tmp/ump-install.json && f=/tmp/ump-install.sh; i=0; until if command -v curl >/dev/null; then curl -fsSL --connect-timeout 10 ` + storage + `/install/install.sh -o "$f"; else wget -q -T 10 -O "$f" ` + storage + `/install/install.sh; fi; do r=$?; i=$((i+1)); [ $i -lt 6 ] || exit $r; sleep 5; done; bash "$f" --spec /tmp/ump-install.json`
 }
 
 func TestInstallServer(t *testing.T) {

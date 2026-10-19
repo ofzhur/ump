@@ -388,10 +388,13 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 // fetchAndRun is a shell command that fetches a script from the storage
 // (with curl, or wget where there is no curl) to path on the machine and
 // runs it with args. Nothing is bundled with ump: the storage is the one
-// source, see images/rescue/README.md for what it serves.
+// source, see images/rescue/README.md for what it serves. A failed fetch
+// is tried again for half a minute: a rescue system that has just come up
+// answers SSH before its resolver reaches a DNS server. The fetch's own
+// exit status is the command's when every try failed.
 func fetchAndRun(url, path string, args []string) string {
 	src := shellJoin([]string{url})
-	return fmt.Sprintf(`f=%s; if command -v curl >/dev/null; then curl -fsSL %s -o "$f"; else wget -q -O "$f" %s; fi && bash "$f" %s`, path, src, src, shellJoin(args))
+	return fmt.Sprintf(`f=%s; i=0; until if command -v curl >/dev/null; then curl -fsSL --connect-timeout 10 %s -o "$f"; else wget -q -T 10 -O "$f" %s; fi; do r=$?; i=$((i+1)); [ $i -lt 6 ] || exit $r; sleep 5; done; bash "$f" %s`, path, src, src, shellJoin(args))
 }
 
 // entryOptions say how a server is brought into the UMP rescue system.

@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -156,5 +158,27 @@ func noRescueWarning(m provider.Machine, prov provider.Provider) string {
 func (a *app) warnNoRescue(m provider.Machine, prov provider.Provider) {
 	if w := noRescueWarning(m, prov); w != "" {
 		fmt.Fprintln(a.stderr, w)
+	}
+}
+
+// warnPreflight says what the provider knows stands in the way of a
+// rescue system or an installation (provider.Preflight), within a few
+// seconds; a provider that cannot tell says nothing.
+func (a *app) warnPreflight(ctx context.Context, m provider.Machine, prov provider.Provider) {
+	pf, ok := prov.(provider.Preflight)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	warnings, err := pf.Preflight(ctx, m)
+	if err != nil {
+		if a.verbose {
+			fmt.Fprintf(a.stderr, "ump: could not check %s at its provider: %v\n", m.Ref(), err)
+		}
+		return
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(a.stderr, "Warning: %s\n", w)
 	}
 }

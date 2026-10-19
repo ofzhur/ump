@@ -39,6 +39,14 @@ systems](oses.md).
   it; `start` presses it.
 - Reverse DNS is set for any address of the server (primary IP,
   additional IPs, subnets, the IPv6 /64), and any name is accepted.
+- Firewall: before a rescue or a reinstall, ump reads the server's Robot
+  firewall and warns when it is active and lets no UDP answers in. The
+  Robot firewall is stateless: without a rule for them, the answers of
+  resolvers outside Hetzner (UMP's systems use public ones) are dropped,
+  so DNS lookups time out until systemd-resolved falls back to TCP (a
+  minute or more after every boot) and downloads fail meanwhile. An
+  input rule `udp`, source port `53`, `accept` (or Hetzner's template
+  rule for UDP to ports 32768-65535) lets them in.
 - `ump server show` adds the contract (product, traffic, paid until,
   cancellation), addresses, features, power state and reset types, and
   the rescue state.

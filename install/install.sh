@@ -319,6 +319,17 @@ fi
 [ -n "$mac" ] || die "no network interface with a default route; the new system would be unreachable"
 dns="1.1.1.1 8.8.8.8"
 
+# chroot_resolv FILE: the resolver for a chroot, the rescue system's own
+# (its systemd-resolved falls back to TCP where a firewall at the provider
+# lets no UDP answers in), else the public resolvers
+chroot_resolv() {
+	if grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
+		grep -E '^(nameserver|options|search) ' /etc/resolv.conf > "$1"
+	else
+		printf 'nameserver %s\n' $dns > "$1"
+	fi
+}
+
 # the interfaces: every wired one, by MAC. The uplink and those with a
 # public address are external (ext01, ext02, ...), the rest internal
 # (int01, ...), unless the profile keeps the kernel's names.
@@ -808,7 +819,7 @@ arch_pacstrap() {
 	# size already; the new system keeps Arch's pacman.conf with the check)
 	sed -i -e 's/^#ParallelDownloads.*/ParallelDownloads = 5/' -e 's/^CheckSpace/#CheckSpace/' "$arch_boot/etc/pacman.conf"
 	rm -f "$arch_boot/etc/resolv.conf"
-	printf 'nameserver %s\n' $dns > "$arch_boot/etc/resolv.conf"
+	chroot_resolv "$arch_boot/etc/resolv.conf"
 	# the new system with everything mounted in it (/boot, /boot/efi) as
 	# the bootstrap's /mnt, first, while the bootstrap has no mounts of its
 	# own yet; private, so that nothing mounted later shows up twice. /sys
@@ -1100,7 +1111,7 @@ fi
 net_on() {
 	resolv_was="$(readlink "$TARGET/etc/resolv.conf" 2>/dev/null || true)"
 	rm -f "$TARGET/etc/resolv.conf"
-	printf 'nameserver %s\n' $dns > "$TARGET/etc/resolv.conf"
+	chroot_resolv "$TARGET/etc/resolv.conf"
 	printf '#!/bin/sh\nexit 101\n' > "$TARGET/usr/sbin/policy-rc.d"; chmod 755 "$TARGET/usr/sbin/policy-rc.d"
 }
 net_off() {

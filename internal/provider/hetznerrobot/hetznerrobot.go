@@ -375,6 +375,75 @@ func (p *Provider) allRDNS(ctx context.Context) ([]RDNS, error) {
 	return p.rdns, nil
 }
 
+// Preflight implements provider.Preflight: the Robot firewall is
+// stateless, so a server behind an active one gets no UDP answers unless
+// a rule lets them in. DNS answers from resolvers outside Hetzner (UMP's
+// systems use public ones) then never arrive: lookups time out until
+// systemd-resolved falls back to TCP, a minute or more after every boot,
+// and downloads of the installation fail meanwhile.
+func (p *Provider) Preflight(ctx context.Context, m provider.Machine) ([]string, error) {
+	n, err := p.number(m)
+	if err != nil {
+		return nil, err
+	}
+	fw, err := p.client.GetFirewall(ctx, n)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if fw.Status != "active" || acceptsDNSAnswers(fw.Rules.Input) {
+		return nil, nil
+	}
+	return []string{fmt.Sprintf("the Robot firewall of %s lets no UDP answers in, so DNS lookups of resolvers outside Hetzner time out in the rescue system and the new system until they fall back to TCP, and downloads of the installation can fail; add an input rule (protocol udp, source port 53, accept) at Robot, Firewall", m.Ref())}, nil
+}
+
+// acceptsDNSAnswers reports whether a stateless rule list accepts UDP
+// from any address's port 53 to the ephemeral ports Linux uses.
+func acceptsDNSAnswers(rules []FirewallRule) bool {
+	for _, r := range rules {
+		if r.Action != "accept" || r.SrcIP != "" || r.DstIP != "" || r.TCPFlags != "" {
+			continue
+		}
+		if r.IPVersion != "" && r.IPVersion != "ipv4" {
+			continue
+		}
+		if r.Protocol != "" && r.Protocol != "udp" {
+			continue
+		}
+		if portsCover(r.SrcPort, 53, 53) && portsCover(r.DstPort, 32768, 60999) {
+			return true
+		}
+	}
+	return false
+}
+
+// portsCover reports whether a Robot port list ("53", "80,443",
+// "32768-65535"; empty for every port) contains all of lo-hi.
+func portsCover(list string, lo, hi int) bool {
+	if list == "" {
+		return true
+	}
+	for _, item := range strings.Split(list, ",") {
+		a, b, isRange := strings.Cut(strings.TrimSpace(item), "-")
+		from, err := strconv.Atoi(a)
+		if err != nil {
+			continue
+		}
+		to := from
+		if isRange {
+			if to, err = strconv.Atoi(b); err != nil {
+				continue
+			}
+		}
+		if from <= lo && hi <= to {
+			return true
+		}
+	}
+	return false
+}
+
 // Rename implements provider.Renamer by setting the Robot server name.
 func (p *Provider) Rename(ctx context.Context, m provider.Machine, name string) (provider.Machine, error) {
 	number, err := strconv.Atoi(m.ID)
@@ -755,6 +824,39 @@ func (c *Client) GetRescue(ctx context.Context, number int) (*RescueInfo, error)
 		return nil, err
 	}
 	return &raw.Rescue, nil
+}
+
+// Firewall is the Robot firewall of a server (GET /firewall/{server-number}).
+type Firewall struct {
+	Status string `json:"status"`
+	Rules  struct {
+		Input []FirewallRule `json:"input"`
+	} `json:"rules"`
+}
+
+// FirewallRule is one rule of a Robot firewall; empty fields match
+// everything.
+type FirewallRule struct {
+	Name      string `json:"name"`
+	IPVersion string `json:"ip_version"`
+	SrcIP     string `json:"src_ip"`
+	DstIP     string `json:"dst_ip"`
+	SrcPort   string `json:"src_port"`
+	DstPort   string `json:"dst_port"`
+	Protocol  string `json:"protocol"`
+	TCPFlags  string `json:"tcp_flags"`
+	Action    string `json:"action"`
+}
+
+// GetFirewall returns the firewall of a server.
+func (c *Client) GetFirewall(ctx context.Context, number int) (*Firewall, error) {
+	var raw struct {
+		Firewall Firewall `json:"firewall"`
+	}
+	if err := c.get(ctx, "/firewall/"+strconv.Itoa(number), &raw); err != nil {
+		return nil, err
+	}
+	return &raw.Firewall, nil
 }
 
 // RenameServer sets the server name (POST /server/{server-number}).

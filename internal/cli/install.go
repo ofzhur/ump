@@ -167,6 +167,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}
 	a.warnNoRescue(m, prov)
+	a.warnPreflight(cmd.Context(), m, prov)
 	storage := strings.TrimRight(o.storage, "/")
 	rescueURL := cfg.StagingImage()
 	if storage == "" {

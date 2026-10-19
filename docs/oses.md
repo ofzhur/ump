@@ -174,8 +174,9 @@ systemd-networkd with the interfaces renamed to `ext01`, `int01`, ... by
 MAC address and a static uplink, the users with their keys and sudo
 without a password, sshd, GRUB for UEFI and BIOS (the EFI binary on the
 removable path, so no firmware variable is written), md and LVM in the
-initrd, the swap volumes of the layout, the analysis tools UMP puts on
-every server, and the firewall: the same nftables ruleset UMP writes on
+initrd, the swap volumes of the layout, the `performance` CPU governor
+(what `tuned` sets on Ubuntu; NixOS's default is `powersave`), the
+analysis tools UMP puts on every server, and the firewall: the same nftables ruleset UMP writes on
 Ubuntu, including the chain that holds ports containers publish to the
 same list. The message of the day is the same too: UMP's banner with the
 host, the installation, uptime and load, memory, the root disk and the

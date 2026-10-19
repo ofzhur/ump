@@ -475,3 +475,57 @@ func TestPowerAndRescue(t *testing.T) {
 		t.Errorf("keys registered: %v", keys)
 	}
 }
+
+func TestPreflightFirewall(t *testing.T) {
+	// the rules of a firewall that lets TCP answers in but no UDP ones
+	tcpOnly := `{"ip_version": "ipv4", "name": "tcp_established", "tcp_flags": "ack", "action": "accept"},
+	  {"ip_version": "ipv4", "name": "ssh", "dst_port": "22", "protocol": "tcp", "action": "accept"},
+	  {"ip_version": "ipv4", "name": "icmp", "protocol": "icmp", "action": "accept"}`
+	for _, tc := range []struct {
+		name, status, rules string
+		warn                bool
+	}{
+		{"udp answers dropped", "active", tcpOnly, true},
+		{"disabled", "disabled", tcpOnly, false},
+		{"source port 53", "active", tcpOnly + `, {"name": "dns", "src_port": "53", "protocol": "udp", "action": "accept"}`, false},
+		{"ephemeral ports", "active", tcpOnly + `, {"name": "ephemeral", "dst_port": "32768-65535", "protocol": "udp", "action": "accept"}`, false},
+		{"too few ports", "active", tcpOnly + `, {"name": "some", "dst_port": "40000-65535", "protocol": "udp", "action": "accept"}`, true},
+		{"one resolver only", "active", tcpOnly + `, {"name": "dns", "src_ip": "1.1.1.1/32", "src_port": "53", "protocol": "udp", "action": "accept"}`, true},
+		{"discard", "active", tcpOnly + `, {"name": "all", "action": "discard"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/firewall/321" {
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+				w.Write([]byte(`{"firewall": {"server_number": 321, "status": "` + tc.status + `", "rules": {"input": [` + tc.rules + `], "output": []}}}`))
+			})
+			p, err := Type.New("main", map[string]string{"login": "#ws+user", "password": "pass", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := provider.Machine{Provider: TypeName, Account: "main", ID: "321", Name: "web-01"}
+			warnings, err := p.(provider.Preflight).Preflight(context.Background(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(warnings) > 0; got != tc.warn {
+				t.Fatalf("warnings %q, want a warning: %v", warnings, tc.warn)
+			}
+			if tc.warn && !strings.Contains(warnings[0], "source port 53") {
+				t.Errorf("the warning names no remedy: %q", warnings[0])
+			}
+		})
+	}
+}
+
+func TestPreflightNoFirewall(t *testing.T) {
+	_, inv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":{"status":404,"code":"NOT_FOUND","message":"Not found"}}`))
+	})
+	warnings, err := inv.(provider.Preflight).Preflight(context.Background(), provider.Machine{ID: "321"})
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Preflight = %q, %v; want nothing", warnings, err)
+	}
+}
