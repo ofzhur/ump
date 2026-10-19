@@ -92,14 +92,17 @@ boot.
 ```
 ump config firewall list                          # the firewalls, their policy and what they allow
 ump config firewall get NAME                      # print one
-ump config firewall create [NAME] [--from NAME]   # copy an entry (default: default), open the file in your editor; asks on a terminal
-ump config firewall edit [NAME]                   # your editor on firewalls.yaml, then a check of every firewall
+ump config firewall create [NAME] [--from NAME]   # copy an entry (default: default), then your editor on it; asks on a terminal
+ump config firewall edit [NAME]                   # your editor on that firewall alone, or on all of firewalls.yaml; checked afterwards
 ump config firewall delete NAME [--yes]
 ```
 
 `create` and `delete` edit `firewalls.yaml` in place; its comments
-survive. `edit` checks every firewall when the editor returns and keeps
-the file either way, naming the problem. The command is also `fw`, and
+survive. `edit NAME` opens that firewall alone and puts it back when it
+is valid, the others untouched (an invalid edit saves nothing, is
+offered again on a terminal, and kept where ump says otherwise); `edit`
+without a name opens the whole file, checks every firewall when the
+editor returns and keeps the file either way, naming the problem. The command is also `fw`, and
 the verbs have the short forms of every `ump config` entity (`ump c fw
 ls`); see the [CLI reference](cli.md#ump-config).
 

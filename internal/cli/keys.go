@@ -94,10 +94,10 @@ and where the key comes from.`,
   ump config key add work --agent        # the keys ssh-add -L lists, one name each (work, work-2, ...)
   ump config key rescue oleg work        # these go into every rescue system, next to UMP's
   ump config key rescue                 # which ones do
-  ump config key list
+  ump config key edit laptop             # that key alone, in your editor
   ump config key remove laptop`,
 	}
-	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyRemoveCmd(), a.newKeyRescueCmd())
+	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyEditCmd(), a.newKeyRemoveCmd(), a.newKeyRescueCmd())
 	return cmd
 }
 
@@ -300,6 +300,45 @@ func (a *app) newKeyAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "a public key file (one key per line)")
 	cmd.Flags().StringVar(&line, "line", "", "the public key line itself")
 	cmd.Flags().BoolVar(&agent, "agent", false, "every key the ssh-agent holds (ssh-add -L)")
+	return cmd
+}
+
+// keySet is keys.yaml as a file of named entries, for edit: the same
+// as for users and firewalls, with nothing published to download.
+var keySet = &namedSet{
+	file: "keys.yaml", key: "keys", noun: "key",
+	use:   "key",
+	dir:   config.UserConfigDir,
+	local: true,
+	check: checkKeysFile,
+}
+
+// checkKeysFile validates keys.yaml: names and public key lines.
+func checkKeysFile(data []byte) error {
+	var f keysFile
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return err
+	}
+	for _, n := range sortedKeys(f.Keys) {
+		if err := checkKeyName(n); err != nil {
+			return err
+		}
+		if !profile.IsKeyLine(strings.TrimSpace(f.Keys[n])) {
+			return fmt.Errorf("key %s: %q is not a public key line", n, truncateKey(f.Keys[n]))
+		}
+	}
+	return nil
+}
+
+func (a *app) newKeyEditCmd() *cobra.Command {
+	cmd := keySet.newEditCmd(a)
+	inner := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if _, err := os.Stat(keysPath()); errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no named keys yet (ump config key add NAME --file FILE)")
+		}
+		return inner(cmd, args)
+	}
 	return cmd
 }
 

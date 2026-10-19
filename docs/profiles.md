@@ -227,8 +227,9 @@ UMP provides (sudo without a password, bash, `keys: [ump, local]`);
 $ ump config user list
 NAME   SUDO   SHELL      KEYS         STATE   DESCRIPTION
 ump    yes    /bin/bash  ump, local   ok      the administrator UMP provides
-$ ump config user create ops --from ump      # then your editor on users.yaml
+$ ump config user create ops --from ump      # then your editor on ops
 $ ump config user get ops
+$ ump config user edit ops                   # ops alone, checked and put back
 $ ump config user edit                       # the whole file, checked afterwards
 $ ump config user delete ops
 ```

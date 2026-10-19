@@ -121,14 +121,17 @@ configuration management.
 ```
 ump config userdata list                          # the entries, with type, lines and whether they are valid
 ump config userdata get NAME                      # print one
-ump config userdata create [NAME] [--from NAME]   # copy an entry (default: ubuntu), open the file in your editor; asks on a terminal
-ump config userdata edit [NAME]                   # your editor on userdata.yaml, then a check of every entry
+ump config userdata create [NAME] [--from NAME]   # copy an entry (default: ubuntu), then your editor on it; asks on a terminal
+ump config userdata edit [NAME]                   # your editor on that entry alone, or on all of userdata.yaml; checked afterwards
 ump config userdata delete NAME [--yes]
 ```
 
 `create` and `delete` edit `userdata.yaml` in place; its comments
-survive. `edit` checks every entry when the editor returns and keeps
-the file either way, naming the problem. The command is also `ud`,
+survive. `edit NAME` opens that entry alone and puts it back when it is
+valid, the others untouched (an invalid edit saves nothing, is offered
+again on a terminal, and kept where ump says otherwise); `edit` without
+a name opens the whole file, checks every entry when the editor returns
+and keeps the file either way, naming the problem. The command is also `ud`,
 and the verbs have the short forms of every `ump config` entity (`ump
 c ud ls`); see the [CLI reference](cli.md#ump-config).
 

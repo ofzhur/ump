@@ -193,14 +193,18 @@ parts:
 ```
 ump config disk-layout list                          # the layouts, their parts and whether they are valid
 ump config disk-layout get NAME                      # print one
-ump config disk-layout create [NAME] [--from NAME]   # copy an entry (default: lvm-linear), open the file in your editor; asks on a terminal
-ump config disk-layout edit [NAME]                   # your editor on layouts.yaml, then a check of every layout
+ump config disk-layout create [NAME] [--from NAME]   # copy an entry (default: lvm-linear), then your editor on it; asks on a terminal
+ump config disk-layout edit [NAME]                   # your editor on that layout alone, or on all of layouts.yaml; checked afterwards
 ump config disk-layout delete NAME [--yes]
 ```
 
 `create` and `delete` edit `layouts.yaml` in place; its comments survive.
-`edit` checks every layout when the editor returns and keeps the file
-either way, naming the problem. The command is also `dl` or `layout`,
+`edit NAME` opens that layout alone, in a file of its own: when the
+editor returns it is checked and put back into `layouts.yaml`, the other
+layouts and the comments untouched; an invalid edit saves nothing, is
+offered again on a terminal, and is kept where ump says otherwise.
+`edit` without a name opens the whole file, checks every layout when
+the editor returns and keeps the file either way, naming the problem. The command is also `dl` or `layout`,
 and the verbs have the short forms of every `ump config` entity (`ump
 c dl ls`); see the [CLI reference](cli.md#ump-config).
 

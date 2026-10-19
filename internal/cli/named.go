@@ -37,6 +37,11 @@ type namedSet struct {
 	rows    func(data []byte, names []string) ([][]string, error)
 	// check parses the file and validates every entry.
 	check func(data []byte) error
+	// dir is the directory of the file (default: the profiles directory),
+	// and local means that nothing is downloaded before a command (the
+	// file is the user's alone, like keys.yaml).
+	dir   func() string
+	local bool
 }
 
 // plurals is what several entries are called.
@@ -47,7 +52,12 @@ func (set *namedSet) plurals() string {
 	return set.noun + "s"
 }
 
-func (set *namedSet) path() string { return filepath.Join(config.ProfilesDir(), set.file) }
+func (set *namedSet) path() string {
+	if set.dir != nil {
+		return filepath.Join(set.dir(), set.file)
+	}
+	return filepath.Join(config.ProfilesDir(), set.file)
+}
 
 func (set *namedSet) listHint() string { return "ump config " + set.use + " list" }
 
@@ -132,15 +142,32 @@ func (d *namedDoc) remove(name string) {
 	}
 }
 
-func (d *namedDoc) save() error {
+func (d *namedDoc) replace(name string, node *yaml.Node) {
+	for i := 0; i+1 < len(d.table.Content); i += 2 {
+		if d.table.Content[i].Value == name {
+			d.table.Content[i+1] = node
+			return
+		}
+	}
+}
+
+func (d *namedDoc) bytes() ([]byte, error) {
 	var b strings.Builder
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
 	if err := enc.Encode(&d.root); err != nil {
-		return err
+		return nil, err
 	}
 	enc.Close()
-	return os.WriteFile(d.set.path(), []byte(b.String()), 0o600)
+	return []byte(b.String()), nil
+}
+
+func (d *namedDoc) save() error {
+	data, err := d.bytes()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(d.set.path(), data, 0o600)
 }
 
 func (d *namedDoc) render(name string) string {
@@ -153,8 +180,10 @@ func (d *namedDoc) render(name string) string {
 }
 
 func (set *namedSet) prepare(a *app, cmd *cobra.Command) (*namedDoc, error) {
-	if _, err := a.prepareProfiles(cmd); err != nil {
-		return nil, err
+	if !set.local {
+		if _, err := a.prepareProfiles(cmd); err != nil {
+			return nil, err
+		}
 	}
 	return set.load()
 }
@@ -262,7 +291,7 @@ func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 			}
 			fmt.Fprintf(a.stdout, "Created the %s %s from %s in %s.\n", set.noun, name, from, config.AbbreviateHome(set.path()))
 			if a.isTTY != nil && a.isTTY() {
-				return set.edit(a, cmd.Context())
+				return set.editEntry(a, cmd, d, name)
 			}
 			return nil
 		},
@@ -275,17 +304,24 @@ func (set *namedSet) newEditCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:     "edit [NAME]",
 		Aliases: verbAliases("edit"),
-		Short:   "Open " + set.file + " in your editor and check every " + set.noun + " afterwards",
-		Args:    usageArgs(cobra.MaximumNArgs(1)),
+		Short:   "Edit one " + set.noun + " in your editor, or all of " + set.file + " without a name",
+		Long: "With a name, open that " + set.noun + " alone in your editor; when the editor\n" +
+			"returns, the " + set.noun + " is checked and put back into " + set.file + ", the\n" +
+			"other " + set.plurals() + " untouched. Without a name, open the whole file and check\n" +
+			"every " + set.noun + " afterwards.",
+		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
 			if err != nil {
 				return err
 			}
-			if len(args) == 1 && d.node(args[0]) == nil {
+			if len(args) == 0 {
+				return set.edit(a, cmd.Context())
+			}
+			if d.node(args[0]) == nil {
 				return set.missing(args[0])
 			}
-			return set.edit(a, cmd.Context())
+			return set.editEntry(a, cmd, d, args[0])
 		},
 	}
 }
@@ -340,6 +376,84 @@ func (set *namedSet) edit(a *app, ctx context.Context) error {
 	names := d.names()
 	fmt.Fprintf(a.stdout, "%d %s, all valid: %s.\n", len(names), set.plurals(), strings.Join(names, ", "))
 	return nil
+}
+
+// editEntry opens one entry in the editor, as "NAME:" with its fields
+// in a file of its own, and puts it back into the document when it is
+// valid together with the others; the other entries and the comments
+// stay as they are. An invalid edit is offered again on a terminal and
+// otherwise kept in its file, with nothing saved.
+func (set *namedSet) editEntry(a *app, cmd *cobra.Command, d *namedDoc, name string) error {
+	f, err := os.CreateTemp("", "ump-"+set.noun+"-"+name+"-*.yaml")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	header := fmt.Sprintf("# The %s %s from %s. Save and close to apply it; the\n# other %s stay as they are. The name cannot change here.\n", set.noun, name, config.AbbreviateHome(set.path()), set.plurals())
+	orig := header + d.render(name)
+	_, err = f.WriteString(orig)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	for {
+		if err := a.editor(tmp); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(tmp)
+		if err != nil {
+			return err
+		}
+		if string(data) == orig {
+			os.Remove(tmp)
+			fmt.Fprintf(a.stdout, "No changes to the %s %s.\n", set.noun, name)
+			return nil
+		}
+		node, err := set.entryNode(data, name)
+		if err == nil {
+			d.replace(name, node)
+			var whole []byte
+			if whole, err = d.bytes(); err == nil {
+				err = set.check(whole)
+			}
+		}
+		if err == nil {
+			if err := d.save(); err != nil {
+				return err
+			}
+			os.Remove(tmp)
+			fmt.Fprintf(a.stdout, "Saved the %s %s in %s.\n", set.noun, name, config.AbbreviateHome(set.path()))
+			return nil
+		}
+		fmt.Fprintf(a.stderr, "ump: the %s %s is not valid: %v\n", set.noun, name, err)
+		ui := a.resolverUI(cmd)
+		if ui == nil {
+			return fmt.Errorf("nothing was saved; your edit is in %s", tmp)
+		}
+		if again, cerr := ui.Confirm("Open it again?", true); cerr != nil || !again {
+			return fmt.Errorf("nothing was saved; your edit is in %s", tmp)
+		}
+		// the next round starts from the edit, and the document from the file
+		orig = ""
+		if d, err = set.load(); err != nil {
+			return err
+		}
+	}
+}
+
+// entryNode reads an edited entry: one mapping key, the entry's name.
+func (set *namedSet) entryNode(data []byte, name string) (*yaml.Node, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode || len(root.Content[0].Content) != 2 {
+		return nil, fmt.Errorf("expected one %s, %q with its fields", set.noun, name+":")
+	}
+	if k := root.Content[0].Content[0].Value; k != name {
+		return nil, fmt.Errorf("the name changed to %q; edit keeps the name (create %s --from %s, then delete %s, renames)", k, k, name, name)
+	}
+	return root.Content[0].Content[1], nil
 }
 
 // merge replaces the file with the published one, keeping the entries

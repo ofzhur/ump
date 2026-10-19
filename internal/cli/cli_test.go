@@ -4352,3 +4352,107 @@ func TestRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestEditOneEntry(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+	if _, errOut, code := e.run("", false, "config", "user", "create", "ops", "--from", "ump"); code != 0 {
+		t.Fatalf("create ops: %d %q", code, errOut)
+	}
+	users := func() string { b, _ := os.ReadFile(filepath.Join(dir, "users.yaml")); return string(b) }
+	before := users()
+
+	// edit NAME opens that entry alone and puts it back, the others untouched
+	e.editorHook = func(path string) error {
+		b, _ := os.ReadFile(path)
+		s := string(b)
+		if path == filepath.Join(dir, "users.yaml") || !strings.Contains(s, "\nops:\n") || strings.Contains(s, "\nump:\n") || !strings.HasPrefix(s, "# The user ops from ") {
+			t.Errorf("edited %s:\n%s", path, s)
+		}
+		return os.WriteFile(path, []byte(strings.Replace(s, "the administrator UMP provides", "the operators", 1)), 0o600)
+	}
+	out, errOut, code := e.run("", true, "config", "user", "edit", "ops")
+	if code != 0 || !strings.Contains(out, "Saved the user ops in ") {
+		t.Fatalf("edit ops: code %d\n%s%s", code, out, errOut)
+	}
+	after := users()
+	if strings.Count(after, "the operators") != 1 || strings.Count(after, "the administrator UMP provides") != strings.Count(before, "the administrator UMP provides")-1 {
+		t.Errorf("users.yaml after the edit:\n%s", after)
+	}
+	// unchanged: nothing to save
+	e.editorHook = func(path string) error { return nil }
+	if out, _, code := e.run("", true, "config", "user", "edit", "ops"); code != 0 || !strings.Contains(out, "No changes to the user ops.") || users() != after {
+		t.Errorf("no change: code %d\n%s", code, out)
+	}
+	// an edit that renames or breaks the entry saves nothing and says where it is
+	e.editorHook = func(path string) error {
+		b, _ := os.ReadFile(path)
+		return os.WriteFile(path, []byte(strings.Replace(string(b), "\nops:\n", "\nops2:\n", 1)), 0o600)
+	}
+	if _, errOut, code := e.run("", false, "config", "user", "edit", "ops"); code != 1 || !strings.Contains(errOut, `the name changed to "ops2"`) || !strings.Contains(errOut, "nothing was saved; your edit is in ") || users() != after {
+		t.Errorf("rename: code %d, %q", code, errOut)
+	}
+	// on a terminal, a broken edit is offered again and can be fixed
+	round := 0
+	e.editorHook = func(path string) error {
+		round++
+		b, _ := os.ReadFile(path)
+		s := string(b)
+		if round == 1 {
+			s = strings.Replace(s, "description: the operators", "description: the operators\n  shell: zsh", 1)
+		} else {
+			s = strings.Replace(s, "shell: zsh", "shell: /bin/sh", 1)
+		}
+		return os.WriteFile(path, []byte(s), 0o600)
+	}
+	if out, errOut, code := e.run("y\n", true, "config", "user", "edit", "ops"); code != 0 || round != 2 || !strings.Contains(errOut, "the user ops is not valid") || !strings.Contains(out, "Saved the user ops") || !strings.Contains(users(), "shell: /bin/sh") {
+		t.Errorf("again: code %d, rounds %d\n%s%s\n%s", code, round, out, errOut, users())
+	}
+	// without a name: the whole file, as before; an unknown name is refused
+	e.editorHook = func(path string) error {
+		if path != filepath.Join(dir, "users.yaml") {
+			t.Errorf("edit without a name opened %s", path)
+		}
+		return nil
+	}
+	if out, _, code := e.run("", true, "config", "user", "edit"); code != 0 || !strings.Contains(out, "users, all valid") {
+		t.Errorf("edit all: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", true, "config", "fw", "edit", "nope"); code == 0 || !strings.Contains(errOut, "nope") {
+		t.Errorf("unknown firewall: code %d, %q", code, errOut)
+	}
+
+	// keys: the same, from keys.yaml in the configuration directory
+	e.editorHook = nil
+	if _, errOut, code := e.run("", true, "config", "key", "edit", "laptop"); code == 0 || !strings.Contains(errOut, "no named keys yet") {
+		t.Errorf("key edit without keys: code %d, %q", code, errOut)
+	}
+	line := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop"
+	for _, n := range []string{"laptop", "work"} {
+		if _, errOut, code := e.run("", false, "config", "key", "add", n, "--line", line); code != 0 {
+			t.Fatalf("key add %s: %d %q", n, code, errOut)
+		}
+	}
+	e.editorHook = func(path string) error {
+		b, _ := os.ReadFile(path)
+		if strings.Contains(string(b), "work:") {
+			t.Errorf("the other key is in the edit:\n%s", b)
+		}
+		return os.WriteFile(path, []byte(strings.Replace(string(b), "me@laptop", "oleg@laptop", 1)), 0o600)
+	}
+	if out, errOut, code := e.run("", true, "config", "key", "edit", "laptop"); code != 0 || !strings.Contains(out, "Saved the key laptop") {
+		t.Errorf("key edit: code %d\n%s%s", code, out, errOut)
+	}
+	if out, _, _ := e.run("", false, "config", "key", "list"); !strings.Contains(out, "oleg@laptop") || !strings.Contains(out, "me@laptop") {
+		t.Errorf("keys after the edit:\n%s", out)
+	}
+	e.editorHook = func(path string) error {
+		b, _ := os.ReadFile(path)
+		return os.WriteFile(path, []byte(strings.Replace(string(b), "ssh-ed25519 ", "ssh-nonsense ", 1)), 0o600)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "edit", "laptop"); code != 1 || !strings.Contains(errOut, "not a public key line") {
+		t.Errorf("broken key: code %d, %q", code, errOut)
+	}
+}

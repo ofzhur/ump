@@ -82,6 +82,7 @@ ump config key add                            # on a terminal: asks for the name
 ump config key add NAME --file FILE           # every key line of the file; a second one becomes NAME-2, ...
 ump config key add NAME --line 'ssh-... AAAA... comment'
 ump config key add NAME --agent               # what ssh-add -L lists, one name each
+ump config key edit [NAME]                    # your editor on that key alone, or on all of keys.yaml; checked afterwards
 ump config key remove NAME
 ```
 

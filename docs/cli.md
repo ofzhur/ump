@@ -72,25 +72,25 @@ ump
 │   │   ├── list     (ls, l)                           the layouts, with their parts and whether they are valid
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
-│   │   ├── edit     (e) [<name>]                      your editor on layouts.yaml, then a check of every layout
+│   │   ├── edit     (e) [<name>]                      that layout alone in your editor, or all of layouts.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── firewall (fw)                               the named firewalls of firewalls.yaml
 │   │   ├── list     (ls, l)                           the firewalls, with their policy and what they allow
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
-│   │   ├── edit     (e) [<name>]                      your editor on firewalls.yaml, then a check of every firewall
+│   │   ├── edit     (e) [<name>]                      that firewall alone in your editor, or all of firewalls.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── user (u)                                    the named users of users.yaml
 │   │   ├── list     (ls, l)                           the users, with sudo, shell, keys
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
-│   │   ├── edit     (e) [<name>]                      your editor on users.yaml, then a check of every user
+│   │   ├── edit     (e) [<name>]                      that user alone in your editor, or all of users.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── userdata (ud)                                  the named userdata of userdata.yaml: what runs in a new system before its first boot
 │   │   ├── list     (ls, l)                           the entries, with type, lines and whether they are valid
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
-│   │   ├── edit     (e) [<name>]                      your editor on userdata.yaml, then a check of every entry
+│   │   ├── edit     (e) [<name>]                      that entry alone in your editor, or all of userdata.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── state (st)                                     the state backend: the local directory, or one shared by a team
 │   │   ├── view     (v, show)                         which backend, the mirror, what the state holds
@@ -106,6 +106,7 @@ ump
 │       ├── show     (v, view) [-o json|yaml]          UMP's own SSH public key (generated on first use)
 │       ├── list     (ls, l)                           ump and the named keys, with fingerprints
 │       ├── add      (a, new, create) [<name>] (--file <f>|--line <l>|--agent)   keep a public key under a name; asks on a terminal
+│       ├── edit     (e) [<name>]                      that key alone in your editor, or all of keys.yaml; checked afterwards
 │       └── remove   (rm, d, delete) <name>
 ├── completion
 └── version
@@ -674,9 +675,11 @@ layouts](disk-layouts.md) in `layouts.yaml` that profiles refer to:
 `list` shows each with its parts and whether it is valid, `get` prints
 one, `create NAME
 --from NAME` copies an entry (the file's comments survive) and opens
-the file in your editor (on a terminal it asks for the name and the
-entry to start from when they are not given), `edit` opens it and
-checks every layout afterwards, `delete` removes one. `ump config firewall`
+it in your editor (on a terminal it asks for the name and the entry to
+start from when they are not given), `edit NAME` opens that layout
+alone and puts it back when it is valid, the others untouched, `edit`
+without a name opens the whole file and checks every layout afterwards,
+`delete` removes one. `ump config firewall`
 (`fw`) is the same for the named [firewalls](firewalls.md) in
 `firewalls.yaml` (`default`: ICMP and SSH; `web`: plus HTTP and HTTPS;
 `open`: none), which a profile names in its `firewall` field; `ump

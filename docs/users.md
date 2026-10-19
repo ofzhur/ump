@@ -88,15 +88,18 @@ own with other users.
 ```
 ump config user list                          # the users, with sudo, shell and keys
 ump config user get NAME                      # print one
-ump config user create [NAME] [--from NAME]   # copy an entry (default: ump), open the file in your editor; asks on a terminal
-ump config user edit [NAME]                   # your editor on users.yaml, then a check of every user
+ump config user create [NAME] [--from NAME]   # copy an entry (default: ump), then your editor on it; asks on a terminal
+ump config user edit [NAME]                   # your editor on that user alone, or on all of users.yaml; checked afterwards
 ump config user delete NAME [--yes]
 ```
 
 `create` and `delete` edit `users.yaml` in place; its comments survive.
-`edit` checks every user when the editor returns (the name, the groups,
-the shell, that there are key references) and keeps the file either
-way, naming the problem. `ump config os create` defines a user on the
+`edit NAME` opens that user alone and puts it back when it is valid
+(the groups, the shell, that there are key references), the others
+untouched; an invalid edit saves nothing, is offered again on a
+terminal, and kept where ump says otherwise. `edit` without a name
+opens the whole file, checks every user when the editor returns and
+keeps the file either way, naming the problem. `ump config os create` defines a user on the
 spot when you name one it does not know, and keeps it in `users.yaml`.
 
 ## Using a user
