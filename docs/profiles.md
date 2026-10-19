@@ -131,7 +131,7 @@ publishes:
 | `debian-12` | Debian 12 (bookworm) | `debian-12` |
 | `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](oses.md#nixos)) | `nixos-25.11` |
 | `archlinux` | Arch Linux, the rolling release, installed by `pacstrap` from its mirrors, amd64 only (see [Arch Linux](oses.md#arch-linux)) | `archlinux` |
-| `cachyos` | CachyOS: Arch Linux with CachyOS's x86-64-v3 packages and server kernel, amd64 only (see [CachyOS](oses.md#cachyos)) | `cachyos` |
+| `cachyos` | CachyOS, experimental: Arch Linux with CachyOS's x86-64-v3 packages and server kernel, amd64 only (see [CachyOS](oses.md#cachyos)) | `cachyos` |
 
 The published Ubuntu profiles are the same apart from the image, and
 the NixOS one apart from the image and its userdata (`nixos`, a NixOS

@@ -444,6 +444,7 @@ arch)
 			[ -n "$(printf '%s' "$manifest" | jq -r ".$k // empty")" ] || die "the CachyOS manifest names no $k"
 		done
 		log "image $os: CachyOS from $(printf '%s' "$manifest" | jq -r .cachyos.mirror) over Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
+		log "CachyOS is experimental in UMP: not for production unless you know what you are doing (docs/oses.md#cachyos)"
 	else
 		log "image $os: Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
 	fi

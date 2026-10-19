@@ -7,7 +7,7 @@ layout, the same users, network names, firewall and tools. Ubuntu and
 Debian come as UMP's own prebuilt images from its storage; NixOS is installed from
 NixOS's public servers with UMP's configuration on top, and Arch Linux,
 a rolling release, from its mirrors with the packages of the day, as is
-CachyOS, Arch with packages built for newer CPUs. They work on amd64 and
+CachyOS, Arch with packages built for newer CPUs (experimental). They work on amd64 and
 arm64 (Arch Linux and CachyOS on amd64 only), boot from UEFI and,
 on amd64, from BIOS, and are meant to be used as they are: pick one, and
 the machine is a well-kept server a few minutes later.
@@ -30,7 +30,7 @@ $ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same pr
 | `debian-12` | Debian 12 (bookworm) | `debian-12` | the same |
 | `nixos-25.11` | NixOS 25.11, from its stable channel | `nixos-25.11` | `nixos-install` from NixOS's public servers, with the profile as NixOS modules |
 | `archlinux` | Arch Linux, the rolling release, amd64 only | `archlinux` | `pacstrap` from the Arch mirrors, then configured in place like Ubuntu |
-| `cachyos` | CachyOS: Arch Linux with packages built for x86-64-v3 and CachyOS's server kernel, rolling, amd64 only | `cachyos` | the same as Arch Linux, with CachyOS's repositories in front |
+| `cachyos` | CachyOS, experimental: Arch Linux with packages built for x86-64-v3 and CachyOS's server kernel, rolling, amd64 only | `cachyos` | the same as Arch Linux, with CachyOS's repositories in front |
 
 `ump config os create` lists what the storage offers (its
 `os/index.json`), and [profiles](profiles.md#choosing-the-operating-system) says how a
@@ -321,6 +321,25 @@ the newest bootstrap release, its checksum, the mirror, and the package
 list, each package checked against the Arch package database.
 
 ## CachyOS
+
+**Experimental.** We do not recommend CachyOS for production unless you
+know what you are doing and can reinstall the machine when an update
+goes wrong:
+
+- It is a rolling release with two sets of repositories at once:
+  CachyOS's rebuilds of core packages (glibc, systemd, pacman, the
+  compiler) replace Arch's, so an update depends on two projects
+  staying in step.
+- It is a small project's own repositories, kernel and keys, with no
+  long-term support release and no server edition yet.
+- The installer and the profile are new in UMP and tested on fewer
+  providers than the others.
+
+It is a good fit for performance testing and for machines you can
+rebuild from their profile at any time; on an i9-13900 dedicated server it was,
+with Arch Linux, the fastest of the published systems on HTTP. For a
+server that has to keep running, take Ubuntu, Debian or NixOS, or Arch
+Linux if you want a rolling release.
 
 [CachyOS](https://cachyos.org) is Arch Linux with repositories of its
 own in front of Arch's: Arch's packages rebuilt for newer CPUs

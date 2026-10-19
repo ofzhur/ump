@@ -107,7 +107,7 @@ group, the sudo user `ump` with your keys, ICMP and SSH open),
 `nixos-25.11` (NixOS from its
 stable channel, see [NixOS](docs/oses.md#nixos)), `archlinux` (Arch
 Linux from its mirrors, see [Arch Linux](docs/oses.md#arch-linux)) and
-`cachyos` (Arch with CachyOS's x86-64-v3 packages, see
+`cachyos` (experimental: Arch with CachyOS's x86-64-v3 packages, see
 [CachyOS](docs/oses.md#cachyos)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
 `web` and `open`, and the user `ump`. They are templates: make your own

@@ -1,10 +1,12 @@
 # The profile for CachyOS (Arch Linux with packages built for newer CPUs,
 # rolling release): what a server becomes with --profile cachyos.
+# Experimental: not for production unless you know what you are doing
+# (docs/oses.md#cachyos says why).
 # Published profiles are replaced by ump config os update, so make your
 # own from this one (ump config os create NAME --from cachyos) instead of
 # editing it. Every field is described in docs/profiles.md.
 name: cachyos
-description: CachyOS (Arch Linux with x86-64-v3 packages and its server kernel, rolling) on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+description: Experimental, not for production unless you know what you are doing. CachyOS (Arch Linux with x86-64-v3 packages and its server kernel, rolling) on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
 
 os: cachyos
 timezone: UTC
