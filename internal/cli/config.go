@@ -67,6 +67,7 @@ configuration file. Secrets are stored as references (a file readable
 only by you, an environment variable or a command), never as plaintext.`,
 		Example: `  ump config isp add                  # the wizard, on a terminal
   ump config isp test                 # check every account's credentials
+  ump config isp get main             # one account, its settings and where its secrets come from
   ump config isp add hetzner-robot main --set login=#ws+AbCdEfGh --set password=env:HROBOT_PASSWORD
   ump config isp add hetzner-cloud hcloud --set token=file:~/.config/ump/secrets/hcloud.token
   ump config isp add ovh ovh --set endpoint=ovh-eu --set application_key=... \
@@ -76,6 +77,7 @@ only by you, an environment variable or a command), never as plaintext.`,
 	}
 	cmd.AddCommand(
 		a.newConfigISPListCmd(),
+		a.newConfigISPGetCmd(),
 		a.newConfigTypesCmd(),
 		a.newConfigAddCmd(),
 		a.newConfigEditCmd(),
@@ -157,6 +159,53 @@ type ispRow struct {
 	// Secrets say where each secret comes from: file:PATH, env:NAME,
 	// command:CMD, or plain! for a secret written into the configuration.
 	Secrets map[string]string `json:"secrets" yaml:"secrets"`
+}
+
+// newConfigISPGetCmd prints one account as it stands in the
+// configuration: its type, its settings, and for each secret where it
+// comes from, never a secret itself.
+func (a *app) newConfigISPGetCmd() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:     "get NAME",
+		Aliases: verbAliases("get"),
+		Short:   "Print an account: type, settings, where its secrets come from",
+		Args:    usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, path, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+			if _, ok := cfg.Accounts[args[0]]; !ok {
+				return fmt.Errorf("no account %q in %s (ump config isp list)", args[0], config.AbbreviateHome(path))
+			}
+			format, err := parseFormat(output)
+			if err != nil || format == formatName || format == formatWide {
+				return usageErrorf(cmd, "unknown output format %q (use one of json, yaml)", output)
+			}
+			var row ispRow
+			for _, r := range ispRows(cfg, cache.Open(path)) {
+				if r.Name == args[0] {
+					row = r
+				}
+			}
+			if format == formatJSON {
+				return printEncoded(a.stdout, row, format)
+			}
+			// as the entry reads in the file: the type, then the settings
+			// with the secrets as their references
+			entry := map[string]string{"type": row.Type}
+			for k, v := range row.Settings {
+				entry[k] = v
+			}
+			for k, v := range row.Secrets {
+				entry[k] = v
+			}
+			return printEncoded(a.stdout, map[string]map[string]string{row.Name: entry}, formatYAML)
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "print as json (the listing's row) or yaml (the entry, the default)")
+	return cmd
 }
 
 func ispRows(cfg *config.Config, store *cache.Store) []ispRow {

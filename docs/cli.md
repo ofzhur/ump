@@ -56,13 +56,14 @@ ump
 ├── config (c, cfg)                                    each entity prints its help when called bare
 │   ├── isp (i, provider, account)                     the accounts
 │   │   ├── list     (ls, l) [-o wide|json|yaml]       the accounts: type, servers, settings, where the secrets come from
+│   │   ├── get      (g, show) <name> [-o json|yaml]   one account: type, settings, where its secrets come from
 │   │   ├── types                                      provider types and their settings
 │   │   ├── add      (a, new, create) [<type> <name> --set k=v ...]   the wizard on a terminal: type, name, credentials, test; with arguments the non-interactive form (CI, agents)
 │   │   ├── edit     (e) [<name>]                      that account alone in your editor, or the whole configuration file; checked afterwards
 │   │   ├── remove   (rm, d, delete) <name>
 │   │   └── test     (t) [<name>...]                   check credentials and API access
 │   ├── os (o, profile)                                the profiles
-│   │   ├── list     (ls, l)                           the profiles in ~/.config/ump/profiles
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the profiles in ~/.config/ump/profiles
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   the wizard on a terminal (name, image, layout, firewall, users, ...); --from copies one
 │   │   ├── edit     (e) <name>                        your editor, then a check
@@ -70,25 +71,25 @@ ump
 │   │   ├── update   (up)                              refresh the published profiles and entries; yours are kept
 │   │   └── default  (def) [<name>]                    show or set the default profile
 │   ├── disk-layout (dl, layout)                    the named layouts of layouts.yaml
-│   │   ├── list     (ls, l)                           the layouts, with their parts and whether they are valid
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the layouts, with their parts and whether they are valid
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      that layout alone in your editor, or all of layouts.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── firewall (fw)                               the named firewalls of firewalls.yaml
-│   │   ├── list     (ls, l)                           the firewalls, with their policy and what they allow
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the firewalls, with their policy and what they allow
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      that firewall alone in your editor, or all of firewalls.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── user (u)                                    the named users of users.yaml
-│   │   ├── list     (ls, l)                           the users, with sudo, shell, keys
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the users, with sudo, shell, keys
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      that user alone in your editor, or all of users.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
 │   ├── userdata (ud)                                  the named userdata of userdata.yaml: what runs in a new system before its first boot
-│   │   ├── list     (ls, l)                           the entries, with type, lines and whether they are valid
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the entries, with type, lines and whether they are valid
 │   │   ├── get      (g, show) <name>                  print one
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      that entry alone in your editor, or all of userdata.yaml; checked afterwards
@@ -104,11 +105,12 @@ ump
 │   │   ├── locks                                      the per-server locks held
 │   │   └── unlock   <server>                          release one
 │   └── key (k)                                        UMP's own key and the named keys
-│       ├── show     (v, view) [-o json|yaml]          UMP's own SSH public key (generated on first use)
-│       ├── list     (ls, l)                           ump and the named keys, with fingerprints
+│       ├── list     (ls, l) [-o wide|json|yaml]       ump and the named keys, with fingerprints; wide adds the public key lines
+│       ├── get      (g, show) [<name>] [-o json|yaml]   a public key with its fingerprints: ump (UMP's own, the default) or a named one
 │       ├── add      (a, new, create) [<name>] (--file <f>|--line <l>|--agent)   keep a public key under a name; asks on a terminal
 │       ├── edit     (e) [<name>]                      that key alone in your editor, or all of keys.yaml; checked afterwards
-│       └── remove   (rm, d, delete) <name>
+│       ├── remove   (rm, d, delete) <name>
+│       └── roll     [--no-servers] [--yes]            a new key pair for UMP; every server ump installed gets it and loses the old one
 ├── completion
 └── version
 ```
@@ -607,6 +609,13 @@ keys and a returned password.
 
 ## `ump config`
 
+Every entity of `ump config` answers the same verbs: `list` (with `-o
+table|wide|json|yaml`; `wide` adds what the table holds back, where
+there is anything, and `json` and `yaml` print the entries as data),
+`get NAME` (`show` and `g` are the same) prints one, `create` or `add`
+makes one, `edit [NAME]` opens one entry or the whole file, `delete` or
+`remove` takes one away.
+
 ```
 ump config isp         list|types|add|remove|test
 ump config os          list|get|create|edit|delete|update|default
@@ -734,7 +743,7 @@ UMP has its own SSH key pair, generated on first use (by `ump config key
 show` or the first `ump server rescue`) at `~/.config/ump/staging_ed25519`, or at the
 path set as `staging.key` in the configuration. It is what rescue
 systems and installed systems are reached with, so it works whatever
-personal keys are around. `ump config key show` prints the public key and
+personal keys are around. `ump config key get` prints the public key and
 its fingerprints (`-o json` for scripts); put the public key wherever
 UMP should be able to log in. The subcommands keep more public keys
 under names in `~/.config/ump/keys.yaml`, for the `keys` of

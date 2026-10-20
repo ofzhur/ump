@@ -245,17 +245,39 @@ func (a *app) prepareProfiles(cmd *cobra.Command) (*config.Config, error) {
 	return cfg, nil
 }
 
+// profileRow is one profile as ump config os list -o json prints it.
+type profileRow struct {
+	Name        string   `json:"name" yaml:"name"`
+	Default     bool     `json:"default" yaml:"default"`
+	OS          string   `json:"os,omitempty" yaml:"os,omitempty"`
+	Disks       string   `json:"disks,omitempty" yaml:"disks,omitempty"`
+	Users       []string `json:"users,omitempty" yaml:"users,omitempty"`
+	Firewall    string   `json:"firewall,omitempty" yaml:"firewall,omitempty"`
+	From        string   `json:"from" yaml:"from"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Invalid     string   `json:"invalid,omitempty" yaml:"invalid,omitempty"`
+}
+
 func (a *app) newOSListCmd() *cobra.Command {
+	var output string
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: verbAliases("list"),
 		Short:   "List the profiles",
-		Args:    usageArgs(cobra.NoArgs),
+		Long: `List the profiles of the profiles directory: the default is marked, and
+each shows its image, disk layout, users, firewall, whether it is a
+published one or yours, and its description. -o wide is the same table;
+-o json and -o yaml print the rows as data.`,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
 			if err != nil {
 				return err
+			}
+			format, err := parseFormat(output)
+			if err != nil || format == formatName {
+				return usageErrorf(cmd, "unknown output format %q (use one of table, wide, json, yaml)", output)
 			}
 			names, err := localProfiles()
 			if err != nil {
@@ -263,14 +285,20 @@ func (a *app) newOSListCmd() *cobra.Command {
 			}
 			def := cfg.DefaultProfileName()
 			var rows [][]string
+			var data []profileRow
 			for _, n := range names {
 				mark := ""
 				if n == def {
 					mark = "*"
 				}
+				kind := "published"
+				if !isPublishedProfile(n) {
+					kind = "yours"
+				}
 				p, err := profile.Load(profilePath(n))
 				if err != nil {
-					rows = append(rows, []string{mark, n, "-", "-", "-", "-", "invalid: " + err.Error()})
+					rows = append(rows, []string{mark, n, "-", "-", "-", "-", kind, "invalid: " + err.Error()})
+					data = append(data, profileRow{Name: n, Default: n == def, From: kind, Invalid: err.Error()})
 					continue
 				}
 				disks := p.Disks.Name
@@ -292,11 +320,11 @@ func (a *app) newOSListCmd() *cobra.Command {
 				case fw == "":
 					fw = "none"
 				}
-				kind := "published"
-				if !isPublishedProfile(n) {
-					kind = "yours"
-				}
 				rows = append(rows, []string{mark, n, p.OS, disks, strings.Join(users, ","), fw, kind, p.Description})
+				data = append(data, profileRow{Name: n, Default: n == def, OS: p.OS, Disks: disks, Users: users, Firewall: fw, From: kind, Description: p.Description})
+			}
+			if format == formatJSON || format == formatYAML {
+				return printEncoded(a.stdout, data, format)
 			}
 			if err := writeTable(a.stdout, []string{"", "NAME", "OS", "DISKS", "USERS", "FIREWALL", "FROM", "DESCRIPTION"}, rows, noHeaders); err != nil {
 				return err
@@ -307,6 +335,7 @@ func (a *app) newOSListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format: table, wide, json or yaml")
 	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line")
 	return cmd
 }

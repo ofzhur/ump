@@ -834,7 +834,7 @@ func TestWizardNeedsTTY(t *testing.T) {
 		t.Errorf("short form: code %d, %q", code, errOut)
 	}
 	// an unknown word below the top level is a usage error, not the help
-	if _, errOut, code := e.run("", false, "config", "isp", "view"); code != exitUsage || !strings.Contains(errOut, `unknown command "view" for ump config isp (add, edit, list, remove, test, types)`) {
+	if _, errOut, code := e.run("", false, "config", "isp", "view"); code != exitUsage || !strings.Contains(errOut, `unknown command "view" for ump config isp (add, edit, get, list, remove, test, types)`) {
 		t.Errorf("unknown subcommand: code %d, %q", code, errOut)
 	}
 	if _, errOut, code := e.run("", false, "config", "isp", "add", "--set", "a=b"); code != 2 || !strings.Contains(errOut, "the flags need TYPE and NAME") {
@@ -4510,5 +4510,178 @@ func TestEditAccount(t *testing.T) {
 	e.write("storage: https://mirror.example.org/ump\n")
 	if _, errOut, code := e.run("", true, "config", "isp", "edit"); code == 0 || !strings.Contains(errOut, "no accounts yet") {
 		t.Errorf("no accounts: code %d, %q", code, errOut)
+	}
+}
+
+func TestKeysUniform(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTeN oleg@laptop"
+	if _, errOut, code := e.run("", false, "config", "key", "add", "laptop", "--line", line); code != 0 {
+		t.Fatalf("add: %d %q", code, errOut)
+	}
+
+	// get: ump by default (show stays an alias), a named key, json for export
+	out, _, code := e.run("", false, "config", "key", "get")
+	if code != 0 || !strings.HasPrefix(out, "Name:         ump\nPath:         ") || !strings.Contains(out, "Public key:   ssh-ed25519 AAAA") {
+		t.Errorf("get: code %d\n%s", code, out)
+	}
+	if out2, _, code := e.run("", false, "c", "k", "show", "ump"); code != 0 || out2 != out {
+		t.Errorf("show ump differs from get: code %d\n%s", code, out2)
+	}
+	out, _, code = e.run("", false, "config", "key", "get", "laptop")
+	if code != 0 || !strings.HasPrefix(out, "Name:         laptop\nPublic key:   "+line+"\nFingerprint:  SHA256:") || strings.Contains(out, "Path:") {
+		t.Errorf("get laptop: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "config", "key", "get", "laptop", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"name": "laptop"`) || !strings.Contains(out, `"public_key": "`+line+`"`) || !strings.Contains(out, `"comment": "oleg@laptop"`) || strings.Contains(out, `"path"`) {
+		t.Errorf("get laptop json: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "get", "nope"); code != 1 || !strings.Contains(errOut, `no key "nope"`) {
+		t.Errorf("get unknown: code %d, %q", code, errOut)
+	}
+
+	// list: -o wide has the lines, json everything; table as before
+	out, _, code = e.run("", false, "config", "key", "list", "-o", "wide")
+	if code != 0 || !strings.Contains(out, "PUBLIC KEY") || !strings.Contains(out, line) || !strings.Contains(strings.Join(strings.Fields(out), " "), "ump ssh-ed25519") {
+		t.Errorf("list wide: code %d\n%s", code, out)
+	}
+	out, _, code = e.run("", false, "config", "key", "list", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"name": "ump"`) || !strings.Contains(out, `"rescue": true`) || !strings.Contains(out, `"name": "laptop"`) || !strings.Contains(out, `"rescue": false`) {
+		t.Errorf("list json: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "key", "list"); code != 0 || strings.Contains(out, "PUBLIC KEY") || !strings.Contains(out, "oleg@laptop") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "config", "key", "list", "-o", "name"); code != 2 || !strings.Contains(errOut, "unknown output format") {
+		t.Errorf("list -o name: code %d, %q", code, errOut)
+	}
+
+	// edit ump: the message says what it is and what to do instead
+	if _, errOut, code := e.run("", false, "config", "key", "edit", "ump"); code != 1 || !strings.Contains(errOut, "UMP's own key pair, kept as files") || !strings.Contains(errOut, "ump config key roll") {
+		t.Errorf("edit ump: code %d, %q", code, errOut)
+	}
+}
+
+func TestKeyRoll(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	keyPath := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519")
+
+	// an installed server in the state (web-01, administrator ump) and one never installed
+	e.directRoot = true
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 {
+		t.Fatalf("reinstall: %d %q", code, errOut)
+	}
+	e.directRoot = false
+	oldPub, _ := os.ReadFile(keyPath + ".pub")
+	oldLine := strings.TrimSpace(string(oldPub))
+
+	// without a terminal: --yes is required; nothing changed
+	if _, errOut, code := e.run("", false, "config", "key", "roll"); code != 3 || !strings.Contains(errOut, "needs confirmation") {
+		t.Errorf("roll without --yes: code %d, %q", code, errOut)
+	}
+	if pub, _ := os.ReadFile(keyPath + ".pub"); strings.TrimSpace(string(pub)) != oldLine {
+		t.Errorf("the key changed without confirmation")
+	}
+
+	// the roll: new pair, old kept as .old, the server gets the new line and loses the old
+	e.keyAdds = nil
+	e.directSudo = true
+	calls := len(e.remoteCalls)
+	out, errOut, code := e.run("", false, "config", "key", "roll", "--yes")
+	if code != 0 {
+		t.Fatalf("roll: code %d, %q\n%s", code, errOut, out)
+	}
+	newPub, _ := os.ReadFile(keyPath + ".pub")
+	newLine := strings.TrimSpace(string(newPub))
+	keptPub, _ := os.ReadFile(keyPath + ".old.pub")
+	if newLine == oldLine || strings.TrimSpace(string(keptPub)) != oldLine {
+		t.Errorf("keys after the roll: new %q, kept %q, old %q", newLine, string(keptPub), oldLine)
+	}
+	if _, err := os.Stat(keyPath + ".old"); err != nil {
+		t.Errorf("no .old private key: %v", err)
+	}
+	if !strings.Contains(out, "Rolled UMP's key: SHA256:") || !strings.Contains(out, "kept at ") || !strings.Contains(out, "web-01 (203.0.113.10): the new key opens ump, the old one is gone") || !strings.Contains(out, "1 server with the new key.") {
+		t.Errorf("roll output:\n%s", out)
+	}
+	// the swap went over SSH as ump with the old key, and names both lines
+	var swap []string
+	for _, argv := range e.remoteCalls[calls:] {
+		if cmd := argv[len(argv)-1]; strings.HasPrefix(cmd, "umask 077; mkdir -p ~/.ssh") {
+			swap = argv
+		}
+	}
+	if swap == nil || !strings.Contains(strings.Join(swap, " "), keyPath+".old ") || !strings.Contains(swap[len(swap)-1], "new="+shellJoin([]string{newLine})) || !strings.Contains(swap[len(swap)-1], "old="+shellJoin([]string{oldLine})) {
+		t.Errorf("swap command: %q", swap)
+	}
+	// list and get show the new key
+	if out, _, _ := e.run("", false, "config", "key", "get", "-o", "json"); !strings.Contains(out, newLine) {
+		t.Errorf("get after the roll:\n%s", out)
+	}
+
+	// --no-servers touches no server; a second roll replaces the .old
+	calls = len(e.remoteCalls)
+	if out, _, code := e.run("", false, "config", "key", "roll", "--yes", "--no-servers"); code != 0 || len(e.remoteCalls) != calls || !strings.Contains(out, "Rolled UMP's key") || strings.Contains(out, "web-01") {
+		t.Errorf("roll --no-servers: code %d, calls %d\n%s", code, len(e.remoteCalls)-calls, out)
+	}
+	if keptPub, _ := os.ReadFile(keyPath + ".old.pub"); strings.TrimSpace(string(keptPub)) != newLine {
+		t.Errorf(".old after the second roll is not the previous key")
+	}
+
+	// a server the old key does not open keeps it, named, exit 5
+	e.directSudo = false
+	e.umpKeyDenied = true
+	out, errOut, code = e.run("", false, "config", "key", "roll", "--yes")
+	if code != 5 || !strings.Contains(out, "web-01 (203.0.113.10): the new key was added, but does not open ump@203.0.113.10") && !strings.Contains(out, "not reached as ump with the old key") || !strings.Contains(errOut, "1 of 1 servers keep the old key") {
+		t.Errorf("roll with a server that refuses: code %d, %q\n%s", code, errOut, out)
+	}
+}
+
+func TestListingsOutputFormats(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"config", "user", "list", "-o", "json"}, []string{`"ump": {`, `"sudo": true`}},
+		{[]string{"config", "user", "list", "-o", "yaml"}, []string{"ump:\n", "sudo: true"}},
+		{[]string{"config", "firewall", "list", "-o", "json"}, []string{`"default": {`, `"policy": "drop"`}},
+		{[]string{"config", "disk-layout", "list", "-o", "yaml"}, []string{"lvm-linear:\n", "parts:"}},
+		{[]string{"config", "userdata", "list", "-o", "json"}, []string{`"ubuntu": {`, `"script":`}},
+		{[]string{"config", "os", "list", "-o", "json"}, []string{`"name": "ubuntu-26.04"`, `"default": true`, `"from": "published"`}},
+		{[]string{"config", "os", "list", "-o", "yaml"}, []string{"- name: ", "default: true"}},
+		{[]string{"config", "isp", "get", "one"}, []string{"one:\n", "type: fake", "login: bob", "password: env:FAKE_PASS"}},
+		{[]string{"config", "isp", "get", "two", "-o", "json"}, []string{`"name": "two"`, `"password": "plain!"`, `"region": "us"`}},
+		{[]string{"config", "isp", "show", "one", "-o", "yaml"}, []string{"one:\n", "type: fake"}},
+	} {
+		out, errOut, code := e.run("", false, c.args...)
+		if code != 0 {
+			t.Errorf("%v: code %d, %q", c.args, code, errOut)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%v: missing %q in\n%s", c.args, w, out)
+			}
+		}
+	}
+	// wide is the same table where nothing is held back; name is not a format here
+	table, _, _ := e.run("", false, "config", "user", "list")
+	if wide, _, code := e.run("", false, "config", "user", "list", "-o", "wide"); code != 0 || wide != table {
+		t.Errorf("user list -o wide: code %d\n%s", code, wide)
+	}
+	for _, args := range [][]string{{"config", "user", "list", "-o", "name"}, {"config", "os", "list", "-o", "name"}, {"config", "isp", "get", "one", "-o", "wide"}} {
+		if _, errOut, code := e.run("", false, args...); code != 2 || !strings.Contains(errOut, "unknown output format") {
+			t.Errorf("%v: code %d, %q", args, code, errOut)
+		}
+	}
+	if _, errOut, code := e.run("", false, "config", "isp", "get", "three"); code != 1 || !strings.Contains(errOut, `no account "three"`) {
+		t.Errorf("isp get unknown: code %d, %q", code, errOut)
 	}
 }

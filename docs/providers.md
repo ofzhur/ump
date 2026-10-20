@@ -135,6 +135,7 @@ a repository, so a shared configuration carries references only.
 
 ```
 ump config isp list              # the accounts: type, servers, settings, where the secrets come from
+ump config isp get NAME          # one account as it stands in the file: type, settings, the secrets as references
 ump config isp types             # the provider types, their capabilities and settings
 ump config isp add               # the wizard, on a terminal
 ump config isp add TYPE NAME --set KEY=VALUE ... [--no-test]

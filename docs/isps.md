@@ -121,7 +121,7 @@ public one (the private VPC address is shown by `ump server show`).
 > **For now, ump installs a droplet only when it can already log in.**
 > The droplet has to let ump in over SSH before `ump server reinstall`,
 > as root or as a sudo user, with one of your keys (in `~/.ssh` or your
-> ssh-agent) or UMP's own (`ump config key show`). Pick such a key when
+> ssh-agent) or UMP's own (`ump config key get`). Pick such a key when
 > you create the droplet: DigitalOcean puts SSH keys on a droplet only
 > at creation, and neither its API nor its rebuild nor its recovery ISO
 > adds one later (both give the droplet back the keys it was created

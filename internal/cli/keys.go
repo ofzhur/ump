@@ -1,18 +1,21 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/profile"
+	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/sshkey"
 )
 
@@ -87,7 +90,9 @@ Without any, ump warns before each rescue and reinstall.
 On a terminal, ump config key add without arguments asks for a name
 and where the key comes from.`,
 		Example: `  ump config key list                   # UMP's own key first, then the named ones
-  ump config key show                   # UMP's own public key and its fingerprints
+  ump config key get ump                # UMP's own public key and its fingerprints (also: show)
+  ump config key get oleg -o json       # a named key, as data
+  ump config key roll                   # a new key pair for UMP, on every server ump installed
   ump config key add                    # asks for a name and a file, a line or the agent
   ump config key add oleg --file ~/.ssh/id_ed25519.pub
   ump config key add laptop --line 'ssh-ed25519 AAAA... oleg@laptop'
@@ -97,47 +102,104 @@ and where the key comes from.`,
   ump config key edit laptop             # that key alone, in your editor
   ump config key remove laptop`,
 	}
-	cmd.AddCommand(a.newKeyShowCmd(), a.newKeyListCmd(), a.newKeyAddCmd(), a.newKeyEditCmd(), a.newKeyRemoveCmd(), a.newKeyRescueCmd())
+	cmd.AddCommand(a.newKeyListCmd(), a.newKeyGetCmd(), a.newKeyAddCmd(), a.newKeyEditCmd(), a.newKeyRemoveCmd(), a.newKeyRollCmd(), a.newKeyRescueCmd())
 	return cmd
 }
 
-// showUMPKey prints UMP's own public key, generating the pair on first use.
-func (a *app) showUMPKey(cmd *cobra.Command, output string) error {
-	cfg, _, err := a.loadConfig()
-	if err != nil {
-		return err
-	}
+// keyInfo is one key as get and list print it: UMP's own (with its
+// path) or a named one.
+type keyInfo struct {
+	Name      string `json:"name" yaml:"name"`
+	Path      string `json:"path,omitempty" yaml:"path,omitempty"`
+	Type      string `json:"type" yaml:"type"`
+	Comment   string `json:"comment,omitempty" yaml:"comment,omitempty"`
+	PublicKey string `json:"public_key" yaml:"public_key"`
+	SHA256    string `json:"fingerprint_sha256" yaml:"fingerprint_sha256"`
+	MD5       string `json:"fingerprint_md5" yaml:"fingerprint_md5"`
+	// Rescue says that the key goes into every rescue system (UMP's own
+	// always does, the named ones chosen with ump config key rescue).
+	Rescue bool `json:"rescue" yaml:"rescue"`
+}
+
+// umpKeyInfo is UMP's own key, generated on first use.
+func (a *app) umpKeyInfo(cfg *config.Config) (keyInfo, error) {
 	k, path, err := a.stagingKey(cfg)
 	if err != nil {
-		return err
+		return keyInfo{}, err
 	}
+	return keyInfo{Name: "ump", Path: path, Type: keyType(k.Line()), Comment: commentOf(k.Line()), PublicKey: k.Line(), SHA256: k.FingerprintSHA256(), MD5: k.FingerprintMD5(), Rescue: true}, nil
+}
+
+// namedKeyInfo is a key of keys.yaml; a line that does not parse keeps
+// its text with "-" for the fingerprints.
+func namedKeyInfo(cfg *config.Config, name, line string) keyInfo {
+	info := keyInfo{Name: name, Type: keyType(line), Comment: commentOf(line), PublicKey: line, SHA256: "-", MD5: "-"}
+	if k, err := sshkey.Parse(line); err == nil {
+		info.SHA256, info.MD5 = k.FingerprintSHA256(), k.FingerprintMD5()
+	}
+	for _, r := range cfg.Staging.Keys {
+		if r == name {
+			info.Rescue = true
+		}
+	}
+	return info
+}
+
+func (a *app) printKey(cmd *cobra.Command, info keyInfo, output string) error {
 	if output != "" {
 		f, err := parseFormat(output)
 		if err != nil || (f != formatJSON && f != formatYAML) {
 			return usageErrorf(cmd, "unknown output format %q (use one of json, yaml)", output)
 		}
-		return printEncoded(a.stdout, struct {
-			Path      string `json:"path" yaml:"path"`
-			PublicKey string `json:"public_key" yaml:"public_key"`
-			SHA256    string `json:"fingerprint_sha256" yaml:"fingerprint_sha256"`
-			MD5       string `json:"fingerprint_md5" yaml:"fingerprint_md5"`
-		}{Path: path, PublicKey: k.Line(), SHA256: k.FingerprintSHA256(), MD5: k.FingerprintMD5()}, f)
+		return printEncoded(a.stdout, info, f)
 	}
-	fmt.Fprintf(a.stdout, "Path:         %s\n", config.AbbreviateHome(path))
-	fmt.Fprintf(a.stdout, "Public key:   %s\n", k.Line())
-	fmt.Fprintf(a.stdout, "Fingerprint:  %s (MD5 %s)\n", k.FingerprintSHA256(), k.FingerprintMD5())
+	fmt.Fprintf(a.stdout, "Name:         %s\n", info.Name)
+	if info.Path != "" {
+		fmt.Fprintf(a.stdout, "Path:         %s\n", config.AbbreviateHome(info.Path))
+	}
+	fmt.Fprintf(a.stdout, "Public key:   %s\n", info.PublicKey)
+	fmt.Fprintf(a.stdout, "Fingerprint:  %s (MD5 %s)\n", info.SHA256, info.MD5)
 	return nil
 }
 
-func (a *app) newKeyShowCmd() *cobra.Command {
+func (a *app) newKeyGetCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
-		Use:     "show",
-		Aliases: verbAliases("show"),
-		Short:   "Show UMP's own public key and its fingerprints",
-		Args:    usageArgs(cobra.NoArgs),
+		Use:     "get [NAME]",
+		Aliases: verbAliases("get"),
+		Short:   "Print a key: UMP's own (ump, the default) or a named one",
+		Long: `Print one public key with its fingerprints: ump, UMP's own key pair
+(generated on first use; with the path of the private key), or a key
+kept under a name with ump config key add. The public key line is what
+goes into an authorized_keys file, a provider's key list or a git
+host's deploy keys; -o json or -o yaml give it as data
+(ump config key get ump -o json | jq -r .public_key).`,
+		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.showUMPKey(cmd, output)
+			cfg, _, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+			name := "ump"
+			if len(args) == 1 {
+				name = args[0]
+			}
+			if name == "ump" {
+				info, err := a.umpKeyInfo(cfg)
+				if err != nil {
+					return err
+				}
+				return a.printKey(cmd, info, output)
+			}
+			keys, err := namedKeys()
+			if err != nil {
+				return err
+			}
+			line, ok := keys[name]
+			if !ok {
+				return fmt.Errorf("no key %q in %s (ump config key list)", name, config.AbbreviateHome(keysPath()))
+			}
+			return a.printKey(cmd, namedKeyInfo(cfg, name, line), output)
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "print as json or yaml")
@@ -187,50 +249,81 @@ func checkKeyName(name string) error {
 }
 
 func (a *app) newKeyListCmd() *cobra.Command {
+	var output string
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: verbAliases("list"),
-		Short:   "List the named keys (and ump, UMP's own)",
-		Args:    usageArgs(cobra.NoArgs),
+		Short:   "List the keys: ump (UMP's own) and the named ones",
+		Long: `List UMP's own key (ump) and the keys kept under names, with type,
+comment and fingerprint, and which of them go into every rescue system.
+-o wide adds the public key lines and the path of UMP's key; -o json
+and -o yaml carry everything.`,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := a.loadConfig()
 			if err != nil {
 				return err
 			}
+			format, err := parseFormat(output)
+			if err != nil || format == formatName {
+				return usageErrorf(cmd, "unknown output format %q (use one of table, wide, json, yaml)", output)
+			}
 			keys, err := namedKeys()
 			if err != nil {
 				return err
 			}
-			rows := [][]string{}
-			if k, path, err := a.stagingKey(cfg); err == nil {
-				rows = append(rows, []string{"ump", keyType(k.Line()), keyComment(k.Line()), k.FingerprintSHA256(), "UMP's own key (" + config.AbbreviateHome(path) + "), in every rescue system"})
+			var infos []keyInfo
+			if info, err := a.umpKeyInfo(cfg); err == nil {
+				infos = append(infos, info)
 			}
-			rescue := map[string]bool{}
-			for _, r := range cfg.Staging.Keys {
-				rescue[r] = true
+			for _, n := range sortedKeys(keys) {
+				infos = append(infos, namedKeyInfo(cfg, n, keys[n]))
 			}
-			names := make([]string, 0, len(keys))
-			for n := range keys {
-				names = append(names, n)
+			switch format {
+			case formatJSON, formatYAML:
+				return printEncoded(a.stdout, infos, format)
 			}
-			sort.Strings(names)
-			for _, n := range names {
-				fp := "-"
-				if k, err := sshkey.Parse(keys[n]); err == nil {
-					fp = k.FingerprintSHA256()
-				}
+			headers := []string{"NAME", "TYPE", "COMMENT", "FINGERPRINT", "NOTE"}
+			if format == formatWide {
+				headers = append(headers, "PUBLIC KEY")
+			}
+			rows := make([][]string, 0, len(infos))
+			for _, k := range infos {
 				note := ""
-				if rescue[n] {
+				switch {
+				case k.Path != "":
+					note = "UMP's own key (" + config.AbbreviateHome(k.Path) + "), in every rescue system"
+				case k.Rescue:
 					note = "in every rescue system"
 				}
-				rows = append(rows, []string{n, keyType(keys[n]), keyComment(keys[n]), fp, note})
+				row := []string{k.Name, k.Type, orDash(k.Comment), k.SHA256, note}
+				if format == formatWide {
+					row = append(row, k.PublicKey)
+				}
+				rows = append(rows, row)
 			}
-			return writeTable(a.stdout, []string{"NAME", "TYPE", "COMMENT", "FINGERPRINT", "NOTE"}, rows, noHeaders)
+			return writeTable(a.stdout, headers, rows, noHeaders)
 		},
 	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format: table, wide (with the public key lines), json or yaml")
 	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line")
 	return cmd
+}
+
+// commentOf is the comment of a key line, empty without one.
+func commentOf(line string) string {
+	if c := keyComment(line); c != "-" {
+		return c
+	}
+	return ""
+}
+
+func orDash(s string) string {
+	if s == "" || s == "-" {
+		return "-"
+	}
+	return s
 }
 
 func (a *app) newKeyAddCmd() *cobra.Command {
@@ -334,6 +427,9 @@ func (a *app) newKeyEditCmd() *cobra.Command {
 	cmd := keySet.newEditCmd(a)
 	inner := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 && args[0] == "ump" {
+			return fmt.Errorf("ump is UMP's own key pair, kept as files and not an entry of %s, so it cannot be edited: ump config key get ump shows it, ump config key roll replaces it with a new one", config.AbbreviateHome(keysPath()))
+		}
 		if _, err := os.Stat(keysPath()); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("no named keys yet (ump config key add NAME --file FILE)")
 		}
@@ -453,5 +549,146 @@ reinstall.`,
 		},
 	}
 	cmd.Flags().BoolVar(&clear, "clear", false, "no keys but UMP's")
+	return cmd
+}
+
+// newKeyRollCmd replaces UMP's own key pair with a new one and puts the
+// new public key onto every server ump installed, taking the old one
+// away there.
+func (a *app) newKeyRollCmd() *cobra.Command {
+	var yes, noServers bool
+	cmd := &cobra.Command{
+		Use:   "roll [--no-servers] [--yes]",
+		Short: "Replace UMP's own key pair with a new one, on every server ump installed",
+		Long: `Generate a new key pair for UMP and retire the current one, for when
+it may have leaked or someone who could read it has left. The new key
+goes into every server ump installed (the administrator's
+authorized_keys, over SSH with the old key), and the old key is removed
+there; a server that cannot be reached keeps the old key and is named,
+so that you add the new key by hand (ump config key get ump). The old
+pair is kept next to the new one as staging_ed25519.old, for exactly
+that, until the next roll; delete it when every server has the new key.
+
+--no-servers rolls the key alone and touches no server. The providers
+that keep keys (Hetzner Robot and Cloud, Vultr, Linode) still have the
+old public key registered under its name: a leaked key is removed there
+by hand, the new one is registered at the next rescue. The keys you
+keep under names are not affected. Asks for confirmation on a terminal;
+without one, --yes is required.`,
+		Example: `  ump config key roll
+  ump config key roll --no-servers`,
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+			old, err := a.umpKeyInfo(cfg)
+			if err != nil {
+				return err
+			}
+			ctx := cmd.Context()
+			// the servers first, so that the question can name them
+			type target struct {
+				m     provider.Machine
+				admin string
+			}
+			var targets []target
+			if !noServers {
+				doc, err := a.loadState(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				machines, _, failed, total, err := a.listedMachines(cmd)
+				if err != nil {
+					return err
+				}
+				if failed > 0 {
+					fmt.Fprintf(a.stderr, "ump: %d of %d accounts could not be listed; their servers keep the old key\n", failed, total)
+				}
+				for _, m := range machines {
+					s := doc.Servers[m.Ref()]
+					if s.Installed == nil || s.Installed.Admin == "" {
+						continue
+					}
+					if m.IPv4 == "" && m.IPv6 == "" {
+						continue
+					}
+					targets = append(targets, target{m, s.Installed.Admin})
+				}
+			}
+			q := fmt.Sprintf("Replace UMP's key %s with a new one? %s get the new key over SSH and lose the old one; the old pair is kept as %s.old.", old.SHA256, plural(len(targets), "installed server"), config.AbbreviateHome(old.Path))
+			if err := a.confirm(cmd, yes, q); err != nil {
+				return err
+			}
+			// the new pair, then the swap: the old one stays as .old
+			path := old.Path
+			oldPath := path + ".old"
+			newKey, err := sshkey.Generate(path+".new", sshkey.DefaultComment())
+			if err != nil {
+				return err
+			}
+			for _, f := range []string{oldPath, oldPath + ".pub"} {
+				os.Remove(f)
+			}
+			if err := os.Rename(path, oldPath); err != nil {
+				return err
+			}
+			if err := os.Rename(path+".pub", oldPath+".pub"); err != nil {
+				return err
+			}
+			if err := os.Rename(path+".new", path); err != nil {
+				return err
+			}
+			if err := os.Rename(path+".new.pub", path+".pub"); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stdout, "Rolled UMP's key: %s is the new one (was %s, kept at %s).\n", newKey.FingerprintSHA256(), old.SHA256, config.AbbreviateHome(oldPath))
+			if len(targets) == 0 {
+				if !noServers {
+					fmt.Fprintln(a.stdout, "No installed server to update.")
+				}
+				return nil
+			}
+			// every installed server: add the new line, drop the old,
+			// check that the new key gets in
+			swap := "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; f=~/.ssh/authorized_keys; new=" + shellJoin([]string{newKey.Line()}) + "; old=" + shellJoin([]string{old.PublicKey}) +
+				`; grep -qxF "$new" "$f" || echo "$new" >> "$f"; grep -vxF "$old" "$f" > "$f.ump"; cat "$f.ump" > "$f"; rm -f "$f.ump"`
+			done, kept := 0, 0
+			for _, t := range targets {
+				addr := t.m.IPv4
+				if addr == "" {
+					addr = t.m.IPv6
+				}
+				var errb bytes.Buffer
+				argv := withSSHOptions(sshArgs(t.admin, addr, []string{oldPath}, true, true, []string{swap}), batchOptions(10*time.Second)...)
+				code, err := a.sshExec(ctx, argv, nil, io.Discard, &errb)
+				if err != nil || code != 0 {
+					kept++
+					fmt.Fprintf(a.stdout, "  %s (%s): not reached as %s with the old key, keeps it; add the new key by hand: %s\n", t.m.Name, addr, t.admin, strings.TrimSpace(errb.String()))
+					continue
+				}
+				argv = withSSHOptions(sshArgs(t.admin, addr, []string{path}, true, true, []string{"id -u; echo rolled"}), batchOptions(10*time.Second)...)
+				if code, err := a.sshExec(ctx, argv, nil, io.Discard, io.Discard); err != nil || code != 0 {
+					kept++
+					fmt.Fprintf(a.stdout, "  %s (%s): the new key was added, but does not open %s@%s; the old key may still be there\n", t.m.Name, addr, t.admin, addr)
+					continue
+				}
+				done++
+				fmt.Fprintf(a.stdout, "  %s (%s): the new key opens %s, the old one is gone\n", t.m.Name, addr, t.admin)
+			}
+			fmt.Fprintf(a.stdout, "%s with the new key", plural(done, "server"))
+			if kept > 0 {
+				fmt.Fprintf(a.stdout, ", %d still with the old one (%s)", kept, config.AbbreviateHome(oldPath))
+			}
+			fmt.Fprintln(a.stdout, ".")
+			if kept > 0 {
+				return withExit(exitUnreachable, fmt.Errorf("%d of %d servers keep the old key", kept, len(targets)))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&noServers, "no-servers", false, "roll the key alone; no server is touched")
+	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	return cmd
 }

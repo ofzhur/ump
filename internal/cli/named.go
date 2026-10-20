@@ -196,16 +196,27 @@ func (set *namedSet) missing(name string) error {
 }
 
 func (set *namedSet) newListCmd(a *app) *cobra.Command {
+	var output string
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: verbAliases("list"),
 		Short:   "List the " + set.plurals(),
-		Args:    usageArgs(cobra.NoArgs),
+		Long: "List the " + set.plurals() + " of " + set.file + ", one per row, with whether each is\n" +
+			"valid. -o wide is the same table (nothing is held back); -o json and -o yaml\n" +
+			"print the entries themselves, by name.",
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := set.prepare(a, cmd)
 			if err != nil {
 				return err
+			}
+			format, err := parseFormat(output)
+			if err != nil || format == formatName {
+				return usageErrorf(cmd, "unknown output format %q (use one of table, wide, json, yaml)", output)
+			}
+			if format == formatJSON || format == formatYAML {
+				return printEncoded(a.stdout, d.entries(), format)
 			}
 			data, _ := os.ReadFile(set.path())
 			rows, err := set.rows(data, d.names())
@@ -215,8 +226,22 @@ func (set *namedSet) newListCmd(a *app) *cobra.Command {
 			return writeTable(a.stdout, set.headers, rows, noHeaders)
 		},
 	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format: table, wide, json or yaml")
 	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line")
 	return cmd
+}
+
+// entries decodes every entry, by name, for -o json and -o yaml.
+func (d *namedDoc) entries() map[string]any {
+	out := map[string]any{}
+	for _, n := range d.names() {
+		var v any
+		if err := d.node(n).Decode(&v); err != nil {
+			v = map[string]string{"invalid": err.Error()}
+		}
+		out[n] = v
+	}
+	return out
 }
 
 func (set *namedSet) newGetCmd(a *app) *cobra.Command {

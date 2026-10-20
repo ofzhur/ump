@@ -9,10 +9,18 @@ a user can carry several people's keys without files lying around.
 ```console
 $ ump config key list
 NAME     TYPE          COMMENT        FINGERPRINT    NOTE
-ump      ssh-ed25519   ump@laptop     SHA256:...     UMP's own key (~/.config/ump/staging_ed25519)
+ump      ssh-ed25519   ump@laptop     SHA256:...     UMP's own key (~/.config/ump/staging_ed25519), in every rescue system
 oleg     ssh-ed25519   oleg@laptop    SHA256:...
 work     ssh-rsa       oleg@work      SHA256:...
+$ ump config key get oleg
+Name:         oleg
+Public key:   ssh-ed25519 AAAA... oleg@laptop
+Fingerprint:  SHA256:... (MD5 ...)
 ```
+
+`list -o wide` adds the public key lines, `-o json` and `-o yaml`
+everything; `get NAME` (also `show`) prints one key, `ump` without a
+name.
 
 ## UMP's own key
 
@@ -27,10 +35,49 @@ It goes into every rescue system ump boots and, through the key
 reference `ump`, to the administrator of every installed system, which
 is how ump logs in again afterwards (`ump ssh`, the check after an
 installation, the direct way back into the rescue system without a
-reboot). `ump config key show` prints the public key and its
-fingerprints (`-o json` for scripts); put it in `authorized_keys` of a
-machine installed by other means, and `ump server rescue` takes the
-direct way in there too.
+reboot). `ump config key get` (or `show`) prints the public key and its
+fingerprints; put it in `authorized_keys` of a machine installed by
+other means, and `ump server rescue` takes the direct way in there too.
+To export the line alone, for a provider's key list, a git host or an
+`authorized_keys` file:
+
+```console
+$ ump config key get ump -o json | jq -r .public_key
+$ cat ~/.config/ump/staging_ed25519.pub                # the same file
+```
+
+Only the public half ever leaves your machine; the private key opens
+every server ump installed, so treat it as a root key.
+
+### Rolling UMP's key
+
+When the private key may have leaked, or someone who could read it has
+left, `ump config key roll` makes a new pair and retires the current
+one: the new public key is put into the administrator's
+`authorized_keys` on every server ump installed, over SSH with the old
+key, and the old one is removed there. A server that cannot be reached
+keeps the old key and is named, with exit code 5, so that you add the
+new key by hand (`ump config key get`); the old pair stays next to the
+new one as `staging_ed25519.old` for that, until the next roll.
+`--no-servers` rolls the key alone. The providers that keep keys
+(Hetzner Robot and Cloud, Vultr, Linode) still hold the old public key
+under its name: remove a leaked one there by hand; the new one is
+registered at the next rescue. Rescue systems already running keep
+the key they were booted with. Named keys are not affected. The
+command asks on a terminal; without one, `--yes` is required.
+
+```console
+$ ump config key roll
+Replace UMP's key SHA256:... with a new one? 3 installed servers get the new key over SSH and lose the old one; the old pair is kept as ~/.config/ump/staging_ed25519.old. [y/N] y
+Rolled UMP's key: SHA256:... is the new one (was SHA256:..., kept at ~/.config/ump/staging_ed25519.old).
+  web-01 (203.0.113.10): the new key opens ump, the old one is gone
+  db-01 (203.0.113.11): the new key opens ump, the old one is gone
+  old-box (203.0.113.12): not reached as ump with the old key, keeps it; add the new key by hand: ...
+2 servers with the new key, 1 still with the old one (~/.config/ump/staging_ed25519.old).
+```
+
+With a shared [state backend](state.md), the key pair lives in the
+state, so a roll reaches everyone who uses it with the next command.
 
 ump sets that up by itself where it can: when `ump server rescue` or
 `ump server reinstall` gets into a running system with one of your keys
@@ -76,15 +123,19 @@ keys:
 ```
 
 ```
-ump config key show [-o json|yaml]            # UMP's own public key and its fingerprints
-ump config key list                           # ump and the named keys, with type, comment and fingerprint
+ump config key list [-o wide|json|yaml]       # ump and the named keys, with type, comment and fingerprint; wide adds the lines
+ump config key get [NAME] [-o json|yaml]      # one key with its fingerprints: ump (the default) or a named one; also show
 ump config key add                            # on a terminal: asks for the name and a file, a line or the agent
 ump config key add NAME --file FILE           # every key line of the file; a second one becomes NAME-2, ...
 ump config key add NAME --line 'ssh-... AAAA... comment'
 ump config key add NAME --agent               # what ssh-add -L lists, one name each
 ump config key edit [NAME]                    # your editor on that key alone, or on all of keys.yaml; checked afterwards
 ump config key remove NAME
+ump config key roll [--no-servers] [--yes]    # a new key pair for UMP, put onto every server ump installed
 ```
+
+`ump` is UMP's own key pair, kept as files, not an entry of
+`keys.yaml`: `edit ump` says so and points to `get` and `roll`.
 
 A name is lower-case letters, digits, `-`, `_` and `.`; `ump`, `local`
 and `agent` are taken. A key line must be a public key (`ssh-ed25519`,

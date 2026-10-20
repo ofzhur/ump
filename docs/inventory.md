@@ -117,7 +117,7 @@ every machine is without asking it.
 
 What ump can do with a manual server is what SSH allows. `ump server
 rescue` and `ump server reinstall` work when the running system lets UMP
-in (UMP's key or yours, as root or a sudo user; `ump config key show`
+in (UMP's key or yours, as root or a sudo user; `ump config key get`
 prints the key): the rescue image is loaded over SSH and entered with
 kexec, without a reboot through anyone. There is no provider rescue
 system behind it, and that is the risk: when an installation fails, or
