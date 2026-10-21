@@ -12,8 +12,8 @@ Every provider has its own API, its own rescue system, its own stock
 images and its own way of doing networking. UMP hides all of that behind
 one CLI. `ump server list` shows the servers of every configured account;
 `ump server reinstall NAME` boots a server into UMP's own rescue system,
-erases its disks and installs an operating system (Ubuntu, Debian or
-NixOS) the way a profile says; `ump ssh NAME` logs in. The result is a homogeneous fleet: the same
+erases its disks and installs an operating system (Ubuntu, Debian,
+NixOS, Arch Linux or CachyOS) the way a profile says; `ump ssh NAME` logs in. The result is a homogeneous fleet: the same
 base system, disk layout, users and keys, firewall and interface names on
 every machine, whatever it is and wherever it runs, ready for Ansible or
 whatever configures it from there.
@@ -34,7 +34,7 @@ that a team shares, mirrored on each machine and locked per server.
 $ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or arm64
 $ ump config isp add                             # add a provider account (wizard)
 $ ump server list                                # every server of every account
-$ ump config os edit default                     # the profile: image, disks, users, firewall
+$ ump config os create mine --from ubuntu-26.04   # your profile: image, disks, users, firewall
 $ ump server reinstall web-01 --dry-run          # the plan on that machine, nothing erased
 $ ump server reinstall web-01                    # erase, install, reboot, verify
 $ ump ssh web-01
@@ -77,7 +77,9 @@ prebuilt by UMP with LVM, md, netplan, SSH and the tools a server needs,
 and nothing that does not belong there (no cloud-init, no snaps); and
 NixOS 25.11,
 installed from NixOS's public servers and its stable channel, with the
-profile as NixOS modules. Each gets the
+profile as NixOS modules; and, on amd64, Arch Linux and CachyOS
+(experimental), rolling, installed with `pacstrap` from their mirrors.
+Each gets the
 same disks, users and keys, interface names, firewall and message of
 the day. See [operating systems](docs/oses.md).
 
@@ -172,7 +174,7 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
-| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12 and NixOS 25.11, what every system gets, how each is installed, NixOS configuration and userdata as modules |
+| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), what every system gets, how each is installed, NixOS configuration and userdata as modules |
 | [Base images](images/base/README.md) | the Ubuntu and Debian systems UMP builds, what they hold and their defaults |
 
 **Reference**

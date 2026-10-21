@@ -32,7 +32,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist release clean help images rescue-image rescue-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check dist notices release clean help images rescue-image rescue-test os-image upload
 
 all: build
 
@@ -71,7 +71,11 @@ dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SU
 	done
 	@cd dist && (command -v sha256sum >/dev/null && sha256sum $(BINARY)-* || shasum -a 256 $(BINARY)-*) > SHA256SUMS
 	@echo '$(VERSION)' > dist/VERSION
-	@echo "  dist/SHA256SUMS dist/VERSION ($(VERSION))"
+	@images/notices.sh dist/THIRD_PARTY_NOTICES
+	@echo "  dist/SHA256SUMS dist/VERSION ($(VERSION)) dist/THIRD_PARTY_NOTICES"
+
+notices: ## rewrite THIRD_PARTY_NOTICES from the Go modules compiled into ump
+	images/notices.sh THIRD_PARTY_NOTICES
 
 release: check dist ## check, dist, and publish the binaries (bin/) and get.sh to UPLOAD_TARGET (s3://, scp:// or file://)
 	images/upload.sh bin scripts

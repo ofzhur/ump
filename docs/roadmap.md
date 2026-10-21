@@ -23,8 +23,9 @@ As of October 2026, ump does what the [README](../README.md) and the
   inline disk layouts (partitions, md, LVM with striping, mirroring and
   parity), users and keys, userdata scripts, nftables firewalls that also hold
   the ports containers publish, uniform interface names, the kernel
-  command line, UEFI and BIOS boot; `--dry-run`; the Ubuntu 26.04 base
-  image; `ump ssh`.
+  command line, UEFI and BIOS boot; `--dry-run`; Ubuntu 26.04, 24.04
+  and 22.04 and Debian 13 and 12 from UMP's base images, NixOS 25.11,
+  Arch Linux and CachyOS (experimental); `ump ssh`.
 - **Configuration objects:** `ump config os`, `disk-layout` and
   `firewall` with list, get, create, edit and delete each; the
   published defaults downloaded on first use.

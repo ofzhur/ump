@@ -97,7 +97,7 @@ description: Operate hybrid infrastructure (cloud VMs and bare metal) with UMP,
   decommission servers, write or run Terraform or Ansible in an infrastructure
   repository, check for drift, audit or reorganize an infra repo, rotate users
   or SSH keys, or respond to a host that is down.
-license: TBD
+license: Apache-2.0
 metadata:
   ump-version: ">=0.3 <1.0"
 ---

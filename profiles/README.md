@@ -18,7 +18,7 @@ reinstall NAME` works with the published `ubuntu-26.04` out of the box.
 | [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 | [`users.yaml`](users.yaml) | the named user `ump`, the administrator UMP provides | [Users](../docs/users.md) |
-| [`userdata.yaml`](userdata.yaml) | the named userdata `ubuntu` and `debian` (the scripts every Ubuntu and Debian runs before its first boot) and `nixos` (the module every NixOS gets), which do nothing yet | [Userdata](../docs/userdata.md) |
+| [`userdata.yaml`](userdata.yaml) | the named userdata `ubuntu`, `debian`, `archlinux` and `cachyos` (the scripts each of those systems runs before its first boot) and `nixos` (the module every NixOS gets), which do nothing yet | [Userdata](../docs/userdata.md) |
 
 A change here reaches every ump without a local copy of the file at the
 next `make upload`; the installer that consumes the resolved profile is

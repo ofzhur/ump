@@ -118,7 +118,8 @@ image alone) and serve this below it:
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
 | `rescue/v/<version>/<arch>/...`, `os/<os>/v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
 
-`<arch>` is `amd64` or `arm64`, `<os>` is `ubuntu-26.04`. `make upload`
+`<arch>` is `amd64` or `arm64`, `<os>` an image name such as
+`ubuntu-26.04` or `debian-13` (`os/index.json` lists them). `make upload`
 produces exactly this layout from the built images and binaries (`make
 release` builds and publishes the binaries alone, from a tagged
 commit), and

@@ -95,7 +95,7 @@ esac
 content_type() {
 	case "$1" in
 	*.json) echo application/json ;;
-	*.txt|*.sh|SHA256SUMS|VERSION) echo text/plain ;;
+	*.txt|*.sh|SHA256SUMS|VERSION|THIRD_PARTY_NOTICES) echo text/plain ;;
 	*.yaml|*.yml) echo application/yaml ;;
 	*) echo application/octet-stream ;;
 	esac
@@ -234,7 +234,8 @@ for w in "${what[@]}"; do
 		for f in "$dist"/ump-*; do put "$f" "bin/v/$version/$(basename "$f")"; done
 		put "$dist/SHA256SUMS" "bin/v/$version/SHA256SUMS"
 		put "$dist/VERSION" "bin/v/$version/VERSION"
-		for f in "$dist"/ump-* "$dist/SHA256SUMS" "$dist/VERSION"; do copy "bin/v/$version/$(basename "$f")" "bin/latest/$(basename "$f")"; done
+		put "$dist/THIRD_PARTY_NOTICES" "bin/v/$version/THIRD_PARTY_NOTICES"
+		for f in "$dist"/ump-* "$dist/SHA256SUMS" "$dist/VERSION" "$dist/THIRD_PARTY_NOTICES"; do copy "bin/v/$version/$(basename "$f")" "bin/latest/$(basename "$f")"; done
 		built=1
 		;;
 	scripts)
