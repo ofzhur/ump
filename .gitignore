@@ -9,3 +9,10 @@ images/rescue/out/
 images/base/out/
 images/nixos/out/
 images/arch/out/
+# editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
