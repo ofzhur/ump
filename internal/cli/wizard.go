@@ -479,7 +479,8 @@ func (a *app) wizardAddAccount(ctx context.Context, ui *prompter, cfg *config.Co
 		if err := config.WriteSecretFile(p, values[f.Key]); err != nil {
 			return false, err
 		}
-		acct.Settings[f.Key] = config.Value{File: config.AbbreviateHome(p)}
+		// relative: in the home, so the reference travels with the state
+		acct.Settings[f.Key] = config.Value{File: secretFileRef(name, f.Key)}
 	}
 	cfg.Accounts[name] = acct
 	if err := config.Save(path, cfg); err != nil {

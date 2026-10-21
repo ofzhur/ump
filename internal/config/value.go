@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -82,7 +84,7 @@ func (v Value) Resolve() (string, error) {
 		}
 		return s, nil
 	case v.File != "":
-		b, err := os.ReadFile(ExpandHome(v.File))
+		b, err := readSecretFile(v.File)
 		if err != nil {
 			return "", err
 		}
@@ -165,4 +167,50 @@ func (v *Value) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	return errors.New("a setting must be a string or a secret reference")
+}
+
+// readSecretFile reads the file of a file reference (see FilePath).
+func readSecretFile(ref string) ([]byte, error) {
+	return os.ReadFile(FilePath(ref))
+}
+
+// FilePath is the file a file reference reads. A relative path is in
+// the home (secrets/NAME, as the wizard writes them), so it travels with
+// the state to every machine. A path into a home as one machine sees it
+// (~/.config/ump/secrets/NAME before a migration, or a backend's mirror
+// under ~/.cache/ump/homes/) that is not there is the same file in the
+// home of this run, where the state brought it.
+func FilePath(ref string) string {
+	p := ExpandHome(ref)
+	if !filepath.IsAbs(p) {
+		return filepath.Join(UserConfigDir(), p)
+	}
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return p
+	}
+	if rel, ok := inSomeHome(p); ok {
+		if q := filepath.Join(UserConfigDir(), rel); fileExists(q) {
+			return q
+		}
+	}
+	return p
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// inSomeHome gives p relative to the home it is in: the local
+// directory, or a backend's mirror.
+func inSomeHome(p string) (string, bool) {
+	if rel, err := filepath.Rel(LocalDir(), p); err == nil && filepath.IsLocal(rel) {
+		return rel, true
+	}
+	if rel, err := filepath.Rel(filepath.Join(CacheDir(), "homes"), p); err == nil && filepath.IsLocal(rel) {
+		if _, rest, ok := strings.Cut(filepath.ToSlash(rel), "/"); ok && rest != "" {
+			return filepath.FromSlash(rest), true
+		}
+	}
+	return "", false
 }

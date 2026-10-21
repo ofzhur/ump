@@ -459,7 +459,7 @@ func (a *app) newConfigRemoveCmd() *cobra.Command {
 				if v.File == "" {
 					continue
 				}
-				p := config.ExpandHome(v.File)
+				p := config.FilePath(v.File)
 				if !strings.HasPrefix(p, secretsDir+string(os.PathSeparator)) {
 					continue
 				}
@@ -534,6 +534,12 @@ func plural(n int, noun string) string {
 // secretFilePath is where the wizard stores one secret of an account.
 func secretFilePath(account, key string) string {
 	return filepath.Join(config.SecretsDir(), account+"."+key)
+}
+
+// secretFileRef is how the configuration names that file: relative to
+// the home (config.SecretsDir is its secrets directory).
+func secretFileRef(account, key string) string {
+	return "secrets/" + account + "." + key
 }
 
 // verbAliases are the short forms of a subcommand verb, the same under

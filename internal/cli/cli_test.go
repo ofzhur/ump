@@ -869,7 +869,7 @@ func TestWizardFileStorage(t *testing.T) {
 	}
 	text := e.read()
 	if !strings.Contains(text, "    login: carol\n") || !strings.Contains(text, "    region: eu\n") ||
-		!strings.Contains(text, "    password: {file: "+config.AbbreviateHome(secret)+"}\n") || strings.Contains(text, "s3cret") {
+		!strings.Contains(text, "    password: {file: secrets/acc.password}\n") || strings.Contains(text, "s3cret") {
 		t.Errorf("saved config:\n%s", text)
 	}
 	out, _, code = e.run("", false, "server", "list", "-o", "name")

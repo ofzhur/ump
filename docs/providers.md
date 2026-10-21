@@ -122,7 +122,7 @@ is a plain string or a reference to where the secret is:
 | In `config.yaml` | With `--set` | Source |
 |---|---|---|
 | `{ env: NAME }` | `env:NAME` | an environment variable |
-| `{ file: PATH }` | `file:PATH` | the content of a file, trailing newline stripped; the wizard writes these under `~/.config/ump/secrets/` with mode 0600 |
+| `{ file: PATH }` | `file:PATH` | the content of a file, trailing newline stripped; the wizard writes these as `secrets/NAME` in the home (`~/.config/ump/secrets/`, or the backend's) with mode 0600; a relative path is in the home, so it moves with a shared state |
 | `{ command: "..." }` | `command:CMD` | the standard output of a command: `pass show ...`, `op read ...`, `sops -d ...`, `vault kv get ...` |
 
 References are resolved when a command needs the account. Plaintext

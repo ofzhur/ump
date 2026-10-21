@@ -248,3 +248,38 @@ func TestValidateAccountName(t *testing.T) {
 		}
 	}
 }
+
+// TestFileReferenceFollowsTheHome: a secret file saved under the local
+// directory before a migration, or under another machine's mirror, is
+// found in the home of this run, where the state brought it; a relative
+// reference is in the home.
+func TestFileReferenceFollowsTheHome(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, ".cache"))
+	mirror := filepath.Join(base, ".cache", "ump", "homes", "aaaaaaaaaaaa")
+	if err := os.MkdirAll(filepath.Join(mirror, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirror, "secrets", "hr.password"), []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SetHome(mirror)
+	defer SetHome("")
+	for _, ref := range []string{
+		"secrets/hr.password",
+		"~/.config/ump/secrets/hr.password",
+		"~/.cache/ump/homes/bbbbbbbbbbbb/secrets/hr.password",
+		filepath.Join(base, ".config", "ump", "secrets", "hr.password"),
+	} {
+		got, err := Value{File: ref}.Resolve()
+		if err != nil || got != "s3cret" {
+			t.Errorf("%s: %q, %v", ref, got, err)
+		}
+	}
+	// a file outside any home is what it says
+	if _, err := (Value{File: filepath.Join(base, "elsewhere", "hr.password")}).Resolve(); err == nil {
+		t.Error("a path outside the homes was redirected")
+	}
+}

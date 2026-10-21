@@ -107,7 +107,7 @@ Any setting of an account can be a reference instead of the value:
 | Form | Source |
 |---|---|
 | `{ env: NAME }` | the environment variable |
-| `{ file: PATH }` | the content of a file, trailing newline stripped; `~` is expanded |
+| `{ file: PATH }` | the content of a file, trailing newline stripped; `~` is expanded, a relative path is in the home (`secrets/NAME`), so it moves with a shared [state](state.md) |
 | `{ command: "..." }` | the standard output of a command, run with `sh -c` (`cmd /C` on Windows): `pass show ...`, `op read ...`, `sops -d ...`, `vault kv get ...` |
 
 The wizard writes `file` references to `~/.config/ump/secrets/ACCOUNT.KEY`

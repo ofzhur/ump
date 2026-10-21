@@ -113,6 +113,12 @@ The state holds secrets, the accounts' and UMP's key, in clear text,
 as `~/.config/ump` does; choose a backend accordingly (a private
 bucket, a Vault, a repository nobody else reads).
 
+The accounts' secret files (`secrets/NAME`) are part of the state and
+move with it. A reference written as `file: secrets/NAME` is in the
+home wherever it is; one written before a migration as
+`~/.config/ump/secrets/NAME`, or naming another machine's mirror, is
+found in the home too when that path does not exist on this machine.
+
 ## How the mirror works
 
 Before a command, ump lists the backend and downloads the files whose
