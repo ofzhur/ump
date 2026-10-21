@@ -110,7 +110,7 @@ ump
 │       ├── add      (a, new, create) [<name>] (--file <f>|--line <l>|--agent)   keep a public key under a name; asks on a terminal
 │       ├── edit     (e) [<name>]                      that key alone in your editor, or all of keys.yaml; checked afterwards
 │       ├── remove   (rm, d, delete) <name>
-│       └── roll     [--no-servers] [--yes]            a new key pair for UMP; every server ump installed gets it and loses the old one
+│       └── roll     [--no-servers] [--drop-old] [--yes]  a new key pair for UMP; every server ump installed gets it and loses the old one
 ├── completion
 └── version
 ```

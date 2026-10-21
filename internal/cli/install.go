@@ -312,7 +312,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	defer unlock()
 	// everything on the way is progress (stderr); stdout is for the result
-	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: true, unguarded: true, users: logins})
+	entry, err := a.bringToImage(cmd, m, prov, keys, keyPath, keyPaths, rescueURL, entryOptions{via: o.via, confirmed: true, quiet: true, stock: !o.dryRun, unguarded: true, users: logins})
 	if err != nil {
 		return err
 	}

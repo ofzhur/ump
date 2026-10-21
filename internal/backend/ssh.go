@@ -106,10 +106,11 @@ func (s *SSH) List(ctx context.Context) ([]Entry, error) {
 	var entries []Entry
 	for _, line := range strings.Split(string(out), "\n") {
 		sum, path, ok := strings.Cut(strings.TrimSpace(line), "  ")
-		if !ok || len(sum) < 16 {
+		path = strings.TrimPrefix(path, "./")
+		if !ok || len(sum) < 16 || !ValidPath(path) {
 			continue
 		}
-		entries = append(entries, Entry{Path: strings.TrimPrefix(path, "./"), Version: sum[:16]})
+		entries = append(entries, Entry{Path: path, Version: sum[:16]})
 	}
 	return entries, nil
 }

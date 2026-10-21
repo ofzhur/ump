@@ -300,7 +300,9 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 	}
 	remote := map[string]string{}
 	for _, e := range entries {
-		remote[e.Path] = e.Version
+		if backend.ValidPath(e.Path) {
+			remote[e.Path] = e.Version
+		}
 	}
 	for path, version := range remote {
 		local := filepath.Join(m.Dir, filepath.FromSlash(path))

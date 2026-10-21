@@ -181,6 +181,15 @@ fi
 # one boot only), rather than waiting for a hardware reset.
 cmdline="$cmdline panic=30"
 [ -n "$extra" ] && cmdline="$cmdline $extra"
+# The kernel takes 2048 bytes of command line (x86 and arm64), the
+# terminating NUL included, and cuts the rest without a word: the keys
+# would arrive broken and the rescue system be unreachable. Each
+# RSA-4096 key is about 1 KB in base64, so a few of them are enough.
+if [ "${#cmdline}" -gt 2047 ]; then
+	nkeys="$(printf '%s\n' "$keylist" | grep -c . || true)"
+	echo "the kernel command line would be ${#cmdline} bytes, more than the 2047 the kernel takes; the $nkeys authorized keys are most of it. Pass only the keys the rescue system needs: -k /dev/null and one -K per key (ed25519 keys are short). Nothing was changed" >&2
+	exit 1
+fi
 
 echo "==> interface $iface ($mac): $ip4 via ${gw4:-?}${ip6:+, $ip6 via ${gw6:-?}}; DNS $dns; hostname $host"
 if [ "$dry" = 1 ]; then

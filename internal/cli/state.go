@@ -635,6 +635,9 @@ func (a *app) newStateUnlockCmd() *cobra.Command {
 		Short: "Release a server's lock left behind by an ump that died",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.Trim(args[0], ". ") == "" {
+				return usageErrorf(cmd, "%q is not a server name", args[0])
+			}
 			st := a.stateStore()
 			if err := st.Backend.Unlock(cmd.Context(), args[0]); err != nil {
 				return fmt.Errorf("%s: %w", st.Backend, err)

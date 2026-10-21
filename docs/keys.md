@@ -53,13 +53,21 @@ every server ump installed, so treat it as a root key.
 
 When the private key may have leaked, or someone who could read it has
 left, `ump config key roll` makes a new pair and retires the current
-one: the new public key is put into the administrator's
-`authorized_keys` on every server ump installed, over SSH with the old
-key, and the old one is removed there. A server that cannot be reached
-keeps the old key and is named, with exit code 5, so that you add the
-new key by hand (`ump config key get`); the old pair stays next to the
-new one as `staging_ed25519.old` for that, until the next roll.
-`--no-servers` rolls the key alone. The providers that keep keys
+one. On every server ump installed it logs in as the administrator
+with the old key and, as root through sudo, replaces the old key with
+the new one in every account's `authorized_keys` that holds it (root,
+the administrator, any user given the key `ump`), options and comments
+kept; the administrator gets the new key in any case. An administrator
+without passwordless sudo has only its own file changed, and the server
+is named as possibly still holding the old key elsewhere. A server that
+cannot be reached keeps the old key and is named, with exit code 5, so
+that you add the new key by hand (`ump config key get`); the old pair
+stays next to the new one as `staging_ed25519.old` for that. It is
+deleted once every installed server has the new key and every account
+was listed; until then the next roll refuses, since it would lose the
+only key those servers take, and `--drop-old` deletes it when you are
+done with it. `--no-servers` rolls the key alone and keeps the old
+pair. The providers that keep keys
 (Hetzner Robot and Cloud, Vultr, Linode) still hold the old public key
 under its name: remove a leaked one there by hand; the new one is
 registered at the next rescue. Rescue systems already running keep
@@ -70,8 +78,8 @@ command asks on a terminal; without one, `--yes` is required.
 $ ump config key roll
 Replace UMP's key SHA256:... with a new one? 3 installed servers get the new key over SSH and lose the old one; the old pair is kept as ~/.config/ump/staging_ed25519.old. [y/N] y
 Rolled UMP's key: SHA256:... is the new one (was SHA256:..., kept at ~/.config/ump/staging_ed25519.old).
-  web-01 (203.0.113.10): the new key opens ump, the old one is gone
-  db-01 (203.0.113.11): the new key opens ump, the old one is gone
+  web-01 (203.0.113.10): the new key opens ump, the old one is replaced in /root/.ssh/authorized_keys, /home/ump/.ssh/authorized_keys
+  db-01 (203.0.113.11): the new key opens ump, the old one is replaced in /home/ump/.ssh/authorized_keys
   old-box (203.0.113.12): not reached as ump with the old key, keeps it; add the new key by hand: ...
 2 servers with the new key, 1 still with the old one (~/.config/ump/staging_ed25519.old).
 ```
@@ -131,7 +139,7 @@ ump config key add NAME --line 'ssh-... AAAA... comment'
 ump config key add NAME --agent               # what ssh-add -L lists, one name each
 ump config key edit [NAME]                    # your editor on that key alone, or on all of keys.yaml; checked afterwards
 ump config key remove NAME
-ump config key roll [--no-servers] [--yes]    # a new key pair for UMP, put onto every server ump installed
+ump config key roll [--no-servers] [--drop-old] [--yes]    # a new key pair for UMP, put onto every server ump installed
 ```
 
 `ump` is UMP's own key pair, kept as files, not an entry of

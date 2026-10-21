@@ -25,10 +25,13 @@ type Local struct {
 func (l *Local) String() string { return "file://" + l.Dir }
 
 // Excluded says which names of a home directory are never files of the
-// backend: locks, temporary files and the mirror's bookkeeping.
+// backend: locks, temporary files, the mirror's bookkeeping, and the
+// pointer to the backend with its own secrets (backend.yaml and
+// backend.*, next to the local configuration, which is the home when
+// the state is local).
 func Excluded(rel string) bool {
 	base := filepath.Base(rel)
-	return strings.HasPrefix(rel, ".locks") || strings.HasSuffix(base, ".tmp") || strings.HasSuffix(base, ".lock") || base == ".mirror.json" || base == ".DS_Store"
+	return strings.HasPrefix(rel, ".locks") || !strings.Contains(rel, "/") && strings.HasPrefix(rel, "backend.") || strings.HasSuffix(base, ".tmp") || strings.HasSuffix(base, ".lock") || base == ".mirror.json" || base == ".DS_Store"
 }
 
 func (l *Local) file(p string) (string, error) {
@@ -113,7 +116,7 @@ func (l *Local) List(ctx context.Context) ([]Entry, error) {
 			}
 			return nil
 		}
-		if Excluded(rel) {
+		if Excluded(rel) || !ValidPath(rel) {
 			return nil
 		}
 		data, err := os.ReadFile(path)

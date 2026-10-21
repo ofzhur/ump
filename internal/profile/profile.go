@@ -44,7 +44,7 @@ func (f *FirewallRef) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&f.Name)
 	case yaml.MappingNode:
 		f.Rules = &Firewall{}
-		return n.Decode(f.Rules)
+		return decodeStrict(n, f.Rules)
 	}
 	return fmt.Errorf("firewall: a firewall name or a firewall, not a %s", kindName(n.Kind))
 }
@@ -87,7 +87,7 @@ func (d *Disks) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&d.Name)
 	case yaml.MappingNode:
 		d.Layout = &Layout{}
-		return n.Decode(d.Layout)
+		return decodeStrict(n, d.Layout)
 	}
 	return fmt.Errorf("disks: a layout name or a layout, not a %s", kindName(n.Kind))
 }
@@ -165,7 +165,7 @@ func (r *UserRef) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&r.Name)
 	case yaml.MappingNode:
 		r.User = &User{}
-		return n.Decode(r.User)
+		return decodeStrict(n, r.User)
 	}
 	return fmt.Errorf("users: a user name or a user, not a %s", kindName(n.Kind))
 }
@@ -262,7 +262,7 @@ func (r *UserdataRef) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&r.Name)
 	case yaml.MappingNode:
 		r.Data = &Userdata{}
-		return n.Decode(r.Data)
+		return decodeStrict(n, r.Data)
 	}
 	return fmt.Errorf("userdata: a userdata name or a userdata, not a %s", kindName(n.Kind))
 }
@@ -467,7 +467,7 @@ func (a *Allow) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		type plain Allow
 		var p plain
-		if err := n.Decode(&p); err != nil {
+		if err := decodeStrict(n, &p); err != nil {
 			return err
 		}
 		*a = Allow(p)

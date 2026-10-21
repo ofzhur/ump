@@ -297,3 +297,27 @@ func TestDebianProfiles(t *testing.T) {
 		}
 	}
 }
+
+// TestInlineTyposRefused: a misspelt key inside an inline firewall,
+// user, layout or userdata, or a firewall rule, is an error like one at
+// the top of the file, not a silently dropped setting.
+func TestInlineTyposRefused(t *testing.T) {
+	base := "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [ump]}\n"
+	for _, c := range []struct{ name, yaml, want string }{
+		{"firewall", base + "firewall:\n  policy: drop\n  alow: [ssh]\n", "line 8: field alow not found in type profile.Firewall"},
+		{"rule", base + "firewall:\n  policy: drop\n  allow:\n    - {proto: tcp, port: \"22\", form: 10.0.0.0/8}\n", "field form not found in type profile.plain"},
+		{"user", "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [ump], suod: true}\n", "field suod not found in type profile.User"},
+		{"layout", "name: t\nos: ubuntu-26.04\nusers:\n  - {name: root, keys: [ump]}\ndisks:\n  prats: []\n", "field prats not found in type profile.Layout"},
+	} {
+		_, err := Parse([]byte(c.yaml))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
+	}
+	if _, err := Parse([]byte(base + "firewall:\n  policy: drop\n  allow:\n    - ssh\n    - {proto: tcp, port: \"443\", from: 10.0.0.0/8}\n")); err != nil {
+		t.Errorf("a correct inline firewall: %v", err)
+	}
+	if _, err := ParseFirewalls([]byte("firewalls:\n  web:\n    allow:\n      - {proto: tcp, port: \"80\", form: 10.0.0.0/8}\n")); err == nil || !strings.Contains(err.Error(), "field form not found") {
+		t.Errorf("firewalls.yaml rule typo: %v", err)
+	}
+}

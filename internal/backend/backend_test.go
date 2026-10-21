@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -157,6 +158,8 @@ func TestSSH(t *testing.T) {
 		return out, 0, err
 	}
 	exercise(t, &SSH{Host: "ops@jump", Dir: filepath.Join(t.TempDir(), "home"), Run: run})
+	dir := t.TempDir()
+	dotfilesSkipped(t, &SSH{Host: "ops@jump", Dir: dir, Run: run}, dir)
 }
 
 type obj struct {
@@ -563,5 +566,76 @@ func TestOpen(t *testing.T) {
 	}
 	if _, err := Open("vault://h:8200/kv/p", Credentials{}); err == nil || !strings.Contains(err.Error(), "token") {
 		t.Errorf("vault without token: %v", err)
+	}
+}
+
+// TestLocalUnlockDots: a key of dots or nothing must not reach the
+// locks directory or the home.
+func TestLocalUnlockDots(t *testing.T) {
+	dir := t.TempDir()
+	b := &Local{Dir: dir}
+	ctx := context.Background()
+	keep := filepath.Join(dir, "servers.yaml")
+	if err := os.WriteFile(keep, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Lock(ctx, "fake/1", LockInfo{Key: "fake/1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"..", ".", "", "..."} {
+		if err := b.Lock(ctx, k, LockInfo{Key: k}); err != nil {
+			t.Fatalf("lock %q: %v", k, err)
+		}
+		if err := b.Unlock(ctx, k); err != nil {
+			t.Fatalf("unlock %q: %v", k, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("the home lost a file: %v", err)
+	}
+	locks, err := b.Locks(ctx)
+	if err != nil || len(locks) != 1 || locks[0].Key != "fake/1" {
+		t.Fatalf("locks = %+v, %v; want fake/1 alone", locks, err)
+	}
+	for _, k := range []string{"..", ".", "", "a.b"} {
+		if got := unlockKey(lockKey(k)); got != k {
+			t.Errorf("unlockKey(lockKey(%q)) = %q", k, got)
+		}
+	}
+}
+
+func TestLocalDotfiles(t *testing.T) {
+	dir := t.TempDir()
+	dotfilesSkipped(t, &Local{Dir: dir}, dir)
+}
+
+// dotfilesSkipped: what a person puts next to the state (a .gitkeep, a
+// .git directory, .DS_Store) is not listed, since Read refuses it and a
+// pull would fail on every command.
+func dotfilesSkipped(t *testing.T, b Backend, dir string) {
+	t.Helper()
+	for f, body := range map[string]string{"state.yaml": "servers: {}\n", ".gitkeep": "", ".git/HEAD": "ref: x\n", "profiles/.keep": ""} {
+		p := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := b.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, e := range entries {
+		paths = append(paths, e.Path)
+		if _, _, err := b.Read(context.Background(), e.Path); err != nil {
+			t.Errorf("listed but not readable: %s: %v", e.Path, err)
+		}
+	}
+	sort.Strings(paths)
+	if got := strings.Join(paths, ","); got != "profiles/.keep,state.yaml" {
+		t.Errorf("%s lists %s", b, got)
 	}
 }

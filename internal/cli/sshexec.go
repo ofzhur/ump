@@ -6,15 +6,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // sshRunner runs the local ssh client with argv (argv[0] is "ssh") and
-// returns its exit status. With interactive set, the process is replaced
-// by ssh where the platform allows it, so the terminal is handed over.
+// returns its exit status. With interactive set, ssh gets the terminal.
 type sshRunner func(argv []string, interactive bool) (int, error)
 
 // runSSH is the real sshRunner.
@@ -23,10 +20,8 @@ func runSSH(argv []string, interactive bool) (int, error) {
 	if err != nil {
 		return 0, errors.New("no ssh client found in PATH")
 	}
-	if interactive && runtime.GOOS != "windows" {
-		// Only returns on failure.
-		return 0, syscall.Exec(path, argv, os.Environ())
-	}
+	// a child process, never an exec: what ump does after the session
+	// (releasing a lock, the push of the home) must still run
 	cmd := exec.Command(path, argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err = cmd.Run()

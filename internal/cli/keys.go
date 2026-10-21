@@ -556,18 +556,21 @@ reinstall.`,
 // new public key onto every server ump installed, taking the old one
 // away there.
 func (a *app) newKeyRollCmd() *cobra.Command {
-	var yes, noServers bool
+	var yes, noServers, dropOld bool
 	cmd := &cobra.Command{
-		Use:   "roll [--no-servers] [--yes]",
+		Use:   "roll [--no-servers] [--drop-old] [--yes]",
 		Short: "Replace UMP's own key pair with a new one, on every server ump installed",
 		Long: `Generate a new key pair for UMP and retire the current one, for when
 it may have leaked or someone who could read it has left. The new key
-goes into every server ump installed (the administrator's
-authorized_keys, over SSH with the old key), and the old key is removed
-there; a server that cannot be reached keeps the old key and is named,
-so that you add the new key by hand (ump config key get ump). The old
+goes into every server ump installed, over SSH with the old key as the
+administrator: through sudo, the old key becomes the new one in every
+account's authorized_keys that holds it; a server that cannot be
+reached keeps the old key and is named, so that you add the new key by
+hand (ump config key get ump). The old
 pair is kept next to the new one as staging_ed25519.old, for exactly
-that, until the next roll; delete it when every server has the new key.
+that, and deleted once every server has the new key. While it is still
+there, the next roll refuses, since it would lose the only key those
+servers take; --drop-old deletes it when you are done with it.
 
 --no-servers rolls the key alone and touches no server. The providers
 that keep keys (Hetzner Robot and Cloud, Vultr, Linode) still have the
@@ -576,7 +579,8 @@ by hand, the new one is registered at the next rescue. The keys you
 keep under names are not affected. Asks for confirmation on a terminal;
 without one, --yes is required.`,
 		Example: `  ump config key roll
-  ump config key roll --no-servers`,
+  ump config key roll --no-servers
+  ump config key roll --drop-old`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := a.loadConfig()
@@ -587,7 +591,13 @@ without one, --yes is required.`,
 			if err != nil {
 				return err
 			}
+			path := old.Path
+			oldPath := path + ".old"
+			if _, err := os.Stat(oldPath); err == nil && !dropOld {
+				return fmt.Errorf("the key of a previous roll is still at %s, for servers that did not get the new key; a new roll would delete it. Put the current key on those servers (ump config key get ump), then roll with --drop-old", config.AbbreviateHome(oldPath))
+			}
 			ctx := cmd.Context()
+			failed := 0
 			// the servers first, so that the question can name them
 			type target struct {
 				m     provider.Machine
@@ -599,7 +609,9 @@ without one, --yes is required.`,
 				if err != nil {
 					return err
 				}
-				machines, _, failed, total, err := a.listedMachines(cmd)
+				var machines []provider.Machine
+				var total int
+				machines, _, failed, total, err = a.listedMachines(cmd)
 				if err != nil {
 					return err
 				}
@@ -612,6 +624,7 @@ without one, --yes is required.`,
 						continue
 					}
 					if m.IPv4 == "" && m.IPv6 == "" {
+						failed++ // may hold the old key, so it stays
 						continue
 					}
 					targets = append(targets, target{m, s.Installed.Admin})
@@ -622,8 +635,6 @@ without one, --yes is required.`,
 				return err
 			}
 			// the new pair, then the swap: the old one stays as .old
-			path := old.Path
-			oldPath := path + ".old"
 			newKey, err := sshkey.Generate(path+".new", sshkey.DefaultComment())
 			if err != nil {
 				return err
@@ -644,29 +655,53 @@ without one, --yes is required.`,
 				return err
 			}
 			fmt.Fprintf(a.stdout, "Rolled UMP's key: %s is the new one (was %s, kept at %s).\n", newKey.FingerprintSHA256(), old.SHA256, config.AbbreviateHome(oldPath))
+			// the old pair goes once nothing can still need it
+			dropKept := func() {
+				if noServers {
+					return
+				}
+				if failed > 0 {
+					fmt.Fprintf(a.stdout, "The old pair stays at %s: %s could not be checked and may still take only the old key.\n", config.AbbreviateHome(oldPath), plural(failed, "account or server"))
+					return
+				}
+				for _, f := range []string{oldPath, oldPath + ".pub"} {
+					os.Remove(f)
+				}
+				fmt.Fprintf(a.stdout, "Every installed server has the new key; the old pair is deleted.\n")
+			}
 			if len(targets) == 0 {
 				if !noServers {
 					fmt.Fprintln(a.stdout, "No installed server to update.")
 				}
+				dropKept()
 				return nil
 			}
-			// every installed server: add the new line, drop the old,
-			// check that the new key gets in
-			swap := "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; f=~/.ssh/authorized_keys; new=" + shellJoin([]string{newKey.Line()}) + "; old=" + shellJoin([]string{old.PublicKey}) +
-				`; grep -qxF "$new" "$f" || echo "$new" >> "$f"; grep -vxF "$old" "$f" > "$f.ump"; cat "$f.ump" > "$f"; rm -f "$f.ump"`
+			// every installed server: the old key becomes the new one in
+			// every authorized_keys that holds it, then a check that the
+			// new key gets in
+			swap := rollScript(old.PublicKey, newKey.Line())
 			done, kept := 0, 0
 			for _, t := range targets {
 				addr := t.m.IPv4
 				if addr == "" {
 					addr = t.m.IPv6
 				}
-				var errb bytes.Buffer
+				var outb, errb bytes.Buffer
 				argv := withSSHOptions(sshArgs(t.admin, addr, []string{oldPath}, true, true, []string{swap}), batchOptions(10*time.Second)...)
-				code, err := a.sshExec(ctx, argv, nil, io.Discard, &errb)
+				code, err := a.sshExec(ctx, argv, nil, &outb, &errb)
 				if err != nil || code != 0 {
 					kept++
 					fmt.Fprintf(a.stdout, "  %s (%s): not reached as %s with the old key, keeps it; add the new key by hand: %s\n", t.m.Name, addr, t.admin, strings.TrimSpace(errb.String()))
 					continue
+				}
+				var files []string
+				noSudo := false
+				for _, l := range strings.Split(outb.String(), "\n") {
+					if f, ok := strings.CutPrefix(l, "rolled "); ok {
+						files = append(files, f)
+					} else if l == "nosudo" {
+						noSudo = true
+					}
 				}
 				argv = withSSHOptions(sshArgs(t.admin, addr, []string{path}, true, true, []string{"id -u; echo rolled"}), batchOptions(10*time.Second)...)
 				if code, err := a.sshExec(ctx, argv, nil, io.Discard, io.Discard); err != nil || code != 0 {
@@ -674,14 +709,26 @@ without one, --yes is required.`,
 					fmt.Fprintf(a.stdout, "  %s (%s): the new key was added, but does not open %s@%s; the old key may still be there\n", t.m.Name, addr, t.admin, addr)
 					continue
 				}
+				where := "the old one is gone"
+				if len(files) > 0 {
+					where = "the old one is replaced in " + strings.Join(files, ", ")
+				}
+				if noSudo {
+					kept++
+					fmt.Fprintf(a.stdout, "  %s (%s): the new key opens %s, %s; %s has no sudo without a password, so other accounts there may still hold the old key\n", t.m.Name, addr, t.admin, where, t.admin)
+					continue
+				}
 				done++
-				fmt.Fprintf(a.stdout, "  %s (%s): the new key opens %s, the old one is gone\n", t.m.Name, addr, t.admin)
+				fmt.Fprintf(a.stdout, "  %s (%s): the new key opens %s, %s\n", t.m.Name, addr, t.admin, where)
 			}
 			fmt.Fprintf(a.stdout, "%s with the new key", plural(done, "server"))
 			if kept > 0 {
 				fmt.Fprintf(a.stdout, ", %d still with the old one (%s)", kept, config.AbbreviateHome(oldPath))
 			}
 			fmt.Fprintln(a.stdout, ".")
+			if kept == 0 {
+				dropKept()
+			}
 			if kept > 0 {
 				return withExit(exitUnreachable, fmt.Errorf("%d of %d servers keep the old key", kept, len(targets)))
 			}
@@ -689,6 +736,38 @@ without one, --yes is required.`,
 		},
 	}
 	cmd.Flags().BoolVar(&noServers, "no-servers", false, "roll the key alone; no server is touched")
+	cmd.Flags().BoolVar(&dropOld, "drop-old", false, "delete the key a previous roll kept")
 	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	return cmd
+}
+
+// rollScript is what a key roll runs on a server as its administrator:
+// as root (directly or with sudo) the old key becomes the new one in
+// every account's authorized_keys that holds it, options and comments
+// kept, and each such file is named ("rolled FILE"); without sudo
+// ("nosudo") only the administrator's own. The administrator's file
+// gets the new line in any case, for the check that follows.
+func rollScript(oldLine, newLine string) string {
+	inner := rollFiles(oldLine, newLine, `$( (getent passwd 2>/dev/null || cat /etc/passwd) | cut -d: -f6 | sort -u)`)
+	own := rollFiles(oldLine, newLine, `"$HOME"`)
+	return "# ump key roll\numask 077; " +
+		`if [ "$(id -u)" = 0 ]; then sh -c ` + shellQuote(inner) +
+		`; elif sudo -n true 2>/dev/null; then sudo -n sh -c ` + shellQuote(inner) +
+		`; else echo nosudo; sh -c ` + shellQuote(own) + `; fi; ` +
+		`mkdir -p ~/.ssh; f=~/.ssh/authorized_keys; touch "$f"; grep -qF ` + shellQuote(keyBlob(newLine)) + ` "$f" || echo ` + shellQuote(newLine) + ` >> "$f"`
+}
+
+// rollFiles replaces the old key's blob with the new one's in the
+// authorized_keys files under homes (a shell word list).
+func rollFiles(oldLine, newLine, homes string) string {
+	return "old=" + shellQuote(keyBlob(oldLine)) + "; new=" + shellQuote(keyType(newLine)+" "+keyBlob(newLine)) + "; oldt=" + shellQuote(keyType(oldLine)+" "+keyBlob(oldLine)) +
+		`; for h in ` + homes + `; do for f in "$h/.ssh/authorized_keys" "$h/.ssh/authorized_keys2"; do [ -f "$f" ] && grep -qF "$old" "$f" || continue; sed "s|$oldt|$new|g" "$f" > "$f.ump" && cat "$f.ump" > "$f"; rm -f "$f.ump"; echo "rolled $f"; done; done`
+}
+
+// keyBlob is the second field of a public key line, the key itself.
+func keyBlob(line string) string {
+	if f := strings.Fields(line); len(f) > 1 {
+		return f[1]
+	}
+	return ""
 }

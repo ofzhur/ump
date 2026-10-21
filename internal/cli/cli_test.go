@@ -387,6 +387,9 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	inProviderRescue := fakePower.rescue["fake/1"]
 	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
 	switch {
+	case strings.HasPrefix(cmd, "# ump key roll\n"):
+		e.keyAdds = append(e.keyAdds, "roll")
+		return "rolled /root/.ssh/authorized_keys\nrolled /home/ump/.ssh/authorized_keys\n", "", 0
 	case strings.HasPrefix(cmd, "umask 077; mkdir -p ~/.ssh"):
 		for _, a := range argv {
 			if strings.HasSuffix(a, "@203.0.113.10") {
@@ -2812,6 +2815,12 @@ func TestReinstallWithoutRescueTakesTheStockWay(t *testing.T) {
 	resetFakePower()
 	e.stockRoot = true
 	defer func() { e.stockRoot = false }()
+	// a dry run never takes the provider's reinstall, which erases
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run")
+	if code == 0 || len(fakePower.actions) != 0 || !strings.Contains(errOut, "Nothing was changed") {
+		t.Errorf("dry run: code %d, actions %v, %q", code, fakePower.actions, errOut)
+	}
+	resetFakePower()
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes")
 	if code != 0 {
 		t.Fatalf("stock way: code %d, %q", code, errOut)
@@ -3541,9 +3550,18 @@ func TestConfigState(t *testing.T) {
 	if _, errOut, code := e.run("", false, "config", "state", "migrate"); code != 2 || !strings.Contains(errOut, "--to URL is required") {
 		t.Errorf("migrate without --to: code %d, %q", code, errOut)
 	}
+	// a backend secret saved by an earlier setup stays where it is
+	if err := os.WriteFile(filepath.Join(local, "backend.secret_key"), []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	out, _, code = e.run("", false, "config", "state", "migrate", "--to", "file://"+remote)
 	if code != 0 || !strings.Contains(out, "files to file://"+remote+" and wrote "+filepath.Join(local, "backend.yaml")) {
 		t.Errorf("migrate: code %d\n%s", code, out)
+	}
+	for _, f := range []string{"backend.secret_key", "backend.yaml"} {
+		if _, err := os.Stat(filepath.Join(remote, f)); err == nil {
+			t.Errorf("%s went to the backend", f)
+		}
 	}
 	for _, f := range []string{"state.yaml", "profiles/db.yaml", "profiles/ubuntu-26.04.yaml", "profiles/users.yaml"} {
 		if _, err := os.Stat(filepath.Join(remote, f)); err != nil {
@@ -4588,9 +4606,12 @@ func TestKeyRoll(t *testing.T) {
 		t.Errorf("the key changed without confirmation")
 	}
 
-	// the roll: new pair, old kept as .old, the server gets the new line and loses the old
+	// the roll: new pair, the server gets the new key in place of the
+	// old one in every account, and the old pair goes as nothing needs it
 	e.keyAdds = nil
 	e.directSudo = true
+	// one account, listed: nothing is left that could need the old key
+	e.write("accounts:\n  one:\n    type: fake\n    login: bob\n    password: {env: FAKE_PASS}\n")
 	calls := len(e.remoteCalls)
 	out, errOut, code := e.run("", false, "config", "key", "roll", "--yes")
 	if code != 0 {
@@ -4599,23 +4620,23 @@ func TestKeyRoll(t *testing.T) {
 	newPub, _ := os.ReadFile(keyPath + ".pub")
 	newLine := strings.TrimSpace(string(newPub))
 	keptPub, _ := os.ReadFile(keyPath + ".old.pub")
-	if newLine == oldLine || strings.TrimSpace(string(keptPub)) != oldLine {
+	if newLine == oldLine || len(keptPub) != 0 {
 		t.Errorf("keys after the roll: new %q, kept %q, old %q", newLine, string(keptPub), oldLine)
 	}
-	if _, err := os.Stat(keyPath + ".old"); err != nil {
-		t.Errorf("no .old private key: %v", err)
+	if _, err := os.Stat(keyPath + ".old"); err == nil {
+		t.Errorf(".old private key left after every server got the new one")
 	}
-	if !strings.Contains(out, "Rolled UMP's key: SHA256:") || !strings.Contains(out, "kept at ") || !strings.Contains(out, "web-01 (203.0.113.10): the new key opens ump, the old one is gone") || !strings.Contains(out, "1 server with the new key.") {
+	if !strings.Contains(out, "Rolled UMP's key: SHA256:") || !strings.Contains(out, "web-01 (203.0.113.10): the new key opens ump, the old one is replaced in /root/.ssh/authorized_keys, /home/ump/.ssh/authorized_keys") || !strings.Contains(out, "1 server with the new key.") || !strings.Contains(out, "the old pair is deleted") {
 		t.Errorf("roll output:\n%s", out)
 	}
 	// the swap went over SSH as ump with the old key, and names both lines
 	var swap []string
 	for _, argv := range e.remoteCalls[calls:] {
-		if cmd := argv[len(argv)-1]; strings.HasPrefix(cmd, "umask 077; mkdir -p ~/.ssh") {
+		if cmd := argv[len(argv)-1]; strings.HasPrefix(cmd, "# ump key roll\n") {
 			swap = argv
 		}
 	}
-	if swap == nil || !strings.Contains(strings.Join(swap, " "), keyPath+".old ") || !strings.Contains(swap[len(swap)-1], "new="+shellJoin([]string{newLine})) || !strings.Contains(swap[len(swap)-1], "old="+shellJoin([]string{oldLine})) {
+	if swap == nil || !strings.Contains(strings.Join(swap, " "), keyPath+".old ") || !strings.Contains(swap[len(swap)-1], keyBlob(newLine)) || !strings.Contains(swap[len(swap)-1], keyBlob(oldLine)) || !strings.Contains(swap[len(swap)-1], "sudo -n sh -c") {
 		t.Errorf("swap command: %q", swap)
 	}
 	// list and get show the new key
@@ -4623,7 +4644,7 @@ func TestKeyRoll(t *testing.T) {
 		t.Errorf("get after the roll:\n%s", out)
 	}
 
-	// --no-servers touches no server; a second roll replaces the .old
+	// --no-servers touches no server and keeps the old pair
 	calls = len(e.remoteCalls)
 	if out, _, code := e.run("", false, "config", "key", "roll", "--yes", "--no-servers"); code != 0 || len(e.remoteCalls) != calls || !strings.Contains(out, "Rolled UMP's key") || strings.Contains(out, "web-01") {
 		t.Errorf("roll --no-servers: code %d, calls %d\n%s", code, len(e.remoteCalls)-calls, out)
@@ -4631,11 +4652,19 @@ func TestKeyRoll(t *testing.T) {
 	if keptPub, _ := os.ReadFile(keyPath + ".old.pub"); strings.TrimSpace(string(keptPub)) != newLine {
 		t.Errorf(".old after the second roll is not the previous key")
 	}
+	// which a third roll does not delete unless told to
+	if _, errOut, code := e.run("", false, "config", "key", "roll", "--yes"); code == 0 || !strings.Contains(errOut, "the key of a previous roll is still at") || !strings.Contains(errOut, "--drop-old") {
+		t.Errorf("roll over a kept .old: code %d, %q", code, errOut)
+	}
+	if keptPub, _ := os.ReadFile(keyPath + ".old.pub"); strings.TrimSpace(string(keptPub)) != newLine {
+		t.Errorf("the refused roll touched .old")
+	}
 
 	// a server the old key does not open keeps it, named, exit 5
 	e.directSudo = false
 	e.umpKeyDenied = true
-	out, errOut, code = e.run("", false, "config", "key", "roll", "--yes")
+	e.write(testConfig)
+	out, errOut, code = e.run("", false, "config", "key", "roll", "--yes", "--drop-old")
 	if code != 5 || !strings.Contains(out, "web-01 (203.0.113.10): the new key was added, but does not open ump@203.0.113.10") && !strings.Contains(out, "not reached as ump with the old key") || !strings.Contains(errOut, "1 of 1 servers keep the old key") {
 		t.Errorf("roll with a server that refuses: code %d, %q\n%s", code, errOut, out)
 	}

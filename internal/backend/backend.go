@@ -70,12 +70,28 @@ type Backend interface {
 }
 
 // lockKey makes a lock key safe for a file or object name.
+// A key that is empty or only dots would name the locks directory or
+// the home itself, so its dots are encoded too.
 func lockKey(key string) string {
+	if strings.Trim(key, ".") == "" {
+		return "%" + strings.Repeat("%2E", len(key))
+	}
 	return strings.NewReplacer("/", "%2F", "\\", "%5C", ":", "%3A", " ", "%20").Replace(key)
 }
 
 func unlockKey(name string) string {
+	if rest, ok := strings.CutPrefix(name, "%"); ok && strings.ReplaceAll(rest, "%2E", "") == "" {
+		return strings.ReplaceAll(rest, "%2E", ".")
+	}
 	return strings.NewReplacer("%2F", "/", "%5C", "\\", "%3A", ":", "%20", " ").Replace(name)
+}
+
+// ValidPath says whether p is a path of the state: a listing skips the
+// others (a .gitkeep, .git or .DS_Store a person put next to it), which
+// Read and Write refuse.
+func ValidPath(p string) bool {
+	_, err := cleanPath(p)
+	return err == nil
 }
 
 // cleanPath rejects paths that leave the home.
