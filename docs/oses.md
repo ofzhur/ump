@@ -11,6 +11,8 @@ CachyOS, Arch with packages built for newer CPUs (experimental). They work on am
 arm64 (Arch Linux and CachyOS on amd64 only), boot from UEFI and,
 on amd64, from BIOS, and are meant to be used as they are: pick one, and
 the machine is a well-kept server a few minutes later.
+How they compare on the same hardware, and how long each takes to
+install: [benchmarks](benchmarks.md).
 
 ```console
 $ ump server reinstall web-01                          # the default: Ubuntu 26.04
