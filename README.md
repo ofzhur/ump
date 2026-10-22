@@ -175,6 +175,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
 | [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), what every system gets, how each is installed, NixOS configuration and userdata as modules |
+| [Benchmarks](docs/benchmarks.md) | the eight systems on one bare-metal server: installation times, tuning, CPU, memory, disk, network and HTTP results |
 | [Base images](images/base/README.md) | the Ubuntu and Debian systems UMP builds, what they hold and their defaults |
 
 **Reference**
