@@ -370,6 +370,8 @@ array and volume per disk, the network, the users, userdata and
 firewall, and the run list the server is [provisioned](provisioning.md)
 with afterwards, without touching a disk.
 
+### Overrides
+
 The flags of `ump server reinstall` override a profile for one
 installation:
 
@@ -381,10 +383,32 @@ installation:
 | `--timezone ZONE` | `timezone` |
 | `--ipv6` | `kernel.ipv6: true` |
 | `--mitigations` | `kernel.mitigations: true` |
-| `--ssh-key FILE` | adds the file's keys to the administrator (repeatable) |
+| `--user NAME:KEY[,KEY...]`, `--user NAME` | `users`, with these users in order (repeatable), each with sudo: with those key references, or as in `users.yaml` (below) |
+| `--userdata NAME[,NAME...]` | `userdata`, with these entries of `userdata.yaml` in order (repeatable) |
+| `--ssh-key REF` | adds the reference's keys to the administrator (repeatable) |
 | `--disks /dev/sda,/dev/sdb` | the disks the layout is applied to (default: every disk of the server) |
 | `--hostname NAME` | the hostname (default: the server's name at the provider) |
-| `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable): `--set kernel.extra=quiet`, `--set users[0].shell=/bin/bash`, `--set users[ump].keys='[ump, agent]'`, `--set 'userdata=[ubuntu, web]'`, `--set 'users[+]={name: ops, sudo: true, keys: [local]}'`, `--set network.rename=false`; an unknown field is refused like in a profile file |
+| `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable) |
+
+Every other field has no flag of its own and is overridden with
+`--set`: `--set kernel.extra=quiet`, `--set users[0].shell=/bin/bash`,
+`--set users[ump].keys='[ump, agent]'`, `--set 'users[+]={name: ops,
+sudo: true, keys: [local]}'`, `--set 'userdata[+]={name: x, script:
+"..."}'`, `--set userdata=[]` (no userdata), `--set
+network.rename=false`; an unknown field is refused like in a profile
+file. `--set` comes after the other flags, in the order given, so it
+changes what they made: `--user ops:local --set users[ops].shell=/bin/zsh`.
+
+`--user` replaces the profile's users: `--user oleg:local,~/.ssh/oleg.pub`
+is `oleg` with those [key references](#keys) (split from the name at the
+first `:`, from each other at `,`), `--user ops` is `ops` as it is in
+`users.yaml` (an error when it is not there). Each gets sudo without a
+password. The first, `root` aside, is the administrator, the user ump
+logs in as, and gets UMP's key (`ump`) when its references lack it, so
+that ump can check and provision the new system; `--ssh-key` adds to its
+keys. `root` follows [its rules](#the-administrator-and-root): it takes
+its keys alone, no sudo, and is the administrator only when it is the
+only `--user`. A name given twice is an error.
 
 The resolved profile travels to the installer as a JSON specification and
 stays on the installed system as `/etc/ump/spec.json` (mode 0600);

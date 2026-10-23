@@ -46,6 +46,11 @@ terminal the table shows each account's servers as soon as it answered,
 with the accounts still being asked under it. An account whose API fails
 is reported on stderr and the others are still listed.
 
+OS and GROUPS are the system ump installed last and the groups it put
+the server in (from the state); -o wide adds the ID, the PROFILE and
+the disk LAYOUT of that installation, IPv6, product, kind and the
+attributes; -o json and -o yaml have every field.
+
 Every listing is recorded in the cache, as a new snapshot only when
 something changed. A listing a provider confirmed less than the cache TTL
 ago (cache_ttl in the configuration or UMP_CACHE_TTL; 5m by default, 0

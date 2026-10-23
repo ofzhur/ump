@@ -138,7 +138,15 @@ c ud ls`); see the [CLI reference](cli.md#ump-config).
 ## Using userdata
 
 A profile names the entries in `userdata`, in order; `ump server
-reinstall --set 'userdata=[ubuntu, web]'` overrides the list for one
-installation, and `--set 'userdata[+]={name: x, script: "..."}'`
-appends an inline entry. `ump server reinstall --dry-run` lists what
-would run. A profile without `userdata` runs nothing.
+reinstall --userdata ubuntu,web` (repeatable) replaces the list for one
+installation with entries of `userdata.yaml`, checked like the names in
+a profile: each exists, is given once and is of the type the system
+takes. `--set` comes after it: `--set 'userdata[+]={name: x, script:
+"..."}'` appends an inline entry, `--set userdata=[]` runs none (see
+[overrides](profiles.md#overrides)). `ump server reinstall --dry-run`
+lists what would run. A profile without `userdata` runs nothing.
+
+```console
+$ ump server reinstall web-01 --userdata ubuntu,web
+$ ump server reinstall web-01 --userdata ubuntu --set 'userdata[+]={name: tools, script: "apt-get install -y htop"}'
+```
