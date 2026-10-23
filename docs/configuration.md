@@ -29,10 +29,10 @@ the rest is optional.
 ├── cache/                   the listing cache (cache_ttl, ump server list --diff, --cached)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)
 ├── staging_ed25519          UMP's own SSH key, generated on first use
-├── staging_ed25519.pub
-└── update-check.json        when the storage was last asked for a newer release, and what it said
+└── staging_ed25519.pub
 
 ~/.cache/ump/listings/       snapshots of server listings, for ump server list --diff; safe to delete
+~/.cache/ump/update-check.json  when this machine last asked the storage for a newer release, and what it said
 ```
 
 `$XDG_CONFIG_HOME/ump` and `$XDG_CACHE_HOME/ump` are used when those
