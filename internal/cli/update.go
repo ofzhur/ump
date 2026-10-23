@@ -25,14 +25,19 @@ import (
 // updateCheckInterval is how often the storage is asked.
 const updateCheckInterval = 24 * time.Hour
 
-// updateState is what the last check found, kept in the configuration
-// directory.
+// updateState is what the last check found, kept in the local cache
+// directory: it belongs to this machine's binary, so it stays out of a
+// home shared through a backend, where every machine would rewrite it.
 type updateState struct {
 	Checked time.Time `json:"checked"`
 	Latest  string    `json:"latest"`
 }
 
-func updateStatePath() string { return filepath.Join(config.UserConfigDir(), "update-check.json") }
+func updateStatePath() string { return filepath.Join(config.CacheDir(), "update-check.json") }
+
+// oldUpdateStatePath is where releases up to v0.4.4 kept it: in the home,
+// so a backend shared it.
+func oldUpdateStatePath() string { return filepath.Join(config.UserConfigDir(), "update-check.json") }
 
 // updateHint runs after a successful command: at most once a day, and
 // never for the commands that do not touch anything, with the check
@@ -49,6 +54,8 @@ func (a *app) updateHint(cmd *cobra.Command) {
 	if err != nil || (cfg.Updates != nil && !*cfg.Updates) {
 		return
 	}
+	// the home's copy goes; with a backend, the next push removes it there
+	os.Remove(oldUpdateStatePath())
 	var state updateState
 	if data, err := os.ReadFile(updateStatePath()); err == nil {
 		json.Unmarshal(data, &state)
