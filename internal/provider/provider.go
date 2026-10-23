@@ -81,6 +81,11 @@ type Machine struct {
 	// --group and ump server provision; from the state, for a machine
 	// ump installed.
 	Groups []string `json:"groups,omitempty" yaml:"groups,omitempty"`
+	// Profile and Layout are the profile and the disk layout of the
+	// installation ump made last (inline: the profile carried its own
+	// layout); from the state, like OS.
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Layout  string `json:"layout,omitempty" yaml:"layout,omitempty"`
 }
 
 // Price is what a machine costs per period.

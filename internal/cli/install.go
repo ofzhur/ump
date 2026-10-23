@@ -34,6 +34,8 @@ type installOptions struct {
 	timezone    string
 	disks       string
 	keyFiles    []string
+	users       []string
+	userdata    []string
 	sets        []string
 	ipv6        bool
 	mitigations bool
@@ -72,7 +74,11 @@ group, gives the sudo user ump UMP's key and your ~/.ssh/id_*.pub keys
 kernel command line with mitigations=off and ipv6.disable=1;
 --mitigations and --ipv6 keep them on (install/README.md says how to
 turn them on later). The other flags override the profile for this one
-installation.
+installation: --user replaces its users, each with sudo (NAME:KEY,...
+with those key references, NAME alone as in users.yaml; the first, root
+aside, is the administrator, the user ump logs in as, and gets UMP's
+key; root takes its keys alone), --userdata its userdata, by name from
+userdata.yaml, and --set FIELD=VALUE any field, after the other flags.
 
 After the first boot ump provisions the server from the infrastructure
 repository it runs in: ansible.cfg and inventory/ in the current
@@ -99,6 +105,7 @@ after the reboot). Asks for confirmation on a terminal; without one,
 		Example: `  ump server reinstall web-01 --dry-run
   ump server reinstall web-01 --group web
   ump server reinstall web-01 --profile web --group web,monitoring --yes
+  ump server reinstall web-01 --user oleg:local --user deploy --userdata ubuntu,web
   ump server reinstall lab-01 --no-provision`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -114,7 +121,9 @@ after the reboot). Asks for confirmation on a terminal; without one,
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
 	sub.Flags().StringArrayVar(&o.keyFiles, "ssh-key", nil, "another key for the administrator of the new system and the rescue system on the way: a named key, local, agent, a file or a key line (repeatable)")
-	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, userdata='[ubuntu, web]'; repeatable)")
+	sub.Flags().StringArrayVar(&o.users, "user", nil, "a user of the new system, with sudo, instead of the profile's: NAME:KEY[,KEY...] with key references (ump, local, agent, a named key, a file, a key line), or NAME from users.yaml; the first, root aside, is the administrator and gets UMP's key (repeatable)")
+	sub.Flags().StringArrayVar(&o.userdata, "userdata", nil, "the userdata instead of the profile's, by name from userdata.yaml, in order (repeatable, or comma-separated)")
+	sub.Flags().StringArrayVar(&o.sets, "set", nil, "override any field of the profile, after the other flags, FIELD=VALUE in YAML (kernel.extra=quiet, users[0].shell=/bin/bash, userdata='[ubuntu, web]'; repeatable)")
 	sub.Flags().BoolVar(&o.ipv6, "ipv6", false, "keep IPv6 on, whatever the profile says")
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")
@@ -127,11 +136,10 @@ after the reboot). Asks for confirmation on a terminal; without one,
 	return sub
 }
 
-// installResult is what ump install reports.
+// installResult is what ump install reports: the machine with the os,
+// profile, layout and groups of this installation.
 type installResult struct {
 	provider.Machine `yaml:",inline"`
-	Profile          string `json:"profile" yaml:"profile"`
-	Layout           string `json:"layout" yaml:"layout"`
 	Hostname         string `json:"hostname" yaml:"hostname"`
 	Via              string `json:"via" yaml:"via"`
 	DryRun           bool   `json:"dry_run,omitempty" yaml:"dry_run,omitempty"`
@@ -179,6 +187,14 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		if err := validateServerName(o.hostname); err != nil {
 			return usageErrorf(cmd, "%v", err)
 		}
+	}
+	givenUsers, err := parseUserFlags(cmd, o.users)
+	if err != nil {
+		return err
+	}
+	givenUserdata, err := parseUserdataFlags(cmd, o.userdata)
+	if err != nil {
+		return err
 	}
 	// provisioning needs the infrastructure repository, checked before
 	// anything else; --no-provision needs none, and puts the server into
@@ -289,20 +305,44 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		t := true
 		prof.Kernel.Mitigations = &t
 	}
-	// the named users, when the profile refers to any (or --ssh-key must
-	// find the administrator)
+	// the named users, when the profile or --user refers to any (or
+	// --ssh-key must find the administrator)
 	var users map[string]*profile.User
-	if profile.HasUserRefs(prof) {
+	if (len(givenUsers) == 0 && profile.HasUserRefs(prof)) || namesUsers(givenUsers) {
 		if users, err = a.loadUsers(ctx, storage); err != nil {
 			return err
+		}
+	}
+	if len(givenUsers) > 0 {
+		if err := replaceUsers(prof, givenUsers, users); err != nil {
+			return usageErrorf(cmd, "%v", err)
+		}
+	}
+	var userdata map[string]*profile.Userdata
+	if len(givenUserdata) > 0 {
+		if userdata, err = a.loadUserdata(ctx, storage); err != nil {
+			return err
+		}
+		prof.Userdata = nil
+		for _, n := range givenUserdata {
+			if userdata[n] == nil {
+				return usageErrorf(cmd, "--userdata %s: not in userdata.yaml (known: %s; ump config userdata create %s makes it)", n, strings.Join(sortedKeys(userdata), ", "), n)
+			}
+			prof.Userdata = append(prof.Userdata, profile.UserdataRef{Name: n})
 		}
 	}
 	if len(o.keyFiles) > 0 {
 		addAdminKeys(prof, users, o.keyFiles)
 	}
+	// --set comes last, over what the other flags made
 	if len(o.sets) > 0 {
 		if prof, err = prof.Set(o.sets); err != nil {
 			return usageErrorf(cmd, "%v", err)
+		}
+		if users == nil && profile.HasUserRefs(prof) {
+			if users, err = a.loadUsers(ctx, storage); err != nil {
+				return err
+			}
 		}
 	}
 	var layouts map[string]*profile.Layout
@@ -317,8 +357,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return err
 		}
 	}
-	var userdata map[string]*profile.Userdata
-	if profile.HasUserdataRefs(prof) {
+	if userdata == nil && profile.HasUserdataRefs(prof) {
 		if userdata, err = a.loadUserdata(ctx, storage); err != nil {
 			return err
 		}
@@ -409,10 +448,12 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	case code != 0:
 		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh %s --staging)", m.Name, code, ref)
 	}
-	result := installResult{Machine: m, Profile: prof.Name, Layout: spec.Layout.Name, Hostname: hostname, Via: entry.via, DryRun: o.dryRun, RunList: append([]string{commonGroup}, groups...)}
-	// the server's os and groups are those of this installation, its
-	// groups as in the inventory; installed_at comes with the record
-	result.OS, result.Groups, result.InstalledAt = spec.OS, slices.Clone(result.RunList), nil
+	result := installResult{Machine: m, Hostname: hostname, Via: entry.via, DryRun: o.dryRun, RunList: append([]string{commonGroup}, groups...)}
+	// the server's os, profile, layout and groups are those of this
+	// installation, its groups as in the inventory; installed_at comes
+	// with the record
+	result.OS, result.Profile, result.Layout = spec.OS, prof.Name, spec.Layout.Name
+	result.Groups, result.InstalledAt = slices.Clone(result.RunList), nil
 	if !o.noProvision {
 		result.Playbooks = rl.playbooks
 	}
@@ -681,6 +722,108 @@ func (a *app) keyResolver(cfg *config.Config) profile.KeyResolver {
 		}
 		return nil, errors.New("not a key reference (ump, local, agent, a named key, a file, or a public key line)")
 	}
+}
+
+// userFlag is one --user: the name, and the key references after the
+// first ':'; none means the user of that name from users.yaml.
+type userFlag struct {
+	name string
+	keys []string
+}
+
+// parseUserFlags reads --user NAME[:KEY[,KEY...]], in order: the name is
+// a user name, given once, and every key reference is there.
+func parseUserFlags(cmd *cobra.Command, values []string) ([]userFlag, error) {
+	var out []userFlag
+	for _, v := range values {
+		name, refs, withKeys := strings.Cut(v, ":")
+		u := userFlag{name: strings.TrimSpace(name)}
+		if err := (&profile.User{Name: u.name, Keys: []string{"ump"}}).Validate(); err != nil {
+			return nil, usageErrorf(cmd, "--user %q: %v", v, err)
+		}
+		for _, given := range out {
+			if given.name == u.name {
+				return nil, usageErrorf(cmd, "--user %s is given twice", u.name)
+			}
+		}
+		if withKeys {
+			for _, k := range strings.Split(refs, ",") {
+				if k = strings.TrimSpace(k); k == "" {
+					return nil, usageErrorf(cmd, "--user %q: an empty key reference (NAME:KEY[,KEY...], or NAME alone for the user of users.yaml)", v)
+				}
+				u.keys = append(u.keys, k)
+			}
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+// namesUsers reports whether a --user is to be taken from users.yaml.
+func namesUsers(given []userFlag) bool {
+	for _, u := range given {
+		if len(u.keys) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// replaceUsers makes the --user users the profile's, inline and in
+// order: each with sudo and its key references, or as its entry of
+// users.yaml with sudo; root, as in a profile, with its keys alone. The
+// administrator, the first that is not root (else root), gets UMP's key
+// when it lacks it, so that ump reaches the new system.
+func replaceUsers(p *profile.Profile, given []userFlag, users map[string]*profile.User) error {
+	p.Users = make([]profile.UserRef, 0, len(given))
+	for _, g := range given {
+		u := profile.User{Name: g.name, Keys: slices.Clone(g.keys)}
+		if len(g.keys) == 0 {
+			def, ok := users[g.name]
+			if !ok {
+				return fmt.Errorf("--user %s: not in users.yaml (known: %s); give its keys, --user %s:KEY[,KEY...]", g.name, strings.Join(sortedKeys(users), ", "), g.name)
+			}
+			u = *def
+			u.Groups, u.Keys = slices.Clone(def.Groups), slices.Clone(def.Keys)
+		}
+		if u.Name == "root" {
+			u = profile.User{Name: "root", Keys: u.Keys}
+		} else {
+			u.Sudo = true
+		}
+		p.Users = append(p.Users, profile.UserRef{User: &u})
+	}
+	admin := p.Admin(nil)
+	for _, r := range p.Users {
+		if r.User.Name == admin && !slices.Contains(r.User.Keys, "ump") {
+			r.User.Keys = append([]string{"ump"}, r.User.Keys...)
+		}
+	}
+	return nil
+}
+
+// parseUserdataFlags reads --userdata NAME[,NAME...], in order: names of
+// entries of userdata.yaml, each once.
+func parseUserdataFlags(cmd *cobra.Command, values []string) ([]string, error) {
+	var out []string
+	for _, v := range values {
+		for _, n := range strings.Split(v, ",") {
+			n = strings.TrimSpace(n)
+			switch {
+			case n == "":
+				continue
+			case !profile.IsUserdataName(n):
+				return nil, usageErrorf(cmd, "--userdata %q: %q is not a userdata name", v, n)
+			case slices.Contains(out, n):
+				return nil, usageErrorf(cmd, "--userdata %s is given twice", n)
+			}
+			out = append(out, n)
+		}
+	}
+	if len(values) > 0 && len(out) == 0 {
+		return nil, usageErrorf(cmd, "--userdata names no entry (--set userdata=[] runs none)")
+	}
+	return out, nil
 }
 
 // addAdminKeys adds --ssh-key files to the administrator's keys (the

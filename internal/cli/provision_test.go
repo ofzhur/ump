@@ -406,9 +406,19 @@ func TestReinstallProvisions(t *testing.T) {
       "common",
       "web",
       "db"
-    ]`) {
+    ],
+    "profile": "ubuntu-26.04",
+    "layout": "lvm-linear"
+  }`) || strings.Count(out, `"profile"`) != 1 {
 		t.Errorf("list -o json: code %d\n%s", code, out)
 	}
+	// -o wide adds the profile and the layout of the installation
+	out, _, _ = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
+	expectRows(t, out, [][]string{
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PROFILE", "LAYOUT", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "ubuntu-26.04", "common,web,db", "ubuntu-26.04", "lvm-linear", "2001:db8::/64", "m1", "cloud", "<none>", "owner=alice"},
+	})
 	if out, _, code := e.run("", false, "server", "show", "web-01", "--account", "one"); code != 0 || !strings.Contains(out, "Groups:") || !strings.Contains(out, "common, web, db") {
 		t.Errorf("show: code %d\n%s", code, out)
 	}

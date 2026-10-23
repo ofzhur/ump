@@ -35,7 +35,7 @@ ump
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 │   ├── provision    <ref> [--group <list>]...         put a server ump installed into the inventory, run its run list
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
@@ -158,9 +158,11 @@ the operating system ump installed last (`ubuntu-26.04`) and
 for a server ump never installed. `groups` are the Ansible groups ump
 put the server in, as in the inventory: `common` first, then those of
 `--group` ([provisioning](provisioning.md)); none for a server ump never
-installed. `-o wide`
-adds the ID, IPv6, product, kind and attributes columns (the ID right
-after the provider); the price is in the default table; `-o name`
+installed. `profile` and `layout` are the profile and the disk layout of
+that installation (`inline` when the profile carried its own layout).
+`-o wide` adds the ID, IPv6, product, kind, profile, layout and
+attributes columns (the ID right after the provider, the profile and
+the layout after the groups); the price is in the default table; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
 sets the default format. `price` comes from the provider's API where it
 tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
@@ -443,7 +445,7 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -507,24 +509,30 @@ carried over from the running system), uniform interface names (`ext01`,
 `int01`, ...; see [the profiles](profiles.md#interface-names)), resolvers
 1.1.1.1 and 8.8.8.8, the profile's users with their keys (the default:
 the sudo user `ump` with UMP's key and your `~/.ssh/id_*.pub` keys, and
-no root login over SSH; `--ssh-key` adds keys (any key reference) to
-the administrator and to the rescue system on the way;
-`agent` in a profile takes what `ssh-add -L` lists), the time zone
-(`--timezone`), and a kernel command
+no root login over SSH; `agent` in a profile takes what `ssh-add -L`
+lists), the time zone, and a kernel command
 line with `mitigations=off`, `ipv6.disable=1` and `kho=off` (the kernel's
 kexec handover reserves memory for live updates and gets in the way of
 ump's own re-entry). The first two cost performance and most servers
 need neither; the profile's `kernel` section, `--mitigations` and
 `--ipv6` keep them on, and [the installer's
 README](../install/README.md#turning-ipv6-or-the-mitigations-back-on)
-says how to turn them on later. The flags override the profile for one
-installation: `--layout`, `--firewall`, `--os`, `--timezone`, `--ipv6`,
-`--set FIELD=VALUE` for any other field (`--set kernel.extra=quiet`,
-`--set users[0].shell=/bin/bash`, `--set 'userdata=[ubuntu, web]'`;
-the value is YAML, an unknown field is refused),
-`--mitigations`, `--disks`, `--ssh-key`; `--storage` names another
-storage than the configured one for the installer, the images, the
-profiles and the rescue image.
+says how to turn them on later.
+
+The flags override the profile for one installation: `--layout`,
+`--firewall`, `--os`, `--timezone`, `--ipv6`, `--mitigations` and
+`--disks`; `--user` (repeatable) replaces the users, each with sudo:
+`NAME:KEY[,KEY...]` with those [key references](keys.md#key-references),
+`NAME` alone as it is in `users.yaml`. The first, `root` aside, is the
+administrator, the user ump logs in as, and gets UMP's key when it
+lacks it; `root` takes its keys alone, as in a profile, and is the
+administrator only when it is the only one. `--ssh-key` adds keys (any
+key reference) to the administrator and to the rescue system on the
+way; `--userdata NAME,...` (repeatable) replaces the userdata with
+entries of `userdata.yaml`, in order. `--set FIELD=VALUE` overrides any
+other field, after the other flags ([overrides](profiles.md#overrides)).
+`--storage` names another storage than the configured one for the
+installer, the images, the profiles and the rescue image.
 
 After the first boot the server is [provisioned](provisioning.md) from
 the infrastructure repository ump runs in: it needs `ansible.cfg` and
@@ -813,6 +821,7 @@ $ ump ssh prod-web-01 -- uptime
 $ ump server reinstall web-01 --dry-run            # the plan on that machine, nothing erased
 $ ump server reinstall web-01                      # the profile set for it, else default
 $ ump server reinstall web-01 --profile web --layout lvm-raid1 --firewall web
+$ ump server reinstall web-01 --user oleg:local --userdata ubuntu,web
 $ ump server set web-01 --profile web              # from now on without --profile
 
 # without a terminal (CI, agents): --yes, and -o json for the result

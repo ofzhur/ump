@@ -56,6 +56,8 @@ var serverColumns = []column{
 	{header: "STATUS", value: func(m provider.Machine) string { return m.Status }},
 	{header: "OS", value: func(m provider.Machine) string { return m.OS }},
 	{header: "GROUPS", value: func(m provider.Machine) string { return strings.Join(m.Groups, ",") }},
+	{header: "PROFILE", wide: true, value: func(m provider.Machine) string { return m.Profile }},
+	{header: "LAYOUT", wide: true, value: func(m provider.Machine) string { return m.Layout }},
 	{header: "IPV6", wide: true, value: func(m provider.Machine) string { return m.IPv6 }},
 	{header: "PRODUCT", wide: true, value: func(m provider.Machine) string { return m.Product }},
 	{header: "KIND", wide: true, value: func(m provider.Machine) string { return string(m.Kind) }},

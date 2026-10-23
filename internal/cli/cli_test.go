@@ -19,9 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
@@ -647,9 +650,9 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatal(out)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PROFILE", "LAYOUT", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "<none>", "<none>", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
 	})
 }
 
@@ -2569,6 +2572,14 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	if !strings.Contains(out, `"profile": "db"`) || !strings.Contains(out, `"layout": "inline"`) {
 		t.Errorf("json result:\n%s", out)
 	}
+	// the listing has the profile and the layout of the installation
+	if out, _, code := e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json"); code != 0 || !strings.Contains(out, `"os": "ubuntu-26.04"`) || !strings.Contains(out, `"profile": "db",
+    "layout": "inline"`) {
+		t.Errorf("list -o json: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "wide", "--no-headers"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), " ubuntu-26.04 common db inline ") {
+		t.Errorf("list -o wide: code %d\n%s", code, out)
+	}
 
 	// the published profile and layouts, from the storage, when there is no
 	// local copy: the first run downloads them into the profiles directory
@@ -3387,6 +3398,197 @@ func TestReinstallSet(t *testing.T) {
 	}
 }
 
+func TestUserFlags(t *testing.T) {
+	cmd := &cobra.Command{}
+	got, err := parseUserFlags(cmd, []string{"oleg:local, ~/.ssh/oleg.pub", "deploy", "root:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop", `ops:C:\keys\ops.pub`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []userFlag{
+		{name: "oleg", keys: []string{"local", "~/.ssh/oleg.pub"}},
+		{name: "deploy"},
+		{name: "root", keys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 me@laptop"}},
+		{name: "ops", keys: []string{`C:\keys\ops.pub`}},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for _, c := range []struct {
+		values []string
+		msg    string
+	}{
+		{[]string{"Oleg:local"}, `--user "Oleg:local": user name "Oleg" is not valid`},
+		{[]string{":local"}, `--user ":local": user name "" is not valid`},
+		{[]string{"oleg:local", "oleg:agent"}, "--user oleg is given twice"},
+		{[]string{"oleg:"}, `--user "oleg:": an empty key reference`},
+		{[]string{"oleg:local,,agent"}, `--user "oleg:local,,agent": an empty key reference`},
+	} {
+		if _, err := parseUserFlags(cmd, c.values); err == nil || exitCodeFor(err) != exitUsage || !strings.Contains(err.Error(), c.msg) {
+			t.Errorf("%q: %v", c.values, err)
+		}
+	}
+	names, err := parseUserdataFlags(cmd, []string{"ubuntu, web", "dev"})
+	if err != nil || strings.Join(names, ",") != "ubuntu,web,dev" {
+		t.Errorf("--userdata: %v, %v", names, err)
+	}
+	for _, c := range []struct {
+		values []string
+		msg    string
+	}{
+		{[]string{"ubuntu,Web"}, `--userdata "ubuntu,Web": "Web" is not a userdata name`},
+		{[]string{"ubuntu", "web,ubuntu"}, "--userdata ubuntu is given twice"},
+		{[]string{""}, "--userdata names no entry (--set userdata=[] runs none)"},
+	} {
+		if _, err := parseUserdataFlags(cmd, c.values); err == nil || exitCodeFor(err) != exitUsage || !strings.Contains(err.Error(), c.msg) {
+			t.Errorf("%q: %v", c.values, err)
+		}
+	}
+}
+
+func TestReplaceUsers(t *testing.T) {
+	named := map[string]*profile.User{
+		"ump":    {Name: "ump", Sudo: true, Keys: []string{"ump", "local"}},
+		"deploy": {Name: "deploy", Description: "the CI", Groups: []string{"www-data"}, Shell: "/bin/sh", Keys: []string{"deploy"}},
+	}
+	users := func(p *profile.Profile) string {
+		var out []string
+		for _, r := range p.Users {
+			if r.User == nil {
+				out = append(out, "ref "+r.Name)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s sudo=%v groups=%v shell=%s keys=%v", r.User.Name, r.User.Sudo, r.User.Groups, r.User.Shell, r.User.Keys))
+		}
+		return strings.Join(out, "; ")
+	}
+	// the profile's users go; the first is the administrator and gets
+	// UMP's key, a named one is copied from users.yaml with sudo, root
+	// keeps its keys alone
+	p := &profile.Profile{Name: "web", Users: []profile.UserRef{{Name: "ump"}, {Name: "ops"}}}
+	if err := replaceUsers(p, []userFlag{{name: "oleg", keys: []string{"local"}}, {name: "deploy"}, {name: "root", keys: []string{"agent"}}}, named); err != nil {
+		t.Fatal(err)
+	}
+	if got := users(p); got != "oleg sudo=true groups=[] shell= keys=[ump local]; deploy sudo=true groups=[www-data] shell=/bin/sh keys=[deploy]; root sudo=false groups=[] shell= keys=[agent]" {
+		t.Errorf("users: %s", got)
+	}
+	if p.Admin(nil) != "oleg" || named["deploy"].Sudo || len(named["deploy"].Keys) != 1 {
+		t.Errorf("admin %q, users.yaml changed: %+v", p.Admin(nil), named["deploy"])
+	}
+	// UMP's key once; root first is not the administrator while another
+	// user is given, root alone is
+	for _, c := range []struct {
+		given []userFlag
+		want  string
+	}{
+		{[]userFlag{{name: "ump"}}, "ump sudo=true groups=[] shell= keys=[ump local]"},
+		{[]userFlag{{name: "root", keys: []string{"local"}}, {name: "ops", keys: []string{"agent", "ump"}}}, "root sudo=false groups=[] shell= keys=[local]; ops sudo=true groups=[] shell= keys=[agent ump]"},
+		{[]userFlag{{name: "root", keys: []string{"local"}}}, "root sudo=false groups=[] shell= keys=[ump local]"},
+	} {
+		p := &profile.Profile{Name: "web"}
+		if err := replaceUsers(p, c.given, named); err != nil || users(p) != c.want {
+			t.Errorf("%v: %q, %v", c.given, users(p), err)
+		}
+	}
+	err := replaceUsers(&profile.Profile{}, []userFlag{{name: "ops"}}, named)
+	if err == nil || err.Error() != "--user ops: not in users.yaml (known: deploy, ump); give its keys, --user ops:KEY[,KEY...]" {
+		t.Errorf("unknown user: %v", err)
+	}
+}
+
+func TestReinstallUsers(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	resetFakePower()
+	const (
+		olegKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFMuCiD2rTA/oSMVg0nhlB+wcM4K0BBRvt44SxPJz6W2 oleg@laptop"
+		rootKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGRvb3RrZXlyb290a2V5cm9vdGtleXJvb3RrZXlyb290 root@laptop"
+		moreKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG1vcmVrZXltb3Jla2V5bW9yZWtleW1vcmVrZXltb3Jl more@laptop"
+	)
+	// the users replace the profile's (ump), each with sudo; the first is
+	// the administrator, with UMP's key and --ssh-key's; ump comes from
+	// users.yaml; root has its keys alone; --set comes after them
+	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "-o", "json",
+		"--user", "oleg:"+olegKey, "--user", "ump", "--user", "root:"+rootKey, "--ssh-key", moreKey, "--set", "users[ump].shell=/bin/sh")
+	if code != 0 {
+		t.Fatalf("reinstall --user: code %d, %q", code, errOut)
+	}
+	pub, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "staging_ed25519.pub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	umpKey := strings.TrimSpace(string(pub))
+	var got []string
+	for _, u := range e.lastSpec()["users"].([]any) {
+		u := u.(map[string]any)
+		got = append(got, fmt.Sprintf("%s sudo=%v shell=%s keys=%v", u["name"], u["sudo"], u["shell"], u["keys"]))
+	}
+	want := []string{
+		fmt.Sprintf("oleg sudo=true shell=/bin/bash keys=[%s %s %s]", umpKey, olegKey, moreKey),
+		fmt.Sprintf("ump sudo=true shell=/bin/sh keys=[%s]", umpKey),
+		fmt.Sprintf("root sudo=<nil> shell=/bin/bash keys=[%s]", rootKey),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("spec users:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// ump logs in as the administrator, and the inventory has it
+	if !strings.Contains(errOut, "log in as oleg (ump ssh web-01)") || !strings.Contains(out, `"admin": "oleg"`) || !strings.Contains(e.readState(), "      admin: oleg\n") || !strings.Contains(e.hostFile("web-01.yml"), "  ansible_user: oleg\n") {
+		t.Errorf("administrator: %q\n%s", errOut, out)
+	}
+
+	// a user without keys must be in users.yaml; nothing is touched
+	resetFakePower()
+	entries := len(e.entryCommands())
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--user", "oleg:local", "--user", "ops"); code != 2 || !strings.Contains(errOut, "--user ops: not in users.yaml (known: ump); give its keys, --user ops:KEY[,KEY...]") || len(e.entryCommands()) != entries || len(fakePower.actions) != 0 {
+		t.Errorf("unknown user: code %d, %q, actions %v", code, errOut, fakePower.actions)
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one", "--user", "oleg:local", "--user", "oleg"); code != 2 || !strings.Contains(errOut, "--user oleg is given twice") {
+		t.Errorf("a user twice: code %d, %q", code, errOut)
+	}
+}
+
+func TestReinstallUserdata(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	e.directRoot = true
+	resetFakePower()
+	names := func() string {
+		var out []string
+		for _, u := range e.lastSpec()["userdata"].([]any) {
+			out = append(out, u.(map[string]any)["name"].(string))
+		}
+		return strings.Join(out, ",")
+	}
+	// the list replaces the profile's (ubuntu); --set comes after it
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run", "--account", "one", "--userdata", "debian", "--userdata", "ubuntu"); code != 0 || names() != "debian,ubuntu" {
+		t.Errorf("--userdata: code %d, %q, %s", code, errOut, names())
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run", "--account", "one", "--userdata", "debian", "--set", "userdata[+]={name: x, script: 'echo x'}"); code != 0 || names() != "debian,x" {
+		t.Errorf("--userdata, then --set: code %d, %q, %s", code, errOut, names())
+	}
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run", "--account", "one", "--set", "userdata=[]"); code != 0 || names() != "" {
+		t.Errorf("--set userdata=[]: code %d, %q, %s", code, errOut, names())
+	}
+	installs := len(e.installs)
+	for _, c := range []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"--userdata", "nope"}, 2, "--userdata nope: not in userdata.yaml (known: archlinux, cachyos, debian, nixos, ubuntu; ump config userdata create nope makes it)"},
+		{[]string{"--userdata", "ubuntu,Bad"}, 2, `--userdata "ubuntu,Bad": "Bad" is not a userdata name`},
+		{[]string{"--userdata", "nixos"}, 1, "userdata nixos is nix, and ubuntu-26.04 takes bash userdata"},
+	} {
+		if _, errOut, code := e.run("", false, append([]string{"server", "reinstall", "web-01", "--yes", "--account", "one"}, c.args...)...); code != c.code || !strings.Contains(errOut, c.msg) {
+			t.Errorf("%v: code %d, %q", c.args, code, errOut)
+		}
+	}
+	if len(e.installs) != installs {
+		t.Errorf("an installer ran: %v", e.installs[installs:])
+	}
+}
+
 func TestConfigKeyNamed(t *testing.T) {
 	e := newTestEnv(t)
 	e.write(testConfig)
@@ -3495,7 +3697,7 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 		t.Errorf("state after set:\n%s", st)
 	}
 	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
-	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> <none> <none> <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
 		t.Errorf("wide: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json")

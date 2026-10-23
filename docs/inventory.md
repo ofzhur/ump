@@ -9,7 +9,7 @@ are added by hand, so the inventory is complete.
 
 ```console
 $ ump server list                         # every server of every account
-$ ump server list -o wide                 # with the ID, IPv6, product, kind and attributes
+$ ump server list -o wide                 # with the ID, profile, layout, IPv6, product, kind and attributes
 $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
 $ ump server list --refresh               # ask the providers, not the cache
@@ -22,18 +22,20 @@ $ ump server show web-01                  # everything the provider knows, plus 
 `ump server list` asks every configured account, all in parallel (on a
 terminal each account's servers appear as soon as it answered), and
 prints one row per server: account, provider, name, IPv4, location,
-status, the operating system ump installed last and the Ansible groups
-it put the server in (from the state), and the price. The groups are
-as in the inventory: `common` first, then those of `--group`
-([provisioning](provisioning.md)); a server ump did not install has
-none.
-`-o wide` adds the provider's ID, IPv6, product, kind and the
-attributes; `-o json` and
-`-o yaml` print every field, including the provider's labels; `-o name`
-prints `provider/id` per line. `--account NAME` restricts the listing,
-and references after the command select servers (`ump server list
-web-01 db-01`). An account whose API fails is reported on stderr and the
-others are still listed; the exit code says so (4).
+status, the operating system ump installed last (the profile's `os`, or
+`--os`) and the Ansible groups it put the server in (from the state),
+and the price. The groups are as in the inventory: `common` first, then
+those of `--group` ([provisioning](provisioning.md)); a server ump did
+not install has none. `-o wide` adds the provider's ID, the profile and
+the disk layout of the last installation (`inline` when the profile
+carried its own layout) after the groups, the IPv6 address, product,
+kind and the attributes; `-o json` and `-o yaml` print every field,
+`os`, `installed_at`, `groups`, `profile` and `layout` among them, and
+the provider's labels; `-o name` prints `provider/id` per line.
+`--account NAME` restricts the listing, and references after the
+command select servers (`ump server list web-01 db-01`). An account
+whose API fails is reported on stderr and the others are still listed;
+the exit code says so (4).
 
 A listing is served from the cache for 5 minutes (`cache_ttl` in the
 configuration, `UMP_CACHE_TTL` for one run, `0` turns it off), unless a

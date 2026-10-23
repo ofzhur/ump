@@ -56,7 +56,7 @@ keys: [ump, local, oleg]      # at least one key reference (see Keys)
 
 | Field | Meaning |
 |---|---|
-| `name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special (below). |
+| `name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special (below); a system account of the image (`www-data`, `backup`, `daemon`: no login shell) stops the installation before the reboot, in the rescue system. |
 | `description` | One line, shown by `ump config user list`. |
 | `sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in (`/etc/sudoers.d/90-ump-NAME`), since no passwords are set. |
 | `groups` | Extra groups the user joins; a group that does not exist is created. |
@@ -111,14 +111,38 @@ $ ump server reinstall web-01 --profile web
 $ ump ssh web-01 --user oleg
 ```
 
-`ump server reinstall --ssh-key FILE` adds the keys of a file to the
-administrator for one installation, and `--set 'users[+]={name: ops,
-sudo: true, keys: [local]}'` adds an inline user to it. On the
-installed system, `/etc/ump/install` records the administrator
+On the installed system, `/etc/ump/install` records the administrator
 (`admin=ump`), and `/etc/ump/spec.json` every user with the key lines it
 got; `~USER/.ssh/authorized_keys` holds them. UMP writes users once, at
 installation: later changes are yours, or your configuration
 management's.
+
+## Overriding the users at installation
+
+`ump server reinstall --user` replaces the profile's users for one
+installation (repeatable, in order), each with sudo without a password:
+
+```console
+$ ump server reinstall web-01 --user oleg:local,~/.ssh/oleg.pub    # oleg with these keys
+$ ump server reinstall web-01 --user oleg:agent --user ops         # and ops as in users.yaml
+$ ump server reinstall web-01 --user ops:ops-team --user root:ump  # ops gets UMP's key too; root logs in with it
+```
+
+`NAME:KEY[,KEY...]` is that user with those [key references](keys.md#key-references)
+alone (the name ends at the first `:`, the references are split at
+`,`); `NAME` alone is the user of `users.yaml` with its groups, shell
+and keys, and an error when it is not there. The first, `root` aside,
+is the administrator, the user ump logs in as: it gets UMP's key (`ump`)
+when its references lack it, since ump checks and provisions the new
+system with that key. `root` takes its keys alone, no sudo, and is the
+administrator only when it is the only `--user`, as in a profile. A
+name given twice is an error.
+
+`--ssh-key REF` adds keys to the administrator for one installation,
+with or without `--user`, and `--set` comes after both: `--set
+'users[+]={name: deploy, keys: [deploy]}'` adds a user without sudo,
+`--set users[oleg].shell=/bin/zsh` changes one; see
+[overrides](profiles.md#overrides).
 
 ## Examples
 

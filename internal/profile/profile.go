@@ -296,6 +296,10 @@ func ParseUserdata(data []byte) (map[string]*Userdata, error) {
 	return file.Userdata, nil
 }
 
+// IsUserdataName reports whether s can name an entry of userdata.yaml
+// in a profile.
+func IsUserdataName(s string) bool { return nameRe.MatchString(s) }
+
 // HasUserdataRefs reports whether the profile names entries of
 // userdata.yaml.
 func HasUserdataRefs(p *Profile) bool {
@@ -694,7 +698,7 @@ func (p *Profile) Validate() error {
 		}
 	}
 	for _, r := range p.Userdata {
-		if r.Data == nil && !nameRe.MatchString(r.Name) {
+		if r.Data == nil && !IsUserdataName(r.Name) {
 			return fmt.Errorf("profile %s: %q is not a userdata name", p.Name, r.Name)
 		}
 	}

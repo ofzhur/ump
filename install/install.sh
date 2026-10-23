@@ -661,8 +661,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# the administrator: the first sudo user, else root; ump logs in as it
-admin="$(jq -r '[.users[] | select(.name == "root" or .sudo == true)][0].name // .users[0].name' <<< "$spec")"
+# the administrator: the first sudo user other than root, else root, as
+# ump picks it; ump logs in as it
+admin="$(jq -r '([.users[] | select(.sudo == true and .name != "root")][0].name) // ([.users[] | select(.name == "root")][0].name) // .users[0].name' <<< "$spec")"
 
 # the firewall ruleset, the same for every system: input policy, and the
 # same list for new connections forwarded in from the external interfaces
@@ -1076,6 +1077,13 @@ for ((n = 0; n < nusers; n++)); do
 	else
 		if ! in_target getent passwd "$name" >/dev/null 2>&1; then
 			run_in_target "useradd $name" useradd -m -s "$shell" "$name"
+		else
+			# an account of the image (www-data, backup, daemon) has no login
+			# shell: nobody would get in after the reboot
+			uid="$(in_target getent passwd "$name" | cut -d: -f3)"
+			if [ "$uid" -lt 1000 ] || [ "$uid" -ge 65534 ]; then
+				die "user $name is a system account of the image; choose another name"
+			fi
 		fi
 		home="$(in_target getent passwd "$name" | cut -d: -f6)"
 		for g in $(jq -r '.groups // [] | .[]' <<< "$u"); do
