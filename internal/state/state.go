@@ -52,9 +52,13 @@ type Server struct {
 	// Installed is what ump last installed on the server.
 	Installed *Install `yaml:"installed,omitempty"`
 	// Groups are the Ansible groups the server is in besides common, in
-	// order: set by ump server reinstall --group (none without), added to
-	// by ump server provision.
+	// order: set by ump server reinstall --group (none without), changed
+	// by ump server set --group and --ungroup.
 	Groups []string `yaml:"groups,omitempty"`
+	// StaleFacts says that the facts a fact cache has of the server are
+	// those of its old system: set when an installation is recorded,
+	// taken away once a provisioning run completed on it.
+	StaleFacts bool `yaml:"stale_facts,omitempty"`
 	// Roles is what an older ump wrote for the groups; Parse turns it
 	// into Groups, so it is never written.
 	Roles []string `yaml:"roles,omitempty"`
@@ -75,7 +79,7 @@ type Install struct {
 
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
-	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0
+	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && !s.StaleFacts
 }
 
 // New returns an empty document.

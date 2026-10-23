@@ -88,15 +88,16 @@ the day. See [operating systems](docs/oses.md).
 **Provisioning** follows the installation: run from the root of your
 infrastructure repository, `ump server reinstall` puts the new server
 into its Ansible inventory, in the group `common` and the groups of
-`--group`, and runs the playbooks of those groups for it, from the
-repository or from the collection
-[ofzhur.ansible](https://github.com/ofzhur/ansible) (users and keys
-first). The inventory is a host file per server, or ump itself (`ump
-server list -o ansible`, read by the plugin `ofzhur.ansible.ump`).
-`ump server provision` adds groups later or runs them again;
-`--no-provision` installs only. With the facts in a central storage
-(the fact cache `ofzhur.ansible.facts`: S3, R2, Consul, Vault, SSH),
-servers can also pull the repository themselves
+`--group`, and runs the repository's playbooks over the fleet, each
+play on the hosts its `hosts:` names, with the collection
+[ofzhur.ansible](https://github.com/ofzhur/ansible) for users and keys
+first. `ump provision` converges the fleet at any time (`--hosts` for
+some of it), one run at a time, logging in as each server's
+administrator; you log in as yourself. The inventory is a host file per
+server, or ump itself (`ump server list -o ansible`, read by the plugin
+`ofzhur.ansible.ump`). `--no-provision` installs only. With the facts
+in a central storage (the fact cache `ofzhur.ansible.facts`: S3, R2,
+Consul, Vault, SSH), servers can also pull the repository themselves
 ([provisioning](docs/provisioning.md)).
 
 ## The objects
@@ -194,7 +195,7 @@ own](images/rescue/README.md#your-own-storage).
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Provisioning](docs/provisioning.md) | after the installation: groups and run lists (`--group`, `ump server provision`), the infrastructure repository, the inventory (host files, or ump itself), Ansible with the collection ofzhur.ansible, facts in a central storage and servers that pull |
+| [Provisioning](docs/provisioning.md) | after the installation: groups and playbooks (`--group`, `ump provision`, `ump server set --group`), the infrastructure repository, the inventory (host files, or ump itself), ump's logins and yours, the fleet's lock, Ansible with the collection ofzhur.ansible, facts in a central storage and servers that pull |
 | [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |

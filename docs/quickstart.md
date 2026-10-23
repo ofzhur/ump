@@ -181,7 +181,7 @@ Rebooting web-01 into ubuntu-26.04 ...
 Waiting for SSH on 198.51.100.22 to go down ... down after 4s.
 Waiting for SSH on 198.51.100.22 ... up after 18s.
 web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).
-web-01 is not in any inventory (no Ansible layout here); run ump server provision web-01 from the infrastructure repository later.
+Not provisioned (--no-provision), and no host file for web-01 (no Ansible layout here): ump provision, run from the infrastructure repository, writes it and includes the server; where ump is the inventory, it is in it already.
 ```
 
 A few minutes on a cloud VM, longer on bare metal with many disks. The
@@ -208,9 +208,10 @@ uptime, memory, the root disk and the addresses.
 
 The server now runs the operating system with the profile's userdata,
 and nothing else: ready to use, by hand or by your own tools. Turning it
-into what it is for is provisioning: ump puts the server into the
-Ansible inventory of your infrastructure repository, in groups, and runs
-the playbooks of those groups. A repository to start with:
+into what it is for is provisioning: ump puts every server it
+installed into the Ansible inventory of your infrastructure repository,
+in groups, and runs the repository's playbooks over the fleet, each
+play on the hosts its `hosts:` names. A repository to start with:
 
 ```console
 $ mkdir infra && cd infra && git init
@@ -218,40 +219,45 @@ $ git submodule add -b main https://github.com/ofzhur/ansible.git collections/an
 $ cp collections/ansible_collections/ofzhur/ansible/config/push/ansible.cfg .
 $ mkdir -p inventory/group_vars playbooks
 $ printf 'all:\n  children:\n    common:\n' > inventory/groups.yml
-$ printf '.cache/\n' > .gitignore                 # the fact cache of the template
+$ printf -- '- import_playbook: ofzhur.ansible.base\n' > playbooks/00-base.yml
+$ printf '.cache/\nplaybooks/.ump-*\n' > .gitignore      # the fact cache, what ump writes for a run
 ```
 
-Every server is in the group `common`, whose playbook comes from the
-collection [ofzhur.ansible](https://github.com/ofzhur/ansible): the
-users, groups and keys of the group variables
-(`inventory/group_vars/common.yml`; the collection's README says how).
-From the repository's root:
+Every server is in the group `common`. `playbooks/00-base.yml` brings
+in the collection [ofzhur.ansible](https://github.com/ofzhur/ansible)'s
+`base` for every host: the users, groups and keys of the group variables
+(`inventory/group_vars/common/users.yml`; the collection's README says
+how), your own user among them. From the repository's root:
 
 ```console
-$ ump server provision web-01
+$ ump provision
+Run 00-base on every host of the inventory, the whole fleet? [y/N] y
 Wrote inventory/hosts/web-01.yml: web-01 in common.
-Provisioning web-01: common (ofzhur.ansible.common) ...
+Provisioning: 00-base on the fleet (1 host) ...
 ...
-hetzner-cloud/234567 (web-01, 198.51.100.22): provisioned, run list common.
+Provisioned 1 host, 1 changed.
 ```
 
 From here, `ump server reinstall` runs in the repository and provisions
-what it installs. `--group` adds groups, each a playbook of the
-repository (`playbooks/web.yml`) or of the collection:
+the fleet after the installation. `--group` adds groups; a playbook of
+yours picks its hosts by them (`playbooks/10-web.yml` with `hosts:
+web`):
 
 ```console
-$ ump server reinstall web-02 --group web          # install, then common and web
-$ ump server provision web-01 --group monitoring    # add a group to an installed server
+$ ump server reinstall web-02 --group web          # install, then provision the fleet
+$ ump server set web-01 --group monitoring          # a group more; the next ump provision applies it
 ```
 
 Groups are best given at the installation, so that each starts on a
-fresh system; adding one in place suits groups built for it. Commit
+fresh system; adding one in place suits groups built for it. ump logs
+in as each server's administrator with its own key; you log in as
+yourself (`ansible-playbook playbooks/10-web.yml`, `-u NAME`). Commit
 `inventory/hosts/` with the rest: Ansible runs from the repository
 without ump. Or let ump be the inventory, with no files to commit:
 `inventory/ump.yml` with `plugin: ofzhur.ansible.ump`, which lists the
 servers with `ump server list -o ansible`. See
-[provisioning](provisioning.md) for the layout, the inventory, the run
-lists, and facts and secrets.
+[provisioning](provisioning.md) for the layout, the inventory, the
+playbooks, the logins, and facts and secrets.
 
 ## Next
 

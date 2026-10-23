@@ -121,8 +121,9 @@ the interface names with their MAC addresses, when, its groups), and
 `ump server show` prints it under `UMP:`. Run from your infrastructure
 repository, ump also writes the server into its Ansible inventory, one
 file per server in `inventory/hosts/` with its groups, address,
-administrator and these facts (`ump_os`, `ump_profile`,
-`ump_attributes`, ...): see [provisioning](provisioning.md#host-files).
+administrator (`ump_admin`) and these facts (`ump_os`, `ump_profile`,
+`ump_attributes`, ...), and `ump provision` writes them all again
+before every run: see [provisioning](provisioning.md#host-files).
 
 The same inventory comes from the listing: `ump server list -o ansible`
 prints the servers ump installed with the hosts, groups and variables

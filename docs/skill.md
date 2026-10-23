@@ -145,8 +145,8 @@ terraform output -json ──▶ ump machine import --from terraform    names, l
 ump server reinstall … --group <role> ──▶ inventory/hosts/<host>.yml  the host in common and its groups,
                                                                    with address, administrator, facts
                                          (or ump server list -o ansible, the same, through inventory/ump.yml)
-                                     ──▶ ansible-playbook <run list> --limit <host>
-                                         (common and its groups, a playbook each)
+ump provision [--hosts <pattern>]    ──▶ ansible-playbook playbooks/*.yml on the fleet, each play on
+                                         the hosts its hosts: names, each host as its administrator
 ```
 
 The join key across all three tools is the **machine name**,
@@ -217,7 +217,7 @@ infra/
 │   ├── host_vars/                rare; most per-host facts come from the host files
 │   └── hosts/                    written by ump: one file per machine (or ump.yml: ump is the inventory)
 ├── playbooks/
-│   └── <role>.yml                one per group, the run list's steps; common from ofzhur.ansible
+│   └── NN-<role>.yml             every one runs, in order, on the hosts it names; 00-base imports ofzhur.ansible.base
 ├── roles/                        one role per concern; no logic in playbooks
 ├── collections/                  ofzhur.ansible as a submodule; others pinned (requirements.yml)
 │
@@ -293,7 +293,7 @@ agent  $ ump plan prod-web-03 --profile web -o json       # also prints the huma
 agent  → shows the plan: disks, layout, hostname, network, users, handoff
 human  $ ump approve run-7f3a                             # interactive, TTY only
 agent  $ ump install prod-web-03 --group web --approved run-7f3a   # install, reboot, verify, then
-                                                          # the host file and the run list common, web
+                                                          # the host files and the playbooks on the fleet
 agent  $ ansible prod-web-03 -m ping && task check -- prod-web-03
 agent  → reports: debian-13, mirrored-lvm, role web applied, 14 min; fleet table in README updated
 ```
@@ -438,8 +438,8 @@ Consequences for the CLI:
 - `ump inventory export --format json|hosts --group-by
   env,role,provider,location,profile`, for what is not in the Ansible
   inventory; the machines ump installed are there already, one host file
-  each (`ump server reinstall --group`, `ump server provision`) or
-  through `ump server list -o ansible`
+  each (`ump server reinstall --group`, `ump provision`) or through
+  `ump server list -o ansible`
 - `ump inventory check` and `ump repo audit` (Markdown and JSON): the
   deterministic halves of the drift check and the adoption audit
 - `ump repo init`: the reference repository skeleton and templates, from

@@ -16,8 +16,9 @@ on a **mirror** of it under its cache directory: pulled before a
 command (at most every 30 seconds, see [how the mirror
 works](#how-the-mirror-works)), pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
-overwritten in silence. `state.yaml` and the per-server locks of `ump
-server reinstall`, `provision` and `rescue` go through the backend directly.
+overwritten in silence. `state.yaml`, the locks of a server (`ump
+server reinstall` and `rescue`) and the fleet's lock (`ump provision`)
+go through the backend directly.
 
 ```console
 $ ump config state setup                        # the wizard: pick a backend, migrate the state there
@@ -143,13 +144,13 @@ servers side by side, share the mirror: a lock file in it
 others wait for it.
 
 An ump that ump itself runs, the inventory plugin `ofzhur.ansible.ump`
-under the Ansible of `ump server reinstall` and `provision`, is part of
-that run. ump sets `UMP_PARENT` for it, where it reads the state
-(`backend`; `mirror` when the backend did not answer its pull; `local`),
-and `UMP_CONFIG`, its configuration file. That ump reads the state
-there too, so it sees what its parent recorded before the run, and
-neither pulls nor pushes: the mirror is its parent's for the run, and
-it waits for no lock.
+under the Ansible of `ump provision` (also after `ump server
+reinstall`), is part of that run. ump sets `UMP_PARENT` for it, where
+it reads the state (`backend`; `mirror` when the backend did not answer
+its pull; `local`), and `UMP_CONFIG`, its configuration file. That ump
+reads the state there too, so it sees what its parent recorded before
+the run, and neither pulls nor pushes: the mirror is its parent's for
+the run, and it waits for no lock.
 
 ump goes to the backend only when it has to, so that it never makes
 you wait for nothing:
@@ -171,11 +172,14 @@ you wait for nothing:
 the backend's version tag, retried on conflict, so two people setting
 attributes on different servers at the same moment both get their
 change in. Operations that must not run twice on one machine, `ump
-server reinstall`, `provision` and `rescue`, take a **lock per server** on the
+server reinstall` and `rescue`, take a **lock per server** on the
 backend for their duration; a second ump on the same server is refused
 with who holds the lock and since when, while every other server stays
-free. `ump config state locks` lists them, `unlock SERVER` releases one
-an ump that died left behind.
+free. A provisioning run (`ump provision`, also after a reinstall)
+takes the **fleet's lock**, `fleet`: one run at a time; another waits
+for it, saying who holds it, up to the configured wait, and is then
+refused the same way. `ump config state locks` lists them, `unlock
+SERVER` or `unlock fleet` releases one an ump that died left behind.
 
 ## Commands
 
@@ -187,7 +191,7 @@ ump config state migrate --to URL [...] [--force]   # copy the current state the
 ump config state clear                 # no backend: the local directory again
 ump config state pull | push [--force] # the mirror and the backend, by hand
 ump config state test                  # does the backend answer?
-ump config state locks | unlock SERVER
+ump config state locks | unlock SERVER|fleet
 ```
 
 The backend flags of `set` and `migrate`: `--endpoint`, `--region`,
@@ -235,13 +239,16 @@ new system answered, from what `/etc/ump/install` on the machine says
 version, kernel and interfaces), and shown by `ump server show`.
 `groups` are the server's Ansible groups besides `common`
 ([provisioning](provisioning.md)): set by `ump server reinstall
---group`, added to by `ump server provision`; the listings show them as
-in the inventory, `common` first. A state an older
-ump wrote with `roles` is read as `groups` (`-` and `.` become `_`) and
-written back as such. `manual` holds what `ump server add`
+--group`, changed by `ump server set --group` and `--ungroup`; the
+listings show them as in the inventory, `common` first. `stale_facts:
+true` comes with every installation recorded and goes once a
+provisioning run completed on the server: until then, every run with it
+clears the facts a fact cache still has of its old system. A state an
+older ump wrote with `roles` is read as `groups` (`-` and `.` become
+`_`) and written back as such. `manual` holds what `ump server add`
 took; its servers are listed by the account `manual`, which exists
 wherever the state does. Edit the file by hand (in the local directory,
-or in the mirror and push) or with `ump server set`, `add` and `remove`; unknown
-fields are an error, so a typo is caught before anything is written,
-and a command rewrites the file in its own layout, so a server's `note`
-is the place for remarks.
+or in the mirror and push) or with `ump server set`, `add` and
+`remove`; unknown fields are an error, so a typo is caught before
+anything is written, and a command rewrites the file in its own layout,
+so a server's `note` is the place for remarks.

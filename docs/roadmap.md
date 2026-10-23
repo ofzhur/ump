@@ -27,13 +27,15 @@ As of October 2026, ump does what the [README](../README.md) and the
   and 22.04 and Debian 13 and 12 from UMP's base images, NixOS 25.11,
   Arch Linux and CachyOS (experimental); `ump ssh`.
 - **Provisioning:** Ansible from the infrastructure repository: `ump
-  server reinstall` (`--group`) and `ump server provision` put the
-  server into the inventory, as a host file or with ump as the
-  inventory (`ump server list -o ansible`), and run its run list,
-  `common` and its groups, each a playbook of the repository or of the
-  collection [ofzhur.ansible](https://github.com/ofzhur/ansible), whose
-  fact cache `ofzhur.ansible.facts` keeps the facts in a central
-  storage ([provisioning](provisioning.md)).
+  server reinstall` (`--group`) puts the server into the inventory, as
+  a host file or with ump as the inventory (`ump server list -o
+  ansible`), and `ump provision` (also after every reinstall) runs the
+  repository's playbooks over the fleet, each play on the hosts its
+  `hosts:` names, one run at a time, every host logged in to as its
+  administrator; the collection
+  [ofzhur.ansible](https://github.com/ofzhur/ansible) brings the users
+  and keys, and its fact cache `ofzhur.ansible.facts` keeps the facts
+  in a central storage ([provisioning](provisioning.md)).
 - **Configuration objects:** `ump config os`, `disk-layout` and
   `firewall` with list, get, create, edit and delete each; the
   published defaults downloaded on first use.

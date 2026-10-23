@@ -73,7 +73,8 @@ infra/
 │   ├── host_vars/
 │   └── hosts/                written by ump: one file per server, with its groups;
 │                             or ump.yml, ump itself as the inventory
-├── playbooks/                one per group of your own: web.yml, db.yml, ...
+├── playbooks/                every one runs on the hosts its plays name: 00-base.yml
+│                             (the collection's base), 10-web.yml, 20-db.yml, ...
 ├── roles/                    hardening, monitoring, web, db, ...
 ├── collections/              ofzhur.ansible as a git submodule; others pinned
 ├── terraform/                optional: DNS, load balancers, object storage,
@@ -99,20 +100,21 @@ $ ump server reinstall web-03 --profile ump/profiles/web.yaml --group web
 
 ump writes each server's host file into `inventory/hosts/` with its
 groups (`common` and those of `--group`), or lists it from its state
-when ump is the inventory (`inventory/ump.yml`), and runs their
-playbooks. Attributes come along as `ump_attributes`, as they are when
-the host file is written: set them before the reinstall, or let `ump
-server provision web-03` write the host file again (ump as the
-inventory has them as they are now). They are data for playbooks, not
-groups: that `web-03` is in `prod` comes from the group tree in
-`inventory/groups.yml` (`prod` with the children `web` and `db`).
+when ump is the inventory (`inventory/ump.yml`), and runs the playbooks
+over the fleet; `ump provision` does that again whenever the fleet
+should converge, and writes every host file anew. Attributes come along
+as `ump_attributes`, as they are when the host file is written. They
+are data for playbooks, not groups: that `web-03` is in `prod` comes
+from the group tree in `inventory/groups.yml` (`prod` with the children
+`web` and `db`).
 
 ## Provisioning
 
 Turning an installed system into what the server is for is
-[provisioning](provisioning.md): groups and run lists, the inventory
-(host files, or ump itself), Ansible from the repository, the facts in
-a central storage, and servers that pull the repository themselves.
+[provisioning](provisioning.md): groups and playbooks, the inventory
+(host files, or ump itself), Ansible from the repository on the whole
+fleet, the facts in a central storage, and servers that pull the
+repository themselves.
 
 ## Security profiles
 
@@ -182,10 +184,12 @@ Disk encryption (LUKS with remote unlock) is on the
   is the system itself: keep the modules in the repository and deploy
   them with `nixos-rebuild --target-host`, `deploy-rs` or `colmena`
   instead of Ansible.
-- **Teams:** a shared [state backend](state.md), per-server locks for
-  reinstall, provisioning and rescue, everyone acting as one UMP; the
-  facts in a [central storage](provisioning.md#facts-in-a-central-storage),
-  so that Ansible runs from anyone's machine know them.
+- **Teams:** a shared [state backend](state.md), the servers' locks
+  for reinstall and rescue and the fleet's for provisioning, everyone
+  acting as one UMP; each person logging in to the servers as
+  themselves, ump as the administrators; the facts in a [central
+  storage](provisioning.md#facts-in-a-central-storage), so that Ansible
+  runs from anyone's machine know them.
 - **Drift and cost reports:** `ump server list --diff --since 1d` in a
   scheduled job shows what appeared, vanished or changed at the
   providers; `-o json` with the prices and attributes feeds cost reports

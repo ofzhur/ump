@@ -47,6 +47,8 @@ type installOptions struct {
 	output      string
 	groups      groupFlags
 	noProvision bool
+	hosts       string
+	playbooks   listFlag
 }
 
 func (a *app) newServerReinstallCmd() *cobra.Command {
@@ -81,36 +83,39 @@ aside, is the administrator, the user ump logs in as, and gets UMP's
 key; root takes its keys alone), --userdata its userdata, by name from
 userdata.yaml, and --set FIELD=VALUE any field, after the other flags.
 
-After the first boot ump provisions the server from the infrastructure
-repository it runs in: ansible.cfg and inventory/ in the current
+After the first boot ump provisions from the infrastructure repository
+it runs in: ansible.cfg, inventory/ and playbooks/ in the current
 directory and ansible-playbook in PATH, checked before anything is
 touched. The server is in the group common and the groups given with
---group, in order: its run list. Each group is a playbook,
-playbooks/GROUP.yml of the repository when it has one, else the
-collection's ofzhur.ansible.GROUP; ansible-playbook --syntax-check runs
-on them first, and ansible-inventory checks that no host and group share
-a name. ump writes inventory/hosts/HOSTNAME.yml and runs the run list
-for the server alone, as its administrator with UMP's key only; where a
-file of inventory/ says plugin: ofzhur.ansible.ump, ump is the inventory
-and writes no host file (one in inventory/hosts/ for the server stops
-it). Exit status 6 means the run list did not complete: the server is
-installed and recorded; fix that and run ump server provision NAME.
---no-provision runs nothing and needs no layout; where the layout is
-there, the host file is still written once ansible-inventory has
-checked the names. Where ump is the inventory, the server is in it from
-its record on; a record that fails is printed, to add by hand, and
-nothing runs (exit status 6). docs/provisioning.md describes the
+--group. ansible-playbook --syntax-check runs on the playbooks first,
+and ansible-inventory checks that no host and group share a name and
+that --hosts matches a host with the server in it. Once the new system
+is up and recorded, ump provision runs: the host files of every server
+ump installed (none where a file of inventory/ says plugin:
+ofzhur.ansible.ump, and ump is the inventory), then every
+playbooks/*.yml on the whole fleet, each host logged in to as its
+administrator with UMP's key only; the plays pick their hosts by their
+groups. --hosts PATTERN and --playbook NAME narrow it, as for ump
+provision; the confirmation covers it. Exit status 6 names the hosts
+that failed: the server is installed and recorded, and provisioned
+unless it is one of them; fix that and run ump provision. --no-provision
+runs nothing and needs no layout; where the layout is there, the host
+file is still written, under the fleet's lock, once ansible-inventory
+has checked the names, and the next ump provision includes the server.
+An installation that cannot be recorded is printed, to add by hand, and
+not provisioned (exit status 6). docs/provisioning.md describes the
 repository.
 
 --dry-run brings the server into the rescue system and prints the
-installer's plan and the run list without touching a disk or the
+installer's plan and the playbooks without touching a disk or the
 inventory; --no-reboot leaves the server in the rescue system after the
-installation, recorded but not provisioned (ump server provision NAME
-after the reboot). Asks for confirmation on a terminal; without one,
---yes is required.`,
+installation, recorded but not provisioned (ump provision --hosts
+HOSTNAME after the reboot). Asks for confirmation on a terminal;
+without one, --yes is required.`,
 		Example: `  ump server reinstall web-01 --dry-run
   ump server reinstall web-01 --group web
   ump server reinstall web-01 --profile web --group web,monitoring --yes
+  ump server reinstall web-01 --group web --hosts web-01
   ump server reinstall web-01 --user oleg:local --user deploy --userdata ubuntu,web
   ump server reinstall lab-01 --no-provision`,
 		Args: usageArgs(cobra.ExactArgs(1)),
@@ -137,8 +142,10 @@ after the reboot). Asks for confirmation on a terminal; without one,
 	sub.Flags().BoolVar(&o.noReboot, "no-reboot", false, "leave the server in the rescue system after the installation")
 	sub.Flags().BoolVar(&o.yes, "yes", false, "do not ask for confirmation")
 	sub.Flags().StringVarP(&o.output, "output", "o", "", "print the result as json or yaml")
-	sub.Flags().BoolVar(&o.noProvision, "no-provision", false, "do not provision the new system: no Ansible layout needed, no run list")
-	o.groups.add(sub, "a group of the new system besides common")
+	sub.Flags().BoolVar(&o.noProvision, "no-provision", false, "do not provision: no Ansible layout needed, no playbook runs")
+	o.groups.add(sub, "group", "a group of the new system besides common")
+	hostsFlag(sub, &o.hosts, "an Ansible host pattern: provision the hosts it matches alone (default: the whole fleet)")
+	sub.Flags().StringArrayVar((*[]string)(&o.playbooks), "playbook", nil, "a playbook of playbooks/, without .yml: provision with those alone (repeatable, or comma-separated; default: every one)")
 	return sub
 }
 
@@ -150,12 +157,11 @@ type installResult struct {
 	Via              string `json:"via" yaml:"via"`
 	DryRun           bool   `json:"dry_run,omitempty" yaml:"dry_run,omitempty"`
 	Rebooted         bool   `json:"rebooted" yaml:"rebooted"`
-	// RunList is the server's groups, common first; Playbooks what they
-	// resolve to, when ump provisions; Provisioned says that the run
-	// list completed.
-	RunList     []string `json:"run_list" yaml:"run_list"`
-	Playbooks   []string `json:"playbooks,omitempty" yaml:"playbooks,omitempty"`
-	Provisioned bool     `json:"provisioned" yaml:"provisioned"`
+	// Playbooks are those the provisioning runs, when ump provisions;
+	// Provisioned says that it completed, Provision what it reported.
+	Playbooks   []string         `json:"playbooks,omitempty" yaml:"playbooks,omitempty"`
+	Provisioned bool             `json:"provisioned" yaml:"provisioned"`
+	Provision   *provisionResult `json:"provision,omitempty" yaml:"provision,omitempty"`
 	// Admin is the user ump (and you) log in as.
 	Admin string `json:"admin,omitempty" yaml:"admin,omitempty"`
 	// System is what answered after the reboot.
@@ -186,6 +192,17 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err != nil {
 		return err
 	}
+	named, err := playbookNames(cmd, o.playbooks)
+	if err != nil {
+		return err
+	}
+	pattern, err := hostsPattern(cmd, o.hosts)
+	if err != nil {
+		return err
+	}
+	if o.noProvision && (pattern != "" || len(named) > 0) {
+		return usageErrorf(cmd, "--hosts and --playbook narrow the provisioning, which --no-provision leaves out")
+	}
 	if o.os != "" && strings.ContainsAny(o.os, "/ ") {
 		return usageErrorf(cmd, "invalid --os %q", o.os)
 	}
@@ -206,22 +223,27 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	// anything else; --no-provision needs none, and puts the server into
 	// the inventory of the one there is when it can check the names there
 	var repo *infraRepo
-	var rl runList
+	var run fleetRun
 	var inv *inventory
 	var unchecked string
 	if o.noProvision {
 		repo, unchecked = a.inventoryRepo()
-	} else if repo, err = a.requireRepo(", or give --no-provision"); err != nil {
-		return err
-	}
-	if repo != nil {
-		rl = repo.runList(groups)
-		if !o.noProvision {
-			if err := a.syntaxCheck(cmd.Context(), repo, rl); err != nil {
-				return err
-			}
+	} else {
+		var all []string
+		if repo, all, err = a.requireRepo(", or give --no-provision"); err != nil {
+			return err
 		}
-		if inv, err = a.readInventory(cmd.Context(), repo); err != nil {
+		if run.playbooks, err = choosePlaybooks(all, named); err != nil {
+			return err
+		}
+		run.narrowed, run.pattern = len(named) > 0, pattern
+		if err := a.syntaxCheck(cmd.Context(), repo, run.playbooks); err != nil {
+			return err
+		}
+	}
+	inGroups := append([]string{commonGroup}, groups...)
+	if repo != nil {
+		if inv, err = a.readInventory(cmd.Context(), repo, ""); err != nil {
 			return err
 		}
 	}
@@ -254,12 +276,21 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			return fmt.Errorf("the name %q of %s is not a valid hostname; give one with --hostname", m.Name, m.Ref())
 		}
 	}
-	// the host file goes where no other's is, under a name that is no group
+	// the host file goes where no other's is, under a name that is no
+	// group, and --hosts matches a host of the inventory with the server
+	// in it
 	if repo != nil {
-		if err := repo.checkHost(hostname, m.Ref(), rl, "give another --hostname"); err != nil {
+		if err := repo.checkHost(hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
 			return err
 		}
-		if err := inv.check(hostname, m.Ref(), rl, "give another --hostname"); err != nil {
+		if err := inv.check(hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
+			return err
+		}
+	}
+	if pattern != "" {
+		in := strings.Join(inGroups, ", ")
+		future := inv.with(map[string]inventoryHost{hostname: {m: m, groups: inGroups}})
+		if err := a.matchHosts(cmd.Context(), repo, future, pattern, fmt.Sprintf("--hosts %s matches no host of the inventory with %s in %s; nothing was changed", pattern, hostname, in)); err != nil {
 			return err
 		}
 	}
@@ -274,12 +305,16 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		rescueURL = storage + "/rescue"
 	}
 	ctx := cmd.Context()
-	// the profile, resolved to the specification the installer takes:
-	// --profile, else the one set for the server, else default
+	// the hostname is no group of another server in the state
 	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
 		return err
 	}
+	if err := checkStateGroups(doc, hostname, m.Ref(), "give another --hostname"); err != nil {
+		return err
+	}
+	// the profile, resolved to the specification the installer takes:
+	// --profile, else the one set for the server, else default
 	profileName := o.profile
 	if profileName == "" {
 		profileName = doc.Servers[m.Ref()].Profile
@@ -386,6 +421,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if noRescueWarning(m, prov) != "" {
 		question += " There is no rescue system to fall back on: a failed installation is yours to recover."
 	}
+	if !o.noProvision {
+		question += " Then ump provision runs " + run.String() + "."
+	}
 	if o.dryRun {
 		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), what)
 	}
@@ -427,7 +465,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		fmt.Fprintf(a.stderr, "Installing %s on %s as %s ...\n", what, m.Name, hostname)
 	}
 	if !o.noProvision {
-		fmt.Fprintf(a.stderr, "Run list after the first boot: %s.\n", rl)
+		fmt.Fprintf(a.stderr, "Provisioning after the first boot: %s.\n", run)
 	}
 	installer := storage + "/install/install.sh"
 	// the keys go into the rescue system too, so that it stays reachable
@@ -454,15 +492,12 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	case code != 0:
 		return fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh %s --staging)", m.Name, code, ref)
 	}
-	result := installResult{Machine: m, Hostname: hostname, Via: entry.via, DryRun: o.dryRun, RunList: append([]string{commonGroup}, groups...)}
+	result := installResult{Machine: m, Hostname: hostname, Via: entry.via, DryRun: o.dryRun, Playbooks: run.playbooks}
 	// the server's os, profile, layout and groups are those of this
 	// installation, its groups as in the inventory; installed_at comes
 	// with the record
 	result.OS, result.Profile, result.Layout = spec.OS, prof.Name, spec.Layout.Name
-	result.Groups, result.InstalledAt = slices.Clone(result.RunList), nil
-	if !o.noProvision {
-		result.Playbooks = rl.playbooks
-	}
+	result.Groups, result.InstalledAt = slices.Clone(inGroups), nil
 	if o.dryRun {
 		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh %s --staging).\n", m.Name, ref)
 		return a.installReport(result, format)
@@ -487,7 +522,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	if o.noReboot {
 		// the disks hold the new system: it is recorded, and the old host
-		// key goes, so that ump server provision works after the reboot
+		// key goes, so that ump provision works after the reboot
 		admin := spec.Admin()
 		record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, "", a.now())
 		result.InstalledAt, result.Admin = &record.At, admin
@@ -498,13 +533,10 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			how = "a reboot through the provider (ump server reboot " + ref + ")"
 		}
 		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, %s starts %s.\n", m.Name, how, spec.OS)
-		switch {
-		case !recorded:
-			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, record it and run ump server provision %s from the infrastructure repository.\n", ref)
-		case repo != nil && repo.plugin != "":
-			fmt.Fprintf(a.stderr, "Not provisioned: %s makes ump the inventory, which has %s from its record on; after the reboot, ump server provision %s runs its run list.\n", repo.plugin, hostname, ref)
-		default:
-			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, ump server provision %s, run from the infrastructure repository, puts %s into the inventory and runs its run list (where ump is the inventory, %s is in it from its record on).\n", ref, hostname, hostname)
+		if !recorded {
+			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, record it and run ump provision --hosts %s.\n", hostname)
+		} else {
+			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, ump provision --hosts %s runs the playbooks on it. It is in the inventory from its record on: in ump's, and in the host files from the next ump provision, which finds it unreachable until then.\n", hostname)
 		}
 		return a.installReport(result, format)
 	}
@@ -542,57 +574,76 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	result.InstalledAt = &record.At
 	recorded := a.recordInstallation(ctx, m, record, groups)
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, hostname, sys.Root, admin, m.Name)
-	// the new system goes into the inventory and gets its run list; ump
-	// as the inventory lists the record, and without it the old one
-	vars := a.inventoryVars(cfg, m, record)
+	// the inventory comes from the record: without it, the old one
 	switch {
-	case !recorded && repo != nil && repo.plugin != "" && !o.noProvision:
+	case !recorded && !o.noProvision:
 		if err := a.installReport(result, format); err != nil {
 			return err
 		}
-		return withExit(exitProvision, fmt.Errorf("provisioning failed: %s is installed but not recorded, and %s makes ump the inventory, which lists the old record; record it and run ump server provision %s", hostname, repo.plugin, ref))
-	case !recorded && repo != nil && repo.plugin != "":
-		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision), and not in the inventory as installed: %s makes ump the inventory, which lists the old record; record it.\n", repo.plugin)
+		return withExit(exitProvision, fmt.Errorf("provisioning failed: %s is installed but not recorded, and the inventory comes from the record; record it and run ump provision --hosts %s", hostname, hostname))
+	case !recorded:
+		fmt.Fprintln(a.stderr, "Not provisioned (--no-provision), nor in the inventory as installed: the inventory comes from the record; record it.")
 	case !o.noProvision:
-		if err := a.provisionHost(ctx, repo, rl, hostname, vars, keyPath); err != nil {
+		// the server is provisioned when its own line of the recap says so,
+		// whatever the run did on other hosts
+		res, err := a.provision(ctx, cfg, repo, run, "provision after reinstalling "+m.Name, []provider.Machine{m})
+		var own hostRecap
+		var ran bool
+		if res != nil {
+			own, ran = res.Hosts[hostname]
+		}
+		result.Provision, result.Provisioned = res, ran && own.Failed == 0 && own.Unreachable == 0
+		var failed *runFailure
+		if err != nil {
 			// the result still says what was installed
 			if rerr := a.installReport(result, format); rerr != nil {
 				return rerr
 			}
-			return a.provisionFailed(ctx, err, "the server is installed and recorded, its run list did not complete", "run ump server provision "+ref)
+			if !result.Provisioned || ctx.Err() != nil || !errors.As(err, &failed) {
+				return notProvisioned(ctx, err, hostname)
+			}
+			return withExit(exitProvision, fmt.Errorf("%s is provisioned; the run failed%s", hostname, failed.detail()))
 		}
-		result.Provisioned = true
-		fmt.Fprintf(a.stderr, "%s is provisioned: %s.\n", hostname, strings.Join(rl.groups, ", "))
-	case repo != nil:
-		if _, err := a.putInInventory(repo, hostname, rl.groups, vars); err != nil {
-			fmt.Fprintf(a.stderr, "ump: %v\n", err)
+		if !result.Provisioned {
+			fmt.Fprintf(a.stderr, "%s is not provisioned: no play of the run matched it. %s\n", hostname, res.summary())
 			break
 		}
-		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision); ump server provision %s runs its run list.\n", ref)
+		fmt.Fprintf(a.stderr, "%s is provisioned. %s\n", hostname, res.summary())
+	case repo != nil:
+		// under the fleet's lock, as a run writes the host files
+		err := a.addToInventory(ctx, repo, m.Name, hostname, inGroups, a.inventoryVars(cfg, m, record))
+		if err != nil {
+			if rerr := a.installReport(result, format); rerr != nil {
+				return rerr
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return withExit(exitCodeFor(err), fmt.Errorf("%s is installed and recorded, but not written into the inventory: %w", hostname, err))
+		}
+		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision); the next ump provision includes it (ump provision --hosts %s for it alone).\n", hostname)
 	default:
 		why := "no Ansible layout here"
 		if unchecked != "" {
 			why = unchecked
 		}
-		fmt.Fprintf(a.stderr, "No host file for %s (%s): ump server provision %s, run from the infrastructure repository, writes it", hostname, why, ref)
-		if recorded {
-			fmt.Fprintf(a.stderr, "; where ump is the inventory, %s is in it from its record on", hostname)
-		}
-		fmt.Fprintln(a.stderr, ".")
+		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision), and no host file for %s (%s): ump provision, run from the infrastructure repository, writes it and includes the server; where ump is the inventory, it is in it already.\n", hostname, why)
 	}
 	return a.installReport(result, format)
 }
 
 // recordInstallation puts the installation into the state, with the
 // groups: a new system has the groups it is installed with, none
-// without --group. A failure is told, with the record to add by hand,
-// and reported: the server is installed either way, but the state has
-// the old record.
+// without --group, and the facts of the old one, which the next
+// provisioning clears. A failure is told, with the record to add by
+// hand, and reported: the server is installed either way, but the state
+// has the old record.
 func (a *app) recordInstallation(ctx context.Context, m provider.Machine, record state.Install, groups []string) bool {
 	err := a.updateState(ctx, func(d *state.Document) error {
 		s := d.Servers[m.Ref()]
 		s.Installed = &record
 		s.Groups = groups
+		s.StaleFacts = true
 		d.Servers[m.Ref()] = s
 		return nil
 	})
@@ -603,8 +654,8 @@ func (a *app) recordInstallation(ctx context.Context, m provider.Machine, record
 	var entry bytes.Buffer
 	enc := yaml.NewEncoder(&entry)
 	enc.SetIndent(2)
-	enc.Encode(map[string]map[string]state.Server{"servers": {m.Ref(): {Installed: &record, Groups: groups}}})
-	fmt.Fprintf(a.stderr, "Record it by hand: in state.yaml (ump config state view says where), the server's installed and groups are these:\n%s", entry.String())
+	enc.Encode(map[string]map[string]state.Server{"servers": {m.Ref(): {Installed: &record, Groups: groups, StaleFacts: true}}})
+	fmt.Fprintf(a.stderr, "Record it by hand: in state.yaml (ump config state view says where), the server's installed, groups and stale_facts are these:\n%s", entry.String())
 	return false
 }
 

@@ -7,19 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/cache"
@@ -292,18 +296,29 @@ type testEnv struct {
 	bootFails       bool
 
 	// repo is the infrastructure repository ump provisions from: a
-	// directory with ansible.cfg and inventory/. ansibleCalls records the
-	// runs of ansible-playbook and ansible-inventory; syntaxExit makes the
-	// syntax check fail, ansibleExit the run; inventory is what
-	// ansible-inventory --list prints (default: no hosts), inventoryExit
-	// its exit status; noAnsible: ansible-playbook is not in PATH
+	// directory with ansible.cfg, inventory/ and playbooks/00-base.yml.
+	// ansibleCalls records the runs of ansible-playbook and
+	// ansible-inventory; syntaxExit makes the syntax check fail,
+	// ansibleExit the run without a host to blame; inventory is what
+	// ansible-inventory --list prints (default: the host files, as the
+	// collection's plugin reads them), inventoryExit its exit status; the
+	// run's recap has every host of the inventory (or its --limit), with
+	// the counts of hostRecaps where it has some (failed or unreachable
+	// make the exit status); noAnsible: ansible-playbook is not in PATH
 	repo          string
 	ansibleCalls  []ansibleCall
 	syntaxExit    int
 	ansibleExit   int
 	inventory     string
 	inventoryExit int
+	hostRecaps    map[string]hostRecap
 	noAnsible     bool
+	// onRun runs when ansible-playbook does, before its output; imported
+	// is the playbook that imports the playbooks of the last run; sources
+	// are the inventories ansible-inventory was given as files (-i)
+	onRun    func()
+	imported string
+	sources  []string
 	// realAnsible runs ansible-playbook and ansible-inventory from PATH,
 	// the way ump does, instead of playing them
 	realAnsible bool
@@ -335,7 +350,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { waitDownTime, waitPoll = oldDown, oldPoll })
 	repo := filepath.Join(dir, "infra")
 	os.MkdirAll(filepath.Join(repo, "inventory"), 0o755)
+	os.MkdirAll(filepath.Join(repo, "playbooks"), 0o755)
 	os.WriteFile(filepath.Join(repo, "ansible.cfg"), []byte("[defaults]\ninventory = inventory\n"), 0o644)
+	os.WriteFile(filepath.Join(repo, "playbooks", "00-base.yml"), []byte("- import_playbook: ofzhur.ansible.base\n"), 0o644)
 	return &testEnv{t: t, cfgPath: filepath.Join(dir, "config.yaml"), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC), repo: repo}
 }
 
@@ -421,16 +438,20 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 		},
 		ansible: func(ctx context.Context, dir, prog string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 			e.ansibleCalls = append(e.ansibleCalls, ansibleCall{dir: dir, prog: prog, args: args, env: env})
+			limit := ""
+			if i := slices.Index(args, "--limit"); i >= 0 {
+				limit = args[i+1]
+			}
 			if prog == "ansible-inventory" {
-				if e.inventoryExit != 0 {
+				source := ""
+				if i := slices.Index(args, "-i"); i >= 0 {
+					source = args[i+1]
+				}
+				if e.inventoryExit != 0 && source == "" {
 					io.WriteString(stderr, "[ERROR]: inventory/groups.yml: not a mapping\n")
 					return e.inventoryExit, nil
 				}
-				inv := e.inventory
-				if inv == "" {
-					inv = `{"_meta": {"hostvars": {}}, "all": {"children": ["ungrouped"]}}`
-				}
-				io.WriteString(stdout, inv+"\n")
+				io.WriteString(stdout, e.fakeInventory(source, limit)+"\n")
 				return 0, nil
 			}
 			if args[0] == "--syntax-check" {
@@ -441,11 +462,14 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 				io.WriteString(stdout, "\nplaybook: "+args[1]+"\n")
 				return 0, nil
 			}
-			io.WriteString(stdout, "PLAY RECAP *********\n")
-			if e.ansibleExit != 0 {
-				io.WriteString(stdout, "web-01 : ok=2 changed=0 unreachable=0 failed=1\n")
+			if strings.HasPrefix(args[0], "playbooks/.ump-provision-") {
+				data, _ := os.ReadFile(filepath.Join(dir, args[0]))
+				e.imported = string(data)
 			}
-			return e.ansibleExit, nil
+			if e.onRun != nil {
+				e.onRun()
+			}
+			return e.fakeRun(limit, stdout), nil
 		},
 		sshExec: func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 			in := ""
@@ -471,6 +495,159 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	}
 	code = a.run(context.Background(), append([]string{"--config", e.cfgPath}, args...))
 	return out.String(), errb.String(), code
+}
+
+// fakeInventory is what the fake ansible-inventory --list prints: the
+// inventory of a source file (-i), which ump writes for the yaml plugin
+// (every group with its hosts and children as mappings), else
+// e.inventory, else the host files of the repository, each host in its
+// groups with its variables; limited to the hosts of a pattern of names,
+// groups, globs and all (",", ":", "!", "&") when one is given.
+func (e *testEnv) fakeInventory(source, pattern string) string {
+	type group struct {
+		Hosts    []string `json:"hosts,omitempty"`
+		Children []string `json:"children,omitempty"`
+	}
+	inv := map[string]json.RawMessage{}
+	groups := map[string]group{}
+	hostvars := map[string]map[string]any{}
+	if source != "" {
+		data, _ := os.ReadFile(source)
+		var src map[string]struct {
+			Hosts    map[string]any `json:"hosts"`
+			Children map[string]any `json:"children"`
+		}
+		if err := json.Unmarshal(data, &src); err != nil {
+			e.t.Errorf("inventory source %s: %v", source, err)
+		}
+		for name, g := range src {
+			groups[name] = group{Hosts: slices.Sorted(maps.Keys(g.Hosts)), Children: slices.Sorted(maps.Keys(g.Children))}
+		}
+		e.sources = append(e.sources, string(data))
+	} else if e.inventory != "" {
+		json.Unmarshal([]byte(e.inventory), &inv)
+		for name, v := range inv {
+			var g group
+			if name != "_meta" && json.Unmarshal(v, &g) == nil {
+				groups[name] = g
+			}
+		}
+		var meta struct {
+			Hostvars map[string]map[string]any `json:"hostvars"`
+		}
+		json.Unmarshal(inv["_meta"], &meta)
+		hostvars = meta.Hostvars
+	} else {
+		files, _ := filepath.Glob(filepath.Join(e.repo, "inventory", "hosts", "*.yml"))
+		children := []string{"ungrouped"}
+		for _, f := range files {
+			var hf struct {
+				Groups []string       `yaml:"groups"`
+				Vars   map[string]any `yaml:"vars"`
+			}
+			data, _ := os.ReadFile(f)
+			if yaml.Unmarshal(data, &hf) != nil {
+				continue
+			}
+			host := strings.TrimSuffix(filepath.Base(f), ".yml")
+			hostvars[host] = hf.Vars
+			for _, g := range hf.Groups {
+				if _, ok := groups[g]; !ok {
+					children = append(children, g)
+				}
+				groups[g] = group{Hosts: append(groups[g].Hosts, host)}
+			}
+		}
+		groups["all"] = group{Children: children}
+	}
+	// the hosts and their groups, then the pattern
+	member := map[string][]string{}
+	for name, g := range groups {
+		for _, h := range g.Hosts {
+			member[h] = append(member[h], name)
+		}
+	}
+	for h := range hostvars {
+		if _, ok := member[h]; !ok {
+			member[h] = nil
+		}
+	}
+	matches := func(term, host string) bool {
+		ok, _ := path.Match(term, host)
+		return term == "all" || ok || slices.Contains(member[host], term)
+	}
+	keep := map[string]bool{}
+	for h := range member {
+		keep[h] = pattern == ""
+	}
+	for _, term := range strings.FieldsFunc(pattern, func(r rune) bool { return r == ',' || r == ':' }) {
+		for h := range member {
+			switch {
+			case strings.HasPrefix(term, "!"):
+				keep[h] = keep[h] && !matches(term[1:], h)
+			case strings.HasPrefix(term, "&"):
+				keep[h] = keep[h] && matches(term[1:], h)
+			default:
+				keep[h] = keep[h] || matches(term, h)
+			}
+		}
+	}
+	out := map[string]any{}
+	vars := map[string]map[string]any{}
+	for name, g := range groups {
+		var hosts []string
+		for _, h := range g.Hosts {
+			if keep[h] {
+				hosts = append(hosts, h)
+			}
+		}
+		slices.Sort(hosts)
+		out[name] = group{Hosts: hosts, Children: g.Children}
+	}
+	for h, v := range hostvars {
+		if keep[h] && len(v) > 0 {
+			vars[h] = v
+		}
+	}
+	out["_meta"] = map[string]any{"hostvars": vars}
+	data, _ := json.Marshal(out)
+	return string(data)
+}
+
+// fakeRun plays an ansible-playbook run on the hosts of the inventory
+// (or its --limit): a recap after the first playbook and one at the end,
+// with hostRecaps' counts, and the exit status they make.
+func (e *testEnv) fakeRun(limit string, stdout io.Writer) int {
+	inv, _ := parseInventory([]byte(e.fakeInventory("", limit)))
+	var hosts []string
+	for h := range inv.hosts {
+		hosts = append(hosts, h)
+	}
+	slices.Sort(hosts)
+	code := e.ansibleExit
+	for i, final := range []bool{false, true} {
+		fmt.Fprintf(stdout, "\nPLAY [all] *****\n\nTASK [x] *****\nok: [web-01]\n\nPLAY RECAP *********\n")
+		for _, h := range hosts {
+			r, ok := e.hostRecaps[h]
+			if !ok {
+				r = hostRecap{OK: 2}
+			}
+			if !final {
+				r = hostRecap{OK: 1}
+			}
+			fmt.Fprintf(stdout, "%-26s : ok=%-4d changed=%-4d unreachable=%-4d failed=%-4d skipped=%-4d rescued=%-4d ignored=%-4d\n", h, r.OK, r.Changed, r.Unreachable, r.Failed, r.Skipped, r.Rescued, r.Ignored)
+			if final && r.Unreachable > 0 && code == 0 {
+				code = 4
+			}
+			if final && r.Failed > 0 {
+				code = 2
+			}
+		}
+		if i == 0 {
+			io.WriteString(stdout, "\n")
+		}
+	}
+	return code
 }
 
 // remote plays the machine at the other end of a non-interactive ssh run.
@@ -2557,7 +2734,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	if code != 0 {
 		t.Fatalf("install with a profile file: code %d, stderr %q\n%s", code, errOut, out)
 	}
-	if !strings.Contains(errOut, "Installing ubuntu-26.04 (profile db from "+prof+", layout inline) on web-01 as web-01 ...") || !strings.Contains(errOut, "web-01 is provisioned: common.\n") {
+	if !strings.Contains(errOut, "Installing ubuntu-26.04 (profile db from "+prof+", layout inline) on web-01 as web-01 ...") || !strings.Contains(errOut, "web-01 is provisioned. Provisioned 1 host, 0 changed.\n") {
 		t.Errorf("stderr: %q", errOut)
 	}
 	spec := e.lastSpec()
@@ -3546,7 +3723,7 @@ func TestReinstallUsers(t *testing.T) {
 		t.Errorf("spec users:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	// ump logs in as the administrator, and the inventory has it
-	if !strings.Contains(errOut, "log in as oleg (ump ssh web-01)") || !strings.Contains(out, `"admin": "oleg"`) || !strings.Contains(e.readState(), "      admin: oleg\n") || !strings.Contains(e.hostFile("web-01.yml"), "  ansible_user: oleg\n") {
+	if !strings.Contains(errOut, "log in as oleg (ump ssh web-01)") || !strings.Contains(out, `"admin": "oleg"`) || !strings.Contains(e.readState(), "      admin: oleg\n") || !strings.Contains(e.hostFile("web-01.yml"), "  ump_admin: oleg\n") {
 		t.Errorf("administrator: %q\n%s", errOut, out)
 	}
 
@@ -3824,7 +4001,7 @@ func TestManualServersWithoutAccounts(t *testing.T) {
 	e.write("")
 	e.writeProfiles()
 	want := "ump: no accounts configured in " + e.cfgPath + "; run `ump config isp` to add one, or ump server add for a server by hand\n"
-	for _, args := range [][]string{{"server", "set", "rack-07", "--attr", "owner=alice"}, {"server", "provision", "rack-07"}, {"server", "reinstall", "rack-07", "--yes"}} {
+	for _, args := range [][]string{{"server", "set", "rack-07", "--attr", "owner=alice"}, {"server", "reinstall", "rack-07", "--yes"}} {
 		if _, errOut, code := e.run("", false, args...); code != 1 || !strings.HasSuffix(errOut, want) {
 			t.Errorf("%v, nothing: code %d, %q", args, code, errOut)
 		}
@@ -3835,8 +4012,11 @@ func TestManualServersWithoutAccounts(t *testing.T) {
 	if out, errOut, code := e.run("", false, "server", "set", "rack-07", "--attr", "owner=alice"); code != 0 || !strings.Contains(out, "attributes owner=alice.") {
 		t.Errorf("set: code %d, %q\n%s", code, errOut, out)
 	}
-	if _, errOut, code := e.run("", false, "server", "provision", "rack-07"); code != 2 || !strings.Contains(errOut, "ump: ump did not install rack-07: nothing to put into the inventory") {
-		t.Errorf("provision: code %d, %q", code, errOut)
+	if _, errOut, code := e.run("", false, "server", "set", "rack-07", "--group", "web"); code != 2 || !strings.Contains(errOut, "ump: ump did not install rack-07: its groups come with the installation") {
+		t.Errorf("set --group: code %d, %q", code, errOut)
+	}
+	if out, errOut, code := e.run("", false, "provision", "--yes"); code != 0 || out != "Provisioned: no play matched a host.\n" || e.hostFile("rack-07.yml") != "" {
+		t.Errorf("provision: code %d, %q, %q", code, out, errOut)
 	}
 	e.directRoot = true
 	resetFakePower()
