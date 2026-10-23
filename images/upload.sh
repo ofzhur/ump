@@ -113,7 +113,7 @@ ssh_target() { ssh -o BatchMode=yes ${UPLOAD_SSH_OPTIONS:-} "$host" "$@"; }
 
 put() { # put FILE KEY
 	local file="$1" k="$2" type
-	type="$(content_type "$(basename "$file")")"
+	type="$(content_type "$(basename "$k")")"
 	if [ "$DRY_RUN" = 1 ]; then echo "would upload $file -> $TARGET/$k ($type)"; return 0; fi
 	case "$kind" in
 	s3)
