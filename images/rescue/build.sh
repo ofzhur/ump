@@ -149,7 +149,7 @@ sha256sum "${files[@]}" > SHA256SUMS
 	printf '{\n'
 	printf '  "version": "%s",\n  "arch": "%s",\n  "suite": "%s",\n  "kernel": "%s",\n' "$VERSION" "$ARCH" "$SUITE" "$kver"
 	printf '  "built": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-	printf '  "cmdline": "console=tty0 console=ttyS0,115200n8",\n'
+	printf '  "cmdline": "console=ttyS0,115200n8 console=tty0",\n'
 	# the smallest MemTotal the image boots with: the kernel holds the
 	# compressed initramfs while it unpacks it (twice its size), plus the
 	# kernel itself and room for systemd and the tools (see README.md)

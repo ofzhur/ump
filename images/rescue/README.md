@@ -178,7 +178,11 @@ before networkd and sshd and reads the kernel command line:
 Without `ump.ip` and `ump.ip6`, every Ethernet interface uses DHCP and
 router advertisements, which is what cloud VMs need. SSH host keys are
 generated at every boot. `console=ttyS0,115200n8` (or the provider's
-serial console) gives a root shell on the out-of-band console.
+serial console) gives a root shell on the out-of-band console. When the
+provider's rescue system names no console, the entry script passes
+`console=ttyS0,115200n8 console=tty0`: the kernel's messages go to both,
+and programs write to the screen, the last one, so a serial port that
+takes no output after the jump cannot stall the boot.
 
 ## Entering it by hand
 
