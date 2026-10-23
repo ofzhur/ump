@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://ump.zhurko.de/docs/
+    about: The quickstart, the commands, profiles, disk layouts, troubleshooting.
+  - name: Security problem
+    url: https://github.com/ofzhur/ump/security/advisories/new
+    about: Report a vulnerability privately.
