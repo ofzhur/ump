@@ -23,7 +23,10 @@ type Vault struct {
 	Mount   string
 	Prefix  string
 	Token   string
-	Client  *http.Client
+	// Namespace is the namespace of Vault Enterprise and HCP Vault (a
+	// storage's).
+	Namespace string
+	Client    *http.Client
 }
 
 func (v *Vault) String() string {
@@ -48,6 +51,9 @@ func (v *Vault) do(ctx context.Context, method, path string, body any) (*http.Re
 		return nil, nil, err
 	}
 	req.Header.Set("X-Vault-Token", v.Token)
+	if v.Namespace != "" {
+		req.Header.Set("X-Vault-Namespace", v.Namespace)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

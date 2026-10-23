@@ -253,9 +253,11 @@ fresh system; adding one in place suits groups built for it. ump logs
 in as each server's administrator with its own key; you log in as
 yourself (`ansible-playbook playbooks/10-web.yml`, `-u NAME`). Commit
 `inventory/hosts/` with the rest: Ansible runs from the repository
-without ump. Or let ump be the inventory, with no files to commit:
-`inventory/ump.yml` with `plugin: ofzhur.ansible.ump`, which lists the
-servers with `ump server list -o ansible`. See
+without ump. Or keep the host files in a storage, like Ansible's facts
+(`inventory/hosts.yml` with `url:`), or let ump be the inventory,
+with no files at all: `inventory/ump.yml` with `plugin:
+ofzhur.ansible.ump`, which lists the servers with `ump server list -o
+ansible`. See
 [provisioning](provisioning.md) for the layout, the inventory, the
 playbooks, the logins, and facts and secrets.
 

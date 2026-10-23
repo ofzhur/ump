@@ -28,11 +28,11 @@ As of October 2026, ump does what the [README](../README.md) and the
   Arch Linux and CachyOS (experimental); `ump ssh`.
 - **Provisioning:** Ansible from the infrastructure repository: `ump
   server reinstall` (`--group`) puts the server into the inventory, as
-  a host file or with ump as the inventory (`ump server list -o
-  ansible`), and `ump provision` (also after every reinstall) runs the
-  repository's playbooks over the fleet, each play on the hosts its
-  `hosts:` names, one run at a time, every host logged in to as its
-  administrator; the collection
+  a host file in the repository or in a central storage, or with ump as
+  the inventory (`ump server list -o ansible`), and `ump provision`
+  (also after every reinstall) runs the repository's playbooks over the
+  fleet, each play on the hosts its `hosts:` names, one run at a time,
+  every host logged in to as its administrator; the collection
   [ofzhur.ansible](https://github.com/ofzhur/ansible) brings the users
   and keys, and its fact cache `ofzhur.ansible.facts` keeps the facts
   in a central storage ([provisioning](provisioning.md)).

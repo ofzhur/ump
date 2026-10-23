@@ -155,6 +155,7 @@ vars:
 }
 
 func TestWriteHostFile(t *testing.T) {
+	ctx := context.Background()
 	repo := &infraRepo{dir: t.TempDir()}
 	hosts := filepath.Join(repo.dir, "inventory", "hosts")
 	file := func(ref string) []byte {
@@ -163,46 +164,46 @@ func TestWriteHostFile(t *testing.T) {
 	groups := []string{"common", "web"}
 
 	// no file yet: nothing in the way; the directory is created
-	if err := repo.checkHost("web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
+	if err := repo.checkHost(ctx, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
 		t.Errorf("no file: %v", err)
 	}
-	written, removed, err := repo.writeHostFile("web-01", "fake/1", file("fake/1"))
+	written, removed, err := repo.writeHostFile(ctx, "web-01", "fake/1", file("fake/1"))
 	if err != nil || written != "inventory/hosts/web-01.yml" || len(removed) != 0 {
 		t.Fatalf("first write: %q %v %v", written, removed, err)
 	}
 	// the same again is no write
 	fi, _ := os.Stat(filepath.Join(hosts, "web-01.yml"))
 	os.Chtimes(filepath.Join(hosts, "web-01.yml"), time.Unix(1, 0), time.Unix(1, 0))
-	if written, removed, err := repo.writeHostFile("web-01", "fake/1", file("fake/1")); err != nil || written != "" || len(removed) != 0 {
+	if written, removed, err := repo.writeHostFile(ctx, "web-01", "fake/1", file("fake/1")); err != nil || written != "" || len(removed) != 0 {
 		t.Errorf("unchanged: %q %v %v", written, removed, err)
 	}
 	if after, _ := os.Stat(filepath.Join(hosts, "web-01.yml")); fi == nil || after.ModTime().Unix() != 1 {
 		t.Errorf("unchanged file rewritten")
 	}
 	// the server's own file is no conflict; another server's is
-	if err := repo.checkHost("web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
+	if err := repo.checkHost(ctx, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
 		t.Errorf("own file: %v", err)
 	}
-	err = repo.checkHost("web-01", "fake/2", groups, "give another --hostname", "")
+	err = repo.checkHost(ctx, "web-01", "fake/2", groups, "give another --hostname", "")
 	if err == nil || exitCodeFor(err) != exitUsage || err.Error() != "inventory/hosts/web-01.yml is the host file of fake/1 (its ump_ref); give another --hostname, or remove the file if that server is gone" {
 		t.Errorf("conflict: %v", err)
 	}
 	os.WriteFile(filepath.Join(hosts, "db-01.yaml"), file("fake/2"), 0o644)
-	if err := repo.checkHost("db-01", "fake/3", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "inventory/hosts/db-01.yaml is the host file of fake/2") {
+	if err := repo.checkHost(ctx, "db-01", "fake/3", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "inventory/hosts/db-01.yaml is the host file of fake/2") {
 		t.Errorf("conflict with .yaml: %v", err)
 	}
 	// a hostname that is a group of the server, or Ansible's own
 	for _, name := range []string{"web", "common"} {
-		if err := repo.checkHost(name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is also a group of the server: a host and a group with the same name make the group's plays match only the host; give another --hostname" {
+		if err := repo.checkHost(ctx, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is also a group of the server: a host and a group with the same name make the group's plays match only the host; give another --hostname" {
 			t.Errorf("hostname %s: %v", name, err)
 		}
 	}
-	if err := repo.checkHost("all", "fake/1", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "the hostname all is one of Ansible's own groups: a host and a group") {
+	if err := repo.checkHost(ctx, "all", "fake/1", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "the hostname all is one of Ansible's own groups: a host and a group") {
 		t.Errorf("hostname all: %v", err)
 	}
 	// a host of the controller's own names would take its plays
 	for _, name := range []string{"localhost", "127.0.0.1"} {
-		if err := repo.checkHost(name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is one of Ansible's own names: plays and tasks for localhost would run on the server; give another --hostname" {
+		if err := repo.checkHost(ctx, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is one of Ansible's own names: plays and tasks for localhost would run on the server; give another --hostname" {
 			t.Errorf("hostname %s: %v", name, err)
 		}
 	}
@@ -215,10 +216,10 @@ func TestWriteHostFile(t *testing.T) {
 	} {
 		os.WriteFile(filepath.Join(hosts, f.name), []byte(f.content), 0o644)
 		want := "inventory/hosts/" + f.name + " has no ump_ref: written by hand or by another tool; remove it, ump writes inventory/hosts/hand-01.yml"
-		if err := repo.checkHost("hand-01", "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != want {
+		if err := repo.checkHost(ctx, "hand-01", "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != want {
 			t.Errorf("%s: %v", f.name, err)
 		}
-		if _, _, err := repo.writeHostFile("hand-01", "fake/1", file("fake/1")); err == nil || err.Error() != want {
+		if _, _, err := repo.writeHostFile(ctx, "hand-01", "fake/1", file("fake/1")); err == nil || err.Error() != want {
 			t.Errorf("%s, written: %v", f.name, err)
 		}
 		if data, _ := os.ReadFile(filepath.Join(hosts, f.name)); string(data) != f.content {
@@ -230,7 +231,7 @@ func TestWriteHostFile(t *testing.T) {
 		t.Errorf("hand-01.yml written")
 	}
 	// the file of another server is not overwritten either
-	if _, _, err := repo.writeHostFile("web-01", "fake/2", file("fake/2")); err == nil || !strings.Contains(err.Error(), "is the host file of fake/1") {
+	if _, _, err := repo.writeHostFile(ctx, "web-01", "fake/2", file("fake/2")); err == nil || !strings.Contains(err.Error(), "is the host file of fake/1") {
 		t.Errorf("written over another server's: %v", err)
 	}
 
@@ -238,7 +239,7 @@ func TestWriteHostFile(t *testing.T) {
 	os.WriteFile(filepath.Join(hosts, "old-name.yaml"), file("fake/1"), 0o644)
 	os.WriteFile(filepath.Join(hosts, ".hidden.yml"), file("fake/1"), 0o644)
 	os.WriteFile(filepath.Join(hosts, "notes.txt"), file("fake/1"), 0o644)
-	written, removed, err = repo.writeHostFile("web-02", "fake/1", file("fake/1"))
+	written, removed, err = repo.writeHostFile(ctx, "web-02", "fake/1", file("fake/1"))
 	if err != nil || written != "inventory/hosts/web-02.yml" || strings.Join(removed, ",") != "inventory/hosts/old-name.yaml,inventory/hosts/web-01.yml" {
 		t.Errorf("rename: %q %v %v", written, removed, err)
 	}
@@ -658,7 +659,7 @@ func TestReinstallProvisions(t *testing.T) {
 		os.WriteFile(filepath.Join(e.repo, "inventory", "hosts", "web-01.yml"), []byte("plugin: ofzhur.ansible.host\nvars:\n  ump_ref: fake/2\n"), 0o644)
 	}
 	resetFakePower()
-	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one"); code != 2 || !strings.HasSuffix(errOut, "ump: web-01 is installed and recorded, but not written into the inventory: the host file inventory/hosts/web-01.yml: inventory/hosts/web-01.yml is the host file of fake/2 (its ump_ref); give another hostname, or remove the file if that server is gone\n") {
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one"); code != 2 || !strings.HasSuffix(errOut, "ump: web-01 is installed and recorded, but not written into the inventory: inventory/hosts/web-01.yml is the host file of fake/2 (its ump_ref); give another hostname, or remove the file if that server is gone\n") {
 		t.Errorf("--no-provision, a host file in the way: code %d, %q", code, errOut)
 	}
 	e.installHook = nil
@@ -1524,12 +1525,12 @@ func TestUmpInventoryFile(t *testing.T) {
 	write("ump.txt", "plugin: ofzhur.ansible.ump\n")
 	write("sub/ump.yml", "plugin: ofzhur.ansible.ump\n")
 	write("broken.yml", "{not yaml")
-	if got := umpInventory(dir); got != "" {
-		t.Errorf("no plugin file: %q", got)
+	if plugins, pointers := inventoryFiles(dir); len(plugins) != 0 || len(pointers) != 0 {
+		t.Errorf("no plugin file: %v %v", plugins, pointers)
 	}
 	write("ump.yaml", "# ump is the inventory\nplugin: ofzhur.ansible.ump\n")
-	if got := umpInventory(dir); got != "inventory/ump.yaml" {
-		t.Errorf("plugin file: %q", got)
+	if plugins, pointers := inventoryFiles(dir); !slices.Equal(plugins, []string{"inventory/ump.yaml"}) || len(pointers) != 0 {
+		t.Errorf("plugin file: %v %v", plugins, pointers)
 	}
 	os.WriteFile(filepath.Join(dir, "ansible.cfg"), nil, 0o644)
 	a := &app{repoDir: dir}

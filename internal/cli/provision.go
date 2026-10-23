@@ -186,9 +186,11 @@ ump checks the playbooks with ansible-playbook --syntax-check. Then,
 under the fleet's lock (one run at a time: another waits for it up to
 the configured wait), it checks the names of the inventory
 (ansible-inventory) and that --hosts matches a host of it as it will
-be, writes the host files of every server it installed (none when ump
-is the inventory), and runs the playbooks, logging in to every host as
-its administrator (ump_admin) with UMP's key only.
+be, writes the host files of every server it installed (into
+inventory/hosts/, or the storage inventory/hosts.yml points to, with
+the credentials of [ofzhur_storage] in ansible.cfg; none when ump is
+the inventory), and runs the playbooks, logging in to every host as its
+administrator (ump_admin) with UMP's key only.
 
 Exit status 6 names the hosts that failed or were unreachable: fix that
 and run ump provision --hosts with them. Without --hosts, asks for
@@ -411,7 +413,7 @@ func (a *app) provision(ctx context.Context, cfg *config.Config, repo *infraRepo
 	if err != nil {
 		return nil, err
 	}
-	refresh, err := a.refreshHosts(ctx, cfg, repo, inv, known)
+	refresh, files, err := a.refreshHosts(ctx, cfg, repo, inv, known)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +422,7 @@ func (a *app) provision(ctx context.Context, cfg *config.Config, repo *infraRepo
 			return nil, err
 		}
 	}
-	if err := a.writeHostFiles(repo, refresh); err != nil {
+	if err := a.writeHostFiles(ctx, repo, files, refresh); err != nil {
 		return nil, err
 	}
 	matched, err := a.readInventory(ctx, repo, run.pattern)
@@ -512,20 +514,21 @@ func (a *app) freshFacts(ctx context.Context, hosts map[string]inventoryHost, st
 // refreshHosts are the hosts of every server ump installed, as the state
 // and the providers have it now, once all of them pass the checks (a
 // hostname that is a group of another host, a host file in the way, a
-// name the inventory has the other way round): none when one does not.
-// When ump is the inventory, the checks are those of the host files
-// beside it. The servers of an account that could not be listed are
-// none: their host files stay as they are.
-func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraRepo, inv *inventory, known []provider.Machine) (map[string]inventoryHost, error) {
+// name the inventory has the other way round), with the host files they
+// go into, as read (inventory/hosts/, or the storage): none when one
+// does not. When ump is the inventory, the checks are those of the host
+// files beside it. The servers of an account that could not be listed
+// are none: their host files stay as they are.
+func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraRepo, inv *inventory, known []provider.Machine) (map[string]inventoryHost, *hostFiles, error) {
 	_, path, err := a.loadConfig()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// the state as it is now, under the lock
 	a.doc = nil
 	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	isKnown := func(m provider.Machine) bool {
 		return slices.ContainsFunc(known, func(k provider.Machine) bool { return k.Ref() == m.Ref() })
@@ -550,33 +553,40 @@ func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraR
 		for _, other := range names {
 			h, o := hosts[host], hosts[other]
 			if other != host && host != commonGroup && slices.Contains(o.groups, host) {
-				return nil, withExit(exitUsage, fmt.Errorf("the hostname %s of %s is also a group of %s: %s; %s, or reinstall %s with another --hostname", host, h.m.Name, o.m.Name, sameName, ungroup(o.m.Name, host), h.m.Name))
+				return nil, nil, withExit(exitUsage, fmt.Errorf("the hostname %s of %s is also a group of %s: %s; %s, or reinstall %s with another --hostname", host, h.m.Name, o.m.Name, sameName, ungroup(o.m.Name, host), h.m.Name))
 			}
 		}
+	}
+	files, err := repo.readHostFiles(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, host := range names {
 		h := hosts[host]
 		retry := "reinstall " + h.m.Name + " with another --hostname"
-		if err := repo.checkHost(host, h.m.Ref(), h.groups, retry, h.m.Name); err != nil {
-			return nil, err
+		if err := checkHostName(host, h.groups, retry, h.m.Name); err != nil {
+			return nil, nil, err
+		}
+		if err := files.check(host, h.m.Ref(), retry); err != nil {
+			return nil, nil, err
 		}
 		if err := inv.check(host, h.m.Ref(), h.groups, retry, h.m.Name); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return hosts, nil
+	return hosts, files, nil
 }
 
-// writeHostFiles writes the host files of the hosts; when ump is the
-// inventory there is nothing to write.
-func (a *app) writeHostFiles(repo *infraRepo, hosts map[string]inventoryHost) error {
+// writeHostFiles writes the host files of the hosts into files; when ump
+// is the inventory there is nothing to write.
+func (a *app) writeHostFiles(ctx context.Context, repo *infraRepo, files *hostFiles, hosts map[string]inventoryHost) error {
 	if repo.plugin != "" {
 		fmt.Fprintf(a.stderr, "No host files: %s makes ump the inventory.\n", repo.plugin)
 		return nil
 	}
 	for _, host := range slices.Sorted(maps.Keys(hosts)) {
 		h := hosts[host]
-		if err := a.putInInventory(repo, host, h.groups, h.vars); err != nil {
+		if err := a.writeHost(ctx, files, host, h.groups, h.vars); err != nil {
 			return err
 		}
 	}
@@ -591,7 +601,7 @@ func (a *app) addToInventory(ctx context.Context, repo *infraRepo, name, hostnam
 		return err
 	}
 	defer unlock()
-	return a.putInInventory(repo, hostname, groups, v)
+	return a.putInInventory(ctx, repo, hostname, groups, v)
 }
 
 // notProvisioned is the error of the provisioning after an

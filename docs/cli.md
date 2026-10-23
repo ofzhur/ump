@@ -571,24 +571,29 @@ that is another host of the inventory (`ansible-inventory --list`), a
 host file of the hostname that ump did not write for this server (no
 `ump_ref`, or another server's) and a world-writable repository stop the
 reinstall too, and so does `--hosts` that matches no host of the
-inventory with the server in it. Once the new system answers, ump
-records it and runs `ump provision`: the host files of every server it
-installed, then every `playbooks/*.yml` on the whole fleet, each host
-logged in to as its administrator with UMP's key only
-(`IdentitiesOnly`); `--hosts PATTERN` and `--playbook NAME` narrow it
-(`--hosts web-01` for the new server alone), and the reinstall's
-question covers it. Where a file of `inventory/` says `plugin:
-ofzhur.ansible.ump`, ump is the inventory: no host file is written, and
-one of the server in `inventory/hosts/` stops the reinstall up front, as
-does the hostname as another host of the inventory. A successful
-installation records the groups with the server, none without `--group`
-(the disks were wiped). `--no-provision` needs no layout and runs
-nothing; where the layout is there, the host file is still written,
-under the fleet's lock, once `ansible-inventory` has checked the names,
-and the next `ump provision` includes the server. When ump cannot record
-the installation, it prints the record to add to `state.yaml` by hand
-and provisions nothing (exit status 6): the inventory would have the old
-one.
+inventory with the server in it. Where a file of `inventory/` points to
+host files in a storage (`inventory/hosts.yml` with `url:`), they are
+there: ump reads and writes them with the collection's credentials from
+`[ofzhur_storage]` of `ansible.cfg`, never those of its state ([host
+files in a storage](provisioning.md#host-files-in-a-storage)), and
+refuses the pointer beside host files in `inventory/hosts/` or beside
+ump as the inventory. Once the new system answers, ump records it and
+runs `ump provision`: the host files of every server it installed, then
+every `playbooks/*.yml` on the whole fleet, each host logged in to as
+its administrator with UMP's key only (`IdentitiesOnly`); `--hosts
+PATTERN` and `--playbook NAME` narrow it (`--hosts web-01` for the new
+server alone), and the reinstall's question covers it. Where a file of
+`inventory/` says `plugin: ofzhur.ansible.ump`, ump is the inventory: no
+host file is written, and one of the server in `inventory/hosts/` stops
+the reinstall up front, as does the hostname as another host of the
+inventory. A successful installation records the groups with the server,
+none without `--group` (the disks were wiped). `--no-provision` needs no
+layout and runs nothing; where the layout is there, the host file is
+still written, under the fleet's lock, once `ansible-inventory` has
+checked the names, and the next `ump provision` includes the server.
+When ump cannot record the installation, it prints the record to add to
+`state.yaml` by hand and provisions nothing (exit status 6): the
+inventory would have the old one.
 
 `--dry-run` makes the checks, brings the server into the rescue system,
 prints the installer's plan (machine, every partition, array and volume
@@ -634,14 +639,16 @@ alone; arguments after `--` go to `ansible-playbook` (not `--limit` or
 (another waits for it up to the configured `wait`, then exit status 3),
 ump checks the names and that `--hosts` matches a host of the inventory
 as it will be (else exit status 2, nothing written), writes the host
-files of every server it installed (none when ump is the inventory), and
-runs the playbooks as one, every host logged in to as its administrator
-(`ump_admin`) with UMP's key. It prints `Provisioned 4 hosts, 1
-changed.`; `-o json` the recap per host (`ok`, `changed`, `unreachable`,
-`failed`, `skipped`, `rescued`, `ignored`), `failed`, `unreachable` and
-`exit_status`. Exit status 6 names the hosts that failed or were
-unreachable. Without `--hosts` it asks on a terminal (the whole fleet);
-without one, `--yes` is required. See [provisioning](provisioning.md).
+files of every server it installed (into `inventory/hosts/`, or the
+storage `inventory/hosts.yml` points to; none when ump is the
+inventory), and runs the playbooks as one, every host logged in to as
+its administrator (`ump_admin`) with UMP's key. It prints `Provisioned 4
+hosts, 1 changed.`; `-o json` the recap per host (`ok`, `changed`,
+`unreachable`, `failed`, `skipped`, `rescued`, `ignored`), `failed`,
+`unreachable` and `exit_status`. Exit status 6 names the hosts that
+failed or were unreachable. Without `--hosts` it asks on a terminal (the
+whole fleet); without one, `--yes` is required. See
+[provisioning](provisioning.md).
 
 ## `ump server set`, `add` and `remove`
 
