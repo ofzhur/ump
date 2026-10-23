@@ -230,6 +230,9 @@ type Mirror struct {
 	Dir     string
 	// Now is the clock of the pull times (time.Now when nil).
 	Now func() time.Time
+	// Theirs makes Pull take the backend's copy of a file that changed on
+	// both sides, instead of leaving it for Push to name as a conflict.
+	Theirs bool
 }
 
 func (m *Mirror) now() time.Time {
@@ -279,10 +282,52 @@ func (m *Mirror) saveManifest(mf *manifest) error {
 	if err != nil {
 		return err
 	}
+	// whole or not at all: LastPull reads it without the lock
+	return writeFile(m.manifestPath(), data)
+}
+
+// lockWait is how long a pull or a push waits for another ump of this
+// machine to finish its own; staleLock is when a lock left by an ump
+// that died is taken over.
+const (
+	lockWait  = 30 * time.Second
+	staleLock = 2 * time.Minute
+)
+
+// lock serialises what the ump processes of this machine do to the
+// mirror they share. A pull or a push reads the manifest, works and
+// writes it back; two at once lose each other's entries, and a file then
+// looks changed here although it is only older: pull leaves it, and
+// every push names it a conflict. The lock is a file created
+// exclusively, like the local backend's write lock.
+func (m *Mirror) lock(ctx context.Context) (func(), error) {
 	if err := os.MkdirAll(m.Dir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
-	return os.WriteFile(m.manifestPath(), data, 0o600)
+	path := filepath.Join(m.Dir, ".mirror.lock")
+	deadline := time.Now().Add(lockWait)
+	for {
+		h, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			h.Close()
+			return func() { os.Remove(path) }, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+		if fi, err := os.Stat(path); err == nil && time.Since(fi.ModTime()) > staleLock {
+			os.Remove(path) // an ump that died
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("another ump is working on the mirror %s (stale %s?)", m.Dir, path)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // Pull brings the mirror up to date with the backend: files whose
@@ -290,6 +335,11 @@ func (m *Mirror) saveManifest(mf *manifest) error {
 // removed (unless changed locally, which Push reports), new ones are
 // added. It returns what it did.
 func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer unlock()
 	mf, err := m.loadManifest()
 	if err != nil {
 		return 0, 0, err
@@ -311,7 +361,7 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 				if _, err := os.Stat(local); err == nil {
 					continue
 				}
-			} else if data, err := os.ReadFile(local); err == nil && hash(data) != known.Hash {
+			} else if data, err := os.ReadFile(local); err == nil && hash(data) != known.Hash && !m.Theirs {
 				continue // changed on both sides: Push reports the conflict
 			}
 		}
@@ -331,7 +381,7 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 			continue
 		}
 		local := filepath.Join(m.Dir, filepath.FromSlash(path))
-		if data, err := os.ReadFile(local); err == nil && hash(data) != known.Hash {
+		if data, err := os.ReadFile(local); err == nil && hash(data) != known.Hash && !m.Theirs {
 			continue // changed here: Push decides
 		}
 		os.Remove(local)
@@ -353,6 +403,13 @@ func (m *Mirror) LastPull() (pulled, failed time.Time) {
 
 // PullFailed records that a pull failed now.
 func (m *Mirror) PullFailed() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return
+	}
+	defer unlock()
 	mf, err := m.loadManifest()
 	if err != nil {
 		return
@@ -379,6 +436,11 @@ func disposable(path string) bool {
 }
 
 func (m *Mirror) Push(ctx context.Context) ([]Change, error) {
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	mf, err := m.loadManifest()
 	if err != nil {
 		return nil, err
@@ -460,6 +522,35 @@ func (m *Mirror) Push(ctx context.Context) ([]Change, error) {
 		changes = append(changes, Change{Path: path, Kind: "deleted"})
 	}
 	return changes, m.saveManifest(mf)
+}
+
+// Force writes the mirror's copy of a file over the backend's, whatever
+// happened to it there, and records that version as pulled, so that the
+// conflict is over (ump config state push --force).
+func (m *Mirror) Force(ctx context.Context, path string) error {
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	mf, err := m.loadManifest()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(m.Dir, filepath.FromSlash(path)))
+	if err != nil {
+		return err
+	}
+	_, current, err := m.Backend.Read(ctx, path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", m.Backend, err)
+	}
+	version, err := m.Backend.Write(ctx, path, data, current)
+	if err != nil {
+		return fmt.Errorf("%s: %s: %w", m.Backend, path, err)
+	}
+	mf.Files[path] = manifestEntry{Version: version, Hash: hash(data)}
+	return m.saveManifest(mf)
 }
 
 // Copy writes every file of a directory to a backend (ump config state

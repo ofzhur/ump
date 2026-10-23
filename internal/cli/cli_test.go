@@ -3975,6 +3975,25 @@ func TestConfigState(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(remote, "profiles", "web.yaml")); !strings.Contains(string(data), "ubuntu-22.04") {
 		t.Errorf("backend after push --force:\n%s", data)
 	}
+	// the forced copy counts as pulled: the conflict is over
+	if out, _, code := e.run("", false, "config", "state", "push"); code != 0 || !strings.Contains(out, "Nothing to push") {
+		t.Errorf("push after push --force: code %d\n%s", code, out)
+	}
+	// the other way round: pull --force takes the backend's copy
+	os.WriteFile(filepath.Join(mirror, "profiles", "web.yaml"), []byte("os: debian-13\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	os.WriteFile(filepath.Join(remote, "profiles", "web.yaml"), []byte("os: debian-12\ndisks: lvm-linear\nusers: [ump]\n"), 0o600)
+	if out, _, code := e.run("", false, "config", "state", "pull"); code != 0 || !strings.Contains(out, "Pulled 0 files") {
+		t.Errorf("pull leaves a conflict: code %d\n%s", code, out)
+	}
+	if out, _, code := e.run("", false, "config", "state", "pull", "--force"); code != 0 || !strings.Contains(out, "Pulled 1 files") {
+		t.Errorf("pull --force: code %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(mirror, "profiles", "web.yaml")); !strings.Contains(string(data), "debian-12") {
+		t.Errorf("mirror after pull --force:\n%s", data)
+	}
+	if out, _, code := e.run("", false, "config", "state", "push"); code != 0 || !strings.Contains(out, "Nothing to push") {
+		t.Errorf("push after pull --force: code %d\n%s", code, out)
+	}
 
 	// the environment wins over the pointer; test, set and clear
 	other := filepath.Join(t.TempDir(), "other")
