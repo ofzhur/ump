@@ -123,6 +123,9 @@ mmdebstrap \
 log "assembling the image"
 mkdir -p "$OUT"
 kver="$(ls "$ROOTFS"/boot/vmlinuz-* | sed 's|.*/vmlinuz-||' | sort -V | tail -n 1)"
+# build-host traces: emulation caches (Rosetta on an Apple Silicon host)
+# and the build container's resolv.conf that resolved's postinst saved
+rm -rf "$ROOTFS/root/.cache" "$ROOTFS/etc/.resolv.conf.systemd-resolved.bak"
 # read the package list from the host side: a foreign-architecture root
 # cannot be chrooted into without /proc (the emulation needs it)
 dpkg-query --admindir="$ROOTFS/var/lib/dpkg" -W -f='${Package} ${Version}\n' > "$OUT/packages.txt"
