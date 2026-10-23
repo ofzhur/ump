@@ -98,6 +98,9 @@ if [ "$ARCH" = arm64 ]; then
 	# quarter of the size to download and to hold in RAM.
 	gzip -9 -n -f "$OUT/vmlinuz" && mv "$OUT/vmlinuz.gz" "$OUT/vmlinuz"
 fi
+# build-host traces: emulation caches (Rosetta on an Apple Silicon host)
+# and the build container's resolv.conf that resolved's postinst saved
+rm -rf "$ROOTFS/root/.cache" "$ROOTFS/etc/.resolv.conf.systemd-resolved.bak"
 rm -f "$ROOTFS"/boot/vmlinuz-* "$ROOTFS"/boot/initrd.img-* "$ROOTFS"/boot/System.map-* "$ROOTFS"/boot/config-*
 [ -e "$ROOTFS/dev/console" ] || mknod -m 600 "$ROOTFS/dev/console" c 5 1
 # read the package list from the host side: a foreign-architecture root
