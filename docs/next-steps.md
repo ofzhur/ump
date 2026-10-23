@@ -44,6 +44,15 @@ provider credentials (as references), UMP's private key and the
 installation records, and belongs in a backend with access control, not
 in git.
 
+**Recommended: keep the state centralized.** With the state in one
+[backend](state.md) rather than in each laptop's `~/.config/ump`, ump
+can run from several places at once: people, CI jobs and scheduled
+reports work against the same servers in parallel. Each reinstall
+and rescue takes a lock on its own server only (provisioning runs will
+too), so runs on different servers go ahead side by side and two runs
+on the same server cannot collide. With a local state each place has its own
+view and nothing stops two of them from reinstalling the same machine.
+
 ```
 infra/
 ├── README.md                 what is where, how to roll out, who to ask
