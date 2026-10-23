@@ -82,6 +82,11 @@ touch /etc/skel/.sudo_as_admin_successful
 # the message of the day: UMP's own script alone (no help text, no news);
 # the installer puts it in (install/motd.sh), the same on every system
 for f in /etc/update-motd.d/*; do [ "$f" = /etc/update-motd.d/00-ump ] || rm -f "$f"; done
+# Ubuntu's news timer would start the 50-motd-news removed above every few
+# hours and leave the system degraded
+if [ -e /usr/lib/systemd/system/motd-news.timer ] || [ -e /lib/systemd/system/motd-news.timer ]; then
+	systemctl mask motd-news.timer >/dev/null 2>&1
+fi
 
 # the boot loader configuration file that grub-mkconfig reads; the
 # settings are in /etc/default/grub.d/

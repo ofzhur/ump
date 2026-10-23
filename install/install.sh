@@ -1061,6 +1061,14 @@ if curl -fsSL -o "$TARGET/etc/update-motd.d/00-ump" "$storage/install/motd.sh"; 
 else
 	warn "cannot fetch $storage/install/motd.sh; the image's message of the day stays"
 fi
+# Ubuntu's news for the message of the day comes from 50-motd-news, which
+# UMP's images leave out; its timer would start the missing script every
+# few hours and leave the system degraded (images up to 2026-10-19 still
+# have the timer on)
+if [ ! -e "$TARGET/etc/update-motd.d/50-motd-news" ] && { [ -e "$TARGET/usr/lib/systemd/system/motd-news.timer" ] || [ -e "$TARGET/lib/systemd/system/motd-news.timer" ]; }; then
+	rm -f "$TARGET/etc/systemd/system/timers.target.wants/motd-news.timer"
+	ln -sf /dev/null "$TARGET/etc/systemd/system/motd-news.timer"
+fi
 fi
 
 # --- users --------------------------------------------------------------
