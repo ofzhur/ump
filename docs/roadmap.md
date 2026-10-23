@@ -26,6 +26,12 @@ As of October 2026, ump does what the [README](../README.md) and the
   command line, UEFI and BIOS boot; `--dry-run`; Ubuntu 26.04, 24.04
   and 22.04 and Debian 13 and 12 from UMP's base images, NixOS 25.11,
   Arch Linux and CachyOS (experimental); `ump ssh`.
+- **Provisioning:** Ansible by push from the infrastructure repository:
+  `ump server reinstall` (`--group`) and `ump server provision` write
+  the server's host file into the inventory and run its run list,
+  `common` and its groups, each a playbook of the repository or of the
+  collection [ofzhur.ansible](https://github.com/ofzhur/ansible)
+  ([provisioning](provisioning.md)).
 - **Configuration objects:** `ump config os`, `disk-layout` and
   `firewall` with list, get, create, edit and delete each; the
   published defaults downloaded on first use.
@@ -34,13 +40,11 @@ As of October 2026, ump does what the [README](../README.md) and the
 
 ## Next
 
-- **Provisioning.** Roles (`ump server reinstall --role`, `ump server
-  provision`) are checked and recorded with the server; running the
-  strategies comes next: `ansible-bootstrap` with an exported inventory
-  or with ump as the inventory plugin, `ansible-pull` with the inventory
-  committed to the repository, a timer on every server and an
-  S3-compatible bucket as the exchange of facts, and a control plane that
-  runs the push on a schedule ([provisioning](provisioning.md)).
+- **Provisioning by pull.** `ansible-pull` with a timer on every
+  server, the inventory committed to the repository and an
+  S3-compatible bucket as the exchange of facts (the profile's
+  `provision` section is reserved for it), and a control plane that runs
+  the push on a schedule ([provisioning](provisioning.md)).
 - **More images.** Ubuntu, Debian and NixOS are there; Talos and
   cloud-init images may follow as userdata types.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
@@ -65,8 +69,8 @@ As of October 2026, ump does what the [README](../README.md) and the
 - **Configuration management.** Handing an installed machine over to the
   tool that keeps it configured (Ansible, Salt, Puppet, NixOS's own
   deployments), with the facts ump knows about it (provider, profile,
-  addresses, interfaces, roles, attributes) as its inventory; the
-  [provisioning](provisioning.md) strategies are where it starts. It becomes the third kind of
+  addresses, interfaces, groups, attributes) as its inventory; Ansible
+  by push is there ([provisioning](provisioning.md)). It becomes the third kind of
   [platform](platforms.md), next to providers and operating systems.
   [Next steps](next-steps.md) describes the repository it is meant for.
 - **The skill.** Packaged operating knowledge for AI agents that run a

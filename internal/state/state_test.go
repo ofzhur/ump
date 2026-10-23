@@ -75,3 +75,22 @@ func TestParse(t *testing.T) {
 		t.Errorf("empty: %+v %v", d, err)
 	}
 }
+
+func TestParseRolesBecomeGroups(t *testing.T) {
+	// an older ump wrote roles; they load as groups and are written as such
+	d, err := Parse([]byte("servers:\n  fake/1:\n    roles: [web-1, base.x, web_1, common, localhost, 2fa]\n    groups: [db]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := d.Servers["fake/1"]
+	if strings.Join(s.Groups, ",") != "db,web_1,base_x,_2fa" || s.Roles != nil {
+		t.Errorf("groups %v, roles %v", s.Groups, s.Roles)
+	}
+	data, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "    groups:\n      - db\n      - web_1\n      - base_x\n      - _2fa\n") || strings.Contains(string(data), "roles") {
+		t.Errorf("written:\n%s", data)
+	}
+}

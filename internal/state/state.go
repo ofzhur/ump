@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -50,8 +51,12 @@ type Server struct {
 	Note string `yaml:"note,omitempty"`
 	// Installed is what ump last installed on the server.
 	Installed *Install `yaml:"installed,omitempty"`
-	// Roles are what the server is provisioned as: set by ump server
-	// reinstall --role (none without), added to by ump server provision.
+	// Groups are the Ansible groups the server is in besides common, in
+	// order: set by ump server reinstall --group (none without), added to
+	// by ump server provision.
+	Groups []string `yaml:"groups,omitempty"`
+	// Roles is what an older ump wrote for the groups; Parse turns it
+	// into Groups, so it is never written.
 	Roles []string `yaml:"roles,omitempty"`
 }
 
@@ -70,7 +75,7 @@ type Install struct {
 
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
-	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Roles) == 0
+	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0
 }
 
 // New returns an empty document.
@@ -107,8 +112,35 @@ func Parse(data []byte) (*Document, error) {
 				return nil, fmt.Errorf("servers.%s.price: needs amount, currency and period (month or hour)", ref)
 			}
 		}
+		if len(s.Roles) > 0 {
+			s.Groups = rolesToGroups(s.Roles, s.Groups)
+			s.Roles = nil
+			d.Servers[ref] = s
+		}
 	}
 	return d, nil
+}
+
+// rolesToGroups adds the roles an older ump recorded to the groups, as
+// group names: '-' and '.' become '_', a leading digit gets a '_' in
+// front; common (implied) and Ansible's own all, ungrouped and localhost
+// are left out, and no name comes twice.
+func rolesToGroups(roles, groups []string) []string {
+	out := append([]string{}, groups...)
+	for _, r := range roles {
+		g := strings.NewReplacer("-", "_", ".", "_").Replace(r)
+		if g != "" && g[0] >= '0' && g[0] <= '9' {
+			g = "_" + g
+		}
+		switch g {
+		case "", "common", "all", "ungrouped", "localhost":
+			continue
+		}
+		if !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // Bytes renders the document, with a header, tidy and sorted.

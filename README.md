@@ -35,10 +35,11 @@ $ curl -fsSL https://ump.zhurko.de/dl/get.sh | sh   # Linux or macOS, amd64 or a
 $ ump config isp add                             # add a provider account (wizard)
 $ ump server list                                # every server of every account
 $ ump config os create mine --from ubuntu-26.04   # your profile: image, disks, users, firewall
-$ ump server reinstall web-01 --dry-run          # the plan on that machine, nothing erased
-$ ump server reinstall web-01                    # erase, install, reboot, verify
+$ ump server reinstall web-01 --dry-run --no-provision   # the plan on that machine, nothing erased
+$ ump server reinstall web-01 --no-provision     # erase, install, reboot, verify
 $ ump ssh web-01
-$ ump server reinstall web-02 --role web         # with roles to provision (work in progress)
+$ cd ~/src/infra                                 # your infrastructure repository (Ansible)
+$ ump server reinstall web-02 --group web        # install, then provision: common, web
 ```
 
 The [quickstart](docs/quickstart.md) walks through these with their
@@ -49,8 +50,8 @@ from the storage at every use, so they are current without a new binary.
 ## Platforms
 
 What ump works with: the providers whose machines it finds and controls,
-the operating systems it puts on them, and later the configuration
-management that takes over from there. See [platforms](docs/platforms.md).
+the operating systems it puts on them, and the configuration management
+that takes over from there. See [platforms](docs/platforms.md).
 
 **Providers.** Every account's machines are listed together, with their
 prices where the provider says them; ump shows, renames, powers and
@@ -83,12 +84,14 @@ Each gets the
 same disks, users and keys, interface names, firewall and message of
 the day. See [operating systems](docs/oses.md).
 
-**Provisioning** is in progress: a server given roles (`ump server
-reinstall --role web`, `ump server provision`) gets them applied after
-the first boot by a strategy of its profile: Ansible run by ump with an
-exported inventory or with ump as the inventory, or Ansible pulled by
-the server itself. The roles are recorded today; running the strategies
-comes next ([provisioning](docs/provisioning.md)).
+**Provisioning** follows the installation: run from the root of your
+infrastructure repository, `ump server reinstall` puts the new server
+into its Ansible inventory, in the group `common` and the groups of
+`--group`, and runs the playbooks of those groups for it, from the
+repository or from the collection
+[ofzhur.ansible](https://github.com/ofzhur/ansible) (users and keys
+first). `ump server provision` adds groups later or runs them again;
+`--no-provision` installs only ([provisioning](docs/provisioning.md)).
 
 ## The objects
 
@@ -101,7 +104,7 @@ file):
 | Object | Command | What it is |
 |---|---|---|
 | [Provider accounts](docs/providers.md) | `ump config isp` | credentials for a provider API; secrets as references to files, environment variables or commands, never plaintext |
-| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line, the provision strategy for roles |
+| [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line |
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
@@ -172,7 +175,7 @@ own](images/rescue/README.md#your-own-storage).
 
 | Document | Contents |
 |---|---|
-| [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (planned) |
+| [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (Ansible) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
 | [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), what every system gets, how each is installed, NixOS configuration and userdata as modules |
 | [Benchmarks](docs/benchmarks.md) | the eight systems on one bare-metal server: installation times, tuning, CPU, memory, disk, network and HTTP results |
@@ -185,7 +188,7 @@ own](images/rescue/README.md#your-own-storage).
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Provisioning](docs/provisioning.md) | after the installation (work in progress): roles (`--role`, `ump server provision`), the strategies (Ansible by push with an exported inventory or ump as the inventory, Ansible by pull, a control plane), and what works by hand today |
+| [Provisioning](docs/provisioning.md) | after the installation: groups and run lists (`--group`, `ump server provision`), the infrastructure repository and its host files, Ansible by push with the collection ofzhur.ansible; pull and a control plane later |
 | [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
@@ -217,7 +220,8 @@ own](images/rescue/README.md#your-own-storage).
 ## Non-goals
 
 - Being a configuration management tool. UMP stops at "reachable,
-  consistent base system" and hands off.
+  consistent base system" and hands off to Ansible: it writes the
+  inventory entry and runs the playbooks, Ansible does the rest.
 - Lifecycle orchestration of fleets (autoscaling, scheduling,
   reconciliation loops). UMP is an operator's tool, not a control plane.
 - Ordering, billing or contract management at providers.

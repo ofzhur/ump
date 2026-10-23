@@ -202,7 +202,9 @@ func (a *app) lockServer(ctx context.Context, m provider.Machine, what string) (
 
 // applyState puts what the state knows onto the listed machines: a
 // price set by hand wins over the provider's, the attributes are the
-// user's alone.
+// user's alone. The groups are those of the inventory: common and the
+// recorded ones (the state keeps them without common) for a server ump
+// installed, none for the others.
 func applyState(d *state.Document, ms []provider.Machine) {
 	if d == nil {
 		return
@@ -220,11 +222,12 @@ func applyState(d *state.Document, ms []provider.Machine) {
 		if len(s.Attributes) > 0 {
 			ms[i].Attributes = s.Attributes
 		}
+		ms[i].Groups = nil
 		if s.Installed != nil {
 			at := s.Installed.At
 			ms[i].OS, ms[i].InstalledAt = s.Installed.OS, &at
+			ms[i].Groups = append([]string{commonGroup}, s.Groups...)
 		}
-		ms[i].Roles = s.Roles
 	}
 }
 
@@ -240,8 +243,8 @@ With a shared state backend, everyone who uses it acts as one UMP, and
 ump works on a mirror under its cache directory: pulled before every
 command, pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
-overwritten. state.yaml and the per-server locks of ump server reinstall
-and rescue go through the backend directly.
+overwritten. state.yaml and the per-server locks of ump server reinstall,
+provision and rescue go through the backend directly.
 
 Which backend: UMP_STATE in the environment names one (with
 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, UMP_STATE_ENDPOINT,

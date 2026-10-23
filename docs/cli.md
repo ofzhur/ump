@@ -35,8 +35,8 @@ ump
 │   │                                                  all servers of all accounts (--account to restrict);
 │   │                                                  what changed since the last listing; the cached listing
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--role <role>]... [--roles <list>] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
-│   ├── provision    <ref> --role <role>... | --roles <list>
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── provision    <ref> [--group <list>]...         put a server ump installed into the inventory, run its run list
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
@@ -155,7 +155,10 @@ code is 4. A reference that matches nothing gives exit code 1.
 lower-cased; `labels` are present where the provider has them. `os` is
 the operating system ump installed last (`ubuntu-26.04`) and
 `installed_at` when, from the [state](state.md); `<none>` in the table
-for a server ump never installed. `-o wide`
+for a server ump never installed. `groups` are the Ansible groups ump
+put the server in, as in the inventory: `common` first, then those of
+`--group` ([provisioning](provisioning.md)); none for a server ump never
+installed. `-o wide`
 adds the ID, IPv6, product, kind and attributes columns (the ID right
 after the provider); the price is in the default table; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
@@ -440,7 +443,7 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -459,14 +462,14 @@ system; when neither tells, ump warns and asks. The profile (`--profile`, defaul
 of that name in `~/.config/ump/profiles/`, else the published one, or a
 path) names the image, the disk layout (by name from `layouts.yaml`, or
 its own), the users with their keys, the userdata that runs in the new
-system, what the firewall lets in, and the provision strategy for roles. The server is
+system and what the firewall lets in. The server is
 brought into the UMP rescue system the way `rescue` does it (as it is
 when it runs it already, by a kexec from the running system when that
 lets UMP in as root, else through the provider's rescue system); the
 [installer](../install/README.md) is fetched from the storage and run
 there with the resolved profile, with its progress shown; the server is
 rebooted into the new system; ump waits until it answers over SSH with
-UMP's key and reports what came up:
+UMP's key, reports what came up and [provisions](provisioning.md) it:
 
 ```console
 $ ump server reinstall web-01
@@ -476,6 +479,7 @@ Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, wit
 ...
 Waiting for the UMP rescue system on 203.0.113.10 ... up after 11s (ump-rescue 2026.10.13).
 Installing ubuntu-26.04 on web-01 as web-01 ...
+Run list after the first boot: common (ofzhur.ansible.common).
 ==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM
 ==> disks (1): /dev/sda (19.1G SSD)
 ==> layout lvm-linear: /dev/sda gets 1 MiB BIOS boot, 512 MiB EFI (vfat), 1 GiB /boot (ext4) and the rest as LVM; ...
@@ -484,7 +488,11 @@ Installing ubuntu-26.04 on web-01 as web-01 ...
 Rebooting web-01 into ubuntu-26.04 ...
 Waiting for SSH on 203.0.113.10 to go down ... down after 4s.
 Waiting for SSH on 203.0.113.10 ... up after 18s.
-web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root.
+web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).
+Wrote inventory/hosts/web-01.yml: web-01 in common.
+Provisioning web-01: common (ofzhur.ansible.common) ...
+...
+web-01 is provisioned: common.
 ```
 
 Every disk of the server is erased. The default profile's layout,
@@ -518,45 +526,69 @@ the value is YAML, an unknown field is refused),
 storage than the configured one for the installer, the images, the
 profiles and the rescue image.
 
-`--dry-run` brings the server into the rescue system, prints the
-installer's plan (machine, every partition, array and volume per disk,
-network, users, userdata, firewall, provision) and leaves it there
-without touching a disk; a layout whose targets match no disk, or a raid
-level with too few members, stops there too. `--no-reboot` installs and leaves the
-server in the rescue system. `-o json` prints the result (the profile and layout, the way in, the
-hostname, what answered after the reboot, the roles).
+After the first boot the server is [provisioned](provisioning.md) from
+the infrastructure repository ump runs in: it needs `ansible.cfg` and
+`inventory/` in the current directory and `ansible-playbook` in `PATH`,
+and stops with exit status 2 before it touches anything when one is
+missing. The server is in the group `common` and the groups of `--group`
+(repeatable, or comma-separated; lower-case letters, digits and `_`),
+in order: its run list. Each group is a playbook, `playbooks/GROUP.yml`
+of the repository, else the collection's `ofzhur.ansible.GROUP`; they
+pass `ansible-playbook --syntax-check` first; a hostname that is a
+group of the run list or of the inventory, a group that is another host
+of the inventory (`ansible-inventory --list`), a host file of the
+hostname that ump did not write for this server (no `ump_ref`, or
+another server's) and a world-writable repository stop the reinstall
+too. Once the new system answers, ump records it, writes
+`inventory/hosts/HOSTNAME.yml` and runs the run list for that host, as
+its administrator with UMP's key only (`IdentitiesOnly`); Ansible's
+output goes to stderr. A successful installation records the groups
+with the server, none without `--group` (the disks were wiped).
+`--no-provision` needs no layout and runs nothing; where the layout is
+there, the host file is still written once `ansible-inventory` has
+checked the names.
 
-Without `--role`, the new system is the operating system ready to use
-with the profile's userdata, and nothing more. `--role ROLE` (repeatable)
-or `--roles A,B` names the roles to [provision](provisioning.md) it with
-after the first boot, by the profile's provision strategy; the plan shows
-them, and a successful installation records them with the server, or
-records none without `--role` (the disks were wiped). Running the
-strategy is not implemented yet, and ump says so. A role name is
-lower-case letters, digits, `-`, `_` and `.`. Exit status 1 means the
-installer failed (its output says where; the server stays in the rescue
-system, `ump ssh REF --staging` gets there), 5 that the new system
-did not answer after the reboot (look at the server's console). Providers
-that keep their rescue system as the boot option (OVHcloud) have it
-disabled before the reboot. Asks for confirmation on a terminal; without
-one, `--yes` is required.
+`--dry-run` makes the checks, brings the server into the rescue system,
+prints the installer's plan (machine, every partition, array and volume
+per disk, network, users, userdata, firewall) and the run list, and
+leaves it there without touching a disk or the inventory; a layout whose
+targets match no disk, or a raid level with too few members, stops there
+too. `--no-reboot` installs, records the installation and leaves the
+server in the rescue system, not provisioned: `ump server provision
+REF` after the reboot. `-o json` prints the result (the profile and
+layout, the way in, the hostname, what answered after the reboot,
+`groups` as in the inventory, `run_list`, `playbooks`, `provisioned`).
+
+Exit status 1 means the installer failed (its output says where; the
+server stays in the rescue system, `ump ssh REF --staging` gets there),
+5 that the new system did not answer after the reboot (look at the
+server's console), 6 that the run list did not complete: the server is
+installed and recorded; fix what Ansible reports and run `ump server
+provision REF`. Providers that keep their rescue system as the boot
+option (OVHcloud) have it disabled before the reboot. Asks for
+confirmation on a terminal; without one, `--yes` is required.
 
 ## Provision: `ump server provision`
 
 ```console
-$ ump server provision web-01 --role monitoring
-$ ump server provision web-01 --roles base,monitoring
+$ ump server provision web-01                       # run its run list again
+$ ump server provision web-01 --group monitoring    # add a group, then run
 ```
 
-Adds roles to a server ump installed, to be applied by the strategy its
-profile names, without reinstalling it; `--role` or `--roles` is
-required. Roles are best given at the installation (`ump server
-reinstall --role`), so that each starts on a fresh system, and a server
-that changes roles is reinstalled; adding a role in place suits roles
-built for it, such as a basic one every server gets. A role is removed
-only by a reinstall. Running the strategy is not implemented yet: the
-roles are checked and recorded (`ump server show`, the `ROLES` column of
-`ump server list -o wide`, `roles` in `-o json`), and ump says so. See
+Puts a server ump installed into the inventory of the infrastructure
+repository and runs its run list, without reinstalling it; from the
+repository's root, like `reinstall`. `--group` adds groups to those the
+server has (repeatable, or comma-separated), in order; without it, the
+run list the server has runs again. The same checks as `reinstall`
+come first; then the groups are recorded, `inventory/hosts/HOSTNAME.yml`
+is written and the run list runs, under the server's lock. Groups are
+best given at the installation, so that each starts on a fresh system;
+adding one in place suits groups built for it, such as monitoring. A
+group is removed only by a reinstall. A server ump did not install is
+refused with exit status 2 (there is nothing to put into the
+inventory); exit status 6 means the run list did not complete. The
+groups show, `common` first, in `ump server show`, the `GROUPS` column
+of `ump server list` and `groups` in `-o json`. See
 [provisioning](provisioning.md).
 
 ## `ump server set`, `add` and `remove`
@@ -669,8 +701,8 @@ with `*`, and whether each is published or yours), `get` prints one,
 `create [NAME]` asks on a terminal what the profile should hold (the
 name when none is given; the image, from the storage's `os/index.json`; the disk layout; the
 firewall; the users from `users.yaml`, a new one defined on the spot;
-the kernel switches; the time zone; the userdata; the interface names;
-the provision step) and writes it, or with `--from NAME` copies another
+the kernel switches; the time zone; the userdata; the interface names)
+and writes it, or with `--from NAME` copies another
 profile and opens it in your editor, `edit NAME` opens it and checks it
 afterwards (an invalid profile is kept, with the problem named; a
 published profile is refused, make your own from it), `delete NAME`
@@ -804,3 +836,4 @@ $ ump config firewall create mail --from default
 | 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes` |
 | 4 | provider API error, or an account that could not be listed |
 | 5 | the server did not answer in time (rescue system, reboot, new system) |
+| 6 | provisioning failed: the server is installed and recorded, its run list did not complete |

@@ -9,8 +9,9 @@ userdata that had to run before the first boot. From there the machine
 belongs to the tools that keep it configured and the pipeline that
 deploys onto it. This page is about that hand-over: where the line runs,
 how to lay out the repository that holds the rest, security, and the
-configurations that go beyond the published defaults. Applying roles to
-a server is [provisioning](provisioning.md).
+configurations that go beyond the published defaults. Putting a server
+into the inventory and running its playbooks is
+[provisioning](provisioning.md).
 
 ## Where ump stops
 
@@ -47,9 +48,9 @@ in git.
 **Recommended: keep the state centralized.** With the state in one
 [backend](state.md) rather than in each laptop's `~/.config/ump`, ump
 can run from several places at once: people, CI jobs and scheduled
-reports work against the same servers in parallel. Each reinstall
-and rescue takes a lock on its own server only (provisioning runs will
-too), so runs on different servers go ahead side by side and two runs
+reports work against the same servers in parallel. Each reinstall,
+provisioning run and rescue takes a lock on its own server only, so
+runs on different servers go ahead side by side and two runs
 on the same server cannot collide. With a local state each place has its own
 view and nothing stops two of them from reinstalling the same machine.
 
@@ -58,55 +59,57 @@ infra/
 ├── README.md                 what is where, how to roll out, who to ask
 ├── ump/
 │   ├── profiles/
-│   │   ├── web.yaml          one self-contained profile per role: inline firewall,
-│   │   ├── db.yaml           layout and users, or names from ump's published sets
+│   │   ├── web.yaml          one self-contained profile per kind of server: inline
+│   │   ├── db.yaml           firewall, layout and users, or names from ump's published sets
 │   │   └── base.yaml
 │   └── userdata/             the userdata scripts the profiles inline (reviewed here)
-├── ansible/
-│   ├── ansible.cfg
-│   ├── inventory/
-│   │   └── ump.sh            the dynamic inventory: ump server list -o json, grouped
+├── ansible.cfg               the template of the collection ofzhur.ansible; ump runs here
+├── inventory/
+│   ├── groups.yml            the group tree: prod with web and db, ...
 │   ├── group_vars/
-│   │   ├── all.yml
-│   │   ├── role_web.yml
-│   │   └── env_prod.yml
+│   │   ├── common.yml        what every server gets: users and keys, ...
+│   │   ├── web.yml
+│   │   └── prod.yml
 │   ├── host_vars/
-│   ├── roles/                base, hardening, monitoring, web, db, ...
-│   ├── site.yml              push: the whole fleet, from your machine or CI
-│   ├── local.yml             pull: what a machine applies to itself
-│   └── requirements.yml      collections and roles from Galaxy, pinned
+│   └── hosts/                written by ump: one file per server, with its groups
+├── playbooks/                one per group of your own: web.yml, db.yml, ...
+├── roles/                    hardening, monitoring, web, db, ...
+├── collections/              ofzhur.ansible as a git submodule; others pinned
 ├── terraform/                optional: DNS, load balancers, object storage,
 │                             what ump does not do
 ├── secrets/                  encrypted (sops or ansible-vault), never plain
 └── .github/workflows/        lint, ansible --check, the drift report
 ```
 
-Profiles are used from the repository by path, so a change to a role's
-system goes through review like any other:
+Profiles are used from the repository by path, so a change to a
+server's system goes through review like any other:
 
 ```console
 $ ump server reinstall web-03 --profile ump/profiles/web.yaml
 ```
 
-The servers get their roles when they are installed, and attributes of
-your own for the rest of the grouping:
+The servers get their groups when they are installed, from the
+repository's root:
 
 ```console
-$ ump server reinstall web-03 --profile ump/profiles/web.yaml --role web
-$ ump server set web-03 --attr env=prod
+$ ump server set web-03 --attr owner=alice
+$ ump server reinstall web-03 --profile ump/profiles/web.yaml --group web
 ```
 
-The grouping comes from the roles ump records with each server (`ump
-server reinstall --role`, `ump server provision`) and from attributes you
-set; [provisioning](provisioning.md) has the inventory script and the
-strategies that apply the roles.
+ump writes each server's host file into `inventory/hosts/` with its
+groups (`common` and those of `--group`) and runs their playbooks.
+Attributes come along as `ump_attributes`, as they are when the host
+file is written: set them before the reinstall, or let `ump server
+provision web-03` write the host file again. They are data for
+playbooks, not groups: that `web-03` is in `prod` comes from the group
+tree in `inventory/groups.yml` (`prod` with the children `web` and `db`).
 
 ## Provisioning
 
-Turning an installed system into what the server is for (its roles) is
-[provisioning](provisioning.md): the roles, the commands, push and pull
-with Ansible (`ansible-bootstrap`, `ansible-pull`), a control plane, and
-what works by hand until the strategies run.
+Turning an installed system into what the server is for is
+[provisioning](provisioning.md): groups and run lists, the host files,
+Ansible by push from the repository; pull and a control plane come
+later.
 
 ## Security profiles
 
@@ -177,7 +180,7 @@ Disk encryption (LUKS with remote unlock) is on the
   them with `nixos-rebuild --target-host`, `deploy-rs` or `colmena`
   instead of Ansible.
 - **Teams:** a shared [state backend](state.md), per-server locks for
-  reinstall and rescue, everyone acting as one UMP.
+  reinstall, provisioning and rescue, everyone acting as one UMP.
 - **Drift and cost reports:** `ump server list --diff --since 1d` in a
   scheduled job shows what appeared, vanished or changed at the
   providers; `-o json` with the prices and attributes feeds cost reports

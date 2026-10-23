@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime/debug"
 	"strings"
@@ -40,6 +41,7 @@ const (
 	exitAborted     = 3
 	exitProvider    = 4
 	exitUnreachable = 5
+	exitProvision   = 6
 )
 
 // app holds the process-level dependencies so that tests can run commands
@@ -95,6 +97,14 @@ type app struct {
 	// liveTerm reports the size of the terminal stdout writes to, for
 	// output that redraws itself; nil or ok false means no terminal.
 	liveTerm func() (width, height int, ok bool)
+	// repoDir is the infrastructure repository ump provisions from;
+	// empty means the current directory.
+	repoDir string
+	// lookPath finds a program in PATH; nil means exec.LookPath.
+	lookPath func(file string) (string, error)
+	// ansible runs ansible-playbook and ansible-inventory; nil means
+	// the real ones.
+	ansible ansibleRunner
 
 	// global flags
 	configFlag string
@@ -185,6 +195,12 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	if a.editor == nil {
 		a.editor = runEditor
+	}
+	if a.lookPath == nil {
+		a.lookPath = exec.LookPath
+	}
+	if a.ansible == nil {
+		a.ansible = runAnsible
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)

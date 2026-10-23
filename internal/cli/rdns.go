@@ -124,8 +124,12 @@ func (a *app) listedMachines(cmd *cobra.Command) ([]provider.Machine, map[string
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
+	// the state's manual servers bring their account along
+	if _, err := a.loadState(cmd.Context(), cfg); err != nil {
+		return nil, nil, 0, 0, err
+	}
 	if len(cfg.Accounts) == 0 {
-		return nil, nil, 0, 0, fmt.Errorf("no accounts configured in %s; run `ump config` to add one", config.AbbreviateHome(path))
+		return nil, nil, 0, 0, fmt.Errorf("no accounts configured in %s; run `ump config isp` to add one, or ump server add for a server by hand", config.AbbreviateHome(path))
 	}
 	names, err := a.selectAccounts(cmd, cfg)
 	if err != nil {
