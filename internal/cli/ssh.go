@@ -58,10 +58,7 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 	if err != nil {
 		return err
 	}
-	addr := m.IPv4
-	if addr == "" {
-		addr = m.IPv6
-	}
+	addr := primaryAddress(m)
 	if addr == "" {
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}

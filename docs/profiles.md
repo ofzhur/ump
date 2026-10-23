@@ -89,7 +89,7 @@ userdata: [ubuntu]     # entries from userdata.yaml, run in the new system befor
 firewall: default      # a firewall from firewalls.yaml, or an inline one
 
 provision:
-  type: none
+  type: none           # reserved for ansible-pull (later)
 
 network:
   rename: true         # uniform interface names: ext01, ... and int01, ...
@@ -180,9 +180,9 @@ userdata: [ubuntu, web]       # optional; entries from userdata.yaml, or inline 
                               # as root in the new system before its first boot
 firewall: default             # a firewall name from firewalls.yaml, or an inline one;
                               # absent: no firewall
-provision:                    # optional; the step after the first boot
-  type: none                  # none | ansible-pull | ansible-bootstrap
-  repo: ...                   # whatever the step needs; kept with the type in /etc/ump/install
+provision:                    # optional; reserved for ansible-pull (later)
+  type: none                  # none | ansible-pull
+  repo: ...                   # kept with the type in /etc/ump/install
 network:                      # optional
   rename: true                # uniform interface names; false keeps the kernel's
 ```
@@ -205,7 +205,7 @@ network:                      # optional
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
-| `provision.type` | The strategy that applies a server's roles after the first boot: `none` (the default), `ansible-bootstrap` or `ansible-pull`; the other keys of the section belong to the strategy. It runs only for a server given roles (`ump server reinstall --role`, `ump server provision`). The type and the other keys are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`); running the strategy is not implemented yet, and ump says so. See [provisioning](provisioning.md). |
+| `provision.type` | Reserved for `ansible-pull`, the server converging itself from the repository (later): `none` (the default) or `ansible-pull`, with keys of its own; `ansible-bootstrap` is accepted from older profiles and has no effect. The type and the keys are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`) and change nothing else: `ump server reinstall` provisions by push from the infrastructure repository, whatever the profile says, unless `--no-provision`. See [provisioning](provisioning.md). |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
 
 Unknown fields are an error, so a typo in a field name is caught by
@@ -320,7 +320,7 @@ date, or another name), the disk layout and the firewall by name, the
 users by name from `users.yaml` (a name it does not know is defined on
 the spot: sudo, shell, keys, description, and kept there), the
 mitigations and IPv6 switches, the time zone, the userdata by name
-from `userdata.yaml`, the interface naming, the provision step and a description. It checks the result like an
+from `userdata.yaml`, the interface naming and a description. It checks the result like an
 installation would, writes the file, prints it and offers your editor.
 `--from NAME` copies a profile instead, and without a terminal that is
 the only form.
@@ -351,7 +351,8 @@ A profile is valid when:
 - package names look like Debian package names;
 - an inline firewall passes [its checks](firewalls.md#fields); a named
   one exists in `firewalls.yaml`;
-- `provision.type` is `none`, `ansible-pull` or `ansible-bootstrap`.
+- `provision.type` is `none` or `ansible-pull` (or `ansible-bootstrap`,
+  accepted from older profiles).
 
 ## Using a profile
 
@@ -365,8 +366,9 @@ $ ump server set web-01 --clear
 
 `ump server reinstall --dry-run` brings the server into the rescue system
 and prints what the profile resolves to on that machine: every partition,
-array and volume per disk, the network, the users, userdata, firewall and
-provision step, without touching a disk.
+array and volume per disk, the network, the users, userdata and
+firewall, and the run list the server is [provisioned](provisioning.md)
+with afterwards, without touching a disk.
 
 The flags of `ump server reinstall` override a profile for one
 installation:
@@ -389,8 +391,8 @@ stays on the installed system as `/etc/ump/spec.json` (mode 0600);
 `/etc/ump/install` records the essentials in `key=value` lines: the
 image and its version, when it was installed, the profile and layout, the
 disks, the boot disk, root, hostname, administrator, interfaces, whether
-IPv6 and the mitigations are on, the firewall policy and the provision
-step. The message of the day shows the profile too.
+IPv6 and the mitigations are on, the firewall policy and the reserved
+provision type. The message of the day shows the profile too.
 
 ## Example: a web server profile
 
@@ -420,10 +422,6 @@ users:
 userdata: [ubuntu, web]        # ubuntu: what every Ubuntu gets; web: yours, ump config userdata create web
 
 firewall: web                  # ICMP, SSH, HTTP, HTTPS
-
-provision:
-  type: ansible-pull
-  repo: git@github.com:example/infra.git
 ```
 
 The administrator here is `ops`, the first user with sudo. `ump ssh

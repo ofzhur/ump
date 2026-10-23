@@ -15,12 +15,12 @@ How they compare on the same hardware, and how long each takes to
 install: [benchmarks](benchmarks.md).
 
 ```console
-$ ump server reinstall web-01                          # the default: Ubuntu 26.04
-$ ump server reinstall web-01 --profile debian-13      # Debian
-$ ump server reinstall web-01 --profile nixos-25.11    # NixOS
-$ ump server reinstall web-01 --profile archlinux      # Arch Linux
-$ ump server reinstall web-01 --profile cachyos        # CachyOS
-$ ump server reinstall web-01 --os ubuntu-24.04        # another Ubuntu, same profile
+$ ump server reinstall web-01                                        # the default: Ubuntu 26.04
+$ ump server reinstall web-01 --profile debian-13                    # Debian
+$ ump server reinstall web-01 --profile nixos-25.11 --no-provision   # NixOS
+$ ump server reinstall web-01 --profile archlinux                    # Arch Linux
+$ ump server reinstall web-01 --profile cachyos                      # CachyOS
+$ ump server reinstall web-01 --os ubuntu-24.04                      # another Ubuntu, same profile
 ```
 
 | `os` | System | Published profile | How it is installed |
@@ -133,8 +133,13 @@ NixOS everything becomes NixOS configuration, so the machine is what
 `/etc/nixos` says, and `nixos-rebuild` keeps managing it afterwards.
 
 ```console
-$ ump server reinstall web-01 --profile nixos-25.11
+$ ump server reinstall web-01 --profile nixos-25.11 --no-provision
 ```
+
+NixOS is configured by its modules, not by the playbooks of the
+collection ofzhur.ansible, which need Python and support Ubuntu, Debian
+and Arch Linux: install it with `--no-provision`
+([provisioning](provisioning.md)).
 
 ### What is installed
 

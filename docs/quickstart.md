@@ -1,7 +1,7 @@
 # Quickstart
 
 From nothing to a freshly installed server in six commands, and from
-there to its roles. You need a
+there into your Ansible inventory. You need a
 server at [Hetzner Robot, Hetzner Cloud, OVHcloud, DigitalOcean, Linode or Vultr](isps.md) with a
 public address, the API credentials of that account, and `ssh` on your
 machine. The server will be erased. At DigitalOcean, the droplet must
@@ -83,9 +83,9 @@ Where the credentials come from and what each provider can do is in
 
 ```console
 $ ump server list
-ACCOUNT   PROVIDER        NAME     IPV4            LOCATION   STATUS    OS       PRICE
-hcloud    hetzner-cloud   web-01   198.51.100.22   hel1       running   <none>   3.79 EUR/mo
-hrobot    hetzner-robot   db-01    203.0.113.10    fsn1-dc7   running   <none>   <none>
+ACCOUNT   PROVIDER        NAME     IPV4            LOCATION   STATUS    OS       GROUPS   PRICE
+hcloud    hetzner-cloud   web-01   198.51.100.22   hel1       running   <none>   <none>   3.79 EUR/mo
+hrobot    hetzner-robot   db-01    203.0.113.10    fsn1-dc7   running   <none>   <none>   <none>
 
 $ ump server show web-01            # everything the provider knows about it
 $ ump server list -o json           # for scripts; also yaml, wide, name
@@ -137,8 +137,11 @@ and [keys](keys.md) describe every field and the published ones.
 
 ## 6. See the plan, then install
 
+ump provisions what it installs from the infrastructure repository it
+runs in (step 8); until you have one, `--no-provision` installs only.
+
 ```console
-$ ump server reinstall web-01 --dry-run
+$ ump server reinstall web-01 --dry-run --no-provision
 Bring hetzner-cloud/234567 (web-01, 198.51.100.22) into the rescue system and show the installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear)? (dry run: nothing is erased) [y/N] y
 Checking root access to 198.51.100.22 over SSH ... no.
 Going through the provider's rescue system.
@@ -166,7 +169,7 @@ you reboot it; `ump server unrescue web-01 --reboot` boots the old system
 again, and a real installation continues from the rescue system as it is.
 
 ```console
-$ ump server reinstall web-01
+$ ump server reinstall web-01 --no-provision
 Install ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on hetzner-cloud/234567 (web-01, 198.51.100.22) as web-01? Every disk of the server is erased. [y/N] y
 ...
 Installing ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01 as web-01 ...
@@ -178,16 +181,14 @@ Rebooting web-01 into ubuntu-26.04 ...
 Waiting for SSH on 198.51.100.22 to go down ... down after 4s.
 Waiting for SSH on 198.51.100.22 ... up after 18s.
 web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).
+web-01 is not in any inventory (no Ansible layout here); run ump server provision web-01 from the infrastructure repository later.
 ```
 
 A few minutes on a cloud VM, longer on bare metal with many disks. The
 server's name at the provider becomes its hostname (`--hostname` for
 another), and the address, gateway and interface it had are carried over.
 `--profile NAME`, `--layout NAME` and `--firewall NAME` pick others for
-this installation; without a terminal, add `--yes`. `--role NAME` also
-provisions the new system with that role after its first boot, which is
-the recommended way to give a server its roles; see
-[provisioning](provisioning.md).
+this installation; without a terminal, add `--yes`.
 
 ## 7. Log in
 
@@ -207,29 +208,51 @@ uptime, memory, the root disk and the addresses.
 
 The server now runs the operating system with the profile's userdata,
 and nothing else: ready to use, by hand or by your own tools. Turning it
-into what it is for (a web server, a database) is provisioning, by
-roles that the profile's strategy applies: Ansible run by ump
-(`ansible-bootstrap`), or by the server itself on a timer
-(`ansible-pull`). `ump server provision` applies roles to a server
-that is already installed:
+into what it is for is provisioning: ump puts the server into the
+Ansible inventory of your infrastructure repository, in groups, and runs
+the playbooks of those groups. A repository to start with:
 
 ```console
-$ ump server provision web-01 --role base
-$ ump server provision web-01 --roles base,monitoring
+$ mkdir infra && cd infra && git init
+$ git submodule add -b main https://github.com/ofzhur/ansible.git collections/ansible_collections/ofzhur/ansible
+$ cp collections/ansible_collections/ofzhur/ansible/config/push/ansible.cfg .
+$ mkdir -p inventory/group_vars playbooks
+$ printf 'all:\n  children:\n    common:\n' > inventory/groups.yml
+$ printf '.cache/\n' > .gitignore                 # the fact cache of the template
 ```
 
-The roles are added to those the server has (`ump server show` lists
-them); a role is removed only by a reinstall. Adding roles in place
-suits ones built for it, such as a basic role every server gets; for a
-server's main roles, a reinstall with `--role` (step 6) starts each on a
-fresh system. Running the strategies is not implemented yet: ump checks
-the roles and records them with the server, and says so. See
-[provisioning](provisioning.md) for the roles, the strategies, facts and
-secrets, and what works by hand today.
+Every server is in the group `common`, whose playbook comes from the
+collection [ofzhur.ansible](https://github.com/ofzhur/ansible): the
+users, groups and keys of the group variables
+(`inventory/group_vars/common.yml`; the collection's README says how).
+From the repository's root:
+
+```console
+$ ump server provision web-01
+Wrote inventory/hosts/web-01.yml: web-01 in common.
+Provisioning web-01: common (ofzhur.ansible.common) ...
+...
+hetzner-cloud/234567 (web-01, 198.51.100.22): provisioned, run list common.
+```
+
+From here, `ump server reinstall` runs in the repository and provisions
+what it installs. `--group` adds groups, each a playbook of the
+repository (`playbooks/web.yml`) or of the collection:
+
+```console
+$ ump server reinstall web-02 --group web          # install, then common and web
+$ ump server provision web-01 --group monitoring    # add a group to an installed server
+```
+
+Groups are best given at the installation, so that each starts on a
+fresh system; adding one in place suits groups built for it. Commit
+`inventory/hosts/` with the rest: Ansible runs from the repository
+without ump. See [provisioning](provisioning.md) for the layout, the
+host files, the run lists, and facts and secrets.
 
 ## Next
 
-- **A profile per role.** `ump config os create web` copies the default
+- **A profile per kind of server.** `ump config os create web` copies the default
   profile and opens it; `ump server set web-01 --profile web` remembers
   it for the server, so `ump server reinstall web-01` takes it from then
   on. See [profiles](profiles.md).
@@ -276,5 +299,5 @@ secrets, and what works by hand today.
   points ump at it.
 - **What comes after the installation.** A repository for the rest of
   the infrastructure, security profiles, and where to get help: [next
-  steps](next-steps.md); roles and Ansible by push or pull:
+  steps](next-steps.md); groups and Ansible:
   [provisioning](provisioning.md).

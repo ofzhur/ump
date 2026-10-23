@@ -4,7 +4,8 @@ The **state** is everything ump keeps: `config.yaml` with the
 accounts, the secret files, the profiles with the layouts, firewalls,
 users and userdata, the named keys, UMP's own SSH key, `state.yaml`
 (what ump knows about servers beyond the providers' word: profile,
-price, attributes, the servers added by hand, what was installed where)
+price, attributes, the servers added by hand, what was installed where,
+the groups)
 and the listing cache. It lives in a **state backend**. Without one
 configured, that is the local directory `~/.config/ump`, and a single
 person on one machine never needs more.
@@ -16,7 +17,7 @@ command (at most every 30 seconds, see [how the mirror
 works](#how-the-mirror-works)), pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
 overwritten in silence. `state.yaml` and the per-server locks of `ump
-server reinstall` and `rescue` go through the backend directly.
+server reinstall`, `provision` and `rescue` go through the backend directly.
 
 ```console
 $ ump config state setup                        # the wizard: pick a backend, migrate the state there
@@ -151,7 +152,7 @@ you wait for nothing:
 the backend's version tag, retried on conflict, so two people setting
 attributes on different servers at the same moment both get their
 change in. Operations that must not run twice on one machine, `ump
-server reinstall` and `rescue`, take a **lock per server** on the
+server reinstall`, `provision` and `rescue`, take a **lock per server** on the
 backend for their duration; a second ump on the same server is refused
 with who holds the lock and since when, while every other server stays
 free. `ump config state locks` lists them, `unlock SERVER` releases one
@@ -198,6 +199,7 @@ servers:
       admin: ump
       interfaces: {ext01: "96:00:01:02:03:04"}
       at: 2026-10-14T11:58:30Z
+    groups: [web]
 manual:
   rack-07:
     ipv4: 192.0.2.7
@@ -209,8 +211,15 @@ manual:
 
 `servers` is keyed by `provider/id`; a record that holds nothing
 disappears. `installed` is written by `ump server reinstall` when the
-new system answered, from what `/etc/ump/install` on the machine says,
-and shown by `ump server show`. `manual` holds what `ump server add`
+new system answered, from what `/etc/ump/install` on the machine says
+(with `--no-reboot` when the installer finished, without the image
+version, kernel and interfaces), and shown by `ump server show`.
+`groups` are the server's Ansible groups besides `common`
+([provisioning](provisioning.md)): set by `ump server reinstall
+--group`, added to by `ump server provision`; the listings show them as
+in the inventory, `common` first. A state an older
+ump wrote with `roles` is read as `groups` (`-` and `.` become `_`) and
+written back as such. `manual` holds what `ump server add`
 took; its servers are listed by the account `manual`, which exists
 wherever the state does. Edit the file by hand (in the local directory,
 or in the mirror and push) or with `ump server set`, `add` and `remove`; unknown

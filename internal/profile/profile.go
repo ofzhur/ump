@@ -1,6 +1,6 @@
 // Package profile reads the YAML profiles that say what a server becomes
 // when ump installs it (operating system, disk layout, users, userdata,
-// firewall, the provision step), validates them and renders the
+// firewall, the reserved provision type), validates them and renders the
 // specification the installer takes.
 package profile
 
@@ -492,8 +492,9 @@ func (a *Allow) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// Provision is the step after the first boot. Only the type is known to
-// ump yet; the other fields are kept for the step to read.
+// Provision is reserved for ansible-pull, the server converging itself
+// later. The type and the other fields are recorded on the server and
+// change nothing else: ump provisions by push (internal/cli/ansible.go).
 type Provision struct {
 	Type    string            `yaml:"type,omitempty" json:"type"`
 	Options map[string]string `yaml:",inline" json:"options,omitempty"`

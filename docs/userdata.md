@@ -112,9 +112,9 @@ output shown, and the server stays in the rescue system for a look.
 
 What does not fit a script that runs once at installation, such as
 keeping a system configured over time, belongs to
-[provisioning](provisioning.md) after the first boot (roles applied by
-the profile's `provision` strategy) or to your
-configuration management.
+[provisioning](provisioning.md) after the first boot (the playbooks of
+the server's groups, run by ump from your infrastructure repository) or
+to your configuration management.
 
 ## Managing userdata
 

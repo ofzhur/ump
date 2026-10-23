@@ -80,7 +80,7 @@ skills/ump/
 
 The skill ships **no scripts**. Everything executable it relies on is a
 subcommand of `ump` — `ump repo audit`, `ump repo init`,
-`ump inventory check`, `ump inventory ansible` — because `ump` is a single
+`ump inventory check` — because `ump` is a single
 binary: no interpreter is needed on the operator's machine, the logic is
 tested, versioned and redacts secrets like the rest of the tool, it cannot
 drift from the CLI, and an agent cannot "fix" a helper script by editing
@@ -134,7 +134,7 @@ one owner; everything else is derived.
 | Per-machine intent: profile, environment, role, overrides | the machine overlay | `ump/machines.yaml` (+ provider labels where they exist) | UMP, Ansible groups |
 | OS, disks, boot, base network, base packages | UMP profiles | `ump/` | the agent on the target |
 | Users and SSH keys | user sets | `ump/users/*.yaml` | UMP at install time; the Ansible `users` role afterwards — the same file |
-| Everything above the base OS | Ansible | `ansible/` | machines |
+| Everything above the base OS | Ansible | `ansible.cfg`, `inventory/`, `playbooks/`, `roles/` | machines |
 | Procedures | runbooks | `docs/runbooks/` and the skill's references | humans and agents |
 
 The seams between the owners are **generated, never hand-copied**:
@@ -142,9 +142,10 @@ The seams between the owners are **generated, never hand-copied**:
 ```
 terraform output -json ──▶ ump machine import --from terraform    names, labels and addresses of
                                                                    machines Terraform created
-ump inventory export --format ansible ──▶ Ansible dynamic inventory groups from env, role,
-                                                                   provider, location, profile
-ump server reinstall … handoff: ansible ──▶ ansible-playbook site.yml --limit <host>
+ump server reinstall … --group <role> ──▶ inventory/hosts/<host>.yml  the host in common and its groups,
+                                                                   with address, administrator, facts
+                                     ──▶ ansible-playbook <run list> --limit <host>
+                                         (common and its groups, a playbook each)
 ```
 
 The join key across all three tools is the **machine name**,
@@ -208,17 +209,16 @@ infra/
 │   ├── machines.yaml             the machine overlay
 │   ├── profiles/  layouts/  users/  images/
 │
-├── ansible/
-│   ├── ansible.cfg
-│   ├── inventory/
-│   │   ├── ump                   executable one-liner: exec ump inventory ansible "$@"
-│   │   ├── group_vars/           by env, role, provider, location
-│   │   └── host_vars/            rare; most per-host facts come from the inventory
-│   ├── playbooks/
-│   │   ├── site.yml              the one entry point; includes per-role playbooks
-│   │   └── <role>.yml
-│   ├── roles/                    one role per concern; no logic in playbooks
-│   └── requirements.yml          pinned collections and external roles
+├── ansible.cfg                   at the root: ump provisions from here
+├── inventory/
+│   ├── groups.yml                the group tree: env above role
+│   ├── group_vars/               by env, role, provider, location
+│   ├── host_vars/                rare; most per-host facts come from the host files
+│   └── hosts/                    written by ump: one file per machine
+├── playbooks/
+│   └── <role>.yml                one per group, the run list's steps; common from ofzhur.ansible
+├── roles/                        one role per concern; no logic in playbooks
+├── collections/                  ofzhur.ansible as a submodule; others pinned (requirements.yml)
 │
 ├── secrets/                      sops-encrypted files, or nothing: references to pass / vault / op
 ├── docs/
@@ -291,8 +291,8 @@ agent  $ terraform -chdir=terraform/envs/prod output -json | ump machine import 
 agent  $ ump plan prod-web-03 --profile web -o json       # also prints the human summary
 agent  → shows the plan: disks, layout, hostname, network, users, handoff
 human  $ ump approve run-7f3a                             # interactive, TTY only
-agent  $ ump install prod-web-03 --approved run-7f3a      # install, reboot, verify, then
-                                                          # ansible-playbook site.yml --limit prod-web-03
+agent  $ ump install prod-web-03 --group web --approved run-7f3a   # install, reboot, verify, then
+                                                          # the host file and the run list common, web
 agent  $ ansible prod-web-03 -m ping && task check -- prod-web-03
 agent  → reports: debian-13, mirrored-lvm, role web applied, 14 min; fleet table in README updated
 ```
@@ -309,7 +309,7 @@ working.
 |---|---|---|---|
 | **0 — Audit** | Understand without changing | `ump repo audit` report plus the agent's reading → `docs/repo-health.md` and a migration plan as an ADR | the owner agrees with the plan |
 | **1 — Safety** | Remove the ways to lose data or secrets | secrets out of git (sops or references), remote state with locking, pinned providers and collections, CI that runs plan and check | `terraform plan` and `--check` are clean and run in CI |
-| **2 — Structure** | Move to the reference layout | pure moves with `moved` blocks (plan shows no changes), one `site.yml`, roles deduplicated, playbook logic pushed into roles, hand-written inventory replaced by the generated one | layout matches; no behaviour change in any PR |
+| **2 — Structure** | Move to the reference layout | pure moves with `moved` blocks (plan shows no changes), one playbook per group, roles deduplicated, playbook logic pushed into roles, hand-written inventory replaced by the host files ump writes | layout matches; no behaviour change in any PR |
 | **3 — Provisioning** | Replace bespoke install paths with UMP | users and disk layouts extracted from scripts and roles into `ump/`; profiles per role; cloud-init snowflakes and install scripts retired; first machines rebuilt with UMP | every new machine goes through `ump server reinstall` |
 | **4 — Operation** | Routine work runs through the skill | runbooks written from what was learned, weekly drift and health reports, dependency bumps as PRs | the human mostly reviews and approves |
 
@@ -434,10 +434,10 @@ Consequences for the CLI:
   `ump server reinstall --approved <run-id>`
 - no prompts without a TTY; exit code 3 plus a message naming the missing
   approval
-- `ump inventory export --format ansible|json|hosts --group-by
-  env,role,provider,location,profile`, and `ump inventory ansible` speaking
-  Ansible's script-inventory protocol (`--list`, `--host`), so the inventory
-  file in the repository is a one-line exec wrapper
+- `ump inventory export --format json|hosts --group-by
+  env,role,provider,location,profile`, for what is not in the Ansible
+  inventory; the machines ump installed are there already, one host file
+  each (`ump server reinstall --group`, `ump server provision`)
 - `ump inventory check` and `ump repo audit` (Markdown and JSON): the
   deterministic halves of the drift check and the adoption audit
 - `ump repo init`: the reference repository skeleton and templates, from

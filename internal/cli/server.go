@@ -19,12 +19,14 @@ func (a *app) newServerCmd() *cobra.Command {
 		Aliases: []string{"s", "srv"},
 		Short:   "List, inspect, install and control servers",
 		Long: `Everything that happens to a server: listing and showing them, installing
-an operating system the way a profile says, the rescue system, power,
+an operating system the way a profile says and provisioning it with
+Ansible from the infrastructure repository, the rescue system, power,
 names and reverse DNS. Servers are named by name, provider ID, IP address
 or provider/id, and found across every configured account.`,
 		Example: `  ump server list
   ump server show web-01
-  ump server reinstall web-01 --profile db
+  ump server reinstall web-01 --profile db --group db
+  ump server provision web-01 --group monitoring
   ump server rescue web-01
   ump server reboot web-01 --wait
   ump server rdns set web-01 web-01.example.net

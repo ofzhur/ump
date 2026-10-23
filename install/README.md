@@ -26,8 +26,8 @@ root and the keys of a file).
    volume. A target that matches no disk, two parts taking the rest of
    one disk, an md or raid level with too few members, a UEFI machine
    without an `efi` part or a BIOS machine without a `bios` part stop it
-   here. Prints the plan, with the users, userdata, firewall and
-   provision step; `--dry-run` stops here.
+   here. Prints the plan, with the users, userdata, firewall and the
+   reserved provision type; `--dry-run` stops here.
 3. **Fetches the manifest** of the image, so that a missing image costs
    no disk.
 4. **Releases and wipes the disks:** swap off, everything mounted from
@@ -102,7 +102,7 @@ root and the keys of a file).
     and the initramfs rebuilt first. Then `update-grub`.
 12. Writes `/etc/ump/install` (what was installed, when, on which disks,
     which profile and layout, the administrator, the interfaces with
-    their MAC addresses, the provision step) and
+    their MAC addresses, the reserved provision type) and
     `/etc/ump/spec.json` (the specification), unmounts everything and
     reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
