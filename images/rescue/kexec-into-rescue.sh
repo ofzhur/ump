@@ -159,9 +159,14 @@ gw6="$( { ip -o -6 route show default dev "$iface" 2>/dev/null || true; } | firs
 
 # The running kernel knows which consoles this machine has (the provider's
 # rescue system was booted with the right ones); keep them, so that the
-# rescue image talks to the same serial console.
+# rescue image talks to the same serial console. Without any, both: the
+# kernel's messages go to every console, but /dev/console, where systemd
+# writes, is the last one, so the screen goes last. A serial port whose
+# interrupt never fires after the jump (an ASRock Rack board at Hetzner)
+# takes no output from programs, and systemd blocked on it at its first
+# status line; the kernel writes to it without the interrupt.
 consoles="$(tr ' ' '\n' < /proc/cmdline | grep '^console=' | paste -sd' ' - || true)"
-[ -n "$consoles" ] || consoles="console=tty0 console=ttyS0,115200n8"
+[ -n "$consoles" ] || consoles="console=ttyS0,115200n8 console=tty0"
 
 cmdline="$consoles ump.hostname=$host ump.mac=$mac"
 [ -n "$ip4" ] && cmdline="$cmdline ump.ip=$ip4${gw4:+,$gw4}"
