@@ -1,0 +1,40 @@
+name: Bug report
+description: Something ump does wrong, or a command that fails
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Leave out real tokens, passwords, keys and addresses: placeholders are enough.
+        A security problem goes [privately](https://github.com/ofzhur/ump/security/advisories/new) instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `ump version`.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Provider, server type and profile
+      description: For example "Hetzner Robot, AX41-NVMe, ubuntu-26.04 with lvm-raid1"; "none" if no server is involved.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran and what it printed.
+      render: console
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Your operating system, a backend if the state is shared, /var/log/ump-userdata.log or the rescue system's output when the installation failed.

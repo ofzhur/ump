@@ -1,0 +1,33 @@
+name: Provider or OS request
+description: A hosting provider or an operating system ump should support
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - a provider
+        - an operating system
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Which one
+      description: For example "Scaleway Elastic Metal" or "Rocky Linux 10".
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What you know about it
+      description: |
+        For a provider: the API, whether it has a rescue system or a way to boot one, what kind of servers (dedicated, VMs).
+        For an OS: the release, the architectures, how it is usually installed.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Help
+      options:
+        - label: I can test on an account or a server of mine

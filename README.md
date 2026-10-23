@@ -227,7 +227,9 @@ own](images/rescue/README.md#your-own-storage).
 ## Author, support and services
 
 UMP is made by Oleg Zhurko <oleg@zhurko.de>, a DevOps and infrastructure
-engineer. Issues and pull requests are welcome here. For paid work
+engineer. Issues and pull requests are welcome here (see
+[contributing](CONTRIBUTING.md); security problems go privately, see
+[security](SECURITY.md)). For paid work
 around it, such as setting UMP up for your fleet, a provider or an OS
 image of your own, profiles and the provisioning that follows, or
 running your infrastructure with it, write to the address above.
