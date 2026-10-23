@@ -19,28 +19,39 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/state"
 )
 
-// Provisioning by push: ump runs Ansible from the infrastructure
-// repository, the current directory. Every server ump installs is in the
-// group common and in the groups given with --group; its run list is
-// those groups in order, and each group is a playbook: playbooks/<group>.yml
-// of the repository when it has one, else the collection's
-// ofzhur.ansible.<group>. ump writes the server's host file into
-// inventory/hosts/ (read by the collection's inventory plugin
-// ofzhur.ansible.host) and runs the run list for that host alone.
+// Provisioning: ump runs Ansible from the infrastructure repository, the
+// current directory. Every server ump installs is in the group common and
+// in the groups given with --group; its run list is those groups in
+// order, and each group is a playbook: playbooks/<group>.yml of the
+// repository when it has one, else the collection's
+// ofzhur.ansible.<group>. The server goes into the inventory one of two
+// ways: ump writes its host file into inventory/hosts/ (read by the
+// collection's inventory plugin ofzhur.ansible.host), or, when a file of
+// inventory/ configures the plugin ofzhur.ansible.ump, ump itself is the
+// inventory (ump server list -o ansible) and writes nothing. Either way
+// the inventory has the same hosts, groups and variables, and ump runs
+// the run list for that host alone.
 
 const (
 	// commonGroup is the group of every server ump installs; its run
 	// list starts with it.
 	commonGroup = "common"
-	// collection is the Ansible collection with the inventory plugin and
+	// collection is the Ansible collection with the inventory plugins and
 	// the playbooks of the groups the repository has none of.
 	collection = "ofzhur.ansible"
 	// hostsDir is where the host files go, in the repository.
 	hostsDir = "inventory/hosts"
+	// umpPlugin is the inventory plugin that makes ump the inventory.
+	umpPlugin = collection + ".ump"
+	// parentEnv names, in the environment of the Ansible ump runs, where
+	// ump reads the state (backend, mirror or local): an ump that Ansible
+	// runs in turn is part of the same run.
+	parentEnv = "UMP_PARENT"
 )
 
 // ansibleRunner runs an Ansible program (ansible-playbook,
@@ -77,6 +88,9 @@ func runAnsible(ctx context.Context, dir, prog string, args, env []string, stdin
 type infraRepo struct {
 	// dir is its root, absolute: where ump runs.
 	dir string
+	// plugin is the file of inventory/ that makes ump the inventory
+	// (inventory/ump.yml), relative to dir; empty: host files.
+	plugin string
 }
 
 // infraLayout looks for the Ansible layout in the current directory:
@@ -95,10 +109,47 @@ func (a *app) infraLayout() (repo *infraRepo, missing []string, err error) {
 	if fi, err := os.Stat(filepath.Join(dir, "ansible.cfg")); err != nil || !fi.Mode().IsRegular() {
 		missing = append(missing, "ansible.cfg")
 	}
+	repo = &infraRepo{dir: dir}
 	if fi, err := os.Stat(filepath.Join(dir, "inventory")); err != nil || !fi.IsDir() {
 		missing = append(missing, "inventory/")
+	} else {
+		repo.plugin = umpInventory(dir)
 	}
-	return &infraRepo{dir: dir}, missing, nil
+	return repo, missing, nil
+}
+
+// umpInventory returns the file directly in the repository's inventory/
+// that makes ump the inventory, a YAML mapping with plugin:
+// ofzhur.ansible.ump, relative to the repository; empty when there is
+// none. Ansible skips dot names, and so does ump.
+func umpInventory(dir string) string {
+	entries, err := os.ReadDir(filepath.Join(dir, "inventory"))
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || strings.HasPrefix(n, ".") || !isYAMLFile(n) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "inventory", n))
+		if err != nil {
+			continue
+		}
+		var f map[string]any
+		if yaml.Unmarshal(data, &f) != nil {
+			continue
+		}
+		if p, _ := f["plugin"].(string); p == umpPlugin {
+			return "inventory/" + n
+		}
+	}
+	return ""
+}
+
+// isYAMLFile says whether a file name is one Ansible reads as YAML.
+func isYAMLFile(name string) bool {
+	return strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")
 }
 
 // requireRepo returns the infrastructure repository to run Ansible in,
@@ -215,6 +266,26 @@ func (r *infraRepo) ansibleEnv() []string {
 	return env
 }
 
+// ansibleEnv is what ump adds to the environment of an Ansible run: the
+// repository's settings, and for an ump that Ansible runs in turn (the
+// inventory plugin ofzhur.ansible.ump) where this one reads the state
+// and its configuration file, so that it lists what this one recorded,
+// from the same accounts, and leaves the mirror alone (resolveHome).
+func (a *app) ansibleEnv(repo *infraRepo) []string {
+	where := "local"
+	if a.home != nil && a.home.Backend != nil {
+		where = "backend"
+		if a.pullFailed {
+			where = "mirror"
+		}
+	}
+	env := append(repo.ansibleEnv(), parentEnv+"="+where)
+	if path, err := filepath.Abs(config.ResolvePath(a.configFlag)); err == nil {
+		env = append(env, config.EnvConfig+"="+path)
+	}
+	return env
+}
+
 // syntaxCheck runs ansible-playbook --syntax-check on the run list in
 // the repository, which also reads the inventory: a group without a
 // playbook, a playbook that does not parse and a broken inventory stop
@@ -222,7 +293,7 @@ func (r *infraRepo) ansibleEnv() []string {
 func (a *app) syntaxCheck(ctx context.Context, repo *infraRepo, rl runList) error {
 	var out bytes.Buffer
 	args := append([]string{"--syntax-check"}, rl.playbooks...)
-	code, err := a.ansible(ctx, repo.dir, "ansible-playbook", args, repo.ansibleEnv(), nil, &out, &out)
+	code, err := a.ansible(ctx, repo.dir, "ansible-playbook", args, a.ansibleEnv(repo), nil, &out, &out)
 	if err != nil {
 		return err
 	}
@@ -234,17 +305,19 @@ func (a *app) syntaxCheck(ctx context.Context, repo *infraRepo, rl runList) erro
 }
 
 // inventory is what ansible-inventory --list says: the groups, and the
-// hosts with the ump_ref of each (empty where a host has none).
+// hosts with the ump_ref of each (empty where a host has none); plugin
+// is the repository's, when ump is the inventory.
 type inventory struct {
 	groups map[string]bool
 	hosts  map[string]string
+	plugin string
 }
 
 // readInventory reads the repository's inventory with ansible-inventory
 // --list; its output is shown when it fails.
 func (a *app) readInventory(ctx context.Context, repo *infraRepo) (*inventory, error) {
 	var out, errb bytes.Buffer
-	code, err := a.ansible(ctx, repo.dir, "ansible-inventory", []string{"--list"}, repo.ansibleEnv(), nil, &out, &errb)
+	code, err := a.ansible(ctx, repo.dir, "ansible-inventory", []string{"--list"}, a.ansibleEnv(repo), nil, &out, &errb)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +329,7 @@ func (a *app) readInventory(ctx context.Context, repo *infraRepo) (*inventory, e
 	if err != nil {
 		return nil, fmt.Errorf("ansible-inventory --list in %s: %w", repo.dir, err)
 	}
+	inv.plugin = repo.plugin
 	return inv, nil
 }
 
@@ -323,11 +397,19 @@ const sameName = "a host and a group with the same name make the group's plays m
 // check refuses names the inventory already has the other way round:
 // the hostname as a group, or a group of the run list as a host other
 // than the server's own (its host file of another hostname, which goes
-// when the new one is written). retry is what the user can do about the
-// hostname.
+// when the new one is written); when ump is the inventory, also the
+// hostname as a host other than the server's. retry is what the user can
+// do about the hostname.
 func (inv *inventory) check(hostname, ref string, rl runList, retry string) error {
 	if inv.groups[hostname] {
 		return withExit(exitUsage, fmt.Errorf("the hostname %s is also a group of the inventory: %s; %s", hostname, sameName, retry))
+	}
+	if r, ok := inv.hosts[hostname]; ok && inv.plugin != "" && r != ref {
+		other := "a host of the inventory without ump_ref"
+		if r != "" {
+			other = "the host of " + r + " in the inventory (its ump_ref)"
+		}
+		return withExit(exitUsage, fmt.Errorf("the hostname %s is %s; %s", hostname, other, retry))
 	}
 	for _, g := range rl.groups {
 		if r, ok := inv.hosts[g]; ok && g != hostname && r != ref {
@@ -345,19 +427,21 @@ type hostFile struct {
 	Vars   hostVars `yaml:"vars"`
 }
 
+// hostVars are the variables of a host, in the host file and in ump
+// server list -o ansible.
 type hostVars struct {
-	AnsibleHost    string            `yaml:"ansible_host,omitempty"`
-	AnsibleUser    string            `yaml:"ansible_user,omitempty"`
-	UMPName        string            `yaml:"ump_name,omitempty"`
-	UMPRef         string            `yaml:"ump_ref,omitempty"`
-	UMPProvider    string            `yaml:"ump_provider,omitempty"`
-	UMPAccount     string            `yaml:"ump_account,omitempty"`
-	UMPLocation    string            `yaml:"ump_location,omitempty"`
-	UMPProduct     string            `yaml:"ump_product,omitempty"`
-	UMPOS          string            `yaml:"ump_os,omitempty"`
-	UMPProfile     string            `yaml:"ump_profile,omitempty"`
-	UMPInstalledAt string            `yaml:"ump_installed_at,omitempty"`
-	UMPAttributes  map[string]string `yaml:"ump_attributes,omitempty"`
+	AnsibleHost    string            `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
+	AnsibleUser    string            `json:"ansible_user,omitempty" yaml:"ansible_user,omitempty"`
+	UMPName        string            `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
+	UMPRef         string            `json:"ump_ref,omitempty" yaml:"ump_ref,omitempty"`
+	UMPProvider    string            `json:"ump_provider,omitempty" yaml:"ump_provider,omitempty"`
+	UMPAccount     string            `json:"ump_account,omitempty" yaml:"ump_account,omitempty"`
+	UMPLocation    string            `json:"ump_location,omitempty" yaml:"ump_location,omitempty"`
+	UMPProduct     string            `json:"ump_product,omitempty" yaml:"ump_product,omitempty"`
+	UMPOS          string            `json:"ump_os,omitempty" yaml:"ump_os,omitempty"`
+	UMPProfile     string            `json:"ump_profile,omitempty" yaml:"ump_profile,omitempty"`
+	UMPInstalledAt string            `json:"ump_installed_at,omitempty" yaml:"ump_installed_at,omitempty"`
+	UMPAttributes  map[string]string `json:"ump_attributes,omitempty" yaml:"ump_attributes,omitempty"`
 }
 
 // primaryAddress is the address ump reaches a server at: the IPv4, else
@@ -382,6 +466,89 @@ func hostVarsFor(m provider.Machine, rec state.Install, admin string) hostVars {
 		v.UMPInstalledAt = rec.At.UTC().Format(time.RFC3339)
 	}
 	return v
+}
+
+// inventoryHostname is the host name of a server ump installed: the
+// hostname of its installation, else its name where that is a valid one;
+// empty when neither.
+func inventoryHostname(m provider.Machine, rec state.Install) string {
+	if rec.Hostname != "" {
+		return rec.Hostname
+	}
+	return rescueHostname(m.Name)
+}
+
+// inventoryVars is what the inventory says about a server ump installed,
+// logging in as the administrator of the installation (the profile's
+// for a record without one).
+func (a *app) inventoryVars(cfg *config.Config, m provider.Machine, rec state.Install) hostVars {
+	admin := rec.Admin
+	if admin == "" {
+		admin = a.profileAdmin(cfg, rec.Profile)
+	}
+	return hostVarsFor(m, rec, admin)
+}
+
+// ansibleInventory is the inventory of the servers ump installed among
+// ms, in the JSON of an inventory script: every group with its hosts,
+// all with the groups as children, and the variables of the hosts under
+// _meta, as the host files have them. A server without an address or a
+// valid hostname is left out with a note, and so is one whose hostname
+// a later installation took.
+func (a *app) ansibleInventory(cfg *config.Config, doc *state.Document, ms []provider.Machine) map[string]any {
+	type entry struct {
+		m provider.Machine
+		s state.Server
+	}
+	hosts := map[string]entry{}
+	for _, m := range ms {
+		s, ok := doc.Servers[m.Ref()]
+		if !ok || s.Installed == nil {
+			continue
+		}
+		host := inventoryHostname(m, *s.Installed)
+		switch {
+		case primaryAddress(m) == "":
+			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: it has no public address\n", describeRef(m))
+			continue
+		case host == "":
+			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: its installation has no hostname, and its name is not a valid one\n", describeRef(m))
+			continue
+		}
+		if other, taken := hosts[host]; taken {
+			kept, left := other, entry{m, s}
+			if s.Installed.At.After(other.s.Installed.At) {
+				kept, left = left, kept
+			}
+			hosts[host] = kept
+			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: its hostname %s is that of %s, installed later\n", describeRef(left.m), host, kept.m.Ref())
+			continue
+		}
+		hosts[host] = entry{m, s}
+	}
+	hostvars := map[string]hostVars{}
+	members := map[string][]string{}
+	for host, e := range hosts {
+		hostvars[host] = a.inventoryVars(cfg, e.m, *e.s.Installed)
+		for _, g := range append([]string{commonGroup}, e.s.Groups...) {
+			// a group of a state edited by hand that ump would not give
+			if !groupName.MatchString(g) || ansibleOwnName(g) {
+				fmt.Fprintf(a.stderr, "ump: the group %q of %s in the state is left out: not a group name ump gives\n", g, describeRef(e.m))
+				continue
+			}
+			members[g] = append(members[g], host)
+		}
+	}
+	inv := map[string]any{"_meta": map[string]any{"hostvars": hostvars}}
+	groups := []string{}
+	for g, hs := range members {
+		slices.Sort(hs)
+		inv[g] = map[string][]string{"hosts": hs}
+		groups = append(groups, g)
+	}
+	slices.Sort(groups)
+	inv["all"] = map[string][]string{"children": groups}
+	return inv
 }
 
 // renderHostFile is the host file of a host in the groups (common
@@ -436,8 +603,13 @@ func (r *infraRepo) checkHost(hostname, ref string, rl runList, retry string) er
 
 // checkHostFiles refuses the host files of the hostname that ump would
 // overwrite or write its own beside: HOSTNAME.yml or HOSTNAME.yaml
-// without ump_ref, or with another server's.
+// without ump_ref, or with another server's. When ump is the inventory,
+// it refuses every host file of the hostname or of the server instead:
+// the host would be defined twice.
 func (r *infraRepo) checkHostFiles(hostname, ref, retry string) error {
+	if r.plugin != "" {
+		return r.checkNoHostFile(hostname, ref)
+	}
 	for _, ext := range []string{".yml", ".yaml"} {
 		rel := hostsDir + "/" + hostname + ext
 		other, err := hostFileRef(filepath.Join(r.dir, rel))
@@ -449,6 +621,34 @@ func (r *infraRepo) checkHostFiles(hostname, ref, retry string) error {
 			return withExit(exitUsage, fmt.Errorf("%s has no ump_ref: written by hand or by another tool; remove it, ump writes %s/%s.yml", rel, hostsDir, hostname))
 		case other != ref:
 			return withExit(exitUsage, fmt.Errorf("%s is the host file of %s (its ump_ref); %s, or remove the file if that server is gone", rel, other, retry))
+		}
+	}
+	return nil
+}
+
+// checkNoHostFile refuses a host file of the hostname, or one written
+// for the server under another name, beside the plugin that makes ump
+// the inventory.
+func (r *infraRepo) checkNoHostFile(hostname, ref string) error {
+	dir := filepath.Join(r.dir, hostsDir)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || strings.HasPrefix(n, ".") || !isYAMLFile(n) {
+			continue
+		}
+		rel := hostsDir + "/" + n
+		if n == hostname+".yml" || n == hostname+".yaml" {
+			return withExit(exitUsage, fmt.Errorf("%s defines the host %s too, and %s makes ump the inventory: the host would be defined twice; remove the host file", rel, hostname, r.plugin))
+		}
+		if other, err := hostFileRef(filepath.Join(dir, n)); err == nil && other == ref {
+			return withExit(exitUsage, fmt.Errorf("%s is the host file of %s, and %s makes ump the inventory: the server would be in it twice; remove the host file", rel, ref, r.plugin))
 		}
 	}
 	return nil
@@ -497,8 +697,16 @@ func (r *infraRepo) writeHostFile(hostname, ref string, data []byte) (written st
 	return hostsDir + "/" + name, removed, nil
 }
 
-// putInInventory writes the host file and says so.
+// putInInventory writes the host file and says so; when ump is the
+// inventory, the state has the server already, and it says that.
 func (a *app) putInInventory(repo *infraRepo, hostname string, groups []string, v hostVars) (string, error) {
+	if repo.plugin != "" {
+		if err := repo.checkNoHostFile(hostname, v.UMPRef); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(a.stderr, "No host file: %s makes ump the inventory, with %s in %s.\n", repo.plugin, hostname, strings.Join(groups, ", "))
+		return "", nil
+	}
 	data, err := renderHostFile(hostname, groups, v)
 	if err != nil {
 		return "", err
@@ -525,7 +733,7 @@ func (a *app) runRunList(ctx context.Context, repo *infraRepo, rl runList, hostn
 	if a.isTTY != nil && a.isTTY() {
 		stdin = a.stdin
 	}
-	return a.ansible(ctx, repo.dir, "ansible-playbook", args, repo.ansibleEnv(), stdin, a.stderr, a.stderr)
+	return a.ansible(ctx, repo.dir, "ansible-playbook", args, a.ansibleEnv(repo), stdin, a.stderr, a.stderr)
 }
 
 // provisionHost puts the host into the inventory and runs its run list.

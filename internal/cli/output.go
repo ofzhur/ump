@@ -22,6 +22,8 @@ const (
 	formatJSON  outputFormat = "json"
 	formatYAML  outputFormat = "yaml"
 	formatName  outputFormat = "name"
+	// formatAnsible is the inventory of ump server list -o ansible alone.
+	formatAnsible outputFormat = "ansible"
 )
 
 var outputFormats = []string{"table", "wide", "json", "yaml", "name"}

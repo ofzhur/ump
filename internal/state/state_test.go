@@ -78,7 +78,7 @@ func TestParse(t *testing.T) {
 
 func TestParseRolesBecomeGroups(t *testing.T) {
 	// an older ump wrote roles; they load as groups and are written as such
-	d, err := Parse([]byte("servers:\n  fake/1:\n    roles: [web-1, base.x, web_1, common, localhost, 2fa]\n    groups: [db]\n"))
+	d, err := Parse([]byte("servers:\n  fake/1:\n    roles: [web-1, base.x, web_1, common, localhost, _meta, 2fa]\n    groups: [db]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

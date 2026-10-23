@@ -49,8 +49,19 @@ const pullTimeout = 10 * time.Second
 // does not answer: the mirror is what there is, and the user is told.
 // offline (shell completion, help, the version) never touches the
 // backend, not even its credentials: those must not wait on anything.
+//
+// An ump that ump runs (the inventory plugin ofzhur.ansible.ump, under
+// the Ansible of ump server reinstall and provision) has UMP_PARENT,
+// which says where its parent reads the state: it reads it there too,
+// the backend or, when the parent's pull failed, the mirror as it is, so
+// that it sees what the parent recorded. It leaves the mirror to the
+// parent, which pulled it and pushes it after the command: no pull, no
+// push, so it takes no lock of the mirror and writes nothing there but
+// the listing cache, which the parent's push carries along.
 func (a *app) resolveHome(ctx context.Context, offline bool) error {
 	a.doc, a.store, a.manual = nil, nil, nil
+	parent := os.Getenv(parentEnv)
+	a.nested = parent != ""
 	resolve := func() (*home.Resolved, error) { return home.Resolve(a.sshRunner(), a.httpClient) }
 	if offline {
 		resolve = home.ResolveLocal
@@ -62,6 +73,10 @@ func (a *app) resolveHome(ctx context.Context, offline bool) error {
 	a.home = h
 	config.SetHome(h.Dir)
 	if h.Backend == nil {
+		return nil
+	}
+	if a.nested {
+		a.pullFailed = parent == "mirror"
 		return nil
 	}
 	m := &home.Mirror{Backend: h.Backend, Dir: h.Dir, Now: a.now}
@@ -88,7 +103,7 @@ func (a *app) resolveHome(ctx context.Context, offline bool) error {
 // pushHome writes what a command changed in the mirror back to the
 // backend; conflicts are named and left for ump config state push.
 func (a *app) pushHome(ctx context.Context) {
-	if a.home == nil || a.home.Backend == nil || a.pullFailed {
+	if a.home == nil || a.home.Backend == nil || a.pullFailed || a.nested {
 		return
 	}
 	m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
@@ -166,14 +181,15 @@ func (a *app) manualAccount(cfg *config.Config, d *state.Document) {
 
 // updateState changes the state document; the next loadState reads it
 // again. Behind a backend the mirror's copy is refreshed too, so that
-// the push after the command has nothing stale to send.
+// the push after the command has nothing stale to send; an ump that ump
+// runs leaves that to its parent.
 func (a *app) updateState(ctx context.Context, fn func(d *state.Document) error) error {
 	a.doc = nil
 	st := a.stateStore()
 	if err := st.Update(ctx, fn); err != nil {
 		return err
 	}
-	if a.home != nil && a.home.Backend != nil && st.Backend == a.home.Backend {
+	if a.home != nil && a.home.Backend != nil && st.Backend == a.home.Backend && !a.nested {
 		m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
 		if _, _, err := m.Pull(ctx); err != nil {
 			fmt.Fprintf(a.stderr, "ump: %v\n", err)

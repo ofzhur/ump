@@ -26,8 +26,8 @@ root and the keys of a file).
    volume. A target that matches no disk, two parts taking the rest of
    one disk, an md or raid level with too few members, a UEFI machine
    without an `efi` part or a BIOS machine without a `bios` part stop it
-   here. Prints the plan, with the users, userdata, firewall and the
-   reserved provision type; `--dry-run` stops here.
+   here. Prints the plan, with the users, userdata and firewall;
+   `--dry-run` stops here.
 3. **Fetches the manifest** of the image, so that a missing image costs
    no disk.
 4. **Releases and wipes the disks:** swap off, everything mounted from
@@ -102,7 +102,7 @@ root and the keys of a file).
     and the initramfs rebuilt first. Then `update-grub`.
 12. Writes `/etc/ump/install` (what was installed, when, on which disks,
     which profile and layout, the administrator, the interfaces with
-    their MAC addresses, the reserved provision type) and
+    their MAC addresses) and
     `/etc/ump/spec.json` (the specification), unmounts everything and
     reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
@@ -117,7 +117,7 @@ install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/
 
 The specification is JSON with the fields of a resolved profile (`os`,
 `hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
-`disks`, `users` with key lines, `userdata` with scripts, `firewall`, `provision`,
+`disks`, `users` with key lines, `userdata` with scripts, `firewall`,
 `network`);
 `ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`

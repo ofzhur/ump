@@ -88,9 +88,6 @@ userdata: [ubuntu]     # entries from userdata.yaml, run in the new system befor
 
 firewall: default      # a firewall from firewalls.yaml, or an inline one
 
-provision:
-  type: none           # reserved for ansible-pull (later)
-
 network:
   rename: true         # uniform interface names: ext01, ... and int01, ...
 ```
@@ -180,9 +177,6 @@ userdata: [ubuntu, web]       # optional; entries from userdata.yaml, or inline 
                               # as root in the new system before its first boot
 firewall: default             # a firewall name from firewalls.yaml, or an inline one;
                               # absent: no firewall
-provision:                    # optional; reserved for ansible-pull (later)
-  type: none                  # none | ansible-pull
-  repo: ...                   # kept with the type in /etc/ump/install
 network:                      # optional
   rename: true                # uniform interface names; false keeps the kernel's
 ```
@@ -205,11 +199,13 @@ network:                      # optional
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
-| `provision.type` | Reserved for `ansible-pull`, the server converging itself from the repository (later): `none` (the default) or `ansible-pull`, with keys of its own; `ansible-bootstrap` is accepted from older profiles and has no effect. The type and the keys are recorded in `/etc/ump/install` on the server (`provision=...`, `provision_repo=...`) and change nothing else: `ump server reinstall` provisions by push from the infrastructure repository, whatever the profile says, unless `--no-provision`. See [provisioning](provisioning.md). |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
 
 Unknown fields are an error, so a typo in a field name is caught by
-`ump config os edit`, not at installation.
+`ump config os edit`, not at installation. The `provision` section of
+older profiles is accepted and ignored: `ump server reinstall`
+provisions from the infrastructure repository, unless `--no-provision`
+([provisioning](provisioning.md)).
 
 ### Users
 
@@ -350,9 +346,7 @@ A profile is valid when:
 - a user has `sudo: true`, or `root` is listed;
 - package names look like Debian package names;
 - an inline firewall passes [its checks](firewalls.md#fields); a named
-  one exists in `firewalls.yaml`;
-- `provision.type` is `none` or `ansible-pull` (or `ansible-bootstrap`,
-  accepted from older profiles).
+  one exists in `firewalls.yaml`.
 
 ## Using a profile
 
@@ -415,8 +409,8 @@ stays on the installed system as `/etc/ump/spec.json` (mode 0600);
 `/etc/ump/install` records the essentials in `key=value` lines: the
 image and its version, when it was installed, the profile and layout, the
 disks, the boot disk, root, hostname, administrator, interfaces, whether
-IPv6 and the mitigations are on, the firewall policy and the reserved
-provision type. The message of the day shows the profile too.
+IPv6 and the mitigations are on, the firewall policy and the userdata.
+The message of the day shows the profile too.
 
 ## Example: a web server profile
 

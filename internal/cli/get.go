@@ -49,7 +49,10 @@ is reported on stderr and the others are still listed.
 OS and GROUPS are the system ump installed last and the groups it put
 the server in (from the state); -o wide adds the ID, the PROFILE and
 the disk LAYOUT of that installation, IPv6, product, kind and the
-attributes; -o json and -o yaml have every field.
+attributes; -o json and -o yaml have every field. -o ansible prints the
+Ansible inventory of the servers ump installed, in the JSON of an
+inventory script: the hosts, groups and variables their host files
+have (the inventory plugin ofzhur.ansible.ump runs it).
 
 Every listing is recorded in the cache, as a new snapshot only when
 something changed. A listing a provider confirmed less than the cache TTL
@@ -64,7 +67,7 @@ earlier time; --cached prints the last listing however old it is.`,
 			return a.getServers(cmd, args, opts)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.output, "output", "o", "", "output format: table, wide, json, yaml or name (default: the configured default, else table)")
+	cmd.Flags().StringVarP(&opts.output, "output", "o", "", "output format: table, wide, json, yaml, name, or ansible for the Ansible inventory (default: the configured default, else table)")
 	cmd.Flags().BoolVar(&opts.noHeaders, "no-headers", false, "omit the header line of table output")
 	cmd.Flags().BoolVar(&opts.diff, "diff", false, "show what changed since the previous listing: added, removed and changed servers")
 	cmd.Flags().StringVar(&opts.since, "since", "", "compare with the listing as of this time (7d, 12h, 2026-10-01, RFC 3339); implies --diff")
@@ -93,10 +96,17 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		opts.output = cfg.Defaults.Output
 	}
 	format, err := parseFormat(opts.output)
-	if err != nil {
-		return usageErrorf(cmd, "%v", err)
+	if strings.EqualFold(strings.TrimSpace(opts.output), string(formatAnsible)) {
+		format, err = formatAnsible, nil
 	}
-	if _, err := a.loadState(cmd.Context(), cfg); err != nil {
+	switch {
+	case err != nil:
+		return usageErrorf(cmd, "unknown output format %q (use one of %s, ansible)", opts.output, strings.Join(outputFormats, ", "))
+	case format == formatAnsible && opts.diff:
+		return usageErrorf(cmd, "-o ansible cannot be combined with --diff or --since")
+	}
+	doc, err := a.loadState(cmd.Context(), cfg)
+	if err != nil {
 		return err
 	}
 	if len(cfg.Accounts) == 0 {
@@ -117,7 +127,9 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 	if opts.cached {
 		var notes []string
 		results, notes = a.cachedListings(store, cfg, names)
-		if len(notes) > 0 {
+		// the inventory plugin takes whatever ump says on stderr as a
+		// warning: -o ansible keeps to what is wrong
+		if len(notes) > 0 && format != formatAnsible {
 			fmt.Fprintf(a.stderr, "From cache: %s\n", strings.Join(notes, ", "))
 		}
 		failCode = exitGeneric
@@ -162,12 +174,19 @@ func (a *app) getServers(cmd *cobra.Command, refs []string, opts getServersOptio
 		machines, notFound = selectMachines(machines, refs)
 	}
 
-	if len(machines) == 0 && (format == formatTable || format == formatWide) {
+	switch {
+	case format == formatAnsible:
+		if err := printEncoded(a.stdout, a.ansibleInventory(cfg, doc, machines), formatJSON); err != nil {
+			return err
+		}
+	case len(machines) == 0 && (format == formatTable || format == formatWide):
 		if len(refs) == 0 && len(failed) == 0 {
 			fmt.Fprintln(a.stderr, "No servers found.")
 		}
-	} else if err := printMachines(a.stdout, machines, format, opts.noHeaders); err != nil {
-		return err
+	default:
+		if err := printMachines(a.stdout, machines, format, opts.noHeaders); err != nil {
+			return err
+		}
 	}
 
 	for _, d := range duplicates {

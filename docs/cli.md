@@ -31,9 +31,10 @@ and `ump COMMAND --help` say the same at the terminal.
 ```
 ump
 ├── server (s, srv)
-│   ├── list (ls, l)  [ref...] [-o table|wide|json|yaml|name] [--no-headers] [--diff] [--since <t>] [--cached] [--refresh]
+│   ├── list (ls, l)  [ref...] [-o table|wide|json|yaml|name|ansible] [--no-headers] [--diff] [--since <t>] [--cached] [--refresh]
 │   │                                                  all servers of all accounts (--account to restrict);
-│   │                                                  what changed since the last listing; the cached listing
+│   │                                                  what changed since the last listing; the cached listing;
+│   │                                                  the Ansible inventory of the servers ump installed
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
 │   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 │   ├── provision    <ref> [--group <list>]...         put a server ump installed into the inventory, run its run list
@@ -119,7 +120,7 @@ ump
 
 ```
 ump server list [NAME|ID|IP|PROVIDER/ID ...] [--account <name>...]
-                [-o table|wide|json|yaml|name] [--no-headers]
+                [-o table|wide|json|yaml|name|ansible] [--no-headers]
 ```
 
 Lists dedicated servers and cloud instances from every configured account
@@ -167,6 +168,27 @@ prints `provider/id` per line. `defaults.output` in the configuration
 sets the default format. `price` comes from the provider's API where it
 tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
 from `ump server set --attr`; see [inventory](inventory.md).
+
+`-o ansible` prints the Ansible inventory of the servers ump installed
+(the state has their installation), in the JSON of an inventory
+script, for the inventory plugin `ofzhur.ansible.ump`: each server under
+the hostname of its installation, in `common` and its groups, with the
+variables of its host file (`ansible_host`, `ansible_user`, `ump_ref`,
+`ump_os`, ...; [provisioning](provisioning.md#ump-as-the-inventory)).
+`--account`, references and `--cached` select as for the other
+formats, and the exit code is the same. A server without an address or
+a valid hostname, or whose hostname a later installation took, is left
+out with a note on stderr; nothing else goes there unless something is
+wrong (the plugin warns with it).
+
+```json
+{
+  "_meta": {"hostvars": {"web-01": {"ansible_host": "203.0.113.10", "ansible_user": "ump", "ump_ref": "hetzner-robot/123456", "...": "..."}}},
+  "all": {"children": ["common", "web"]},
+  "common": {"hosts": ["web-01"]},
+  "web": {"hosts": ["web-01"]}
+}
+```
 
 All accounts are asked in parallel. On a terminal, the table is drawn
 while they answer: each account's servers appear as soon as it answered,
@@ -539,10 +561,11 @@ the infrastructure repository ump runs in: it needs `ansible.cfg` and
 `inventory/` in the current directory and `ansible-playbook` in `PATH`,
 and stops with exit status 2 before it touches anything when one is
 missing. The server is in the group `common` and the groups of `--group`
-(repeatable, or comma-separated; lower-case letters, digits and `_`),
-in order: its run list. Each group is a playbook, `playbooks/GROUP.yml`
-of the repository, else the collection's `ofzhur.ansible.GROUP`; they
-pass `ansible-playbook --syntax-check` first; a hostname that is a
+(repeatable, or comma-separated; lower-case letters, digits and `_`;
+not `all`, `ungrouped`, `localhost` or `_meta`), in order: its run
+list. Each group is a playbook, `playbooks/GROUP.yml` of the
+repository, else the collection's `ofzhur.ansible.GROUP`; they pass
+`ansible-playbook --syntax-check` first; a hostname that is a
 group of the run list or of the inventory, a group that is another host
 of the inventory (`ansible-inventory --list`), a host file of the
 hostname that ump did not write for this server (no `ump_ref`, or
@@ -550,11 +573,19 @@ another server's) and a world-writable repository stop the reinstall
 too. Once the new system answers, ump records it, writes
 `inventory/hosts/HOSTNAME.yml` and runs the run list for that host, as
 its administrator with UMP's key only (`IdentitiesOnly`); Ansible's
-output goes to stderr. A successful installation records the groups
-with the server, none without `--group` (the disks were wiped).
+output goes to stderr. Where a file of `inventory/` says `plugin:
+ofzhur.ansible.ump`, ump is the inventory: no host file is written,
+and one of the server in `inventory/hosts/` stops the reinstall up
+front, as does the hostname as another host of the inventory. A
+successful installation records the groups with the server, none
+without `--group` (the disks were wiped).
 `--no-provision` needs no layout and runs nothing; where the layout is
 there, the host file is still written once `ansible-inventory` has
-checked the names.
+checked the names. Where ump is the inventory, the server is in it from
+its record on, whatever the flags and wherever ump ran; when ump cannot
+record the installation, it prints the record to add to `state.yaml`
+by hand, and runs nothing there (exit status 6), since the inventory
+would have the old one.
 
 `--dry-run` makes the checks, brings the server into the rescue system,
 prints the installer's plan (machine, every partition, array and volume
@@ -563,9 +594,10 @@ leaves it there without touching a disk or the inventory; a layout whose
 targets match no disk, or a raid level with too few members, stops there
 too. `--no-reboot` installs, records the installation and leaves the
 server in the rescue system, not provisioned: `ump server provision
-REF` after the reboot. `-o json` prints the result (the profile and
-layout, the way in, the hostname, what answered after the reboot,
-`groups` as in the inventory, `run_list`, `playbooks`, `provisioned`).
+REF` after the reboot (when ump is the inventory, the server is in it
+already). `-o json` prints the result (the profile and layout, the way
+in, the hostname, what answered after the reboot, `groups` as in the
+inventory, `run_list`, `playbooks`, `provisioned`).
 
 Exit status 1 means the installer failed (its output says where; the
 server stays in the rescue system, `ump ssh REF --staging` gets there),
@@ -589,15 +621,15 @@ repository's root, like `reinstall`. `--group` adds groups to those the
 server has (repeatable, or comma-separated), in order; without it, the
 run list the server has runs again. The same checks as `reinstall`
 come first; then the groups are recorded, `inventory/hosts/HOSTNAME.yml`
-is written and the run list runs, under the server's lock. Groups are
-best given at the installation, so that each starts on a fresh system;
-adding one in place suits groups built for it, such as monitoring. A
-group is removed only by a reinstall. A server ump did not install is
-refused with exit status 2 (there is nothing to put into the
-inventory); exit status 6 means the run list did not complete. The
-groups show, `common` first, in `ump server show`, the `GROUPS` column
-of `ump server list` and `groups` in `-o json`. See
-[provisioning](provisioning.md).
+is written (not when ump is the inventory) and the run list runs, under
+the server's lock. Groups are best given at the installation, so that
+each starts on a fresh system; adding one in place suits groups built
+for it, such as monitoring. A group is removed only by a reinstall. A
+server ump did not install is refused with exit status 2 (there is
+nothing to put into the inventory); exit status 6 means the run list
+did not complete. The groups show, `common` first, in `ump server
+show`, the `GROUPS` column of `ump server list` and `groups` in `-o
+json`. See [provisioning](provisioning.md).
 
 ## `ump server set`, `add` and `remove`
 

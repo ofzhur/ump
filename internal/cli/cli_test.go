@@ -283,6 +283,7 @@ type testEnv struct {
 	// the reboots asked over SSH; booted: the installed system answers
 	// (bootFails: nothing with UMP's key answers after the reboot)
 	installs        []string
+	installHook     func()
 	installExit     int
 	installNoScript bool
 	reboots         int
@@ -303,6 +304,9 @@ type testEnv struct {
 	inventory     string
 	inventoryExit int
 	noAnsible     bool
+	// realAnsible runs ansible-playbook and ansible-inventory from PATH,
+	// the way ump does, instead of playing them
+	realAnsible bool
 }
 
 // ansibleCall is one run of an Ansible program: where, which, with what,
@@ -459,6 +463,9 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	}
 	e.kexeced, e.versionPolls = false, 0
 	e.installed, e.booted, e.reboots = false, false, 0
+	if e.realAnsible {
+		a.ansible = nil
+	}
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
@@ -531,6 +538,9 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 			return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n==> dry run: stopping here, no disk was touched\n", "", 0
 		}
 		e.installed = true
+		if e.installHook != nil {
+			e.installHook()
+		}
 		return "==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM\n==> installed: ubuntu-26.04 2026.10.12 (kernel 7.0.0-39-generic) as web-01 on vg0/root (17000 MB over 1 disk(s)); reboot to start it\n", "", 0
 	case cmd == "systemctl reboot":
 		e.reboots++
@@ -2384,7 +2394,7 @@ func TestInstallServer(t *testing.T) {
 	if fw := spec["firewall"].(map[string]any); fw["policy"] != "drop" || len(fw["allow"].([]any)) != 2 {
 		t.Errorf("spec firewall: %v", fw)
 	}
-	if ud := spec["userdata"].([]any); spec["provision"].(map[string]any)["type"] != "none" || len(ud) != 1 || ud[0].(map[string]any)["name"] != "ubuntu" || ud[0].(map[string]any)["type"] != "bash" || !strings.Contains(ud[0].(map[string]any)["script"].(string), "set -euo pipefail") {
+	if ud := spec["userdata"].([]any); spec["provision"] != nil || len(ud) != 1 || ud[0].(map[string]any)["name"] != "ubuntu" || ud[0].(map[string]any)["type"] != "bash" || !strings.Contains(ud[0].(map[string]any)["script"].(string), "set -euo pipefail") {
 		t.Errorf("spec provision/userdata: %v %v", spec["provision"], spec["userdata"])
 	}
 	// root's keys of the new system are put into the rescue system first
@@ -2519,7 +2529,8 @@ func TestInstallProfiles(t *testing.T) {
 	e.directRoot = true
 
 	// a profile file of its own: users with sudo and agent keys, inline
-	// userdata, an inline layout, a firewall, a provision step
+	// userdata, an inline layout, a firewall, the provision section of an
+	// older profile (ignored)
 	dir := t.TempDir()
 	prof := filepath.Join(dir, "db.yaml")
 	os.WriteFile(prof, []byte(`os: ubuntu-26.04
@@ -2566,8 +2577,8 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	if fw := spec["firewall"].(map[string]any); len(fw["allow"].([]any)) != 4 || fw["allow"].([]any)[3].(map[string]any)["from"] != "10.0.0.0/8" {
 		t.Errorf("firewall: %v", fw)
 	}
-	if pv := spec["provision"].(map[string]any); pv["type"] != "ansible-pull" || pv["options"].(map[string]any)["repo"] != "https://git.example.net/infra.git" {
-		t.Errorf("provision: %v", pv)
+	if spec["provision"] != nil {
+		t.Errorf("provision: %v", spec["provision"])
 	}
 	if !strings.Contains(out, `"profile": "db"`) || !strings.Contains(out, `"layout": "inline"`) {
 		t.Errorf("json result:\n%s", out)
@@ -3309,7 +3320,7 @@ func TestProfileWizard(t *testing.T) {
 	// image 2 (24.04), the default layout, the web firewall, admin ump with
 	// bash and UMP's key alone, mitigations off, IPv6 on, UTC, the
 	// userdata ubuntu (an unknown name first, refused), renamed
-	// interfaces, no provision step, a description, no editor
+	// interfaces, a description, no editor
 	script := "2\n\nweb\nump, ops\ny\n\nump\nOps people\n\ny\n\nnope\nubuntu\n\nWeb servers\n\n"
 	out, errOut, code := e.run(script, true, "config", "os", "create", "web")
 	if code != 0 {
@@ -3330,10 +3341,13 @@ func TestProfileWizard(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{"# Profile web, made by ump config os create on 2026-10-12", "name: web\n", "description: Web servers\n", "os: ubuntu-24.04\n", "timezone: UTC\n",
 		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - ump\n  - ops\n",
-		"userdata:\n  - ubuntu\n", "firewall: web\n", "provision:\n  type: none\n", "network:\n  rename: true\n"} {
+		"userdata:\n  - ubuntu\n", "firewall: web\n", "network:\n  rename: true\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("profile lacks %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "provision") {
+		t.Errorf("profile with a provision section:\n%s", text)
 	}
 	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump,ops web yours Web servers") {
 		t.Errorf("list: code %d\n%s", code, out)

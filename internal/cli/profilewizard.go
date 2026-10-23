@@ -229,9 +229,6 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 		return err
 	}
 	p.Network.Rename = &rename
-	// provisioning is by push from the infrastructure repository; the
-	// section is kept for ansible-pull
-	p.Provision = profile.Provision{Type: "none"}
 	if p.Description, err = ui.Line("Description (one line)", ""); err != nil {
 		return err
 	}

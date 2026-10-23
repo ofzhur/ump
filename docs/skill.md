@@ -144,6 +144,7 @@ terraform output -json ──▶ ump machine import --from terraform    names, l
                                                                    machines Terraform created
 ump server reinstall … --group <role> ──▶ inventory/hosts/<host>.yml  the host in common and its groups,
                                                                    with address, administrator, facts
+                                         (or ump server list -o ansible, the same, through inventory/ump.yml)
                                      ──▶ ansible-playbook <run list> --limit <host>
                                          (common and its groups, a playbook each)
 ```
@@ -214,7 +215,7 @@ infra/
 │   ├── groups.yml                the group tree: env above role
 │   ├── group_vars/               by env, role, provider, location
 │   ├── host_vars/                rare; most per-host facts come from the host files
-│   └── hosts/                    written by ump: one file per machine
+│   └── hosts/                    written by ump: one file per machine (or ump.yml: ump is the inventory)
 ├── playbooks/
 │   └── <role>.yml                one per group, the run list's steps; common from ofzhur.ansible
 ├── roles/                        one role per concern; no logic in playbooks
@@ -437,7 +438,8 @@ Consequences for the CLI:
 - `ump inventory export --format json|hosts --group-by
   env,role,provider,location,profile`, for what is not in the Ansible
   inventory; the machines ump installed are there already, one host file
-  each (`ump server reinstall --group`, `ump server provision`)
+  each (`ump server reinstall --group`, `ump server provision`) or
+  through `ump server list -o ansible`
 - `ump inventory check` and `ump repo audit` (Markdown and JSON): the
   deterministic halves of the drift check and the adoption audit
 - `ump repo init`: the reference repository skeleton and templates, from

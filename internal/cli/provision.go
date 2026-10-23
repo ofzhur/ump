@@ -21,6 +21,17 @@ import (
 // case.
 var groupName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
+// ansibleOwnName says that a name is Ansible's own: its groups all and
+// ungrouped, localhost, and _meta, the host variables in the JSON of an
+// inventory script.
+func ansibleOwnName(name string) bool {
+	switch name {
+	case "all", "ungrouped", "localhost", "_meta":
+		return true
+	}
+	return false
+}
+
 // groupFlags is --group, repeatable, each a comma-separated list.
 type groupFlags []string
 
@@ -38,8 +49,8 @@ func (f groupFlags) list(cmd *cobra.Command) ([]string, error) {
 			switch {
 			case g == "" || g == commonGroup || slices.Contains(out, g):
 				continue
-			case g == "all" || g == "ungrouped" || g == "localhost":
-				return nil, usageErrorf(cmd, "group %q: all, ungrouped and localhost are Ansible's own names", g)
+			case ansibleOwnName(g):
+				return nil, usageErrorf(cmd, "group %q: all, ungrouped, localhost and _meta are Ansible's own names", g)
 			case !groupName.MatchString(g):
 				return nil, usageErrorf(cmd, "group %q: a group name is lower-case letters, digits and '_', not starting with a digit", g)
 			}
@@ -69,7 +80,9 @@ ansible-playbook --syntax-check and the inventory with ansible-inventory
 inventory/hosts/HOSTNAME.yml, and runs ansible-playbook with the run
 list for that host alone, logging in as the server's administrator with
 UMP's key only. Without --group, it runs the run list the server has: a
-converge.
+converge. Where a file of inventory/ says plugin: ofzhur.ansible.ump,
+ump is the inventory: no host file is written, and one in
+inventory/hosts/ for the server stops it.
 
 Groups are best given at the installation, so that each starts on a
 fresh system; a group is removed only by a reinstall. Adding a group in
@@ -127,11 +140,9 @@ func (a *app) provisionServer(cmd *cobra.Command, ref string, gf groupFlags) err
 		return fmt.Errorf("%s has no public address", m.Ref())
 	}
 	rec := *st.Installed
-	hostname := rec.Hostname
+	hostname := inventoryHostname(m, rec)
 	if hostname == "" {
-		if hostname = rescueHostname(m.Name); hostname == "" {
-			return fmt.Errorf("the installation record of %s has no hostname, and its name %q is not a valid one; ump server reinstall %s --hostname NAME", m.Ref(), m.Name, ref)
-		}
+		return fmt.Errorf("the installation record of %s has no hostname, and its name %q is not a valid one; ump server reinstall %s --hostname NAME", m.Ref(), m.Name, ref)
 	}
 	groups := slices.Clone(st.Groups)
 	for _, g := range add {
@@ -172,11 +183,7 @@ func (a *app) provisionServer(cmd *cobra.Command, ref string, gf groupFlags) err
 			return err
 		}
 	}
-	admin := rec.Admin
-	if admin == "" {
-		admin = a.profileAdmin(cfg, rec.Profile)
-	}
-	if err := a.provisionHost(ctx, repo, rl, hostname, hostVarsFor(m, rec, admin), keyPath); err != nil {
+	if err := a.provisionHost(ctx, repo, rl, hostname, a.inventoryVars(cfg, m, rec), keyPath); err != nil {
 		return a.provisionFailed(ctx, err, fmt.Sprintf("the run list of %s did not complete", hostname), "run ump server provision "+ref+" again")
 	}
 	fmt.Fprintf(a.stdout, "%s: provisioned, run list %s.\n", describeRef(m), strings.Join(rl.groups, ", "))

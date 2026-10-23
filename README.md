@@ -19,11 +19,12 @@ every machine, whatever it is and wherever it runs, ready for Ansible or
 whatever configures it from there.
 
 The same listing is the **inventory** of that fleet: one table over all
-providers, in JSON for whatever consumes it, with what changed since the
-last look, with the servers' prices (from the API where it tells, set by
-hand where it does not) and facts of your own, and with servers no
-provider lists added by hand. A provisioner that already knows every
-machine needs no second tool to count them. See [inventory](docs/inventory.md).
+providers, in JSON for whatever consumes it (Ansible as its inventory
+among them), with what changed since the last look, with the servers'
+prices (from the API where it tells, set by hand where it does not) and
+facts of your own, and with servers no provider lists added by hand. A
+provisioner that already knows every machine needs no second tool to
+count them. See [inventory](docs/inventory.md).
 Everything ump keeps, the accounts and secrets, the profiles, its key,
 the state of the servers and the listing cache, is one directory, its
 [home](docs/state.md): yours alone in `~/.config/ump`, or behind a
@@ -90,8 +91,13 @@ into its Ansible inventory, in the group `common` and the groups of
 `--group`, and runs the playbooks of those groups for it, from the
 repository or from the collection
 [ofzhur.ansible](https://github.com/ofzhur/ansible) (users and keys
-first). `ump server provision` adds groups later or runs them again;
-`--no-provision` installs only ([provisioning](docs/provisioning.md)).
+first). The inventory is a host file per server, or ump itself (`ump
+server list -o ansible`, read by the plugin `ofzhur.ansible.ump`).
+`ump server provision` adds groups later or runs them again;
+`--no-provision` installs only. With the facts in a central storage
+(the fact cache `ofzhur.ansible.facts`: S3, R2, Consul, Vault, SSH),
+servers can also pull the repository themselves
+([provisioning](docs/provisioning.md)).
 
 ## The objects
 
@@ -156,7 +162,7 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Quickstart](docs/quickstart.md) | install ump, decide where it keeps its things, add an account, look at the defaults, dry-run and reinstall a server, log in |
 | [Concepts](docs/concepts.md) | the vocabulary and how the pieces fit, briefly |
-| [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, what changed, prices, attributes, servers added by hand |
+| [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, the Ansible inventory, what changed, prices, attributes, servers added by hand |
 | [The state backend](docs/state.md) | where ump keeps everything: the local directory, or a backend shared by a team (a directory, SSH, S3, R2, HTTP, Consul, Vault), the setup wizard and migration, the mirror, locks per server |
 
 **Objects**
@@ -188,7 +194,7 @@ own](images/rescue/README.md#your-own-storage).
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Provisioning](docs/provisioning.md) | after the installation: groups and run lists (`--group`, `ump server provision`), the infrastructure repository and its host files, Ansible by push with the collection ofzhur.ansible; pull and a control plane later |
+| [Provisioning](docs/provisioning.md) | after the installation: groups and run lists (`--group`, `ump server provision`), the infrastructure repository, the inventory (host files, or ump itself), Ansible with the collection ofzhur.ansible, facts in a central storage and servers that pull |
 | [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
@@ -220,8 +226,8 @@ own](images/rescue/README.md#your-own-storage).
 ## Non-goals
 
 - Being a configuration management tool. UMP stops at "reachable,
-  consistent base system" and hands off to Ansible: it writes the
-  inventory entry and runs the playbooks, Ansible does the rest.
+  consistent base system" and hands off to Ansible: it puts the server
+  into the inventory and runs the playbooks, Ansible does the rest.
 - Lifecycle orchestration of fleets (autoscaling, scheduling,
   reconciliation loops). UMP is an operator's tool, not a control plane.
 - Ordering, billing or contract management at providers.

@@ -156,7 +156,7 @@ Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/prof
 ==> network: ext01 (96:00:01:ab:cd:ef) 198.51.100.22/32,172.31.1.1; IPv6 off; DNS 1.1.1.1 8.8.8.8; hostname web-01; time zone UTC
 ==> interfaces: ext01 (ext, 96:00:01:ab:cd:ef, now eth0)
 ==> users: ump (2 key(s), sudo)
-==> userdata: ubuntu; firewall: drop, allow icmp, tcp/22; provision: none
+==> userdata: ubuntu; firewall: drop, allow icmp, tcp/22
 ==> dry run: stopping here, no disk was touched
 Dry run done; web-01 stays in the UMP rescue system (ump ssh web-01 --staging).
 ```
@@ -247,8 +247,11 @@ $ ump server provision web-01 --group monitoring    # add a group to an installe
 Groups are best given at the installation, so that each starts on a
 fresh system; adding one in place suits groups built for it. Commit
 `inventory/hosts/` with the rest: Ansible runs from the repository
-without ump. See [provisioning](provisioning.md) for the layout, the
-host files, the run lists, and facts and secrets.
+without ump. Or let ump be the inventory, with no files to commit:
+`inventory/ump.yml` with `plugin: ofzhur.ansible.ump`, which lists the
+servers with `ump server list -o ansible`. See
+[provisioning](provisioning.md) for the layout, the inventory, the run
+lists, and facts and secrets.
 
 ## Next
 
