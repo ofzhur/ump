@@ -98,7 +98,7 @@ func (a *app) pushHome(ctx context.Context) {
 	}
 	for _, c := range changes {
 		if c.Kind == "conflict" {
-			fmt.Fprintf(a.stderr, "ump: %s changed in %s meanwhile; your copy is kept in the mirror, ump config state pull shows theirs, push --force takes yours\n", c.Path, a.home.Backend)
+			fmt.Fprintf(a.stderr, "ump: %s changed in %s meanwhile; your copy is kept in the mirror: ump config state pull --force takes theirs, push --force takes yours\n", c.Path, a.home.Backend)
 		}
 	}
 }
@@ -517,15 +517,20 @@ until it says the new URL.`,
 }
 
 func (a *app) newStatePullCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "pull",
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "pull [--force]",
 		Short: "Bring the mirror up to date with the backend",
-		Args:  usageArgs(cobra.NoArgs),
+		Long: `Download every file whose version changed in the backend since the
+last pull. A file that changed in the mirror too is left as it is, for
+push to name as a conflict, unless --force, which takes the backend's
+copy over the mirror's.`,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.home.Backend == nil {
 				return errors.New("no backend configured; the state is in the local directory")
 			}
-			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
+			m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now, Theirs: force}
 			pulled, removed, err := m.Pull(cmd.Context())
 			if err != nil {
 				return err
@@ -534,6 +539,8 @@ func (a *app) newStatePullCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "take the backend's copy of a file that changed on both sides")
+	return cmd
 }
 
 func (a *app) newStatePushCmd() *cobra.Command {
@@ -560,23 +567,16 @@ mirror's copy over the backend's.`,
 				if c.Kind == "conflict" {
 					conflicts++
 					if force {
-						data, _ := os.ReadFile(a.home.Dir + "/" + c.Path)
-						_, cur, _ := a.home.Backend.Read(cmd.Context(), c.Path)
-						if _, err := a.home.Backend.Write(cmd.Context(), c.Path, data, cur); err != nil {
-							return fmt.Errorf("%s: %w", c.Path, err)
+						if err := m.Force(cmd.Context(), c.Path); err != nil {
+							return err
 						}
 						fmt.Fprintf(a.stdout, "%s: forced\n", c.Path)
 						continue
 					}
-					fmt.Fprintf(a.stdout, "%s: conflict, changed in %s too (pull shows theirs; push --force takes yours)\n", c.Path, a.home.Backend)
+					fmt.Fprintf(a.stdout, "%s: conflict, changed in %s too (pull --force takes theirs; push --force takes yours)\n", c.Path, a.home.Backend)
 					continue
 				}
 				fmt.Fprintf(a.stdout, "%s: %s\n", c.Path, c.Kind)
-			}
-			if force && conflicts > 0 {
-				if _, _, err := m.Pull(cmd.Context()); err != nil {
-					return err
-				}
 			}
 			if len(changes) == 0 {
 				fmt.Fprintf(a.stdout, "Nothing to push; %s is up to date.\n", a.home.Backend)

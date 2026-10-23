@@ -126,11 +126,18 @@ Before a command, ump lists the backend and downloads the files whose
 version changed; a file changed in the mirror meanwhile is left as it
 is. After the command, every file that changed in the mirror is written
 back over the version it was pulled at; a file that changed on both
-sides is a **conflict**: ump names it, keeps both copies, and `ump
-config state push --force` writes the mirror's copy over the backend's
-when that is what you want. When the backend does not answer, the
-command runs on the mirror as it is and says so; nothing is pushed
-until the backend is back.
+sides is a **conflict**: ump names it and keeps both copies. `ump
+config state pull --force` takes the backend's copy, `ump config state
+push --force` writes the mirror's copy over the backend's; with
+`state.yaml`, which commands write to the backend directly, the
+backend's copy is the one to keep unless you edited the mirror's by
+hand. When the backend does not answer, the command runs on the mirror
+as it is and says so; nothing is pushed until the backend is back.
+
+Several ump processes on one machine, such as reinstalls of different
+servers side by side, share the mirror: a lock file in it
+(`.mirror.lock`) lets one pull or push at a time go ahead, and the
+others wait for it.
 
 ump goes to the backend only when it has to, so that it never makes
 you wait for nothing:
