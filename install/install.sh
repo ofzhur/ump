@@ -21,7 +21,9 @@
 #
 #   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
 #                    kernel, layout, disks, users, userdata, firewall, network
-#                    (rename: false keeps the kernel's interface names)
+#                    (rename: false keeps the kernel's interface names;
+#                    private: the server's address in its private network,
+#                    recorded in /etc/ump/install, configured nowhere yet)
 #   without --spec   the lvm-linear layout with root alone; the flags are:
 #   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
 #                    manifest.json and rootfs.tar.zst (or UMP_STORAGE)
@@ -132,6 +134,7 @@ layout_name="$(s .layout.name)"; [ -n "$layout_name" ] || layout_name="inline"
 jq -e '.layout.parts | length > 0' >/dev/null <<< "$spec" || die "the layout has no parts"
 jq -e '.users | length > 0' >/dev/null <<< "$spec" || die "the specification names no users"
 profile_name="$(s .profile.name)"
+private_network="$(s .network.private.network)"; private_address="$(s .network.private.address)"; private_cidr="$(s .network.private.cidr)"
 image_url="$storage/os/$os/$arch"
 efi=0; [ -d /sys/firmware/efi ] && efi=1
 
@@ -401,6 +404,9 @@ for i in "${!IF_MAC[@]}"; do
 	ifs="${ifs:+$ifs, }${IF_NAME[$i]} (${IF_KIND[$i]}, ${IF_MAC[$i]}$was)"
 done
 log "interfaces: $ifs$([ "$rename" = yes ] || printf '; kernel names kept')"
+if [ -n "$private_address" ]; then
+	log "private network: $private_network, address $private_address (of $private_cidr; recorded, no interface configured)"
+fi
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
 log "userdata: $(jq -r '.userdata | if length == 0 then "none" else map(.name) | join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec")"
 log "kernel command line: $kernel_cmdline"
@@ -1418,6 +1424,8 @@ ipv6=$([ "$ipv6" = true ] && echo on || echo off)
 mitigations=$([ "$mitigations" = true ] && echo on || echo off)
 firewall=$(jq -r '.firewall.policy' <<< "$spec")
 userdata=$(jq -r '.userdata | map(.name) | join(",")' <<< "$spec")
+private_network=$private_network
+private_address=$private_address
 META
 chmod 644 "$TARGET/etc/ump/install"
 

@@ -64,27 +64,33 @@ profiles, the OS images, plus `get.sh` and the ump binaries. The default
 is `https://ump.zhurko.de/dl`; any web server or object store with plain
 `GET` does. See [configuration](configuration.md#storage).
 
-## Profiles, layouts, firewalls, users, userdata and keys
+## Profiles, layouts, firewalls, networks, users, userdata and keys
 
 A **profile** says what a server becomes: the OS image, the disk layout,
 the users, the userdata that runs in the new system, the firewall, the kernel command line, the
 step after the first boot. A **disk layout** is a list of parts
 (partitions, md arrays, logical volumes) applied to whatever disks a
 server has; a **firewall** is an input policy and the allowed ports; a
+**private network** is an IPv4 network in which every server ump
+installs gets an address of its own, kept across reinstalls and never
+another server's, for the roles that connect the servers; a
 **user** is an account with sudo, groups, a shell and key references; a
 **userdata** entry is a script that runs in the new system before its
 first boot (a declarative configuration later, for the systems that
 take one).
 Layouts, firewalls and users are named entries in `layouts.yaml`,
 `firewalls.yaml` and `users.yaml`, referred to from profiles by name, or
-written inline in one. All of it is YAML in `~/.config/ump/profiles/`;
+written inline in one; networks are named entries in `networks.yaml`,
+referred to by name. All of it is YAML in `~/.config/ump/profiles/`;
 the published entries are templates that `ump config os update`
-replaces, what you create under names of your own is kept, and every
-file is checked when edited. **Keys** are the public keys a user's
-references resolve to: UMP's own, your `~/.ssh` files, the agent, or
-keys kept under names in `~/.config/ump/keys.yaml`. See
+replaces (a published network it only adds where it is missing), what
+you create under names of your own is kept, and every file is checked
+when edited. **Keys** are the public keys a user's references resolve
+to: UMP's own, your `~/.ssh` files, the agent, or keys kept under names
+in `~/.config/ump/keys.yaml`. See
 [profiles](profiles.md), [disk layouts](disk-layouts.md),
-[firewalls](firewalls.md), [users](users.md), [keys](keys.md).
+[firewalls](firewalls.md), [private networks](networks.md),
+[users](users.md), [keys](keys.md).
 
 ## The image and the installer
 

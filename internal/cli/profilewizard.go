@@ -229,6 +229,12 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 		return err
 	}
 	p.Network.Rename = &rename
+	// the private network every published profile names, where it is
+	if networks, err := a.loadNetworks(ctx, storage); err != nil {
+		ui.Printf("Warning: no private network for the profile (%v); network.private is left out, ump config os edit %s adds it.\n", err, name)
+	} else if networks["default"] != nil {
+		p.Network.Private = "default"
+	}
 	if p.Description, err = ui.Line("Description (one line)", ""); err != nil {
 		return err
 	}

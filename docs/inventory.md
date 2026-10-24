@@ -9,7 +9,7 @@ are added by hand, so the inventory is complete.
 
 ```console
 $ ump server list                         # every server of every account
-$ ump server list -o wide                 # with the ID, profile, layout, IPv6, product, kind and attributes
+$ ump server list -o wide                 # with the ID, profile, layout, IPv6, private address, product, kind and attributes
 $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
 $ ump server list --refresh               # ask the providers, not the cache
@@ -29,10 +29,11 @@ and the price. The groups are as in the inventory: `common` first, then
 those of `--group` ([provisioning](provisioning.md)); a server ump did
 not install has none. `-o wide` adds the provider's ID, the profile and
 the disk layout of the last installation (`inline` when the profile
-carried its own layout) after the groups, the IPv6 address, product,
+carried its own layout) after the groups, the IPv6 address, the
+address in its [private network](networks.md) (`PRIVATE`), product,
 kind and the attributes; `-o json` and `-o yaml` print every field,
-`os`, `installed_at`, `groups`, `profile` and `layout` among them, and
-the provider's labels; `-o name` prints `provider/id` per line, `-o
+`os`, `installed_at`, `groups`, `profile`, `layout`, `private_network`
+and `private_address` among them, and the provider's labels; `-o name` prints `provider/id` per line, `-o
 ansible` the Ansible inventory of the servers ump installed
 ([below](#what-ump-installed)). `--account NAME` restricts the
 listing, and references after the command select servers (`ump server
@@ -117,14 +118,26 @@ not touched).
 
 After `ump server reinstall`, the state records what the server got
 (OS and image version, kernel, profile, layout, hostname, administrator,
-the interface names with their MAC addresses, when, its groups), and
-`ump server show` prints it under `UMP:`. Run from your infrastructure
-repository, ump also writes the server into its Ansible inventory, one
-file per server in `inventory/hosts/` (or in a storage) with its
-groups, address, administrator (`ump_admin`) and these facts
-(`ump_os`, `ump_profile`, `ump_attributes`, ...), and `ump provision`
-writes them all again before every run: see
-[provisioning](provisioning.md#host-files).
+the interface names with their MAC addresses, when, its groups, its
+address in its [private network](networks.md)), and `ump server show`
+prints it under `UMP:`. Run from your infrastructure repository, ump
+also writes the server into its Ansible inventory, one file per server
+in `inventory/hosts/` (or in a storage) with its groups, address,
+administrator (`ump_admin`) and these facts (`ump_os`, `ump_profile`,
+`ump_attributes`, ...), and `ump provision` writes them all again
+before every run: see [provisioning](provisioning.md#host-files).
+
+| Variable | Value |
+|---|---|
+| `ump_private_address` | the server's address in its private network (`10.0.0.1`) |
+| `ump_private_network` | the network's name (`default`) |
+| `ump_private_cidr` | the network (`10.0.0.0/24`) |
+
+The three are absent for a server without a private address (its
+profile says `none`, or `--private-network none`); `ump server set
+--private-ip` and `--private-network` change them, and the next `ump
+provision` writes them. They are what the roles that connect the servers
+read ([mesh roles](networks.md#mesh-roles)).
 
 The same inventory comes from the listing: `ump server list -o ansible`
 prints the servers ump installed with the hosts, groups and variables

@@ -20,7 +20,7 @@ import (
 // files next to them hold the published entries and the user's own.
 var publishedProfiles = []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux", "cachyos"}
 
-var namedFiles = []*namedSet{layoutSet, firewallSet, userSet, userdataSet}
+var namedFiles = []*namedSet{layoutSet, firewallSet, networkSet, userSet, userdataSet}
 
 // profileFiles are the files the first run downloads.
 var profileFiles = func() []string {
@@ -44,9 +44,10 @@ func isPublishedProfile(name string) bool {
 }
 
 // ensureProfiles makes sure the profiles directory exists with the
-// published profiles, layouts, firewalls and users in it: the first run
-// downloads them from the storage, so that there is always something to
-// show and start from. An existing directory is left as it is.
+// published profiles, layouts, firewalls, networks, users and userdata
+// in it: the first run downloads them from the storage, so that there is
+// always something to show and start from. An existing directory is left
+// as it is.
 func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 	dir := config.ProfilesDir()
 	if _, err := os.Stat(dir); err == nil {
@@ -65,7 +66,7 @@ func (a *app) ensureProfiles(ctx context.Context, storage string) error {
 			return err
 		}
 	}
-	fmt.Fprintf(a.stderr, "Downloaded the published profiles, layouts, firewalls and users into %s (ump config os); make your own from them.\n", config.AbbreviateHome(dir))
+	fmt.Fprintf(a.stderr, "Downloaded the published profiles, layouts, firewalls, networks, users and userdata into %s (ump config os); make your own from them.\n", config.AbbreviateHome(dir))
 	return nil
 }
 
@@ -73,14 +74,17 @@ func (a *app) newOSUpdateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "update",
 		Aliases: verbAliases("update"),
-		Short:   "Refresh the published profiles, layouts, firewalls and users from the storage",
+		Short:   "Refresh the published profiles, layouts, firewalls, networks, users and userdata from the storage",
 		Long: `Fetch the published files again. The published profiles (` + strings.Join(publishedProfiles, ", ") + `)
 are replaced, which is why they are not for editing: make your own
 from them (ump config os create NAME --from ` + publishedProfiles[0] + `) and those
-are never touched. In layouts.yaml, firewalls.yaml and users.yaml the
-published entries are replaced and the entries you added are kept
-(an entry of yours with a published name is replaced too, so give
-yours their own names).`,
+are never touched. In layouts.yaml, firewalls.yaml, users.yaml and
+userdata.yaml the published entries are replaced and the entries you
+added are kept (an entry of yours with a published name is replaced
+too, so give yours their own names). networks.yaml gets the published
+networks it lacks and keeps the rest, also a published one you changed:
+the servers' addresses were given in it; one that would overlap yours
+is left out. Each file's line says what was kept.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
@@ -108,15 +112,11 @@ yours their own names).`,
 				if err != nil {
 					return fmt.Errorf("the published %s could not be fetched: %w", set.file, err)
 				}
-				kept, err := set.merge(data)
+				said, err := set.merge(data)
 				if err != nil {
 					return err
 				}
-				if len(kept) > 0 {
-					fmt.Fprintf(a.stdout, "%s: updated; your %s kept: %s\n", set.file, set.plurals(), strings.Join(kept, ", "))
-				} else {
-					fmt.Fprintf(a.stdout, "%s: updated\n", set.file)
-				}
+				fmt.Fprintf(a.stdout, "%s: %s\n", set.file, said)
 			}
 			return nil
 		},
@@ -194,8 +194,8 @@ func profilePath(name string) string {
 
 // localProfiles lists the profiles in the directory, by name.
 // isNamedFile reports whether a file of the profiles directory is one of
-// the named sets (layouts.yaml, firewalls.yaml, users.yaml, userdata.yaml,
-// ...) rather than a profile.
+// the named sets (layouts.yaml, firewalls.yaml, networks.yaml, users.yaml,
+// userdata.yaml) rather than a profile.
 func isNamedFile(file string) bool {
 	for _, set := range namedFiles {
 		if set.file == file {
@@ -253,6 +253,7 @@ type profileRow struct {
 	Disks       string   `json:"disks,omitempty" yaml:"disks,omitempty"`
 	Users       []string `json:"users,omitempty" yaml:"users,omitempty"`
 	Firewall    string   `json:"firewall,omitempty" yaml:"firewall,omitempty"`
+	Private     string   `json:"private,omitempty" yaml:"private,omitempty"`
 	From        string   `json:"from" yaml:"from"`
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Invalid     string   `json:"invalid,omitempty" yaml:"invalid,omitempty"`
@@ -266,9 +267,9 @@ func (a *app) newOSListCmd() *cobra.Command {
 		Aliases: verbAliases("list"),
 		Short:   "List the profiles",
 		Long: `List the profiles of the profiles directory: the default is marked, and
-each shows its image, disk layout, users, firewall, whether it is a
-published one or yours, and its description. -o wide is the same table;
--o json and -o yaml print the rows as data.`,
+each shows its image, disk layout, users, firewall, private network,
+whether it is a published one or yours, and its description. -o wide is
+the same table; -o json and -o yaml print the rows as data.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
@@ -297,7 +298,7 @@ published one or yours, and its description. -o wide is the same table;
 				}
 				p, err := profile.Load(profilePath(n))
 				if err != nil {
-					rows = append(rows, []string{mark, n, "-", "-", "-", "-", kind, "invalid: " + err.Error()})
+					rows = append(rows, []string{mark, n, "-", "-", "-", "-", "-", kind, "invalid: " + err.Error()})
 					data = append(data, profileRow{Name: n, Default: n == def, From: kind, Invalid: err.Error()})
 					continue
 				}
@@ -320,13 +321,17 @@ published one or yours, and its description. -o wide is the same table;
 				case fw == "":
 					fw = "none"
 				}
-				rows = append(rows, []string{mark, n, p.OS, disks, strings.Join(users, ","), fw, kind, p.Description})
-				data = append(data, profileRow{Name: n, Default: n == def, OS: p.OS, Disks: disks, Users: users, Firewall: fw, From: kind, Description: p.Description})
+				private := p.PrivateNetworkName()
+				if private == "" {
+					private = "none"
+				}
+				rows = append(rows, []string{mark, n, p.OS, disks, strings.Join(users, ","), fw, private, kind, p.Description})
+				data = append(data, profileRow{Name: n, Default: n == def, OS: p.OS, Disks: disks, Users: users, Firewall: fw, Private: private, From: kind, Description: p.Description})
 			}
 			if format == formatJSON || format == formatYAML {
 				return printEncoded(a.stdout, data, format)
 			}
-			if err := writeTable(a.stdout, []string{"", "NAME", "OS", "DISKS", "USERS", "FIREWALL", "FROM", "DESCRIPTION"}, rows, noHeaders); err != nil {
+			if err := writeTable(a.stdout, []string{"", "NAME", "OS", "DISKS", "USERS", "FIREWALL", "PRIVATE", "FROM", "DESCRIPTION"}, rows, noHeaders); err != nil {
 				return err
 			}
 			if !noHeaders {
@@ -493,8 +498,9 @@ func (a *app) editProfile(cmd *cobra.Command, name string) error {
 	return a.checkProfile(cmd.Context(), name)
 }
 
-// checkProfile parses and validates a profile and resolves its layout;
-// the keys are not resolved, so a missing key file is found at install.
+// checkProfile parses and validates a profile and resolves its layout
+// and its private network; the keys are not resolved, so a missing key
+// file is found at install.
 func (a *app) checkProfile(ctx context.Context, name string) error {
 	p, err := profile.Load(profilePath(name))
 	if err != nil {
@@ -532,6 +538,15 @@ func (a *app) checkProfile(ctx context.Context, name string) error {
 		}
 	}
 	if _, err := p.Resolve(layouts, firewalls, users, userdata, checkKeys); err != nil {
+		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)
+	}
+	var networks map[string]*profile.PrivateNetwork
+	if p.PrivateNetworkName() != "" {
+		if networks, err = a.loadNetworks(ctx, cfg.StorageURL()); err != nil {
+			return err
+		}
+	}
+	if _, err := p.ResolvePrivate(networks); err != nil {
 		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)
 	}
 	fmt.Fprintf(a.stdout, "Profile %s is valid (%s, layout %s).\n", name, p.OS, layoutName(p))

@@ -61,27 +61,40 @@ server (--profile, --layout, --group and the others), or in a plan file
       profile: db
       group: [db, backup]
       hostname: db-01.example.net
+      private-ip: 10.0.0.10
       user: [oleg:local, deploy]
 
 The keys are the flags' names (profile, layout, firewall, os, hostname,
-timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations,
-via, storage), with a list for a repeatable one; a server's value
-replaces that of defaults. Any other key, a key without a value and a
-second YAML document are refused, and so is one of these flags on the
-command line with --plan.
+private-network, private-ip, timezone, disks, ssh-key, set, user,
+userdata, group, ipv6, mitigations, via, storage), with a list for a
+repeatable one; a server's value replaces that of defaults. Any other
+key, a key without a value and a second YAML document are refused, and
+so is one of these flags on the command line with --plan; private-ip
+goes with one server alone (not in defaults, not with several on the
+command line).
 
 Every check comes first, and a failure stops ump (exit status 2) before
 any server is touched: each server is resolved, once; its profile,
 layout, firewall, users, userdata and keys, as reinstall resolves them,
 and its architecture where the provider tells it; the hostnames, each
 once among the servers, none a group of another server (new, or in the
-state) and none another's in the inventory; the Ansible layout, the
-playbooks, and --hosts against the inventory with every new host in it;
-and no server may be locked. A table shows the servers, and one question
-covers them all (without a terminal, --yes is required).
+state) and none another's in the inventory; the private addresses, each
+one server's alone: the ones the servers keep first, then those given
+by hand (refused when another server of the run keeps it), then the
+lowest free ones; the Ansible layout, the playbooks, and --hosts against
+the inventory with every new host in it; and no server may be locked. A
+table shows the servers, and one question covers them all (without a
+terminal, --yes is required). Then ump takes every server's lock, as
+reinstall takes its one (a lock held elsewhere meanwhile stops the run,
+exit status 3, with the locks taken let go and nothing touched), and
+records the private addresses in one change of the state (another ump
+that changed one of them meanwhile stops all, nothing changed); an
+installation that fails before its installer wrote the disks gives its
+server's back.
 
 The installations run side by side, --parallel N at a time (default:
-all), each under its server's lock, their progress line by line, each
+all), each under the lock of its server, which a failed one lets go and
+a completed one keeps until the end, their progress line by line, each
 line with [NAME] in front. A failed installation does not stop the
 others; its server stays where it stopped, in the UMP rescue system as a
 rule, as with reinstall. Once all are done, ump records every installed
@@ -246,9 +259,13 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	}
 	rows := make([][]string, 0, len(plans))
 	for _, p := range plans {
-		rows = append(rows, []string{p.ref, p.m.Ref(), p.spec.OS, p.spec.Layout.Name, p.hostname, strings.Join(p.inGroups(), ",")})
+		private := "none"
+		if p.private != nil {
+			private = p.private.Address
+		}
+		rows = append(rows, []string{p.ref, p.m.Ref(), p.spec.OS, p.spec.Layout.Name, p.hostname, private, strings.Join(p.inGroups(), ",")})
 	}
-	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "GROUPS"}, rows, false); err != nil {
+	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "PRIVATE", "GROUPS"}, rows, false); err != nil {
 		return err
 	}
 	question := fmt.Sprintf("Install on these %s? Every disk of each is erased.", plural(len(plans), "server"))
@@ -268,6 +285,29 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	if err := a.confirm(cmd, o.yes, question); err != nil {
 		return err
 	}
+	// every server's lock, then the private addresses, as reinstall takes
+	// its one: from here on no other ump reinstalls, rescues or changes
+	// the address of any of them; the installations let the locks go
+	unlocks, err := a.lockServers(ctx, plans)
+	if err != nil {
+		return err
+	}
+	locked := true
+	defer func() {
+		if !locked {
+			return
+		}
+		for _, unlock := range unlocks {
+			unlock()
+		}
+	}()
+	// the private addresses are the servers' from now on; those of the
+	// installations whose installer does not write the disks go back
+	if !o.dryRun {
+		if err := a.reservePrivate(ctx, plans); err != nil {
+			return err
+		}
+	}
 
 	// the installations, side by side
 	parallel := o.parallel
@@ -286,7 +326,8 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	} else {
 		fmt.Fprintf(a.stderr, "Installing %s, %s ...\n", plural(len(plans), "server"), at)
 	}
-	outcomes := a.installAll(cmd, cfg, plans, installRun{dryRun: o.dryRun}, parallel)
+	outcomes := a.installAll(cmd, cfg, plans, unlocks, installRun{dryRun: o.dryRun}, parallel)
+	locked = false
 	defer func() {
 		for _, oc := range outcomes {
 			if oc.unlock != nil {
@@ -352,7 +393,7 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	case o.noProvision && repo != nil:
 		hosts := make([]hostEntry, len(done))
 		for i, r := range done {
-			hosts[i] = hostEntry{r.record.Hostname, append([]string{commonGroup}, r.groups...), a.inventoryVars(cfg, r.m, r.record)}
+			hosts[i] = hostEntry{r.record.Hostname, append([]string{commonGroup}, r.groups...), a.inventoryVars(cfg, r.m, r.record, r.private)}
 		}
 		if err := a.addToInventory(ctx, repo, "installing "+strings.Join(records, ", "), hosts); err != nil {
 			provErr = withExit(exitCodeFor(err), fmt.Errorf("%s installed and recorded, but not all written into the inventory: %w", namesAre(records), err))
@@ -482,6 +523,9 @@ func (a *app) multiSummary(res multiResult, dryRun, provisioning bool) error {
 func multiEntries(cmd *cobra.Command, refs []string, o multiOptions) ([]multiEntry, error) {
 	var entries []multiEntry
 	if o.plan == "" {
+		if o.server.privateIP != "" && len(refs) > 1 {
+			return nil, usageErrorf(cmd, "--private-ip gives one server its address, not %d the same one; give each its own in a plan (private-ip:)", len(refs))
+		}
 		for _, r := range refs {
 			entries = append(entries, multiEntry{ref: r, o: o.server})
 		}
@@ -576,6 +620,10 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 			warnings = append(warnings, fmt.Sprintf("Warning: %s exists for %s only, and the provider of %s does not say its architecture. On another architecture the installation stops in the rescue system, after the server was rebooted into it or, without a rescue system, reinstalled by its provider: a wiped server and no new system.", p.spec.OS, strings.Join(archsWith(bad), " and "), p.ref))
 		}
 	}
+	// the private addresses: each one server's alone, also among these
+	if i, err := assignPlans(doc, plans); err != nil {
+		return nil, nil, entries[i].fail(err)
+	}
 	// the hostnames: each once, none a group of another new host or of
 	// another server in the state, and in the inventory where no other
 	// server's host is
@@ -625,8 +673,8 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 			return nil, nil, err
 		}
 	}
-	// no server is locked: each installation takes its server's lock,
-	// and one held now would fail it after the question
+	// no server is locked: the run takes every server's lock after the
+	// question, and one held now would stop it there
 	locks, err := a.stateStore().Locks(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -642,13 +690,14 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 }
 
 // installAll runs the planned installations side by side, parallel at
-// a time, in order, each under its server's lock and as a copy of the
-// app whose stderr puts [NAME] in front of every line; with --verbose,
-// the copy builds its server's provider, so that the API calls are such
-// lines too. A completed installation keeps its lock
-// (installOutcome.unlock); an interrupt leaves the installations not
-// started yet with its error.
-func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*installPlan, r installRun, parallel int) []installOutcome {
+// a time, in order, each under its server's lock (unlocks releases them)
+// and as a copy of the app whose stderr puts [NAME] in front of every
+// line; with --verbose, the copy builds its server's provider, so that
+// the API calls are such lines too. A completed installation keeps its
+// lock (installOutcome.unlock); an interrupt leaves the installations
+// not started yet with its error, their addresses given back and their
+// locks let go.
+func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*installPlan, unlocks []func(), r installRun, parallel int) []installOutcome {
 	ctx := cmd.Context()
 	// what the copies share: the state's store, a bad wait said once, and
 	// with --verbose the settings of the servers' accounts, resolved once
@@ -679,13 +728,16 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 		wg.Go(func() {
 			for i := range next {
 				p := plans[i]
-				if err := ctx.Err(); err != nil {
-					outcomes[i] = installOutcome{result: p.result(r.dryRun), err: err}
-					continue
-				}
 				w := &linePrefix{mu: &lines, w: a.stderr, prefix: "[" + p.ref + "] "}
 				sub := *a
 				sub.stderr, sub.stdout, sub.isTTY = w, w, nil
+				if err := ctx.Err(); err != nil {
+					outcomes[i] = installOutcome{result: p.result(r.dryRun), err: err}
+					sub.releasePrivate(ctx, []*installPlan{p})
+					unlocks[i]()
+					w.Flush()
+					continue
+				}
 				if s, ok := settings[p.m.Account]; ok {
 					if prov, err := provider.Build(cfg.Accounts[p.m.Account].Type, p.m.Account, s, sub.providerOptions()); err == nil {
 						own := *p
@@ -693,7 +745,7 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 						p = &own
 					}
 				}
-				outcomes[i] = sub.installOne(cmd, p, r)
+				outcomes[i] = sub.installOne(cmd, p, r, unlocks[i])
 				w.Flush()
 			}
 		})
@@ -703,14 +755,10 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 }
 
 // installOne runs one installation of multiinstall under its server's
-// lock, which it keeps when the installation completed, for its
-// provisioning.
-func (a *app) installOne(cmd *cobra.Command, p *installPlan, r installRun) installOutcome {
-	unlock, err := a.lockServer(cmd.Context(), p.m, "multiinstall")
-	if err != nil {
-		fmt.Fprintf(a.stderr, "ump: %v\n", err)
-		return installOutcome{result: p.result(r.dryRun), err: err}
-	}
+// lock, which unlock releases: a completed installation keeps it, for its
+// provisioning; one whose installer did not write the disks gives its
+// private address back before it lets the lock go.
+func (a *app) installOne(cmd *cobra.Command, p *installPlan, r installRun, unlock func()) installOutcome {
 	result, record, err := a.runInstall(cmd, p, r)
 	oc := installOutcome{result: result, err: err}
 	switch {
@@ -720,11 +768,32 @@ func (a *app) installOne(cmd *cobra.Command, p *installPlan, r installRun) insta
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 	}
 	if record == nil {
+		if !result.written {
+			a.releasePrivate(cmd.Context(), []*installPlan{p})
+		}
 		unlock()
 		return oc
 	}
-	oc.record, oc.unlock = &serverRecord{p.m, *record, p.groups}, unlock
+	oc.record, oc.unlock = &serverRecord{p.m, *record, p.groups, p.private}, unlock
 	return oc
+}
+
+// lockServers takes the locks of the planned servers, in order, and
+// returns their releases; one it cannot take lets go of those it took
+// and stops the run (exit status 3 when another ump holds it).
+func (a *app) lockServers(ctx context.Context, plans []*installPlan) ([]func(), error) {
+	unlocks := make([]func(), 0, len(plans))
+	for _, p := range plans {
+		unlock, err := a.lockServer(ctx, p.m, "multiinstall")
+		if err != nil {
+			for _, u := range unlocks {
+				u()
+			}
+			return nil, withExit(exitCodeFor(err), fmt.Errorf("%s: %w; nothing was changed", p.ref, err))
+		}
+		unlocks = append(unlocks, unlock)
+	}
+	return unlocks, nil
 }
 
 // linePrefix passes what is written to w a whole line at a time, with
@@ -781,6 +850,8 @@ type planValues struct {
 	Firewall    *string  `yaml:"firewall"`
 	OS          *string  `yaml:"os"`
 	Hostname    *string  `yaml:"hostname"`
+	PrivateNet  *string  `yaml:"private-network"`
+	PrivateIP   *string  `yaml:"private-ip"`
 	Timezone    *string  `yaml:"timezone"`
 	Disks       planList `yaml:"disks"`
 	SSHKey      planList `yaml:"ssh-key"`
@@ -839,7 +910,8 @@ func (v planValues) options() installOptions {
 	}
 	o := installOptions{
 		profile: str(v.Profile), layout: str(v.Layout), firewall: str(v.Firewall), os: str(v.OS),
-		hostname: str(v.Hostname), timezone: str(v.Timezone), storage: str(v.Storage), via: str(v.Via),
+		hostname: str(v.Hostname), privateNetwork: str(v.PrivateNet), privateIP: str(v.PrivateIP),
+		timezone: str(v.Timezone), storage: str(v.Storage), via: str(v.Via),
 		disks: strings.Join(v.Disks, ","), keyFiles: v.SSHKey, sets: v.Set, users: v.User, userdata: v.Userdata,
 		groups: groupFlags(v.Group), ipv6: v.IPv6 != nil && *v.IPv6, mitigations: v.Mitigations != nil && *v.Mitigations,
 	}
@@ -886,6 +958,15 @@ func parsePlan(data []byte) (*installPlanFile, error) {
 			var err error
 			if p.defaults, err = planEntry(v, "defaults"); err != nil {
 				return nil, err
+			}
+			if p.defaults.PrivateIP != nil {
+				line := k.Line
+				for j := 0; j+1 < len(v.Content); j += 2 {
+					if v.Content[j].Value == "private-ip" {
+						line = v.Content[j].Line
+					}
+				}
+				return nil, fmt.Errorf("line %d: defaults: private-ip would give every server the same address; give it per server", line)
 			}
 		case "servers":
 			servers = v

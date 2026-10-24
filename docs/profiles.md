@@ -3,16 +3,18 @@
 A profile says what a server becomes when `ump server reinstall` installs
 it: which operating system image, which [disk layout](disk-layouts.md),
 which users with which SSH keys, which [userdata](userdata.md) runs in
-the new system, what the [firewall](firewalls.md) lets in, the kernel command line, and what
-happens after the first boot. It is one YAML file per profile.
+the new system, what the [firewall](firewalls.md) lets in, the kernel
+command line, the interface names and the [private
+network](networks.md) the server gets an address in. It is one YAML
+file per profile.
 
 ```console
 $ ump config os list
-    NAME           OS             DISKS        USERS   FIREWALL   FROM        DESCRIPTION
-*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump     default    published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
-    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump     default    published   Ubuntu 24.04 on every disk ...
-    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump     default    published   Ubuntu 22.04 on every disk ...
-    web            ubuntu-26.04   lvm-raid1    ump,ops web        yours       Web servers
+    NAME           OS             DISKS        USERS     FIREWALL   PRIVATE   FROM        DESCRIPTION
+*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump       default    default   published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump       default    default   published   Ubuntu 24.04 on every disk ...
+    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump       default    default   published   Ubuntu 22.04 on every disk ...
+    web            ubuntu-26.04   lvm-raid1    ump,ops   web        default   yours       Web servers
 * the default (ump config os default NAME changes it); published profiles are replaced by ump config os update, make your own with ump config os create NAME --from ubuntu-26.04
 ```
 
@@ -20,10 +22,12 @@ $ ump config os list
 
 Profiles are files in the profiles directory next to the configuration,
 `~/.config/ump/profiles/` (`$XDG_CONFIG_HOME/ump/profiles/` when that is
-set), one `NAME.yaml` per profile, plus three files of named entries
+set), one `NAME.yaml` per profile, plus the files of named entries
 the profiles refer to: `layouts.yaml` with the [disk
 layouts](disk-layouts.md), `firewalls.yaml` with the
-[firewalls](firewalls.md) and `users.yaml` with the [users](#users).
+[firewalls](firewalls.md), `networks.yaml` with the [private
+networks](networks.md), `users.yaml` with the [users](#users) and
+`userdata.yaml` with the [userdata](userdata.md).
 The first command that needs the directory creates it and downloads
 the published files from the storage, so that there is always
 something to look at and start from.
@@ -36,16 +40,19 @@ something to look at and start from.
 [`debian-12.yaml`](../profiles/debian-12.yaml): the same profile with
 each image and the userdata of its distribution; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml) and
 [`archlinux.yaml`](../profiles/archlinux.yaml), the same for NixOS, Arch Linux and CachyOS) and the published entries of the named files (the
-layouts `lvm-*`, the firewalls `default`, `web` and `open`, the user
-`ump`) are templates: `ump config os update` fetches them again and
+layouts `lvm-*`, the firewalls `default`, `web` and `open`, the network
+`default`, the user `ump`) are templates: `ump config os update` fetches them again and
 replaces them, which is why `ump config os edit` refuses a published
 profile. Make your own instead: `ump config os create NAME` (guided) or
 `ump config os create NAME --from ubuntu-26.04` (a copy), `ump config
-disk-layout create`, `ump config firewall create`, `ump config user
-create`. Everything with a name of your own is yours and never touched
+disk-layout create`, `ump config firewall create`, `ump config network
+create`, `ump config user create`. Everything with a name of your own is yours and never touched
 by an update; `ump config os list` says which is which in its `FROM`
 column. (An entry of yours in a named file under a published name is
-replaced by the update too, so give yours their own names.)
+replaced by the update too, so give yours their own names. In
+`networks.yaml` the update only adds the published networks it lacks:
+an edited `default` survives updates, since the servers' addresses were
+given in it.)
 
 When `ump server reinstall` needs the profile `NAME`, it takes, in this
 order:
@@ -90,6 +97,7 @@ firewall: default      # a firewall from firewalls.yaml, or an inline one
 
 network:
   rename: true         # uniform interface names: ext01, ... and int01, ...
+  private: default     # an address of its own in 10.0.0.0/24, from networks.yaml
 ```
 
 Installed with it, a server runs the [UMP Ubuntu 26.04 base
@@ -101,8 +109,9 @@ configuration on `ext01`, the resolvers 1.1.1.1 and 8.8.8.8, UTC, the
 sudo user `ump` with UMP's key and your own public keys, no root login
 over SSH and no passwords anywhere, an nftables firewall that lets ICMP
 and SSH in and nothing else ([`default`](firewalls.md#the-published-firewalls)),
-and a kernel command line with `mitigations=off`, `ipv6.disable=1` and
-`kho=off`. The image brings `tuned` with the `throughput-performance`
+a kernel command line with `mitigations=off`, `ipv6.disable=1` and
+`kho=off`, and an address of its own in the private network `default`
+(`10.0.0.0/24`), in its host file for the roles that use it. The image brings `tuned` with the `throughput-performance`
 profile, the `performance` CPU governor, no cloud-init and no snaps; its
 [README](../images/base/README.md#defaults) lists the rest.
 
@@ -179,6 +188,7 @@ firewall: default             # a firewall name from firewalls.yaml, or an inlin
                               # absent: no firewall
 network:                      # optional
   rename: true                # uniform interface names; false keeps the kernel's
+  private: default            # a private network from networks.yaml, or none (also when absent)
 ```
 
 | Field | Meaning |
@@ -200,6 +210,7 @@ network:                      # optional
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
+| `network.private` | The [private network](networks.md) the server gets an address in: a name from `networks.yaml`, or `none`. Absent means `none`, so profiles from before stay as they were; every published profile says `default`. |
 
 Unknown fields are an error, so a typo in a field name is caught by
 `ump config os edit`, not at installation. The `provision` section of
@@ -300,13 +311,13 @@ by MAC as before.
 ## Managing profiles
 
 ```
-ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall
+ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall, private network
 ump config os get NAME                     # print one
 ump config os create [NAME]                # on a terminal: the wizard (the name, then the questions below), then the file is written
 ump config os create NAME --from NAME      # copy one instead, rename it, open it in your editor
 ump config os edit NAME                    # your editor ($VISUAL, $EDITOR, else vi), then a check
 ump config os delete NAME [--yes]
-ump config os update                       # refresh the published profiles and the published entries of layouts.yaml, firewalls.yaml and users.yaml; yours are kept
+ump config os update                       # refresh the published profiles and the published entries of the named files; yours are kept, and so is an edited network
 ump config os default [NAME]               # show or set the default profile
 ```
 
@@ -316,15 +327,17 @@ date, or another name), the disk layout and the firewall by name, the
 users by name from `users.yaml` (a name it does not know is defined on
 the spot: sudo, shell, keys, description, and kept there), the
 mitigations and IPv6 switches, the time zone, the userdata by name
-from `userdata.yaml`, the interface naming and a description. It checks the result like an
+from `userdata.yaml`, the interface naming and a description; the
+private network is `default` (where `networks.yaml` has it), changed in
+the file. It checks the result like an
 installation would, writes the file, prints it and offers your editor.
 `--from NAME` copies a profile instead, and without a terminal that is
 the only form.
 
 `edit` and `create --from` check the file when the editor returns: the YAML, the
 fields, the layout (an inline one, or that the named one exists in
-`layouts.yaml` and is valid), the firewall likewise, and that an
-administrator and keys are there. An invalid profile is kept, with the
+`layouts.yaml` and is valid), the firewall and the private network
+likewise, and that an administrator and keys are there. An invalid profile is kept, with the
 problem named, so nothing is lost; fix it with another `edit`. What is
 not checked until an installation: that the key references yield keys,
 and that the image exists on the storage.
@@ -346,7 +359,9 @@ A profile is valid when:
 - a user has `sudo: true`, or `root` is listed;
 - package names look like Debian package names;
 - an inline firewall passes [its checks](firewalls.md#fields); a named
-  one exists in `firewalls.yaml`.
+  one exists in `firewalls.yaml`;
+- `network.private` is `none` or a network of `networks.yaml` that
+  passes [its checks](networks.md#fields).
 
 ## Using a profile
 
@@ -382,6 +397,8 @@ installation:
 | `--ssh-key REF` | adds the reference's keys to the administrator (repeatable) |
 | `--disks /dev/sda,/dev/sdb` | the disks the layout is applied to (default: every disk of the server) |
 | `--hostname NAME` | the hostname (default: the server's name at the provider) |
+| `--private-network NAME`, `none` | `network.private` |
+| `--private-ip ADDR` | the server's address in the private network (default: the one it has there, else the lowest free one; see [addresses](networks.md#addresses)) |
 | `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable) |
 
 Every other field has no flag of its own and is overridden with
@@ -409,7 +426,8 @@ stays on the installed system as `/etc/ump/spec.json` (mode 0600);
 `/etc/ump/install` records the essentials in `key=value` lines: the
 image and its version, when it was installed, the profile and layout, the
 disks, the boot disk, root, hostname, administrator, interfaces, whether
-IPv6 and the mitigations are on, the firewall policy and the userdata.
+IPv6 and the mitigations are on, the firewall policy, the userdata, and
+the private network and address.
 The message of the day shows the profile too.
 
 ## Example: a web server profile

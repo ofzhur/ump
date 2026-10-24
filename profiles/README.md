@@ -1,9 +1,9 @@
 # Published profiles
 
 This directory holds the profiles, the disk layouts, the firewalls, the
-users and the userdata that ump publishes: `make upload` puts them under `profiles/` of the storage
+private networks, the users and the userdata that ump publishes: `make upload` puts them under `profiles/` of the storage
 (`https://ump.zhurko.de/dl/profiles/` for this project's). The first
-`ump config os`, `disk-layout`, `firewall`, `user` or `userdata` command downloads them into
+`ump config os`, `disk-layout`, `firewall`, `network`, `user` or `userdata` command downloads them into
 `~/.config/ump/profiles/`, where they are yours to edit; a profile that
 is not there is still fetched from the storage by name, so `ump server
 reinstall NAME` works with the published `ubuntu-26.04` out of the box.
@@ -17,6 +17,7 @@ reinstall NAME` works with the published `ubuntu-26.04` out of the box.
 | [`cachyos.yaml`](cachyos.yaml) | the same for CachyOS, Arch Linux with CachyOS's x86-64-v3 packages and server kernel (amd64 only), with the userdata `cachyos` | [CachyOS](../docs/oses.md#cachyos) |
 | [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
+| [`networks.yaml`](networks.yaml) | the named private network `default`, `10.0.0.0/24`, which every published profile names | [Private networks](../docs/networks.md) |
 | [`users.yaml`](users.yaml) | the named user `ump`, the administrator UMP provides | [Users](../docs/users.md) |
 | [`userdata.yaml`](userdata.yaml) | the named userdata `ubuntu`, `debian`, `archlinux` and `cachyos` (the scripts each of those systems runs before its first boot) and `nixos` (the module every NixOS gets), which do nothing yet | [Userdata](../docs/userdata.md) |
 

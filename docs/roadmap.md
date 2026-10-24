@@ -36,14 +36,30 @@ As of October 2026, ump does what the [README](../README.md) and the
   [ofzhur.ansible](https://github.com/ofzhur/ansible) brings the users
   and keys, and its fact cache `ofzhur.ansible.facts` keeps the facts
   in a central storage ([provisioning](provisioning.md)).
-- **Configuration objects:** `ump config os`, `disk-layout` and
-  `firewall` with list, get, create, edit and delete each; the
-  published defaults downloaded on first use.
+- **Configuration objects:** `ump config os`, `disk-layout`,
+  `firewall`, `network`, `user` and `userdata` with list, get, create,
+  edit and delete each, and `key`; the published defaults downloaded on
+  first use.
+- **Private networks:** every server ump installs gets an address in a
+  private network (`default`, `10.0.0.0/24`), the lowest free one or
+  one given by hand, kept across reinstalls and never another server's,
+  in the state and the inventory (`ump_private_address`)
+  ([private networks](networks.md)).
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
   Windows on the storage, `make release`.
 
 ## Next
 
+- **Mesh roles.** Roles in the collection that connect the servers over
+  their private addresses (WireGuard), from the inventory's
+  `ump_private_*` variables, with the interfaces configured on the
+  servers ([mesh roles](networks.md#mesh-roles)).
+- **Provider uplinks.** The providers' private networks (OVHcloud
+  vRack, Hetzner vSwitch and Cloud Networks, Vultr, Linode and
+  DigitalOcean VPCs) as uplinks of the private network, so that servers
+  of one provider and location talk over it and the mesh tunnels only
+  between providers or locations ([provider
+  uplinks](networks.md#provider-uplinks)).
 - **Servers that pull.** The collection's role that sets up
   `ansible-pull` on a timer, with a deploy key, the facts in a central
   storage (`ofzhur.ansible.facts`) and the server's own secrets, so
