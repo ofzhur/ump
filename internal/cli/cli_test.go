@@ -340,6 +340,22 @@ type testEnv struct {
 	machines      map[string]*fakeMachine
 	installExitAt map[string]int
 	remoteGate    func(addr string, argv []string)
+	// onAsk runs when ump first reads stdin: when it asks
+	onAsk func()
+}
+
+// hookReader calls hook before its first read.
+type hookReader struct {
+	r    io.Reader
+	hook func()
+}
+
+func (h *hookReader) Read(p []byte) (int, error) {
+	if h.hook != nil {
+		h.hook()
+		h.hook = nil
+	}
+	return h.r.Read(p)
 }
 
 // fakeMachine is the state of one machine behind the fake ssh, when
@@ -442,7 +458,7 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	var out, errb bytes.Buffer
 	ctx, interrupt := context.WithCancel(context.Background())
 	defer interrupt()
-	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
+	a := &app{stdin: &hookReader{r: strings.NewReader(stdin), hook: e.onAsk}, stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
 		ssh: func(argv []string, interactive bool) (int, error) {
 			e.sshCalls = append(e.sshCalls, argv)
 			e.sshInteractive = append(e.sshInteractive, interactive)
@@ -909,9 +925,9 @@ func TestGetServersTable(t *testing.T) {
 		t.Fatal(out)
 	}
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PROFILE", "LAYOUT", "IPV6", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
-		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
-		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "<none>", "<none>", "<none>", "2001:db8::/64", "m1", "cloud", "<none>", "<none>"},
+		{"ACCOUNT", "PROVIDER", "ID", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PROFILE", "LAYOUT", "IPV6", "PRIVATE", "PRODUCT", "KIND", "PRICE", "ATTRIBUTES"},
+		{"one", "fake", "2", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>", "<none>", "<none>", "<none>", "m2", "cloud", "<none>", "<none>"},
+		{"one", "fake", "1", "web-01", "203.0.113.10", "eu-1", "running", "<none>", "<none>", "<none>", "<none>", "2001:db8::/64", "<none>", "m1", "cloud", "<none>", "<none>"},
 	})
 }
 
@@ -2609,7 +2625,7 @@ func TestInstallServer(t *testing.T) {
 	for _, want := range []string{
 		"Checking root access to 203.0.113.10 over SSH ... no (tried root, ump).\n",
 		"Waiting for the UMP rescue system on 203.0.113.10 (up to 15m) ... up after 0s (ump-rescue 2026.10.12).\n",
-		"Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "ubuntu-26.04.yaml") + ", layout lvm-linear) on web-01 as web-01 ...\n",
+		"Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles", "ubuntu-26.04.yaml") + ", layout lvm-linear, private address 10.0.0.1 in default) on web-01 as web-01 ...\n",
 		"==> installed: ubuntu-26.04 2026.10.12",
 		"Rebooting web-01 into ubuntu-26.04 ...\n",
 		"Waiting for SSH on 203.0.113.10 to go down ...",
@@ -2845,7 +2861,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/debian-13.yaml", "/profiles/debian-12.yaml", "/profiles/nixos-25.11.yaml", "/profiles/archlinux.yaml", "/profiles/cachyos.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
+		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/debian-13.yaml", "/profiles/debian-12.yaml", "/profiles/nixos-25.11.yaml", "/profiles/archlinux.yaml", "/profiles/cachyos.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/networks.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -2857,7 +2873,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	profilesDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	os.RemoveAll(profilesDir)
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--layout", "lvm-striped", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls and users into "+profilesDir+" (ump config os)") || !strings.Contains(errOut, "(profile ubuntu-26.04 from "+filepath.Join(profilesDir, "ubuntu-26.04.yaml")+", layout lvm-striped)") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls, networks, users and userdata into "+profilesDir+" (ump config os)") || !strings.Contains(errOut, "(profile ubuntu-26.04 from "+filepath.Join(profilesDir, "ubuntu-26.04.yaml")+", layout lvm-striped, private address 10.0.0.1 in default)") {
 		t.Errorf("published profile: code %d, %q", code, errOut)
 	}
 	for _, f := range profileFiles {
@@ -2899,7 +2915,7 @@ func TestConfigOSAndServerSet(t *testing.T) {
 
 	// the first run downloads the published profile and layouts
 	out, errOut, code := e.run("", false, "config", "os", "list")
-	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls and users into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "* ubuntu-26.04 ubuntu-26.04 lvm-linear ump default published") || !strings.Contains(strings.Join(strings.Fields(out), " "), " ubuntu-22.04 ubuntu-22.04 lvm-linear ump default published") || !strings.Contains(out, "* the default (ump config os default NAME changes it)") {
+	if code != 0 || !strings.Contains(errOut, "Downloaded the published profiles, layouts, firewalls, networks, users and userdata into "+dir) || !strings.Contains(out, "NAME") || !strings.Contains(strings.Join(strings.Fields(out), " "), "* ubuntu-26.04 ubuntu-26.04 lvm-linear ump default default published") || !strings.Contains(strings.Join(strings.Fields(out), " "), " ubuntu-22.04 ubuntu-22.04 lvm-linear ump default default published") || !strings.Contains(out, "* the default (ump config os default NAME changes it)") {
 		t.Errorf("first list: code %d, stderr %q\n%s", code, errOut, out)
 	}
 	for _, f := range profileFiles {
@@ -3478,7 +3494,7 @@ func TestConfigOSUpdate(t *testing.T) {
 	if _, _, code := e.run("", false, "config", "os", "list"); code != 0 {
 		t.Fatal("first list failed")
 	}
-	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\ndebian-13.yaml: up to date\ndebian-12.yaml: up to date\nnixos-25.11.yaml: up to date\narchlinux.yaml: up to date\ncachyos.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nusers.yaml: updated\n") {
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\ndebian-13.yaml: up to date\ndebian-12.yaml: up to date\nnixos-25.11.yaml: up to date\narchlinux.yaml: up to date\ncachyos.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nnetworks.yaml: up to date\nusers.yaml: updated\n") {
 		t.Errorf("update when current: code %d\n%s", code, out)
 	}
 
@@ -3495,12 +3511,32 @@ func TestConfigOSUpdate(t *testing.T) {
 	if _, _, code := e.run("", false, "config", "user", "create", "ops", "--from", "ump"); code != 0 {
 		t.Fatal("user create failed")
 	}
+	// networks.yaml keeps the published network you changed: the servers'
+	// addresses were given in it
+	networks := "networks:\n  default:\n    cidr: 10.0.0.0/24\n    reserved: [10.0.0.1]\n  db:\n    cidr: 10.0.1.0/24\n"
+	os.WriteFile(filepath.Join(dir, "networks.yaml"), []byte(networks), 0o600)
 	for name := range published {
 		published[name] += "# newer\n"
 	}
 	out, _, code := e.run("", false, "config", "os", "update")
-	if code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: updated\n") || !strings.Contains(out, "layouts.yaml: updated; your layouts kept: mine\n") || !strings.Contains(out, "users.yaml: updated; your users kept: ops\n") || !strings.Contains(out, "firewalls.yaml: updated\n") {
+	if code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: updated\n") || !strings.Contains(out, "layouts.yaml: updated; your layouts kept: mine\n") || !strings.Contains(out, "users.yaml: updated; your users kept: ops\n") || !strings.Contains(out, "firewalls.yaml: updated\n") || !strings.Contains(out, "networks.yaml: up to date; your networks kept: db; published networks you changed, kept as they are: default\n") {
 		t.Errorf("update: code %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "networks.yaml")); string(data) != networks {
+		t.Errorf("networks.yaml after update:\n%s", data)
+	}
+	// a published network it lacks is added, unless it overlaps one of
+	// yours (default renamed)
+	os.WriteFile(filepath.Join(dir, "networks.yaml"), []byte("networks:\n  db:\n    cidr: 10.0.1.0/24\n"), 0o600)
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "networks.yaml: updated; your networks kept: db\n") {
+		t.Errorf("update, default added: code %d\n%s", code, out)
+	}
+	if out, _, _ := e.run("", false, "config", "net", "list", "--no-headers"); !strings.Contains(out, "db ") || !strings.Contains(out, "default ") {
+		t.Errorf("networks after update:\n%s", out)
+	}
+	os.WriteFile(filepath.Join(dir, "networks.yaml"), []byte("networks:\n  lan:\n    cidr: 10.0.0.0/24\n"), 0o600)
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "networks.yaml: up to date; your networks kept: lan; published networks left out: default (networks default (10.0.0.0/24) and lan (10.0.0.0/24) overlap; give each addresses of its own)\n") {
+		t.Errorf("update, default left out: code %d\n%s", code, out)
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "ubuntu-26.04.yaml")); string(data) != published["ubuntu-26.04.yaml"] {
 		t.Errorf("the published profile was not replaced:\n%s", data)
@@ -3590,7 +3626,7 @@ func TestProfileWizard(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{"# Profile web, made by ump config os create on 2026-10-12", "name: web\n", "description: Web servers\n", "os: ubuntu-24.04\n", "timezone: UTC\n",
 		"kernel:\n  mitigations: false\n  ipv6: true\n", "disks: lvm-linear\n", "users:\n  - ump\n  - ops\n",
-		"userdata:\n  - ubuntu\n", "firewall: web\n", "network:\n  rename: true\n"} {
+		"userdata:\n  - ubuntu\n", "firewall: web\n", "network:\n  rename: true\n  private: default\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("profile lacks %q:\n%s", want, text)
 		}
@@ -3598,7 +3634,7 @@ func TestProfileWizard(t *testing.T) {
 	if strings.Contains(text, "provision") {
 		t.Errorf("profile with a provision section:\n%s", text)
 	}
-	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump,ops web yours Web servers") {
+	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web ubuntu-24.04 lvm-linear ump,ops web default yours Web servers") {
 		t.Errorf("list: code %d\n%s", code, out)
 	}
 	// without a name, the wizard asks for it first
@@ -3611,6 +3647,16 @@ func TestProfileWizard(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "users.yaml")); !strings.Contains(string(data), "# Named users") || !strings.Contains(string(data), "\n  ops:\n") {
 		t.Errorf("users.yaml after the wizard:\n%s", data)
 	}
+	// a networks.yaml that does not load leaves network.private out
+	networks, _ := os.ReadFile(filepath.Join(dir, "networks.yaml"))
+	os.WriteFile(filepath.Join(dir, "networks.yaml"), []byte("networks: [default]\n"), 0o600)
+	if _, errOut, code := e.run("web3\n2\n\nweb\nump\n\ny\n\nubuntu\n\nWeb again\n\n", true, "config", "os", "create"); code != 0 || !strings.Contains(errOut, "Warning: no private network for the profile ("+dir+"/networks.yaml: yaml: unmarshal errors:") || !strings.Contains(errOut, "network.private is left out, ump config os edit web3 adds it.\n") {
+		t.Errorf("create without networks: code %d\n%s", code, errOut)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "web3.yaml")); !strings.Contains(string(data), "network:\n  rename: true\n") || strings.Contains(string(data), "private") {
+		t.Errorf("profile without networks:\n%s", data)
+	}
+	os.WriteFile(filepath.Join(dir, "networks.yaml"), networks, 0o600)
 	// the profile installs: the spec carries the choices
 	e.directRoot = true
 	resetFakePower()
@@ -3960,7 +4006,7 @@ func TestServerSetPriceAndAttributes(t *testing.T) {
 		t.Errorf("state after set:\n%s", st)
 	}
 	out, _, code = e.run("", false, "server", "list", "--account", "one", "-o", "wide")
-	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> <none> <none> <none> 2001:db8::/64 m1 cloud 39.90 EUR/mo owner=alice,role=web") {
+	if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "web-01 203.0.113.10 eu-1 running <none> <none> <none> <none> 2001:db8::/64 <none> m1 cloud 39.90 EUR/mo owner=alice,role=web") {
 		t.Errorf("wide: code %d\n%s", code, out)
 	}
 	out, _, code = e.run("", false, "server", "list", "web-01", "--account", "one", "-o", "json")

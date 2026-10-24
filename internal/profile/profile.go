@@ -69,8 +69,11 @@ func (f FirewallRef) IsZero() bool { return f.Name == "" && f.Rules == nil }
 // Network holds the network choices. Rename (unset: on) gives the
 // interfaces uniform names: ext01, ext02, ... for the ones with a public
 // address and int01, ... for the others, instead of the kernel's.
+// Private names the private network of networks.yaml the server gets an
+// address in, or none (also when unset).
 type Network struct {
-	Rename *bool `yaml:"rename,omitempty"`
+	Rename  *bool  `yaml:"rename,omitempty"`
+	Private string `yaml:"private,omitempty"`
 }
 
 // Kernel holds the kernel command line choices; unset means off for the
@@ -703,6 +706,9 @@ func (p *Profile) Validate() error {
 			return fmt.Errorf("profile %s: %w", p.Name, err)
 		}
 	}
+	if n := p.Network.Private; n != "" && n != NoPrivateNetwork && !IsNetworkName(n) {
+		return fmt.Errorf("profile %s: network.private %q is not a network name or none", p.Name, n)
+	}
 	return nil
 }
 
@@ -760,9 +766,19 @@ type Spec struct {
 	Profile  ProfileInfo `json:"profile"`
 }
 
-// NetworkSpec is Network with the default filled in.
+// NetworkSpec is Network with the default filled in, and the server's
+// address in its private network, which the caller fills in (none:
+// absent).
 type NetworkSpec struct {
-	Rename bool `json:"rename"`
+	Rename  bool         `json:"rename"`
+	Private *PrivateSpec `json:"private,omitempty"`
+}
+
+// PrivateSpec is a server's address in a private network.
+type PrivateSpec struct {
+	Network string `json:"network"`
+	CIDR    string `json:"cidr"`
+	Address string `json:"address"`
 }
 
 // Admin is the user ump logs in as on the installed system.
@@ -782,7 +798,8 @@ type ProfileInfo struct {
 // Resolve validates the profile, picks the layout and the firewall (the
 // profile's inline ones, or by name from layouts and firewalls) and
 // resolves the key references, and returns the specification. The
-// caller fills in the hostname, storage and disks.
+// caller fills in the hostname, storage and disks, and the private
+// address (ResolvePrivate is the network).
 func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, users map[string]*User, userdata map[string]*Userdata, resolve KeyResolver) (*Spec, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err

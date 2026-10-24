@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	prof "github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/state"
 )
@@ -76,10 +77,12 @@ func (a *app) newServerSetCmd() *cobra.Command {
 		unset      []string
 		groups     groupFlags
 		ungroups   groupFlags
+		privateNet string
+		privateIP  string
 	)
 	cmd := &cobra.Command{
-		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group GROUP]... [--ungroup GROUP]...",
-		Short: "Set what ump remembers about a server: its profile, its price, your attributes, its groups",
+		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group GROUP]... [--ungroup GROUP]... [--private-network NAME|none] [--private-ip ADDR]",
+		Short: "Set what ump remembers about a server: its profile, its price, your attributes, its groups, its private address",
 		Long: `Remember, in the state, what ump cannot learn from the provider: the
 profile the server is reinstalled with (ump server reinstall NAME then
 takes it without --profile; --clear forgets it), the price it costs
@@ -88,19 +91,26 @@ where the provider's API does not say (--price, with --currency and
 wide and ump server show; --clear-price forgets it), attributes of your
 own for the inventory (--attr owner=alice --attr role=db; --unset-attr
 forgets one), and the groups of a server ump installed (--group adds,
---ungroup removes; repeatable, or comma-separated). The profile is
-checked to exist, locally or on the storage, and a group to be no
-host's name: not the server's hostname, nor, run from the
-infrastructure repository, another host of its inventory. Nothing runs:
-the next ump provision puts the server into its groups and runs their
-plays on it; what the plays of a group it left did stays until a
-reinstall.`,
+--ungroup removes; repeatable, or comma-separated) and its private
+address (--private-ip ADDR in its network, or in the one of
+--private-network NAME, which alone gives the server the address it has
+there, else the lowest free one; --private-network none takes it away).
+The profile is checked to exist, locally or on the storage, a group to
+be no host's name: not the server's hostname, nor, run from the
+infrastructure repository, another host of its inventory, and the
+address to be in the network and no other server's; the address changes
+under the server's lock (exit status 3 while an installation holds it).
+Nothing runs: the next ump provision puts the server into its groups,
+gives the host file the address and runs the plays on it; what the plays
+of a group it left did stays until a reinstall.`,
 		Example: `  ump server set web-01 --profile db
   ump server set web-01 --clear
   ump server set rack-07 --price 89 --currency EUR --period month
   ump server set web-01 --attr owner=alice --attr role=web
   ump server set web-01 --unset-attr role --clear-price
-  ump server set web-01 --group monitoring --ungroup lab`,
+  ump server set web-01 --group monitoring --ungroup lab
+  ump server set web-01 --private-ip 10.0.0.10
+  ump server set web-01 --private-network none`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if profile != "" && clear {
@@ -112,8 +122,11 @@ reinstall.`,
 			if (currency != "" || period != "") && price == "" {
 				return usageErrorf(cmd, "--currency and --period go with --price")
 			}
-			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 && len(groups) == 0 && len(ungroups) == 0 {
-				return usageErrorf(cmd, "give at least one of --profile, --clear, --price, --clear-price, --attr, --unset-attr, --group or --ungroup")
+			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 && len(groups) == 0 && len(ungroups) == 0 && privateNet == "" && privateIP == "" {
+				return usageErrorf(cmd, "give at least one of --profile, --clear, --price, --clear-price, --attr, --unset-attr, --group, --ungroup, --private-network or --private-ip")
+			}
+			if err := checkPrivateFlags(cmd, privateNet, privateIP); err != nil {
+				return err
 			}
 			add, err := groups.list(cmd)
 			if err != nil {
@@ -177,6 +190,16 @@ reinstall.`,
 					return err
 				}
 			}
+			// the private networks, for an address in one
+			var networks map[string]*prof.PrivateNetwork
+			if privateIP != "" || (privateNet != "" && privateNet != prof.NoPrivateNetwork) {
+				if networks, err = a.loadNetworks(cmd.Context(), cfg.StorageURL()); err != nil {
+					return err
+				}
+				if privateNet != "" && networks[privateNet] == nil {
+					return usageErrorf(cmd, "--private-network %s: not in networks.yaml (known: %s; ump config network create %s makes it)", privateNet, strings.Join(sortedKeys(networks), ", "), privateNet)
+				}
+			}
 			// a group is no host's name: not the server's hostname, nor
 			// another host of the inventory where the repository is at hand
 			var inv *inventory
@@ -190,6 +213,15 @@ reinstall.`,
 						return err
 					}
 				}
+			}
+			// the private address changes under the server's lock: not while
+			// an installation runs on it
+			if privateNet != "" || privateIP != "" {
+				unlock, err := a.lockServer(cmd.Context(), m, "set")
+				if err != nil {
+					return err
+				}
+				defer unlock()
 			}
 			var said []string
 			err = a.updateState(cmd.Context(), func(d *state.Document) error {
@@ -256,6 +288,20 @@ reinstall.`,
 					}
 					said = append(said, "groups "+strings.Join(append([]string{commonGroup}, st.Groups...), ", ")+" (ump provision applies them)")
 				}
+				if privateNet != "" || privateIP != "" {
+					if st.Installed == nil {
+						return withExit(exitUsage, fmt.Errorf("ump did not install %s: its private address comes with the installation (ump server reinstall %s --private-network NAME)", m.Name, args[0]))
+					}
+					var err error
+					if st.Private, err = setPrivate(d, m, st.Private, networks, privateNet, privateIP); err != nil {
+						return err
+					}
+					if st.Private == nil {
+						said = append(said, "no private address (ump provision takes it out of the host file)")
+					} else {
+						said = append(said, "private address "+describePrivate(st.Private)+" (ump provision puts it into the host file)")
+					}
+				}
 				d.Servers[m.Ref()] = st
 				return nil
 			})
@@ -276,7 +322,38 @@ reinstall.`,
 	cmd.Flags().StringArrayVar(&unset, "unset-attr", nil, "forget an attribute (repeatable)")
 	groups.add(cmd, "group", "a group to put a server ump installed into")
 	ungroups.add(cmd, "ungroup", "a group to take a server ump installed out of")
+	cmd.Flags().StringVar(&privateNet, "private-network", "", "the private network of a server ump installed, by name from networks.yaml, or none")
+	cmd.Flags().StringVar(&privateIP, "private-ip", "", "the address of a server ump installed in its private network (or in that of --private-network)")
 	return cmd
+}
+
+// setPrivate is the private address of the server m, which has cur,
+// after ump server set --private-network network and --private-ip
+// address: none takes it away; otherwise the address is given, else
+// kept where the network stays, else the lowest free one (assignPrivate,
+// in doc). The network is --private-network, else the server's.
+func setPrivate(doc *state.Document, m provider.Machine, cur *state.Private, networks map[string]*prof.PrivateNetwork, network, address string) (*state.Private, error) {
+	if network == prof.NoPrivateNetwork {
+		return nil, nil
+	}
+	if network == "" {
+		if cur == nil {
+			return nil, withExit(exitUsage, fmt.Errorf("--private-ip %s: %s has no private network; give one, --private-network NAME", address, m.Name))
+		}
+		network = cur.Network
+	}
+	n := networks[network]
+	if n == nil {
+		return nil, withExit(exitUsage, fmt.Errorf("the private network %s of %s is not in networks.yaml (known: %s); give another, --private-network NAME", network, m.Name, strings.Join(sortedKeys(networks), ", ")))
+	}
+	if err := n.Validate(); err != nil {
+		return nil, withExit(exitUsage, err)
+	}
+	private, _, err := assignPrivate(doc, []privateRequest{{ref: m.Ref(), network: n, address: address}})
+	if err != nil {
+		return nil, err
+	}
+	return private[0], nil
 }
 
 var attrKey = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)

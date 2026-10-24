@@ -48,11 +48,12 @@ is reported on stderr and the others are still listed.
 
 OS and GROUPS are the system ump installed last and the groups it put
 the server in (from the state); -o wide adds the ID, the PROFILE and
-the disk LAYOUT of that installation, IPv6, product, kind and the
-attributes; -o json and -o yaml have every field. -o ansible prints the
-Ansible inventory of the servers ump installed, in the JSON of an
-inventory script: the hosts, groups and variables their host files
-have (the inventory plugin ofzhur.ansible.ump runs it).
+the disk LAYOUT of that installation, IPv6, the PRIVATE address (in the
+server's private network), product, kind and the attributes; -o json
+and -o yaml have every field. -o ansible prints the Ansible inventory
+of the servers ump installed, in the JSON of an inventory script: the
+hosts, groups and variables their host files have (the inventory plugin
+ofzhur.ansible.ump runs it).
 
 Every listing is recorded in the cache, as a new snapshot only when
 something changed. A listing a provider confirmed less than the cache TTL

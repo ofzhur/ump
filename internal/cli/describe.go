@@ -139,7 +139,8 @@ func (a *app) describeServers(cmd *cobra.Command, refs []string, output string) 
 // describeMachine asks the provider for details, or falls back to the
 // listing's view when the provider cannot describe machines.
 // umpSection is what ump itself knows about a server: the profile set
-// for it, its price and the user's attributes.
+// for it, its price, the user's attributes, its groups, its private
+// address and its installation.
 func umpSection(doc *state.Document, m provider.Machine) []provider.Section {
 	var s state.Server
 	if doc != nil {
@@ -164,6 +165,9 @@ func umpSection(doc *state.Document, m provider.Machine) []provider.Section {
 	}
 	if len(m.Groups) > 0 {
 		items = append(items, provider.Item{Key: "groups", Value: strings.Join(m.Groups, ", ")})
+	}
+	if p := s.Private; p != nil {
+		items = append(items, provider.Item{Key: "private", Value: p.Address + " in " + p.Network + " (" + p.CIDR + ")"})
 	}
 	if in := s.Installed; in != nil {
 		v := in.OS

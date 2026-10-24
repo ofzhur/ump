@@ -31,9 +31,11 @@ servers:                   # each over the defaults
     profile: db
     group: [db, backup]
     hostname: db-01.example.net
+    private-ip: 10.0.0.12
     user: [oleg:local, deploy]
     ipv6: false
   203.0.113.12:
+    private-network: none
     group: []
     ssh-key: local
     disks: [/dev/sda, /dev/sdb]
@@ -58,11 +60,11 @@ servers:                   # each over the defaults
 		t.Errorf("web-02: %+v", o)
 	}
 	o = p.defaults.over(p.servers[2].values).options()
-	if o.profile != "db" || strings.Join(o.groups, ",") != "db,backup" || o.hostname != "db-01.example.net" || strings.Join(o.users, " ") != "oleg:local deploy" || o.ipv6 {
+	if o.profile != "db" || strings.Join(o.groups, ",") != "db,backup" || o.hostname != "db-01.example.net" || o.privateIP != "10.0.0.12" || o.privateNetwork != "" || strings.Join(o.users, " ") != "oleg:local deploy" || o.ipv6 {
 		t.Errorf("db-01: %+v", o)
 	}
 	o = p.defaults.over(p.servers[3].values).options()
-	if len(o.groups) != 0 || strings.Join(o.keyFiles, ",") != "local" || o.disks != "/dev/sda,/dev/sdb" || strings.Join(o.sets, ",") != "kernel.extra=quiet" || o.via != "direct" || o.profile != "web" {
+	if len(o.groups) != 0 || strings.Join(o.keyFiles, ",") != "local" || o.disks != "/dev/sda,/dev/sdb" || strings.Join(o.sets, ",") != "kernel.extra=quiet" || o.via != "direct" || o.profile != "web" || o.privateNetwork != "none" || o.privateIP != "" {
 		t.Errorf("203.0.113.12: %+v", o)
 	}
 	if p, err := parsePlan([]byte("servers:\n  web-01:\n")); err != nil || len(p.servers) != 1 || p.defaults.over(p.servers[0].values).options().profile != "" {
@@ -89,8 +91,9 @@ servers:                   # each over the defaults
 		{"server:\n  web-01: {}\n", "line 1: server is no part of a plan (defaults, servers)"},
 		{"servers:\n  web-01: {}\nservers:\n  db-01: {}\n", "line 3: servers is given twice"},
 		{"servers:\n  web-01: {}\n  web-01: {}\n", "line 3: server web-01 is given twice"},
-		{"servers:\n  web-01:\n    profil: web\n", "line 3: servers.web-01: profil is no flag of a server (profile, layout, firewall, os, hostname, timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations, via, storage)"},
+		{"servers:\n  web-01:\n    profil: web\n", "line 3: servers.web-01: profil is no flag of a server (profile, layout, firewall, os, hostname, private-network, private-ip, timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations, via, storage)"},
 		{"defaults:\n  no-reboot: true\nservers:\n  web-01:\n", "line 2: defaults: no-reboot is no flag of a server"},
+		{"defaults:\n  profile: web\n  private-ip: 10.0.0.5\nservers:\n  web-01:\n", "line 3: defaults: private-ip would give every server the same address; give it per server"},
 		{"servers:\n  web-01:\n    layout: a\n    layout: b\n", "line 4: servers.web-01: layout is given twice"},
 		{"servers:\n  web-01: lvm-raid1\n", "line 2: servers.web-01 is a mapping of reinstall's flags to their values"},
 		{"servers:\n  web-01:\n    profile: [web]\n", "servers.web-01: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!seq into string"},
@@ -213,11 +216,11 @@ servers:
 	// with its server in front
 	profiles := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	for _, want := range []string{
-		"SERVER   PROVIDER   OS             LAYOUT        HOSTNAME            GROUPS\nweb-01   fake/1     ubuntu-26.04   lvm-striped   web-01              common,web\ndb-01    fake/2     debian-13      lvm-raid1     db-01.example.net   common,db,backup\nProvisioning after the installations: 00-base on the fleet.\nInstalling 2 servers, all at once ...\n",
+		"SERVER   PROVIDER   OS             LAYOUT        HOSTNAME            PRIVATE    GROUPS\nweb-01   fake/1     ubuntu-26.04   lvm-striped   web-01              10.0.0.1   common,web\ndb-01    fake/2     debian-13      lvm-raid1     db-01.example.net   10.0.0.2   common,db,backup\nProvisioning after the installations: 00-base on the fleet.\nInstalling 2 servers, all at once ...\n",
 		"[web-01] Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n",
 		"[db-01] Checking root access to 203.0.113.11 over SSH ... yes (Ubuntu 26.04 LTS).\n",
-		"[web-01] Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(profiles, "ubuntu-26.04.yaml") + ", layout lvm-striped) on web-01 as web-01 ...\n",
-		"[db-01] Installing debian-13 (profile debian-13 from " + filepath.Join(profiles, "debian-13.yaml") + ", layout lvm-raid1) on db-01 as db-01.example.net ...\n",
+		"[web-01] Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(profiles, "ubuntu-26.04.yaml") + ", layout lvm-striped, private address 10.0.0.1 in default) on web-01 as web-01 ...\n",
+		"[db-01] Installing debian-13 (profile debian-13 from " + filepath.Join(profiles, "debian-13.yaml") + ", layout lvm-raid1, private address 10.0.0.2 in default) on db-01 as db-01.example.net ...\n",
 		"[db-01] Waiting for SSH on 203.0.113.11 to go down ... still up; assuming it rebooted quickly.\n",
 		"[web-01] web-01 is up: Ubuntu 26.04.1 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).\n",
 		"[db-01] db-01 is up: Ubuntu 26.04.1 LTS, hostname db-01.example.net, root on /dev/mapper/vg0-root; log in as ump (ump ssh db-01).\n",
@@ -365,7 +368,7 @@ func TestMultiinstallChecksFirst(t *testing.T) {
 		{"a server locked", []string{"web-01", "db-01"}, "", func() {
 			b.Lock(context.Background(), "fake/2", backend.LockInfo{Key: "fake/2", Who: "bob@desk", What: "rescue", Since: time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)})
 		}, 2, "ump: db-01: fake/2 is locked by bob@desk since 2026-10-12T08:00:00Z (rescue); ump config state unlock fake/2 forces it; nothing was changed\n"},
-		{"no confirmation", []string{"web-01", "db-01"}, "", nil, 3, "web-01   fake/1     ubuntu-26.04   lvm-linear   web-01     common\ndb-01    fake/2     ubuntu-26.04   lvm-linear   db-01      common\nump: ump server multiinstall needs confirmation: run it in a terminal or pass --yes\n"},
+		{"no confirmation", []string{"web-01", "db-01"}, "", nil, 3, "web-01   fake/1     ubuntu-26.04   lvm-linear   web-01     10.0.0.1   common\ndb-01    fake/2     ubuntu-26.04   lvm-linear   db-01      10.0.0.2   common\nump: ump server multiinstall needs confirmation: run it in a terminal or pass --yes\n"},
 	}
 	for _, c := range cases {
 		args := append([]string{"server", "multiinstall"}, c.args...)

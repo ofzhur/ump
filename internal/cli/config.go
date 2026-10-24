@@ -23,24 +23,26 @@ func (a *app) newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "config",
 		Aliases: []string{"c", "cfg"},
-		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), users (user), userdata (userdata), keys (key) and the state backend (state)",
+		Short:   "Provider accounts (isp), OS profiles (os), disk layouts (disk-layout), firewalls (firewall), private networks (network), users (user), userdata (userdata), keys (key) and the state backend (state)",
 		Long: `The configuration: provider accounts under isp, the profiles that say
 what a server becomes under os, the named disk layouts, firewalls,
-users and userdata they refer to, UMP's own SSH key and the named keys,
-and where it all lives (state).
+private networks, users and userdata they refer to, UMP's own SSH key
+and the named keys, and where it all lives (state).
 
 Every entity has the same verbs with the same short forms: list (ls, l),
 get (g, show), view (v, show), create (c, new, add), add (a, new,
 create), edit (e), delete (d, rm, remove), remove (rm, d, delete),
 update (up), default (def), test (t). The entities: isp (i, provider,
 account), os (o, profile), disk-layout (dl, layout), firewall (fw),
-user (u), userdata (ud), key (k), state (st); config itself is c or cfg.`,
+network (net), user (u), userdata (ud), key (k), state (st); config
+itself is c or cfg.`,
 		Example: `  ump config isp add              # the account wizard
   ump config isp list             # the accounts: type, servers, settings, where the secrets come from
   ump config os create            # the profile wizard
   ump config os edit db           # a profile in your editor
   ump config disk-layout list     # the named disk layouts
   ump config firewall list        # the named firewalls
+  ump config network list         # the named private networks
   ump config user list            # the named users
   ump config userdata list        # what runs in a freshly installed system
   ump config key list             # UMP's own key and the named keys
@@ -51,7 +53,7 @@ user (u), userdata (ud), key (k), state (st); config itself is c or cfg.`,
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigUserCmd(), a.newConfigUserdataCmd(), a.newConfigStateCmd(), a.newConfigKeyCmd())
+	cmd.AddCommand(a.newConfigISPCmd(), a.newConfigOSCmd(), a.newConfigLayoutCmd(), a.newConfigFirewallCmd(), a.newConfigNetworkCmd(), a.newConfigUserCmd(), a.newConfigUserdataCmd(), a.newConfigStateCmd(), a.newConfigKeyCmd())
 	return cmd
 }
 

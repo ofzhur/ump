@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"net/netip"
 	"os"
 	"slices"
 	"sort"
@@ -21,8 +23,10 @@ import (
 	"github.com/ofzhur/ump/internal/provider"
 )
 
-// FormatVersion is the version of the document's layout.
-const FormatVersion = 1
+// FormatVersion is the version of the document's layout: 2 since the
+// private addresses. An ump reads the versions up to its own and refuses
+// a later one before it reads anything else.
+const FormatVersion = 2
 
 // File is the document's name in the home.
 const File = "state.yaml"
@@ -55,6 +59,11 @@ type Server struct {
 	// order: set by ump server reinstall --group (none without), changed
 	// by ump server set --group and --ungroup.
 	Groups []string `yaml:"groups,omitempty"`
+	// Private is the server's address in a private network: given with
+	// an installation (reserved before it starts) or by ump server set
+	// --private-ip and --private-network, one server's alone in its
+	// network, and kept across reinstalls.
+	Private *Private `yaml:"private,omitempty"`
 	// StaleFacts says that the facts a fact cache has of the server are
 	// those of its old system: set when an installation is recorded,
 	// taken away once a provisioning run completed on it.
@@ -77,9 +86,46 @@ type Install struct {
 	At           time.Time         `yaml:"at"`
 }
 
+// Private is a server's address in a private network of networks.yaml,
+// with the network's CIDR as it was when the address was given.
+type Private struct {
+	Network string `yaml:"network"`
+	CIDR    string `yaml:"cidr"`
+	Address string `yaml:"address"`
+}
+
+// Equal reports whether two private addresses are the same, nil for
+// none.
+func (p *Private) Equal(q *Private) bool {
+	if p == nil || q == nil {
+		return p == q
+	}
+	return *p == *q
+}
+
+// PrivateHolder is the server (provider/id) that has the address of p
+// in a network that overlaps p's, whatever its name, leaving out the
+// servers of except; empty when none has it.
+func (d *Document) PrivateHolder(p *Private, except ...string) string {
+	want, err := netip.ParsePrefix(p.CIDR)
+	if err != nil {
+		return ""
+	}
+	for _, ref := range slices.Sorted(maps.Keys(d.Servers)) {
+		q := d.Servers[ref].Private
+		if q == nil || q.Address != p.Address || slices.Contains(except, ref) {
+			continue
+		}
+		if c, err := netip.ParsePrefix(q.CIDR); err == nil && c.Overlaps(want) {
+			return ref
+		}
+	}
+	return ""
+}
+
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
-	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && !s.StaleFacts
+	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && s.Private == nil && !s.StaleFacts
 }
 
 // New returns an empty document.
@@ -93,6 +139,13 @@ func Parse(data []byte) (*Document, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return d, nil
 	}
+	// the version first: a later one has keys this ump does not know
+	var head struct {
+		Version int `yaml:"version"`
+	}
+	if yaml.Unmarshal(data, &head) == nil && head.Version > FormatVersion {
+		return nil, fmt.Errorf("the state is version %d; this ump reads up to %d", head.Version, FormatVersion)
+	}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(d); err != nil {
@@ -100,9 +153,6 @@ func Parse(data []byte) (*Document, error) {
 	}
 	if d.Version == 0 {
 		d.Version = FormatVersion
-	}
-	if d.Version > FormatVersion {
-		return nil, fmt.Errorf("the state is version %d; this ump reads up to %d", d.Version, FormatVersion)
 	}
 	if d.Servers == nil {
 		d.Servers = map[string]Server{}
@@ -114,6 +164,13 @@ func Parse(data []byte) (*Document, error) {
 		if s.Price != nil {
 			if s.Price.Currency == "" || s.Price.Period == "" || s.Price.Amount < 0 {
 				return nil, fmt.Errorf("servers.%s.price: needs amount, currency and period (month or hour)", ref)
+			}
+		}
+		if p := s.Private; p != nil {
+			a, aerr := netip.ParseAddr(p.Address)
+			c, cerr := netip.ParsePrefix(p.CIDR)
+			if p.Network == "" || aerr != nil || !a.Is4() || cerr != nil || !c.Contains(a) {
+				return nil, fmt.Errorf("servers.%s.private: needs network, cidr and an IPv4 address in it", ref)
 			}
 		}
 		if len(s.Roles) > 0 {

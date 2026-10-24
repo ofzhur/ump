@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
-
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -35,8 +37,10 @@ type namedSet struct {
 	// in order, and returns one row per name.
 	headers []string
 	rows    func(data []byte, names []string) ([][]string, error)
-	// check parses the file and validates every entry.
+	// check parses the file and validates every entry, and name, when
+	// set, the name of a new one beyond the rules for every name.
 	check func(data []byte) error
+	name  func(name string) error
 	// dir is the directory of the file (default: the profiles directory),
 	// and local means that nothing is downloaded before a command (the
 	// file is the user's alone, like keys.yaml).
@@ -45,6 +49,10 @@ type namedSet struct {
 	// saved, when set, runs after an edit is saved: with the entry's
 	// name, or "" after an edit of the whole file.
 	saved func(name string)
+	// keepChanged means that ump config os update adds a published entry
+	// only where the file lacks it, so that one the user changed stays
+	// as it is (networks.yaml: the servers' addresses were given in it).
+	keepChanged bool
 }
 
 // plurals is what several entries are called.
@@ -182,10 +190,24 @@ func (d *namedDoc) render(name string) string {
 	return b.String()
 }
 
+// prepare reads the file for a command, after the first use put the
+// published files into the profiles directory; one that a directory from
+// before it was published lacks is downloaded alone.
 func (set *namedSet) prepare(a *app, cmd *cobra.Command) (*namedDoc, error) {
 	if !set.local {
-		if _, err := a.prepareProfiles(cmd); err != nil {
+		cfg, err := a.prepareProfiles(cmd)
+		if err != nil {
 			return nil, err
+		}
+		if _, err := os.Stat(set.path()); errors.Is(err, fs.ErrNotExist) {
+			data, err := a.fetch(cmd.Context(), cfg.StorageURL()+"/profiles/"+set.file)
+			if err != nil {
+				return nil, fmt.Errorf("%s is not in %s, and the published one could not be fetched: %w", set.file, config.AbbreviateHome(config.ProfilesDir()), err)
+			}
+			if err := os.WriteFile(set.path(), data, 0o600); err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(a.stderr, "Downloaded the published %s into %s.\n", set.file, config.AbbreviateHome(config.ProfilesDir()))
 		}
 	}
 	return set.load()
@@ -306,6 +328,11 @@ func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 			if err := config.ValidateAccountName(name); err != nil {
 				return usageErrorf(cmd, "%s name: %v", set.noun, err)
 			}
+			if set.name != nil {
+				if err := set.name(name); err != nil {
+					return usageErrorf(cmd, "%s name: %v", set.noun, err)
+				}
+			}
 			if d.node(name) != nil {
 				return fmt.Errorf("%s %s exists already (ump config %s edit)", set.noun, name, set.use)
 			}
@@ -319,7 +346,16 @@ func (set *namedSet) newCreateCmd(a *app) *cobra.Command {
 			}
 			fmt.Fprintf(a.stdout, "Created the %s %s from %s in %s.\n", set.noun, name, from, config.AbbreviateHome(set.path()))
 			if a.isTTY != nil && a.isTTY() {
-				return set.editEntry(a, cmd, d, name)
+				if err := set.editEntry(a, cmd, d, name); err != nil {
+					return err
+				}
+			}
+			// a copy that is not valid beside its original (a network that
+			// overlaps it) is said, for the edit that follows
+			if data, err := os.ReadFile(set.path()); err == nil {
+				if err := set.check(data); err != nil {
+					fmt.Fprintf(a.stderr, "Warning: %v; ump config %s edit %s changes it.\n", err, set.use, name)
+				}
 			}
 			return nil
 		},
@@ -492,22 +528,73 @@ func (set *namedSet) entryNode(data []byte, name string) (*yaml.Node, error) {
 
 // merge replaces the file with the published one, keeping the entries
 // of the local file that the published one does not have (the user's
-// own); it returns their names. A local file that does not parse is
-// replaced as it is.
-func (set *namedSet) merge(published []byte) (kept []string, err error) {
+// own), and says so. With keepChanged it adds the published entries the
+// file lacks instead, keeps the published ones the user changed and says
+// which, and leaves out one that would make a valid file invalid. A
+// local file that does not parse is replaced as it is.
+func (set *namedSet) merge(published []byte) (string, error) {
 	pub, err := set.parse(published)
 	if err != nil {
-		return nil, fmt.Errorf("the published %s: %w", set.file, err)
+		return "", fmt.Errorf("the published %s: %w", set.file, err)
 	}
-	if local, err := set.load(); err == nil {
-		for _, n := range local.names() {
-			if pub.node(n) == nil {
-				pub.add(n, local.node(n))
-				kept = append(kept, n)
-			}
+	local, err := set.load()
+	if err != nil {
+		return "updated", pub.save()
+	}
+	said := "updated"
+	var kept []string
+	for _, n := range local.names() {
+		if pub.node(n) == nil {
+			kept = append(kept, n)
 		}
 	}
-	return kept, pub.save()
+	if !set.keepChanged {
+		for _, n := range kept {
+			pub.add(n, local.node(n))
+		}
+		if len(kept) > 0 {
+			said += fmt.Sprintf("; your %s kept: %s", set.plurals(), strings.Join(kept, ", "))
+		}
+		return said, pub.save()
+	}
+	var added, changed, left []string
+	data, _ := local.bytes()
+	valid := set.check(data) == nil
+	for _, n := range pub.names() {
+		if l := local.node(n); l != nil {
+			var lv, pv any
+			if l.Decode(&lv) != nil || pub.node(n).Decode(&pv) != nil || !reflect.DeepEqual(lv, pv) {
+				changed = append(changed, n)
+			}
+			continue
+		}
+		local.add(n, pub.node(n))
+		if valid {
+			data, _ := local.bytes()
+			if err := set.check(data); err != nil {
+				local.remove(n)
+				left = append(left, fmt.Sprintf("%s (%v)", n, err))
+				continue
+			}
+		}
+		added = append(added, n)
+	}
+	if len(added) == 0 {
+		said = "up to date"
+	}
+	if len(kept) > 0 {
+		said += fmt.Sprintf("; your %s kept: %s", set.plurals(), strings.Join(kept, ", "))
+	}
+	if len(changed) > 0 {
+		said += fmt.Sprintf("; published %s you changed, kept as they are: %s", set.plurals(), strings.Join(changed, ", "))
+	}
+	if len(left) > 0 {
+		said += fmt.Sprintf("; published %s left out: %s", set.plurals(), strings.Join(left, ", "))
+	}
+	if len(added) == 0 {
+		return said, nil
+	}
+	return said, local.save()
 }
 
 // loadNamed reads one of the files: the user's own in the profiles

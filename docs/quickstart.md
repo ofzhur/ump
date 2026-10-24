@@ -99,16 +99,17 @@ the last listing.
 
 ```console
 $ ump config os list
-Downloaded the published profiles, layouts, firewalls and users into ~/.config/ump/profiles (ump config os); make your own from them.
-    NAME           OS             DISKS        USERS   FIREWALL   FROM        DESCRIPTION
-*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump     default    published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
-    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump     default    published   Ubuntu 24.04 on every disk ...
-    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump     default    published   Ubuntu 22.04 on every disk ...
+Downloaded the published profiles, layouts, firewalls, networks, users and userdata into ~/.config/ump/profiles (ump config os); make your own from them.
+    NAME           OS             DISKS        USERS   FIREWALL   PRIVATE   FROM        DESCRIPTION
+*   ubuntu-26.04   ubuntu-26.04   lvm-linear   ump     default    default   published   Ubuntu 26.04 on every disk as one linear volume group; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+    ubuntu-24.04   ubuntu-24.04   lvm-linear   ump     default    default   published   Ubuntu 24.04 on every disk ...
+    ubuntu-22.04   ubuntu-22.04   lvm-linear   ump     default    default   published   Ubuntu 22.04 on every disk ...
 * the default (ump config os default NAME changes it); published profiles are replaced by ump config os update, make your own with ump config os create NAME --from ubuntu-26.04
 
 $ ump config os get ubuntu-26.04    # the profile itself
 $ ump config disk-layout list       # the named disk layouts: lvm-linear, lvm-striped, lvm-raid1, lvm-example
 $ ump config firewall list          # the named firewalls: default, web, open
+$ ump config network list           # the named private networks: default, 10.0.0.0/24
 $ ump config user list              # the named users: ump, the administrator
 $ ump config key list               # UMP's own key, and the keys you keep under names
 ```
@@ -119,8 +120,9 @@ config os update`, and what you make from them is yours. The [default
 profile](profiles.md#the-default-profile) installs Ubuntu 26.04 with
 every disk in one volume group, the sudo user `ump` with UMP's own key
 and the public keys next to your `~/.ssh/id_*` files, no root login and
-no passwords, an nftables firewall that lets ICMP and SSH in, and IPv6
-and the CPU mitigations off. Make it yours:
+no passwords, an nftables firewall that lets ICMP and SSH in, IPv6
+and the CPU mitigations off, and an address of its own in the private
+network `default` ([private networks](networks.md)). Make it yours:
 
 ```console
 $ ump config os create mine         # a few questions: image, layout, firewall, users, ...
@@ -142,12 +144,12 @@ runs in (step 8); until you have one, `--no-provision` installs only.
 
 ```console
 $ ump server reinstall web-01 --dry-run --no-provision
-Bring hetzner-cloud/234567 (web-01, 198.51.100.22) into the rescue system and show the installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear)? (dry run: nothing is erased) [y/N] y
+Bring hetzner-cloud/234567 (web-01, 198.51.100.22) into the rescue system and show the installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear, private address 10.0.0.1 in default)? (dry run: nothing is erased) [y/N] y
 Checking root access to 198.51.100.22 over SSH ... no.
 Going through the provider's rescue system.
 ...
 Waiting for the UMP rescue system on 198.51.100.22 ... up after 14s (ump-rescue 2026.10.13).
-Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01:
+Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear, private address 10.0.0.1 in default) on web-01:
 ==> machine: amd64, BIOS firmware, 2 CPUs, 3915 MB RAM
 ==> image: ubuntu-26.04 for amd64 from https://ump.zhurko.de/dl/os/ubuntu-26.04/amd64 (profile ubuntu-26.04, layout lvm-linear)
 ==> disks (1): /dev/sda (38.1G SSD)
@@ -155,6 +157,7 @@ Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/prof
 ==>   vg0/root: rest linear ext4 at /
 ==> network: ext01 (96:00:01:ab:cd:ef) 198.51.100.22/32,172.31.1.1; IPv6 off; DNS 1.1.1.1 8.8.8.8; hostname web-01; time zone UTC
 ==> interfaces: ext01 (ext, 96:00:01:ab:cd:ef, now eth0)
+==> private network: default, address 10.0.0.1 (of 10.0.0.0/24; recorded, no interface configured)
 ==> users: ump (2 key(s), sudo)
 ==> userdata: ubuntu; firewall: drop, allow icmp, tcp/22
 ==> dry run: stopping here, no disk was touched
@@ -170,9 +173,9 @@ again, and a real installation continues from the rescue system as it is.
 
 ```console
 $ ump server reinstall web-01 --no-provision
-Install ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on hetzner-cloud/234567 (web-01, 198.51.100.22) as web-01? Every disk of the server is erased. [y/N] y
+Install ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear, private address 10.0.0.1 in default) on hetzner-cloud/234567 (web-01, 198.51.100.22) as web-01? Every disk of the server is erased. [y/N] y
 ...
-Installing ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear) on web-01 as web-01 ...
+Installing ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/profiles/ubuntu-26.04.yaml, layout lvm-linear, private address 10.0.0.1 in default) on web-01 as web-01 ...
 ==> machine: amd64, BIOS firmware, 2 CPUs, 3.8 GB RAM
 ==> disks (1): /dev/sda (38.1G SSD)
 ...
@@ -288,8 +291,8 @@ playbooks, the logins, and facts and secrets.
   published; the same `get.sh` one-liner installs it. The rescue image,
   the installer and the OS image come from the storage at every use, so
   they are current without a new binary, and `ump config os update`
-  refreshes the published profiles, layouts, firewalls and users while
-  keeping what you made.
+  refreshes the published profiles, layouts, firewalls, networks, users
+  and userdata while keeping what you made.
 - **The inventory.** `ump server list -o wide` shows prices and your
   attributes, `-o json` feeds anything, `--diff` shows what changed;
   `ump server set NAME --price 89 --attr owner=alice` records what the

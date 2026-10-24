@@ -115,7 +115,7 @@ func TestRenderHostFile(t *testing.T) {
 	m := provider.Machine{Provider: "hetzner-cloud", Account: "main", ID: "123", Name: "web-01", IPv4: "203.0.113.10", IPv6: "2001:db8::/64",
 		Location: "fsn1", Product: "cx22", Attributes: map[string]string{"owner": "alice", "on_call": "yes", "note": "a: b", "cc": "4711"}}
 	rec := state.Install{OS: "ubuntu-26.04", Profile: "web", At: time.Date(2026, 10, 12, 11, 58, 30, 0, time.FixedZone("CEST", 7200))}
-	data, err := renderHostFile("web-01", []string{"common", "web", "db"}, hostVarsFor(m, rec, "ump"))
+	data, err := renderHostFile("web-01", []string{"common", "web", "db"}, hostVarsFor(m, rec, "ump", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ vars:
 		t.Errorf("host file:\n%s\nwant:\n%s", data, want)
 	}
 	// empty values are left out; IPv6 when there is no IPv4
-	data, err = renderHostFile("rack-07", []string{"common"}, hostVarsFor(provider.Machine{Provider: "manual", ID: "rack-07", Name: "rack-07", IPv6: "2001:db8::7"}, state.Install{}, "ops"))
+	data, err = renderHostFile("rack-07", []string{"common"}, hostVarsFor(provider.Machine{Provider: "manual", ID: "rack-07", Name: "rack-07", IPv6: "2001:db8::7"}, state.Install{}, "ops", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestReinstallProvisions(t *testing.T) {
 		t.Errorf("result has a run list:\n%s", out)
 	}
 	host := e.hostFile("web-01.yml")
-	if !strings.HasPrefix(host, "# web-01: written by ump (ump server reinstall, ump provision).\n# Edits are overwritten; overrides go to inventory/host_vars/web-01.yml.\nplugin: ofzhur.ansible.host\ngroups: [common, web, db]\nvars:\n  ansible_host: 203.0.113.10\n  ump_admin: ump\n  ump_name: web-01\n  ump_ref: fake/1\n  ump_provider: fake\n  ump_account: one\n  ump_location: eu-1\n  ump_product: m1\n  ump_os: ubuntu-26.04\n  ump_profile: ubuntu-26.04\n  ump_installed_at: \"2026-10-12T09:00:00Z\"\n  ump_attributes:\n    owner: alice\n") {
+	if !strings.HasPrefix(host, "# web-01: written by ump (ump server reinstall, ump provision).\n# Edits are overwritten; overrides go to inventory/host_vars/web-01.yml.\nplugin: ofzhur.ansible.host\ngroups: [common, web, db]\nvars:\n  ansible_host: 203.0.113.10\n  ump_admin: ump\n  ump_name: web-01\n  ump_ref: fake/1\n  ump_provider: fake\n  ump_account: one\n  ump_location: eu-1\n  ump_product: m1\n  ump_os: ubuntu-26.04\n  ump_profile: ubuntu-26.04\n  ump_installed_at: \"2026-10-12T09:00:00Z\"\n  ump_private_address: 10.0.0.1\n  ump_private_network: default\n  ump_private_cidr: 10.0.0.0/24\n  ump_attributes:\n    owner: alice\n") {
 		t.Errorf("host file:\n%s", host)
 	}
 	if st := e.readState(); !strings.Contains(st, "    groups:\n      - web\n      - db\n") {
@@ -1459,7 +1459,7 @@ func TestNoRebootThenProvision(t *testing.T) {
 			t.Errorf("result lacks %s:\n%s", want, out)
 		}
 	}
-	if st := e.readState(); !strings.Contains(st, "      hostname: web-02\n      admin: ops\n      at: 2026-10-12T10:00:00Z\n    groups:\n      - db\n    stale_facts: true\n") {
+	if st := e.readState(); !strings.Contains(st, "      hostname: web-02\n      admin: ops\n      at: 2026-10-12T10:00:00Z\n    groups:\n      - db\n    private:\n      network: default\n      cidr: 10.0.0.0/24\n      address: 10.0.0.1\n    stale_facts: true\n") {
 		t.Errorf("state:\n%s", st)
 	}
 	if strings.Join(e.forgotHosts, ",") != "203.0.113.10" || !strings.Contains(errOut, "Removed the old host key of 203.0.113.10 from ~/.ssh/known_hosts") {
@@ -1568,6 +1568,9 @@ func TestServerListAnsible(t *testing.T) {
         "ump_os": "ubuntu-26.04",
         "ump_profile": "ubuntu-26.04",
         "ump_installed_at": "2026-10-12T09:00:00Z",
+        "ump_private_address": "10.0.0.1",
+        "ump_private_network": "default",
+        "ump_private_cidr": "10.0.0.0/24",
         "ump_attributes": {
           "note": "a: b",
           "owner": "alice"

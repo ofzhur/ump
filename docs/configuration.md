@@ -1,9 +1,9 @@
 # Configuration
 
 ump keeps its configuration in YAML files under `~/.config/ump/`. The
-provider accounts are written by `ump config isp`, the profiles, layouts
-and firewalls edited through `ump config os|disk-layout|firewall`, and
-the rest is optional.
+provider accounts are written by `ump config isp`, the profiles, layouts,
+firewalls and private networks edited through `ump config
+os|disk-layout|firewall|network`, and the rest is optional.
 
 ## Where things live
 
@@ -23,9 +23,11 @@ the rest is optional.
 │   ├── NAME.yaml            your profiles
 │   ├── layouts.yaml         the named disk layouts: the published ones and yours
 │   ├── firewalls.yaml       the named firewalls
-│   └── users.yaml           the named users
+│   ├── networks.yaml        the named private networks
+│   ├── users.yaml           the named users
+│   └── userdata.yaml        the named userdata
 ├── keys.yaml                the named public keys (ump config key add)
-├── state.yaml               what ump knows about servers beyond the providers: profile, price, attributes, manual servers, installations
+├── state.yaml               what ump knows about servers beyond the providers: profile, price, attributes, manual servers, installations, private addresses
 ├── cache/                   the listing cache (cache_ttl, ump server list --diff, --cached)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)
 ├── staging_ed25519          UMP's own SSH key, generated on first use
@@ -157,12 +159,18 @@ provider.
 
 `~/.config/ump/profiles/` holds the [profiles](profiles.md) as
 `NAME.yaml`, the [disk layouts](disk-layouts.md) in `layouts.yaml`, the
-[firewalls](firewalls.md) in `firewalls.yaml` and the
-[users](profiles.md#users) in `users.yaml`. The first command that
-needs the directory creates it and downloads the published files from
-the storage. The published profiles (`ubuntu-26.04`, `ubuntu-24.04`,
+[firewalls](firewalls.md) in `firewalls.yaml`, the [private
+networks](networks.md) in `networks.yaml`, the [users](users.md) in
+`users.yaml` and the [userdata](userdata.md) in `userdata.yaml`. The
+first command that needs the directory creates it and downloads the
+published files from the storage; a named file it lacks (one published
+after it was made, such as `networks.yaml`) is downloaded by the first
+command of its own, and installations read the published one until
+then. The published profiles (`ubuntu-26.04`, `ubuntu-24.04`,
 `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`, `cachyos`) and the published entries of the named files are
-templates that `ump config os update` replaces; what you create under
-names of your own is yours and never touched. `default_profile` in
-`config.yaml` (set with `ump config os default NAME`) names the profile
-taken when nothing else says which; `ubuntu-26.04` when unset.
+templates that `ump config os update` replaces (a published network
+it only adds where it is missing, so an edited one survives); what you
+create under names of your own is yours and never touched.
+`default_profile` in `config.yaml` (set with `ump config os default
+NAME`) names the profile taken when nothing else says which;
+`ubuntu-26.04` when unset.

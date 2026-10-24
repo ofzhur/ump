@@ -2,10 +2,10 @@
 
 The **state** is everything ump keeps: `config.yaml` with the
 accounts, the secret files, the profiles with the layouts, firewalls,
-users and userdata, the named keys, UMP's own SSH key, `state.yaml`
-(what ump knows about servers beyond the providers' word: profile,
-price, attributes, the servers added by hand, what was installed where,
-the groups)
+private networks, users and userdata, the named keys, UMP's own SSH
+key, `state.yaml` (what ump knows about servers beyond the providers'
+word: profile, price, attributes, the servers added by hand, what was
+installed where, the groups, the private addresses)
 and the listing cache. It lives in a **state backend**. Without one
 configured, that is the local directory `~/.config/ump`, and a single
 person on one machine never needs more.
@@ -210,7 +210,7 @@ is used as it was).
 
 ```yaml
 # state.yaml
-version: 1
+version: 2
 updated: 2026-10-14T12:00:00Z
 servers:
   hetzner-cloud/234567:
@@ -228,6 +228,7 @@ servers:
       interfaces: {ext01: "96:00:01:02:03:04"}
       at: 2026-10-14T11:58:30Z
     groups: [web]
+    private: {network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}
 manual:
   rack-07:
     ipv4: 192.0.2.7
@@ -237,6 +238,15 @@ manual:
     note: KVM at 192.0.2.250
 ```
 
+`version` is the layout of the file: 2 since `private`. An ump reads
+the layouts up to its own and refuses a later one before anything else
+(`the state is version 2; this ump reads up to 1`); an ump from before
+that check fails instead on a key it does not know, where there is one:
+`private`, or `stale_facts` for one older still. A state of an older
+layout loads as it is, and the next write gives it this ump's. So every
+machine that shares a state upgrades ump together: once one writes it,
+the others refuse it until they upgrade.
+
 `servers` is keyed by `provider/id`; a record that holds nothing
 disappears. `installed` is written by `ump server reinstall` when the
 new system answered, from what `/etc/ump/install` on the machine says
@@ -245,8 +255,17 @@ version, kernel and interfaces), and shown by `ump server show`.
 `groups` are the server's Ansible groups besides `common`
 ([provisioning](provisioning.md)): set by `ump server reinstall
 --group`, changed by `ump server set --group` and `--ungroup`; the
-listings show them as in the inventory, `common` first. `stale_facts:
-true` comes with every installation recorded and goes once a
+listings show them as in the inventory, `common` first. `private` is
+the server's address in a [private network](networks.md), with the
+network's CIDR as it was when the address was given: recorded when an
+installation starts, once the question is answered, in a
+read-modify-write that refuses an address another server has, in any
+network that has it, or a server whose address changed meanwhile (so
+two umps never give one address twice, and what the installed system
+records is what the state says), given back by an installation that
+fails before its installer wrote the disks, and changed by `ump server
+set --private-ip` and `--private-network` under the server's lock.
+`stale_facts: true` comes with every installation recorded and goes once a
 provisioning run completed on the server: until then, every run with it
 clears the facts a fact cache still has of its old system. A state an
 older ump wrote with `roles` is read as `groups` (`-` and `.` become

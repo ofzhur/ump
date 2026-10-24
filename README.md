@@ -103,7 +103,7 @@ Consul, Vault, SSH), servers can also pull the repository themselves
 
 ## The objects
 
-Seven kinds of things are configured, all as YAML in `~/.config/ump/`,
+Eight kinds of things are configured, all as YAML in `~/.config/ump/`,
 each with its own `ump config` command (`list`, `get`, `create`,
 `edit`, `delete`; `create` and `add` ask their questions on a terminal;
 `edit NAME` opens that one entry in your editor, `edit` alone the whole
@@ -115,6 +115,7 @@ file):
 | [OS profiles](docs/profiles.md) | `ump config os` | what a server becomes: image, disk layout, users and keys, userdata, firewall, kernel command line |
 | [Disk layouts](docs/disk-layouts.md) | `ump config disk-layout` | partitions, md arrays, volume groups and volumes, written once and applied to whatever disks a server has |
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
+| [Private networks](docs/networks.md) | `ump config network` | an IPv4 network in which every server ump installs gets an address of its own, kept across reinstalls, for the roles that connect the servers |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
 | [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, Debian, Arch Linux and CachyOS, a NixOS module for NixOS; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
@@ -129,7 +130,8 @@ Linux from its mirrors, see [Arch Linux](docs/oses.md#arch-linux)) and
 `cachyos` (experimental: Arch with CachyOS's x86-64-v3 packages, see
 [CachyOS](docs/oses.md#cachyos)), the layouts `lvm-linear`,
 `lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
-`web` and `open`, and the user `ump`. They are templates: make your own
+`web` and `open`, the private network `default` (`10.0.0.0/24`, which
+every published profile names) and the user `ump`. They are templates: make your own
 from them (`ump config os create`, `ump config user create`, ...), and
 `ump config os update` refreshes the published ones while keeping yours.
 
@@ -175,6 +177,7 @@ own](images/rescue/README.md#your-own-storage).
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
+| [Private networks](docs/networks.md) | the networks, the default one, addresses given automatically or by hand, kept and never shared; the inventory variables for mesh roles; provider uplinks (vRack, vSwitch, VPC) |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
 | [Userdata](docs/userdata.md) | what a new system gets on top of its profile: fields, how it runs, the published entries, managing and using them |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
@@ -200,7 +203,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
-| [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, users and userdata come from |
+| [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, networks, users and userdata come from |
 | [Roadmap](docs/roadmap.md) | what is there, what comes next, open questions |
 | [Skill](docs/skill.md) | design outline for a planned part: operating a fleet and its Terraform and Ansible repository with an AI agent |
 
