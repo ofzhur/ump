@@ -5,20 +5,22 @@ disks, the users and their keys, the network, the firewall, and the
 [userdata](userdata.md) of the profile, which ran before the first boot.
 Provisioning is the next step: it turns that system into what the server
 is for (a web server, a database, a monitoring node). ump does it with
-Ansible from your infrastructure repository: it puts the server into
-the repository's inventory, in **groups**, and right after the
-installation runs the playbooks of those groups for it, from the
-repository over SSH. That is how provisioning always starts;
-afterwards, servers can also [pull](#servers-that-pull) the repository
-themselves.
+Ansible from your infrastructure repository: it puts every server it
+installs into the repository's inventory, in **groups**, and runs the
+repository's playbooks over the fleet, each play on the hosts its
+`hosts:` names. A reinstall ends with that run; `ump provision` runs it
+whenever you want the fleet converged. Servers can also
+[pull](#servers-that-pull) the repository themselves.
 
 ```console
-$ cd ~/src/infra                                   # the infrastructure repository
-$ ump server reinstall web-01 --group web           # install, then provision: common, web
-$ ump server reinstall db-01 --group db,backup      # several groups, in order
-$ ump server provision web-01 --group monitoring    # add a group to an installed server
-$ ump server provision web-01                       # run its run list again
-$ ump server reinstall lab-01 --no-provision        # install only
+$ cd ~/src/infra                                        # the infrastructure repository
+$ ump server reinstall web-01 --group web                # install, then provision the fleet
+$ ump server reinstall db-01 --group db --hosts db-01   # install, then provision db-01 alone
+$ ump server set web-01 --group monitoring              # a group more; the next run applies it
+$ ump provision                                         # converge the fleet
+$ ump provision --hosts web --playbook 10-web           # some hosts, some playbooks
+$ ump provision --hosts web-01 -- --check --diff        # what Ansible would change
+$ ump server reinstall lab-01 --no-provision            # install only
 ```
 
 ## Installation and provisioning
@@ -26,17 +28,15 @@ $ ump server reinstall lab-01 --no-provision        # install only
 | | Installation | Provisioning |
 |---|---|---|
 | What | the OS, disks, users, network, firewall, userdata | what the server's groups say: users after day one, services, their configuration |
-| Defined by | the [profile](profiles.md) | the playbooks of the groups, in your repository and in the collection [ofzhur.ansible](https://github.com/ofzhur/ansible) |
-| When | before the first boot | after the first boot, and again with `ump server provision` or a pull |
-| Run by | `ump server reinstall` | `ump server reinstall`, `ump server provision`, `ansible-playbook` from the repository, or `ansible-pull` on the server |
+| Defined by | the [profile](profiles.md) | the playbooks of your repository, which use the collection [ofzhur.ansible](https://github.com/ofzhur/ansible) |
+| When | before the first boot | after the first boot, and with every `ump provision` or pull |
+| Run by | `ump server reinstall` | `ump server reinstall`, `ump provision`, `ansible-playbook` from the repository, or `ansible-pull` on the server |
 
 Every `ump server reinstall` provisions, unless `--no-provision`: the
 server is then the operating system plus the userdata, nothing more,
-which is the right end for a machine you configure by hand, and for
-NixOS, which is configured by its modules: the collection's playbooks
-need Python and support Ubuntu, Debian and Arch Linux.
+until the next `ump provision`, which includes it (below).
 
-## Groups and run lists
+## Groups and playbooks
 
 Every server ump installs is in the group `common`. `--group` adds
 groups (repeatable, or comma-separated); a group name is an Ansible
@@ -45,37 +45,62 @@ digit; `all`, `ungrouped`, `localhost` and `_meta` are Ansible's own,
 `common` is implied. Nor can the hostname be `localhost` or
 `127.0.0.1`: plays and tasks for `localhost` would run on the server.
 
-A server's **run list** is its groups in order, `common` first, and each
-group is a playbook:
+Every `playbooks/*.yml` of the repository runs, in file-name order, on
+the hosts its plays name: `hosts: all`, `hosts: web`, `hosts:
+web:&prod`. A group needs no playbook, and a playbook picks its hosts;
+number the files to order them. The collection's playbooks come in
+through a file of one line:
 
-- `playbooks/GROUP.yml` of the repository, when it has one;
-- else the collection's `ofzhur.ansible.GROUP`.
-
-```console
-$ ump server reinstall web-01 --group web,monitoring
-...
-Run list after the first boot: common, web, monitoring (ofzhur.ansible.common, playbooks/web.yml, playbooks/monitoring.yml).
+```yaml
+# playbooks/00-base.yml
+- import_playbook: ofzhur.ansible.base
 ```
 
-ump runs the whole run list in one `ansible-playbook` limited to the
-server. A group without a playbook is an error, found before anything
-happens (below).
+```yaml
+# playbooks/10-web.yml
+- hosts: web
+  become: true
+  roles: [nginx]
+```
+
+Only `*.yml` directly in `playbooks/` runs, files or links to files: dot
+files, other names and subdirectories do not, so tasks files and the
+like go into subdirectories. `--playbook NAME` (the file name without
+`.yml`; repeatable, or comma-separated) runs those alone, in file-name
+order still.
+
+ump runs them as one playbook that imports them, as a `site.yml` does
+(a dot file it writes into `playbooks/` for the run): a host that
+fails or is unreachable is left out of the plays after, and the others
+go on. Given one by one, `ansible-playbook` would stop at the first
+file with such a host, for every host. A play whose every host failed
+ends the run, as Ansible does.
 
 **Groups are best treated as immutable.** A server gets its groups when
 it is installed, and a server that should become something else is
 reinstalled with the new ones: every group starts from a fresh system,
-and a server's state follows from its profile and groups alone. Adding
-a group later (`ump server provision NAME --group GROUP`) suits groups
-built for it, such as monitoring or backup agents; removing one takes a
-reinstall.
+and a server's state follows from its profile and groups alone.
+`ump server set NAME --group GROUP` adds a group and `--ungroup GROUP`
+takes one away, which suits groups built for it, such as monitoring or
+backup agents. Nothing runs then: the next `ump provision` puts the
+server into its groups and runs their plays on it; what the plays of a
+group it left did stays until a reinstall.
 
 ump records the groups in its [state](state.md), without `common`: a
 successful `ump server reinstall` sets them (none without `--group`;
-with `--no-reboot` too), `ump server provision` adds to them; a dry run
-or a failed installation changes nothing. The listings show them as in
-the inventory, `common` first: the `GROUPS` column of `ump server list`,
-`groups` in its `-o json` and in `ump server show`; a server ump did not
-install has none.
+with `--no-reboot` too), `ump server set` changes them; a dry run or a
+failed installation changes nothing. The listings show them as in the
+inventory, `common` first: the `GROUPS` column of `ump server list`,
+`groups` in its `-o json` and in `ump server show`; a server ump did
+not install has none.
+
+A server that Ansible must not touch (NixOS, a machine configured by
+hand) is in `common` all the same: give it a group of its own (`--group
+nixos`) and leave that group out, with `hosts: all:!nixos` in the plays
+or `--hosts 'all:!nixos'`. The collection's `base` runs on `common`,
+every server ump installs; a repository with such servers writes its
+own `00-base.yml`, a play on `common:!nixos` with the role
+`ofzhur.ansible.users`.
 
 ## The infrastructure repository
 
@@ -90,7 +115,7 @@ infra/
 │   ├── host_vars/             overrides per host
 │   ├── hosts/                 written by ump: one file per server
 │   └── ump.yml                or this instead: ump as the inventory (below)
-├── playbooks/                 web.yml, db.yml, ...: the playbooks of your own groups
+├── playbooks/                 00-base.yml, 10-web.yml, ...: every one runs, in this order
 └── collections/ansible_collections/ofzhur/ansible    the collection, a git submodule
 ```
 
@@ -101,47 +126,64 @@ git submodule add -b main https://github.com/ofzhur/ansible.git collections/ansi
 cp collections/ansible_collections/ofzhur/ansible/config/push/ansible.cfg .
 mkdir -p inventory playbooks
 printf 'all:\n  children:\n    common:\n' > inventory/groups.yml
-printf '.cache/\n' > .gitignore
+printf -- '- import_playbook: ofzhur.ansible.base\n' > playbooks/00-base.yml
+printf '.cache/\nplaybooks/.ump-*\n' > .gitignore
 ```
 
 Ansible reads an empty inventory directory as a broken inventory, hence
 `groups.yml`. The template reads collections from the repository only,
 so a playbook uses `ansible.builtin` and what is installed under
-`collections/`; its fact cache is `.cache/`, which stays out of git.
+`collections/`; its fact cache is `.cache/`, which stays out of git, as
+does what ump writes into `playbooks/` for a run.
 
-Before `ump server reinstall` touches anything (before the question, the
-rescue system and the server's lock), it checks:
+Before `ump server reinstall` or `ump provision` touches anything (for
+a reinstall: before the question, the rescue system and the server's
+lock), ump checks:
 
-1. **The layout:** `ansible.cfg` and `inventory/` in the current
-   directory, `ansible-playbook` in `PATH` (from `ansible-core`).
-   Without them it stops with exit status 2 and names what is missing;
-   `--no-provision` needs none of them. A world-writable directory
-   stops it too: Ansible ignores an `ansible.cfg` there, and ump, which
-   names it in `ANSIBLE_CONFIG`, does not take it either.
-2. **The run list:** `ansible-playbook --syntax-check` on the playbooks,
-   which also reads the inventory. A group without a playbook, a
-   playbook that does not parse or a broken inventory stop it with exit
-   status 2 and Ansible's output.
+1. **The layout:** `ansible.cfg`, `inventory/` and a playbook in
+   `playbooks/` in the current directory, `ansible-playbook` in `PATH`
+   (from `ansible-core`). Without them it stops with exit status 2 and
+   names what is missing; without a playbook, it says to create
+   `playbooks/00-base.yml`. `--no-provision` needs none of them. A
+   world-writable directory stops it too: Ansible ignores an
+   `ansible.cfg` there, and ump, which names it in `ANSIBLE_CONFIG`,
+   does not take it either.
+2. **The playbooks:** `ansible-playbook --syntax-check` on those of the
+   run, which also reads the inventory. A playbook that does not parse
+   or a broken inventory stop it with exit status 2 and Ansible's
+   output; so does a `--playbook` that is not there.
 3. **The names:** a host and a group of the same name make the group's
    plays match only the host (Ansible resolves a pattern that names a
-   host as that host). A hostname that is a group of the run list or
-   of the inventory (`ansible-inventory --list`), or a group of the run
-   list that is another host of the inventory, stops it with exit
-   status 2; so does the hostname `localhost` or `127.0.0.1`.
-4. **The host file:** `inventory/hosts/HOSTNAME.yml` or `HOSTNAME.yaml`
-   that ump did not write for this server stops it with exit status 2:
+   host as that host). A hostname that is a group of the server, of
+   another server ump installed (its groups in the state) or of the
+   inventory (`ansible-inventory --list`), or a group of the server that
+   is another host of the inventory, stops it with exit status 2; so
+   does the hostname `localhost` or `127.0.0.1`. For a group a server
+   has in the state, the message says how to take it away: `ump server
+   set NAME --ungroup GROUP`.
+4. **The host files:** `inventory/hosts/HOSTNAME.yml` or `HOSTNAME.yaml`
+   that ump did not write for that server stops it with exit status 2:
    one without `ump_ref` (written by hand), or one of another server.
    When ump is the inventory, any host file of the hostname or of the
    server stops it (the host would be defined twice), and so does the
    hostname as another host of the inventory.
+5. **The hosts:** `--hosts` must match a host of the inventory as it
+   will be: the current one plus the hosts ump writes (for a reinstall,
+   the server under its hostname in `common` and its `--group` groups).
+   `ansible-inventory --limit` matches it as Ansible does, on a copy of
+   the group tree in a temporary file outside the repository. Matching
+   none is exit status 2.
 
-`--dry-run` makes the same checks, shows the run list with the plan and
-writes nothing.
+A reinstall checks the names, the host file of its server and `--hosts`
+up front, and again for every server before the run; `ump provision`
+checks them for every server ump installed, under the fleet's lock
+(below), before it writes a file. `--dry-run` makes the checks, shows
+the playbooks with the plan and writes nothing.
 
 ## The inventory: host files or ump
 
-ump puts a server into the inventory one of two ways, with the same
-hosts, groups and variables either way:
+Every server ump installed is in the inventory, one of two ways, with
+the same hosts, groups and variables either way:
 
 1. **Host files**, the default: ump writes one file per server into
    `inventory/hosts/`, read by the collection's inventory plugin
@@ -167,18 +209,19 @@ Which to choose:
 
 ### Host files
 
-After the installation (the new system is up and recorded) ump writes
-the server's host file, `inventory/hosts/HOSTNAME.yml`, read by the
-collection's inventory plugin `ofzhur.ansible.host`:
+Every run of `ump provision`, and the one after a reinstall, writes
+the host file of every server ump installed,
+`inventory/hosts/HOSTNAME.yml`, read by the collection's inventory
+plugin `ofzhur.ansible.host`:
 
 ```yaml
-# web-01: written by ump (ump server reinstall, ump server provision).
+# web-01: written by ump (ump server reinstall, ump provision).
 # Edits are overwritten; overrides go to inventory/host_vars/web-01.yml.
 plugin: ofzhur.ansible.host
 groups: [common, web]
 vars:
   ansible_host: 203.0.113.10
-  ansible_user: ump
+  ump_admin: ump
   ump_name: web-01
   ump_ref: hetzner-cloud/234567
   ump_provider: hetzner-cloud
@@ -194,14 +237,20 @@ vars:
 
 - The file name is the hostname of the installation (`--hostname`, else
   the server's name). `ansible_host` is the IPv4 address, else the IPv6
-  one; `ansible_user` the administrator of the installation (`ump` with
-  the published profiles). `ump_attributes` are your
+  one; `ump_admin` the administrator of the installation (`ump` with
+  the published profiles), whom ump's runs log in as; there is no
+  `ansible_user`, so that people log in as themselves
+  ([below](#logins-umps-and-yours)). `ump_attributes` are your
   [attributes](inventory.md#attributes). Variables without a value
   (`ump_location`, `ump_product`, ...) are left out.
-- ump writes the file under a dot name, which Ansible ignores, and
-  renames it into place. A file of another name for the same server (an
-  old hostname) is removed. A file of the hostname without `ump_ref`
-  is never overwritten: remove it, and keep what it said in
+- The files come from the state and the providers' listings as they are
+  at the run, under the fleet's lock: a new server, new groups (`ump
+  server set`), a new address or attribute. Only a file that changed is
+  written, under a dot name, which Ansible ignores, and renamed into
+  place. A file of another name for the same server (an old hostname)
+  is removed. An account that cannot be listed keeps its servers' files
+  as they are. A file of the hostname without `ump_ref` is never
+  overwritten: remove it, and keep what it said in
   `inventory/host_vars/HOSTNAME.yml`.
 - Values are data, never templates. Overrides go to
   `inventory/host_vars/HOSTNAME.yml`, group variables to
@@ -210,16 +259,20 @@ vars:
 - Commit the files: the inventory is the repository's, and Ansible runs
   from it without ump.
 - ump does not remove the host file of a server that is gone: `git rm`
-  it. With the last one, remove `inventory/hosts/` too: Ansible fails on
-  an empty directory, and so does ump's syntax check.
+  it, or every run finds it unreachable. With the last one, remove
+  `inventory/hosts/` too: Ansible fails on an empty directory, and so
+  does ump's syntax check.
 
 A server installed with `--no-provision` from the repository gets its
-host file too: ump installed it, so it belongs in the inventory. The
-names and the host file are checked first, as above, which takes
-`ansible-inventory` in `PATH`; without it (or in a world-writable
-directory), and from anywhere else, it gets none until `ump server
-provision` runs from the repository. With `--no-reboot` the host file
-waits for that too.
+host file at once, under the fleet's lock: ump installed it, so it
+belongs in the inventory. Its names and host file are checked first, as
+above, which takes `ansible-inventory` in `PATH`; without it (or in a
+world-writable directory), and from anywhere else, the next `ump
+provision` from the repository writes it. A host file that cannot be
+written then (another's in its way meanwhile, the lock held too long)
+ends the reinstall with that exit status. With `--no-reboot` the host
+file waits for the next run too, and until the reboot the run finds the
+server unreachable.
 
 ### ump as the inventory
 
@@ -241,7 +294,7 @@ $ ump server list -o ansible
     "hostvars": {
       "web-01": {
         "ansible_host": "203.0.113.10",
-        "ansible_user": "ump",
+        "ump_admin": "ump",
         "ump_name": "web-01",
         "ump_ref": "hetzner-cloud/234567",
         ...
@@ -255,18 +308,18 @@ $ ump server list -o ansible
 ```
 
 - A file directly in `inventory/` that says `plugin:
-  ofzhur.ansible.ump` makes ump the inventory for `ump server
-  reinstall` and `provision`: they write no host file and say so (`No
-  host file: inventory/ump.yml makes ump the inventory, with web-01 in
-  common, web.`); the checks and the run list stay as they are.
-- A host file of the server beside it, of its hostname or with its
+  ofzhur.ansible.ump` makes ump the inventory for `ump server reinstall`
+  and `ump provision`: they write no host file and say so (`No host
+  files: inventory/ump.yml makes ump the inventory.`); the checks and
+  the run stay as they are.
+- A host file of a server beside it, of its hostname or with its
   `ump_ref`, stops them with exit status 2: the host would be defined
   twice. Switching from host files, `git rm -r inventory/hosts`.
 - Every server ump installed is in it, in `common`, from its record
   on: also one installed with `--no-provision` or `--no-reboot`, or from
-  outside the repository, and a NixOS one, which the collection's
-  playbooks do not apply to. Keep `ump.yml` to the accounts of the
-  servers Ansible configures (below), or use host files.
+  outside the repository, and a NixOS one. Keep `ump.yml` to the
+  accounts of the servers Ansible configures (below), or give the
+  others a group the plays leave out.
 - A server gone from its provider's listing is gone from the
   inventory. Of two servers with the same hostname, the later
   installation has it; the other is left out with a note on stderr, and
@@ -285,11 +338,6 @@ $ ump server list -o ansible
   cache](inventory.md#the-listing) spares the providers most of those
   listings. When ump runs Ansible itself, the plugin's ump is part of
   that run (below).
-- When ump cannot record an installation in the state (the backend
-  does not answer, say), the plugin would list the old record: `ump
-  server reinstall` runs nothing then and ends with exit status 6. It
-  prints the record; add it to `state.yaml` by hand and run `ump server
-  provision NAME`.
 
 ```yaml
 # inventory/ump.yml: the servers of two accounts, as ump last listed them
@@ -298,18 +346,60 @@ arguments: [--account, main, --account, lab]
 cached: true
 ```
 
+When ump cannot record an installation in the state (the backend does
+not answer, say), the inventory would have the old record, from the
+state as from the host files that `ump provision` writes: `ump server
+reinstall` provisions nothing then and ends with exit status 6. It
+prints the record; add it to `state.yaml` by hand and run `ump
+provision --hosts HOSTNAME`.
+
+## Logins: ump's and yours
+
+ump's runs log in to every host as its administrator, `ump_admin`,
+with UMP's key; you log in as yourself:
+
+- **ump** passes `--extra-vars '{"ansible_ssh_user": "{{ ump_admin |
+  default(ansible_user) | default(none) }}"}'`: an extra variable wins
+  over `-u`, `remote_user` and the inventory, so every server ump
+  installed is logged in to as its own administrator, two servers with
+  two administrators in the same run. A host without `ump_admin` (one
+  ump did not install, in `groups.yml`) is logged in to as the inventory
+  says (`ansible_user`), else as Ansible would, and with UMP's key,
+  which it does not have: give it its key,
+  `ansible_ssh_private_key_file` in `host_vars/` or an `IdentityFile` in
+  `~/.ssh/config` (ump's runs offer the keys given alone, below).
+  Ansible's ssh connection takes `ansible_ssh_user` over `ansible_user`,
+  which is why it can fall back to it. A plain
+  `ansible_user={{ ump_admin }}` would fail every host without
+  `ump_admin`, and every play on `localhost`.
+- **You**, with `ansible-playbook playbooks/10-web.yml` from the
+  repository, log in as your user name, or `-u NAME`, or `remote_user`
+  of `ansible.cfg`, with your keys: the inventory names no login. The
+  collection's role `users` gives your user its key and sudo on every
+  server (`inventory/group_vars/common/users.yml`), so that you need
+  neither UMP's key nor the administrator.
+
 ## How ump runs Ansible
 
 ```console
-$ ansible-playbook ofzhur.ansible.common playbooks/web.yml --limit web-01 --private-key ~/.config/ump/staging_ed25519
+$ ansible-playbook playbooks/.ump-provision-4711.yml --private-key ~/.config/ump/staging_ed25519 \
+    --extra-vars '{"ansible_ssh_user": "{{ ump_admin | default(ansible_user) | default(none) }}"}' \
+    [ANSIBLE-ARGS...] [--limit PATTERN]
 ```
 
 - In the repository's root, with `ANSIBLE_CONFIG` set to its
-  `ansible.cfg`, whatever the environment says.
-- As the server's administrator (`ansible_user` of the inventory) with
-  UMP's key; the administrator has sudo without a password, which
-  `become` uses. Variables of the inventory (`ansible_user`,
-  `ansible_ssh_private_key_file`) win over ump's.
+  `ansible.cfg`, whatever the environment says, and without
+  `ANSIBLE_INVENTORY` and `ANSIBLE_HOSTS`: the inventory is the one
+  `ansible.cfg` names.
+- The playbooks of the run through one that imports them, written into
+  `playbooks/` and removed after the run (above); a single playbook
+  runs as it is, except with servers installed since a run last
+  completed on them (`stale_facts` in the [state](state.md)): then the
+  run starts with `meta: clear_facts` on those of them it has, so that a
+  new system starts without the old one's facts, which a fact cache
+  keeps.
+- Every host as its administrator with UMP's key (above); the
+  administrator has sudo without a password, which `become` uses.
 - With the keys given only: `ANSIBLE_SSH_EXTRA_ARGS` (and
   `ANSIBLE_SFTP_EXTRA_ARGS`, `ANSIBLE_SCP_EXTRA_ARGS`) set to `-o
   IdentitiesOnly=yes`, so that ssh offers UMP's key (or the inventory's
@@ -330,36 +420,94 @@ $ ansible-playbook ofzhur.ansible.common playbooks/web.yml --limit web-01 --priv
   groups ump recorded before the run. It leaves the mirror of a [state
   backend](state.md#how-the-mirror-works) to this one: no pull, no
   push, no lock to wait for.
-- Ansible's output goes to stderr; stdout stays for the result of
-  `ump server reinstall -o json` (or `yaml`), which has `groups` (as in
-  the inventory), `run_list`, `playbooks` and `provisioned`.
+- Arguments after `--` go to `ansible-playbook` after ump's, and
+  `--limit PATTERN` of `--hosts` after them: `--check --diff`, `-v`,
+  `--tags`, `-e`. `--limit` and `--inventory` are refused there, in
+  every form `ansible-playbook` takes (`-l`, `-vl`, `--lim`, `-i`,
+  `--inv`): the hosts are `--hosts`, which ump checks first, and the
+  inventory is the repository's.
+- Ansible's output goes to stderr, in its colors on a terminal; stdout
+  stays for the result.
 
-A run list that does not complete is exit status 6: the server is
-installed and recorded, and in the inventory. Fix what Ansible reports
-and run `ump server provision NAME`.
+## One run at a time: the fleet's lock
+
+`ump provision`, and the provisioning after `ump server reinstall`, take
+the fleet's lock in the [state backend](state.md), beside the servers'
+locks, for the whole run: the checks of the names and of `--hosts`, the
+host files and Ansible; so does the host file of a reinstall with
+`--no-provision`. Another run waits for it, with a line that says who
+holds it, up to the configured wait (`wait:` in `config.yaml`,
+`UMP_WAIT`; 15 minutes), and then gives up with exit status 3, as a
+locked server does. Two reinstalls run side by side and provision one
+after the other. The lock keeps runs apart, not servers: a server that a
+reinstall has in hand meanwhile is in the run, and unreachable; its
+reinstall provisions it. `ump config state locks` lists the lock; `ump
+config state unlock fleet` releases one that an ump left behind when it
+died.
+
+## Failures: exit status 6
+
+ump reads Ansible's recap, per host. A run that does not complete is
+exit status 6, which names the hosts that failed or were unreachable:
+
+```
+ump: provisioning failed on db-01 (failed), web-02 (unreachable), see above; fix that and run ump provision --hosts db-01,web-02
+```
+
+A failure without a host to blame (Ansible's own error) is named by its
+exit status. After a reinstall, the server is judged by its own line of
+the recap: failed or unreachable, the message starts with `web-01 is
+installed and recorded, but not provisioned:`; without either, it is
+provisioned, and a run that failed on other hosts says so:
+
+```
+ump: web-01 is provisioned; the run failed on db-01 (unreachable), see above; fix that and run ump provision --hosts db-01
+```
+
+The server is in the inventory either way, and without a line (no play
+of the run matched it) it is not provisioned. `--hosts` that matches no
+host is exit status 2, before anything is written (for a reinstall,
+before the question). `-o json` (or `yaml`) prints the result, also on
+a failure: per host `ok`, `changed`, `unreachable`, `failed`,
+`skipped`, `rescued` and `ignored`, then `failed`, `unreachable` and
+the `exit_status` of `ansible-playbook`; after a reinstall it is its
+`provision`, with `provisioned`.
 
 ## The commands
 
-**`ump server reinstall NAME [--group GROUP]... [--no-provision]`**
-installs, then provisions: the checks above first, after the first boot
-the host file (none when ump is the inventory) and the run list.
+**`ump provision [--hosts PATTERN] [--playbook NAME]... [--yes] [-o
+json|yaml] [-- ANSIBLE-ARGS...]`** converges the fleet: the checks, then
+under the fleet's lock the names and the hosts of `--hosts` (an Ansible
+host pattern: `web-01`, `web`, `'web:&prod'`, `'all:!lab-*'`; it must
+match a host), the host files of every server ump installed (none when
+ump is the inventory), and every playbook (or those of `--playbook`) on
+the hosts. Without `--hosts` it asks first on a terminal, since it runs
+on the whole fleet; without a terminal, `--yes` is required.
+
+**`ump server reinstall NAME [--group GROUP]... [--hosts PATTERN]
+[--playbook NAME]... [--no-provision]`** installs, records the
+installation, and provisions as `ump provision` does: the whole fleet,
+or the hosts of `--hosts` (`--hosts NAME` for the new server alone),
+with every playbook or those of `--playbook`. Its question covers the
+provisioning, and `--hosts` is checked before it.
 
 - `--no-provision`: no layout needed, nothing runs; the host file is
   still written where the layout and `ansible-inventory` are there,
-  after the checks of the names and the host file.
+  after the checks of the names and the host file, under the fleet's
+  lock. The next `ump provision` includes the server.
 - `--no-reboot`: the installation is recorded, with its groups, but the
-  new system is not up yet, so there is no host file and no run; run
-  `ump server provision NAME` after the reboot. When ump is the
-  inventory, the server is in it from the record on.
+  new system is not up yet, so nothing runs; run `ump provision --hosts
+  HOSTNAME` after the reboot. When ump is the inventory, the server is
+  in it from the record on.
 - `--dry-run`: the checks and the plan, nothing written.
 
-**`ump server provision NAME [--group GROUP]...`** works on a server ump
-installed (the [state](state.md) has its installation), from the
-repository: the same checks, then the groups added to the state, the
-host file written (unless ump is the inventory) and the run list run,
-under the server's lock. Without `--group` it runs the run list the
-server has: a converge. A server ump did not install is refused (exit
-status 2): there is nothing to put into the inventory; reinstall it.
+**`ump server set NAME --group GROUP / --ungroup GROUP`** changes the
+groups of a server ump installed in the state (repeatable, or
+comma-separated; the names as for `--group`) and prints them; nothing
+runs. A group is no host's name: not the server's hostname, nor, run
+from the repository with `ansible-inventory` in `PATH`, another host of
+the inventory (exit status 2). A server ump did not install is refused:
+its groups come with the installation.
 
 ## The collection
 
@@ -373,14 +521,10 @@ includes it:
 - `ofzhur.ansible.facts`: the fact cache in a central storage (below);
 - `config/push/ansible.cfg`: the template of `ansible.cfg` for Ansible
   on a control machine (your laptop, a bastion, CI);
-- the playbook `common`, the run list of every server, which imports
-  `base`;
-- `base`, which runs the role `users`: the users and groups of the
-  group variables, with their keys and sudo. Its README says how.
-
-A repository replaces a playbook of the collection with its own of the
-same name: `playbooks/common.yml` in the repository takes the place of
-`ofzhur.ansible.common` (and can import it).
+- the playbook `base`, on `common` (every server ump installs), which
+  runs the role `users`: the users and groups of the group variables,
+  with their keys and sudo. Its README says how. A repository imports
+  it from `playbooks/00-base.yml`.
 
 ## Facts and secrets
 
@@ -391,8 +535,8 @@ every server the certificates and passwords of its services.
 Ansible runs on a control machine (a CI runner, a bastion, or your
 laptop), connects to the servers of the run, gathers their facts and
 hands each role what it needs; a fact cache keeps the facts of servers
-outside the run between runs. The template's is a directory of the
-repository, `.cache/facts`, on that machine alone.
+outside the run (`--hosts`) between runs. The template's is a
+directory of the repository, `.cache/facts`, on that machine alone.
 
 ### Facts in a central storage
 
@@ -436,12 +580,12 @@ opens.
 ### Servers that pull
 
 With the facts central, a server can converge itself: a systemd timer
-runs `ansible-pull` against the repository, which runs the server's
-own groups on it (`ansible-pull` limits a run to the machine itself,
-by its hostname, which is its host name in the inventory), and the
-server is eventually configured, also after drift, with nothing
-reaching it from outside. ump still provisions it first, with the run
-list right after the installation; the pull keeps it there.
+runs `ansible-pull` against the repository, which runs the plays of the
+server's groups on it (`ansible-pull` limits a run to the machine
+itself, by its hostname, which is its host name in the inventory), and
+the server is eventually configured, also after drift, with nothing
+reaching it from outside. ump still provisions it first, right after
+the installation; the pull keeps it there.
 
 A pulling server needs:
 
@@ -456,18 +600,18 @@ A pulling server needs:
   of its `ansible.cfg`, as narrow as the storage allows: it reads the
   facts of the others and writes its own;
 - a playbook at the root of the repository for `ansible-pull`
-  (`local.yml`, which it runs when given none) that imports the
-  playbooks of the groups; their `hosts:` pick the server's;
+  (`local.yml`, which it runs when given none) that imports those of
+  `playbooks/` in their order, as ump runs them; their `hosts:` pick
+  the server's plays;
 - the secrets its groups use, and no others: from a secrets store with
   a policy per group (Vault, OpenBao), or the key to its own encrypted
   files;
 - never UMP's key, nor anything else of ump's state.
 
 The collection's role that sets this up (the timer, the key, the
-credentials) is to follow; until then, a playbook of your own in the
-run list does it. `ansible-playbook` on a schedule (CI, a timer on a
-control machine) against the whole inventory converges the servers as
-well, with the keys and the logs in one place.
+credentials) is to follow; until then, a playbook of your own does it.
+`ump provision` on a schedule (CI, a timer on a control machine)
+converges the servers as well, with the keys and the logs in one place.
 
 ### Secrets
 
@@ -487,8 +631,8 @@ NixOS needs none of this, and is installed with `--no-provision`: its
 configuration is the system, and the collection's playbooks do not
 apply to it. Keep the modules of each group in the repository and
 deploy them with `nixos-rebuild --target-host`, `deploy-rs` or
-`colmena`. Where ump is the inventory, a NixOS server is in it all the
-same: keep `ump.yml` to the other accounts, or use host files.
+`colmena`. ump puts a NixOS server into the inventory all the same:
+give it a group the plays leave out ([above](#groups-and-playbooks)).
 
 ## Help
 

@@ -26,7 +26,8 @@ import (
 // names a backend; then ump works on a mirror of the backend, pulled
 // before a command and pushed after it. ump config state manages the
 // pointer; the state document itself (state.yaml) is read and written
-// through the backend directly, with per-server locks.
+// through the backend directly, with the locks of the servers and the
+// fleet.
 
 // pullFresh is how long a pull of the mirror holds: a command within it
 // of the last one works with the mirror as it is. Changes still go back
@@ -261,8 +262,9 @@ With a shared state backend, everyone who uses it acts as one UMP, and
 ump works on a mirror under its cache directory: pulled before every
 command, pushed after it, file by file with version tags, so the files
 stay editable by hand and a concurrent writer is noticed, never
-overwritten. state.yaml and the per-server locks of ump server reinstall,
-provision and rescue go through the backend directly.
+overwritten. state.yaml, the locks of a server (ump server reinstall and
+rescue) and the fleet's lock (ump provision) go through the backend
+directly.
 
 Which backend: UMP_STATE in the environment names one (with
 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, UMP_STATE_ENDPOINT,
@@ -632,7 +634,7 @@ func (a *app) newStateLocksCmd() *cobra.Command {
 	var noHeaders bool
 	cmd := &cobra.Command{
 		Use:   "locks",
-		Short: "List the per-server locks held",
+		Short: "List the locks held: the servers', and the fleet's (ump provision)",
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			locks, err := a.stateStore().Locks(cmd.Context())
@@ -643,7 +645,7 @@ func (a *app) newStateLocksCmd() *cobra.Command {
 			for _, l := range locks {
 				rows = append(rows, []string{l.Key, l.What, l.Who, a.fmtTime(l.Since)})
 			}
-			return writeTable(a.stdout, []string{"SERVER", "OPERATION", "HELD BY", "SINCE"}, rows, noHeaders)
+			return writeTable(a.stdout, []string{"LOCK", "OPERATION", "HELD BY", "SINCE"}, rows, noHeaders)
 		},
 	}
 	cmd.Flags().BoolVar(&noHeaders, "no-headers", false, "omit the header line")
@@ -652,12 +654,12 @@ func (a *app) newStateLocksCmd() *cobra.Command {
 
 func (a *app) newStateUnlockCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unlock SERVER",
-		Short: "Release a server's lock left behind by an ump that died",
+		Use:   "unlock SERVER|fleet",
+		Short: "Release a lock left behind by an ump that died: a server's (provider/id), or the fleet's",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.Trim(args[0], ". ") == "" {
-				return usageErrorf(cmd, "%q is not a server name", args[0])
+				return usageErrorf(cmd, "%q is not the name of a lock", args[0])
 			}
 			st := a.stateStore()
 			if err := st.Backend.Unlock(cmd.Context(), args[0]); err != nil {

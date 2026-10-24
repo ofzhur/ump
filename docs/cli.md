@@ -36,8 +36,7 @@ ump
 │   │                                                  what changed since the last listing; the cached listing;
 │   │                                                  the Ansible inventory of the servers ump installed
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
-│   ├── provision    <ref> [--group <list>]...         put a server ump installed into the inventory, run its run list
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
@@ -48,11 +47,13 @@ ump
 │   │   ├── get      [ref...] [-o table|json|yaml]     reverse DNS entries of servers' public addresses
 │   │   ├── set      <ref> [ptr-name] [--ip <addr>]    set the PTR of the primary IPv4 (or --ip); default: the server name
 │   │   └── delete   <ref> [--ip <addr>]               remove the PTR
-│   ├── set          <ref> [--profile <name> | --clear] [--price <amount> [--currency <cur>] [--period month|hour] | --clear-price] [--attr k=v]... [--unset-attr k]...
-│   │                                                  what ump remembers about a server: profile, price, your attributes
+│   ├── set          <ref> [--profile <name> | --clear] [--price <amount> [--currency <cur>] [--period month|hour] | --clear-price] [--attr k=v]... [--unset-attr k]... [--group <list>]... [--ungroup <list>]...
+│   │                                                  what ump remembers about a server: profile, price, your attributes, groups
 │   ├── add (a, new) <name> --ipv4 <addr> [--ipv6 <addr>] [--location <s>] [--product <s>] [--kind bare-metal|cloud] [--note <s>]
 │   │                                                  a server by hand, without a provider API (account "manual")
 │   └── remove (rm, d) <name> [--yes]                  forget a server added by hand
+├── provision        [--hosts <pattern>] [--playbook <list>]... [--yes] [-o json|yaml] [-- ansible-args]
+│                                                      the playbooks of the infrastructure repository on the fleet
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config (c, cfg)                                    each entity prints its help when called bare
 │   ├── isp (i, provider, account)                     the accounts
@@ -103,8 +104,8 @@ ump
 │   │   ├── clear                                      the local directory again
 │   │   ├── pull | push [--force]                      the mirror and the backend, by hand
 │   │   ├── test     (t)                               does the backend answer?
-│   │   ├── locks                                      the per-server locks held
-│   │   └── unlock   <server>                          release one
+│   │   ├── locks                                      the locks held: the servers', the fleet's
+│   │   └── unlock   <server>|fleet                    release one
 │   └── key (k)                                        UMP's own key and the named keys
 │       ├── list     (ls, l) [-o wide|json|yaml]       ump and the named keys, with fingerprints; wide adds the public key lines
 │       ├── get      (g, show) [<name>] [-o json|yaml]   a public key with its fingerprints: ump (UMP's own, the default) or a named one
@@ -173,7 +174,7 @@ from `ump server set --attr`; see [inventory](inventory.md).
 (the state has their installation), in the JSON of an inventory
 script, for the inventory plugin `ofzhur.ansible.ump`: each server under
 the hostname of its installation, in `common` and its groups, with the
-variables of its host file (`ansible_host`, `ansible_user`, `ump_ref`,
+variables of its host file (`ansible_host`, `ump_admin`, `ump_ref`,
 `ump_os`, ...; [provisioning](provisioning.md#ump-as-the-inventory)).
 `--account`, references and `--cached` select as for the other
 formats, and the exit code is the same. A server without an address or
@@ -183,7 +184,7 @@ wrong (the plugin warns with it).
 
 ```json
 {
-  "_meta": {"hostvars": {"web-01": {"ansible_host": "203.0.113.10", "ansible_user": "ump", "ump_ref": "hetzner-robot/123456", "...": "..."}}},
+  "_meta": {"hostvars": {"web-01": {"ansible_host": "203.0.113.10", "ump_admin": "ump", "ump_ref": "hetzner-robot/123456", "...": "..."}}},
   "all": {"children": ["common", "web"]},
   "common": {"hosts": ["web-01"]},
   "web": {"hosts": ["web-01"]}
@@ -467,7 +468,7 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -493,17 +494,18 @@ lets UMP in as root, else through the provider's rescue system); the
 [installer](../install/README.md) is fetched from the storage and run
 there with the resolved profile, with its progress shown; the server is
 rebooted into the new system; ump waits until it answers over SSH with
-UMP's key, reports what came up and [provisions](provisioning.md) it:
+UMP's key, reports what came up and [provisions](provisioning.md) the
+fleet with it:
 
 ```console
 $ ump server reinstall web-01
-Install ubuntu-26.04 on hetzner-cloud/123 (web-01, 203.0.113.10) as web-01? Every disk of the server is erased. [y/N] y
+Install ubuntu-26.04 on hetzner-cloud/123 (web-01, 203.0.113.10) as web-01? Every disk of the server is erased. Then ump provision runs 00-base on the fleet. [y/N] y
 Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 24.04.3 LTS).
 Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.
 ...
 Waiting for the UMP rescue system on 203.0.113.10 ... up after 11s (ump-rescue 2026.10.13).
 Installing ubuntu-26.04 on web-01 as web-01 ...
-Run list after the first boot: common (ofzhur.ansible.common).
+Provisioning after the first boot: 00-base on the fleet.
 ==> machine: amd64, BIOS firmware, 2 CPUs, 937 MB RAM
 ==> disks (1): /dev/sda (19.1G SSD)
 ==> layout lvm-linear: /dev/sda gets 1 MiB BIOS boot, 512 MiB EFI (vfat), 1 GiB /boot (ext4) and the rest as LVM; ...
@@ -514,9 +516,9 @@ Waiting for SSH on 203.0.113.10 to go down ... down after 4s.
 Waiting for SSH on 203.0.113.10 ... up after 18s.
 web-01 is up: Ubuntu 26.04 LTS, hostname web-01, root on /dev/mapper/vg0-root; log in as ump (ump ssh web-01).
 Wrote inventory/hosts/web-01.yml: web-01 in common.
-Provisioning web-01: common (ofzhur.ansible.common) ...
+Provisioning: 00-base on the fleet (4 hosts) ...
 ...
-web-01 is provisioned: common.
+web-01 is provisioned. Provisioned 4 hosts, 1 changed.
 ```
 
 Every disk of the server is erased. The default profile's layout,
@@ -556,85 +558,95 @@ other field, after the other flags ([overrides](profiles.md#overrides)).
 `--storage` names another storage than the configured one for the
 installer, the images, the profiles and the rescue image.
 
-After the first boot the server is [provisioned](provisioning.md) from
-the infrastructure repository ump runs in: it needs `ansible.cfg` and
-`inventory/` in the current directory and `ansible-playbook` in `PATH`,
-and stops with exit status 2 before it touches anything when one is
-missing. The server is in the group `common` and the groups of `--group`
-(repeatable, or comma-separated; lower-case letters, digits and `_`;
-not `all`, `ungrouped`, `localhost` or `_meta`), in order: its run
-list. Each group is a playbook, `playbooks/GROUP.yml` of the
-repository, else the collection's `ofzhur.ansible.GROUP`; they pass
-`ansible-playbook --syntax-check` first; a hostname that is a
-group of the run list or of the inventory, a group that is another host
-of the inventory (`ansible-inventory --list`), a host file of the
-hostname that ump did not write for this server (no `ump_ref`, or
-another server's) and a world-writable repository stop the reinstall
-too. Once the new system answers, ump records it, writes
-`inventory/hosts/HOSTNAME.yml` and runs the run list for that host, as
-its administrator with UMP's key only (`IdentitiesOnly`); Ansible's
-output goes to stderr. Where a file of `inventory/` says `plugin:
-ofzhur.ansible.ump`, ump is the inventory: no host file is written,
-and one of the server in `inventory/hosts/` stops the reinstall up
-front, as does the hostname as another host of the inventory. A
-successful installation records the groups with the server, none
-without `--group` (the disks were wiped).
-`--no-provision` needs no layout and runs nothing; where the layout is
-there, the host file is still written once `ansible-inventory` has
-checked the names. Where ump is the inventory, the server is in it from
-its record on, whatever the flags and wherever ump ran; when ump cannot
-record the installation, it prints the record to add to `state.yaml`
-by hand, and runs nothing there (exit status 6), since the inventory
-would have the old one.
+After the first boot ump [provisions](provisioning.md) from the
+infrastructure repository it runs in: it needs `ansible.cfg`,
+`inventory/` and a playbook in `playbooks/` in the current directory and
+`ansible-playbook` in `PATH`, and stops with exit status 2 before it
+touches anything when one is missing. The server is in the group
+`common` and the groups of `--group` (repeatable, or comma-separated;
+lower-case letters, digits and `_`; not `all`, `ungrouped`, `localhost`
+or `_meta`). The playbooks pass `ansible-playbook --syntax-check` first;
+a hostname that is a group of a server or of the inventory, a group
+that is another host of the inventory (`ansible-inventory --list`), a
+host file of the hostname that ump did not write for this server (no
+`ump_ref`, or another server's) and a world-writable repository stop the
+reinstall too, and so does `--hosts` that matches no host of the
+inventory with the server in it. Once the new system answers, ump
+records it and runs `ump provision`: the host files of every server it
+installed, then every `playbooks/*.yml` on the whole fleet, each host
+logged in to as its administrator with UMP's key only
+(`IdentitiesOnly`); `--hosts PATTERN` and `--playbook NAME` narrow it
+(`--hosts web-01` for the new server alone), and the reinstall's
+question covers it. Where a file of `inventory/` says `plugin:
+ofzhur.ansible.ump`, ump is the inventory: no host file is written, and
+one of the server in `inventory/hosts/` stops the reinstall up front, as
+does the hostname as another host of the inventory. A successful
+installation records the groups with the server, none without `--group`
+(the disks were wiped). `--no-provision` needs no layout and runs
+nothing; where the layout is there, the host file is still written,
+under the fleet's lock, once `ansible-inventory` has checked the names,
+and the next `ump provision` includes the server. When ump cannot record
+the installation, it prints the record to add to `state.yaml` by hand
+and provisions nothing (exit status 6): the inventory would have the old
+one.
 
 `--dry-run` makes the checks, brings the server into the rescue system,
 prints the installer's plan (machine, every partition, array and volume
-per disk, network, users, userdata, firewall) and the run list, and
+per disk, network, users, userdata, firewall) and the playbooks, and
 leaves it there without touching a disk or the inventory; a layout whose
 targets match no disk, or a raid level with too few members, stops there
 too. `--no-reboot` installs, records the installation and leaves the
-server in the rescue system, not provisioned: `ump server provision
-REF` after the reboot (when ump is the inventory, the server is in it
-already). `-o json` prints the result (the profile and layout, the way
-in, the hostname, what answered after the reboot, `groups` as in the
-inventory, `run_list`, `playbooks`, `provisioned`).
+server in the rescue system, not provisioned: `ump provision --hosts
+HOSTNAME` after the reboot (when ump is the inventory, the server is in
+it already). `-o json` prints the result (the profile and layout, the
+way in, the hostname, what answered after the reboot, `groups` as in
+the inventory, `playbooks`, `provisioned`, and `provision`, the result
+of `ump provision`).
 
 Exit status 1 means the installer failed (its output says where; the
 server stays in the rescue system, `ump ssh REF --staging` gets there),
 5 that the new system did not answer after the reboot (look at the
-server's console), 6 that the run list did not complete: the server is
-installed and recorded; fix what Ansible reports and run `ump server
-provision REF`. Providers that keep their rescue system as the boot
-option (OVHcloud) have it disabled before the reboot. Asks for
-confirmation on a terminal; without one, `--yes` is required.
+server's console), 6 that the provisioning did not complete: the server
+is installed and recorded; fix what Ansible reports about the hosts it
+names and run `ump provision`. The server is provisioned when its own
+line of the recap has nothing failed or unreachable, also in a run that
+failed on other hosts (`provisioned: true`, exit status 6 still).
+Providers that keep their rescue system as the boot option (OVHcloud)
+have it disabled before the reboot. Asks for confirmation on a
+terminal; without one, `--yes` is required.
 
-## Provision: `ump server provision`
+## Provision: `ump provision`
 
 ```console
-$ ump server provision web-01                       # run its run list again
-$ ump server provision web-01 --group monitoring    # add a group, then run
+$ ump provision                                     # every playbook on the fleet
+$ ump provision --hosts web-01                      # on one server
+$ ump provision --hosts web --playbook 10-web       # some hosts, some playbooks
+$ ump provision --hosts 'all:!lab-*' -- --check --diff
 ```
 
-Puts a server ump installed into the inventory of the infrastructure
-repository and runs its run list, without reinstalling it; from the
-repository's root, like `reinstall`. `--group` adds groups to those the
-server has (repeatable, or comma-separated), in order; without it, the
-run list the server has runs again. The same checks as `reinstall`
-come first; then the groups are recorded, `inventory/hosts/HOSTNAME.yml`
-is written (not when ump is the inventory) and the run list runs, under
-the server's lock. Groups are best given at the installation, so that
-each starts on a fresh system; adding one in place suits groups built
-for it, such as monitoring. A group is removed only by a reinstall. A
-server ump did not install is refused with exit status 2 (there is
-nothing to put into the inventory); exit status 6 means the run list
-did not complete. The groups show, `common` first, in `ump server
-show`, the `GROUPS` column of `ump server list` and `groups` in `-o
-json`. See [provisioning](provisioning.md).
+Converges the fleet from the infrastructure repository ump runs in, with
+the same layout and checks as `reinstall`: every `playbooks/*.yml`, in
+file-name order, on the hosts its plays name. `--playbook NAME` (the
+file name without `.yml`; repeatable, or comma-separated) runs those
+alone, `--hosts PATTERN` (an Ansible host pattern) the hosts it matches
+alone; arguments after `--` go to `ansible-playbook` (not `--limit` or
+`--inventory`, in any form). Under the fleet's lock, one run at a time
+(another waits for it up to the configured `wait`, then exit status 3),
+ump checks the names and that `--hosts` matches a host of the inventory
+as it will be (else exit status 2, nothing written), writes the host
+files of every server it installed (none when ump is the inventory), and
+runs the playbooks as one, every host logged in to as its administrator
+(`ump_admin`) with UMP's key. It prints `Provisioned 4 hosts, 1
+changed.`; `-o json` the recap per host (`ok`, `changed`, `unreachable`,
+`failed`, `skipped`, `rescued`, `ignored`), `failed`, `unreachable` and
+`exit_status`. Exit status 6 names the hosts that failed or were
+unreachable. Without `--hosts` it asks on a terminal (the whole fleet);
+without one, `--yes` is required. See [provisioning](provisioning.md).
 
 ## `ump server set`, `add` and `remove`
 
 ```
-ump server set REF [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]...
+ump server set REF [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group LIST]... [--ungroup LIST]...
 ump server add NAME --ipv4 ADDR [--ipv6 ADDR] [--location S] [--product S] [--kind bare-metal|cloud] [--note S]
 ump server remove NAME [--yes]
 ```
@@ -646,7 +658,13 @@ with (`--clear` forgets it), its price where the API does not say
 API's price; `--clear-price` forgets it), and attributes of your own
 (`--attr owner=alice`, repeatable; `--unset-attr` forgets one). Price
 and attributes show in `ump server list -o wide` and `ump server show`
-and travel in `-o json`.
+and travel in `-o json`. `--group` and `--ungroup` (repeatable, or
+comma-separated) add groups to a server ump installed and take them
+away; it prints them, `common` first, and runs nothing: the next `ump
+provision` applies them. A group that is the server's hostname, or,
+from the infrastructure repository, another host of its inventory
+(`ansible-inventory`), is refused, and so is a server ump did not
+install (exit status 2).
 
 `add` puts a server no provider lists into the [state](state.md#the-state-document)
 (`manual:`), listed by the account `manual` of provider type `manual`;
@@ -803,10 +821,10 @@ wizard created for it.
 wizard that picks a backend and, when this machine holds state, offers
 to migrate it there; a backend that holds state is used as it is),
 `set --url URL` (use a backend as it is, from flags), `migrate --to
-URL` (copy the state there first),
-`clear` (the local directory again), `pull` and `push` for the mirror
-by hand, `test`, and `locks` and `unlock SERVER` for the per-server
-locks that `reinstall` and `rescue` take. `UMP_STATE` in the
+URL` (copy the state there first), `clear` (the local directory again),
+`pull` and `push` for the mirror by hand, `test`, and `locks` and
+`unlock SERVER|fleet` for the locks that `reinstall` and `rescue` take
+of a server, and `provision` of the fleet. `UMP_STATE` in the
 environment names the backend ahead of the pointer file.
 
 ### `ump config key`
@@ -877,4 +895,4 @@ $ ump config firewall create mail --from default
 | 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes` |
 | 4 | provider API error, or an account that could not be listed |
 | 5 | the server did not answer in time (rescue system, reboot, new system) |
-| 6 | provisioning failed: the server is installed and recorded, its run list did not complete |
+| 6 | provisioning failed: Ansible did not complete; the hosts that failed or were unreachable are named (after a reinstall, the server is installed and recorded) |

@@ -361,7 +361,7 @@ $ ump server set web-01 --clear
 `ump server reinstall --dry-run` brings the server into the rescue system
 and prints what the profile resolves to on that machine: every partition,
 array and volume per disk, the network, the users, userdata and
-firewall, and the run list the server is [provisioned](provisioning.md)
+firewall, and the playbooks the fleet is [provisioned](provisioning.md)
 with afterwards, without touching a disk.
 
 ### Overrides

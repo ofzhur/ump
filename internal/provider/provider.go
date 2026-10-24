@@ -78,7 +78,7 @@ type Machine struct {
 	InstalledAt *time.Time `json:"installed_at,omitempty" yaml:"installed_at,omitempty"`
 	// Groups are the Ansible groups ump put the machine in, as in the
 	// inventory: common first, then those of ump server reinstall
-	// --group and ump server provision; from the state, for a machine
+	// --group and ump server set --group; from the state, for a machine
 	// ump installed.
 	Groups []string `json:"groups,omitempty" yaml:"groups,omitempty"`
 	// Profile and Layout are the profile and the disk layout of the

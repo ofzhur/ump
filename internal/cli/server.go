@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,20 +21,24 @@ func (a *app) newServerCmd() *cobra.Command {
 		Short:   "List, inspect, install and control servers",
 		Long: `Everything that happens to a server: listing and showing them, installing
 an operating system the way a profile says and provisioning it with
-Ansible from the infrastructure repository, the rescue system, power,
-names and reverse DNS. Servers are named by name, provider ID, IP address
-or provider/id, and found across every configured account.`,
+Ansible from the infrastructure repository (ump provision afterwards),
+the rescue system, power, names and reverse DNS. Servers are named by
+name, provider ID, IP address or provider/id, and found across every
+configured account.`,
 		Example: `  ump server list
   ump server show web-01
   ump server reinstall web-01 --profile db --group db
-  ump server provision web-01 --group monitoring
+  ump server set web-01 --group monitoring
   ump server rescue web-01
   ump server reboot web-01 --wait
   ump server rdns set web-01 web-01.example.net
   ump server set web-01 --profile db`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
+			switch {
+			case len(args) == 0:
 				return cmd.Help()
+			case args[0] == "provision":
+				return usageErrorf(cmd, "ump server provision is ump provision now: it runs the playbooks on the fleet, or with --hosts HOSTNAME on one server; ump server set NAME --group GROUP adds a group")
 			}
 			return usageErrorf(cmd, "unknown command %q for ump server", args[0])
 		},
@@ -42,7 +47,6 @@ or provider/id, and found across every configured account.`,
 		a.newServerListCmd(),
 		a.newServerShowCmd(),
 		a.newServerReinstallCmd(),
-		a.newServerProvisionCmd(),
 		a.newServerRescueCmd(),
 		a.newServerUnrescueCmd(),
 		a.newServerRebootCmd(),
@@ -68,24 +72,33 @@ func (a *app) newServerSetCmd() *cobra.Command {
 		clearPrice bool
 		attrs      []string
 		unset      []string
+		groups     groupFlags
+		ungroups   groupFlags
 	)
 	cmd := &cobra.Command{
-		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]...",
-		Short: "Set what ump remembers about a server: its profile, its price, your attributes",
-		Long: `Remember, in the configuration file, what ump cannot learn from the
-provider: the profile the server is reinstalled with (ump server
-reinstall NAME then takes it without --profile; --clear forgets it), the
-price it costs where the provider's API does not say (--price, with
---currency and --period; it wins over the API's price and shows in ump
-server list -o wide and ump server show; --clear-price forgets it), and
-attributes of your own for the inventory (--attr owner=alice --attr
-role=db; --unset-attr forgets one). The profile is checked to exist,
-locally or on the storage.`,
+		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group GROUP]... [--ungroup GROUP]...",
+		Short: "Set what ump remembers about a server: its profile, its price, your attributes, its groups",
+		Long: `Remember, in the state, what ump cannot learn from the provider: the
+profile the server is reinstalled with (ump server reinstall NAME then
+takes it without --profile; --clear forgets it), the price it costs
+where the provider's API does not say (--price, with --currency and
+--period; it wins over the API's price and shows in ump server list -o
+wide and ump server show; --clear-price forgets it), attributes of your
+own for the inventory (--attr owner=alice --attr role=db; --unset-attr
+forgets one), and the groups of a server ump installed (--group adds,
+--ungroup removes; repeatable, or comma-separated). The profile is
+checked to exist, locally or on the storage, and a group to be no
+host's name: not the server's hostname, nor, run from the
+infrastructure repository, another host of its inventory. Nothing runs:
+the next ump provision puts the server into its groups and runs their
+plays on it; what the plays of a group it left did stays until a
+reinstall.`,
 		Example: `  ump server set web-01 --profile db
   ump server set web-01 --clear
   ump server set rack-07 --price 89 --currency EUR --period month
   ump server set web-01 --attr owner=alice --attr role=web
-  ump server set web-01 --unset-attr role --clear-price`,
+  ump server set web-01 --unset-attr role --clear-price
+  ump server set web-01 --group monitoring --ungroup lab`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if profile != "" && clear {
@@ -97,8 +110,26 @@ locally or on the storage.`,
 			if (currency != "" || period != "") && price == "" {
 				return usageErrorf(cmd, "--currency and --period go with --price")
 			}
-			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 {
-				return usageErrorf(cmd, "give at least one of --profile, --clear, --price, --clear-price, --attr or --unset-attr")
+			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 && len(groups) == 0 && len(ungroups) == 0 {
+				return usageErrorf(cmd, "give at least one of --profile, --clear, --price, --clear-price, --attr, --unset-attr, --group or --ungroup")
+			}
+			add, err := groups.list(cmd)
+			if err != nil {
+				return err
+			}
+			for _, g := range listFlag(ungroups).values() {
+				if g == commonGroup {
+					return usageErrorf(cmd, "--ungroup common: every server ump installed is in common")
+				}
+			}
+			drop, err := ungroups.list(cmd)
+			if err != nil {
+				return err
+			}
+			for _, g := range drop {
+				if slices.Contains(add, g) {
+					return usageErrorf(cmd, "--group and --ungroup both name %s", g)
+				}
 			}
 			var newPrice *provider.Price
 			if price != "" {
@@ -144,6 +175,16 @@ locally or on the storage.`,
 					return err
 				}
 			}
+			// a group is no host's name: not the server's hostname, nor
+			// another host of the inventory where the repository is at hand
+			var inv *inventory
+			if len(add) > 0 {
+				if repo, _ := a.inventoryRepo(); repo != nil {
+					if inv, err = a.readInventory(cmd.Context(), repo, ""); err != nil {
+						return err
+					}
+				}
+			}
 			var said []string
 			err = a.updateState(cmd.Context(), func(d *state.Document) error {
 				st := d.Servers[m.Ref()]
@@ -181,6 +222,34 @@ locally or on the storage.`,
 						said = append(said, "attributes "+joinMap(st.Attributes))
 					}
 				}
+				if len(add) > 0 || len(drop) > 0 {
+					if st.Installed == nil {
+						return withExit(exitUsage, fmt.Errorf("ump did not install %s: its groups come with the installation (ump server reinstall %s --group GROUP)", m.Name, args[0]))
+					}
+					for _, g := range drop {
+						if !slices.Contains(st.Groups, g) {
+							return withExit(exitUsage, fmt.Errorf("%s is not in the group %s (its groups: %s)", m.Name, g, strings.Join(append([]string{commonGroup}, st.Groups...), ", ")))
+						}
+					}
+					for _, g := range add {
+						if g == inventoryHostname(m, *st.Installed) {
+							return withExit(exitUsage, fmt.Errorf("--group %s is the hostname of %s: %s", g, m.Name, sameName))
+						}
+						if inv == nil {
+							continue
+						}
+						if r, ok := inv.hosts[g]; ok && r != m.Ref() {
+							return withExit(exitUsage, fmt.Errorf("--group %s is a host of the inventory: %s; rename the host, or use another group", g, sameName))
+						}
+					}
+					st.Groups = slices.DeleteFunc(st.Groups, func(g string) bool { return slices.Contains(drop, g) })
+					for _, g := range add {
+						if !slices.Contains(st.Groups, g) {
+							st.Groups = append(st.Groups, g)
+						}
+					}
+					said = append(said, "groups "+strings.Join(append([]string{commonGroup}, st.Groups...), ", ")+" (ump provision applies them)")
+				}
 				d.Servers[m.Ref()] = st
 				return nil
 			})
@@ -199,6 +268,8 @@ locally or on the storage.`,
 	cmd.Flags().BoolVar(&clearPrice, "clear-price", false, "forget the price set for the server")
 	cmd.Flags().StringArrayVar(&attrs, "attr", nil, "an attribute of your own, KEY=VALUE (repeatable)")
 	cmd.Flags().StringArrayVar(&unset, "unset-attr", nil, "forget an attribute (repeatable)")
+	groups.add(cmd, "group", "a group to put a server ump installed into")
+	ungroups.add(cmd, "ungroup", "a group to take a server ump installed out of")
 	return cmd
 }
 

@@ -52,6 +52,8 @@ type app struct {
 	stderr io.Writer
 	// isTTY reports whether stdin is an interactive terminal.
 	isTTY func() bool
+	// stderrTTY reports whether stderr is a terminal (Ansible's colors).
+	stderrTTY func() bool
 	// readSecret reads a line without echo; nil means "read a plain line".
 	readSecret func() (string, error)
 	// saveTerm captures the terminal state and returns a function that
@@ -128,6 +130,7 @@ func Main(args []string) int {
 	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
 	fd := int(os.Stdin.Fd())
 	a.isTTY = func() bool { return term.IsTerminal(fd) }
+	a.stderrTTY = func() bool { return term.IsTerminal(int(os.Stderr.Fd())) }
 	a.readSecret = func() (string, error) {
 		b, err := term.ReadPassword(fd)
 		return string(b), err
@@ -246,8 +249,9 @@ Everything happens to servers: ` + "`ump server list`" + ` lists the machines of
 configured provider account (the inventory of the fleet: -o wide|json,
 --diff for what changed, prices, your attributes, servers added by hand
 with ` + "`ump server add`" + `), ` + "`ump server show NAME`" + ` shows one in detail,
-` + "`ump server reinstall NAME`" + ` installs it the way a profile says, ` + "`ump ssh NAME`" + `
-logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.
+` + "`ump server reinstall NAME`" + ` installs it the way a profile says, ` + "`ump provision`" + `
+runs the playbooks of your infrastructure repository on the fleet,
+` + "`ump ssh NAME`" + ` logs in. ` + "`ump config isp`" + ` sets accounts up, ` + "`ump config os`" + ` the profiles.
 
 UMP is made by Oleg Zhurko <oleg@zhurko.de>, https://ump.zhurko.de, and
 licensed under the Apache License 2.0.`,
@@ -271,6 +275,7 @@ licensed under the Apache License 2.0.`,
 	pf.BoolVarP(&a.verbose, "verbose", "v", false, "log API requests to stderr")
 
 	root.AddCommand(a.newServerCmd())
+	root.AddCommand(a.newProvisionCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
 	root.AddCommand(a.newVersionCmd())
