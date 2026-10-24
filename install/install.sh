@@ -20,8 +20,8 @@
 #                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
 #
 #   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
-#                    kernel, layout, disks, users, userdata, firewall, provision,
-#                    network (rename: false keeps the kernel's interface names)
+#                    kernel, layout, disks, users, userdata, firewall, network
+#                    (rename: false keeps the kernel's interface names)
 #   without --spec   the lvm-linear layout with root alone; the flags are:
 #   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
 #                    manifest.json and rootfs.tar.zst (or UMP_STORAGE)
@@ -118,7 +118,7 @@ else
 			{type: "lvm", vg: "vg0", name: "root", size: "rest", filesystem: "ext4", mountpoint: "/"}]},
 		disks: ($disks | if . == "" then [] else split(",") end),
 		users: [{name: "root", shell: "/bin/bash", groups: [], sudo: false, keys: ($keys | split("\n") | map(select(test("^[a-z]"))))}],
-		userdata: [], firewall: {policy: "accept", allow: []}, provision: {type: "none"},
+		userdata: [], firewall: {policy: "accept", allow: []},
 		profile: {name: "command line"}}')"
 fi
 s() { jq -r "$1 // empty" <<< "$spec"; }           # a string, empty when absent
@@ -402,7 +402,7 @@ for i in "${!IF_MAC[@]}"; do
 done
 log "interfaces: $ifs$([ "$rename" = yes ] || printf '; kernel names kept')"
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
-log "userdata: $(jq -r '.userdata | if length == 0 then "none" else map(.name) | join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec"); provision: $(jq -r '.provision.type' <<< "$spec")"
+log "userdata: $(jq -r '.userdata | if length == 0 then "none" else map(.name) | join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec")"
 log "kernel command line: $kernel_cmdline"
 if [ "$dry" = 1 ]; then
 	log "dry run: stopping here, no disk was touched"
@@ -1418,8 +1418,6 @@ ipv6=$([ "$ipv6" = true ] && echo on || echo off)
 mitigations=$([ "$mitigations" = true ] && echo on || echo off)
 firewall=$(jq -r '.firewall.policy' <<< "$spec")
 userdata=$(jq -r '.userdata | map(.name) | join(",")' <<< "$spec")
-provision=$(jq -r '.provision.type' <<< "$spec")
-$(jq -r '.provision.options // {} | to_entries[] | "provision_\(.key)=\(.value)"' <<< "$spec")
 META
 chmod 644 "$TARGET/etc/ump/install"
 

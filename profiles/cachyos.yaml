@@ -37,11 +37,6 @@ userdata: [cachyos]     # named entries from userdata.yaml (ump config userdata)
 # a firewall from firewalls.yaml (default, web, open), or an inline one ({policy: drop, allow: [icmp, ssh]})
 firewall: default
 
-provision:
-  type: none            # reserved for ansible-pull (later), recorded in /etc/ump/install; ump server
-                        # reinstall provisions by push from the infrastructure repository
-                        # (docs/provisioning.md)
-
 network:
   rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
                         # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)

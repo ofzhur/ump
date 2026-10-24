@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func repoFile(t *testing.T, name string) []byte {
@@ -72,8 +74,8 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if spec.Firewall.Policy != "drop" || len(spec.Firewall.Allow) != 2 || spec.Firewall.Allow[0].Proto != "icmp" || spec.Firewall.Allow[1] != (Allow{Proto: "tcp", Port: "22"}) {
 		t.Errorf("firewall: %+v", spec.Firewall)
 	}
-	if spec.Provision.Type != "none" || len(spec.Userdata) != 1 || spec.Userdata[0].Name != "ubuntu" || spec.Userdata[0].Type != "bash" || !strings.Contains(spec.Userdata[0].Script, "set -euo pipefail") {
-		t.Errorf("provision %+v userdata %v", spec.Provision, spec.Userdata)
+	if len(spec.Userdata) != 1 || spec.Userdata[0].Name != "ubuntu" || spec.Userdata[0].Type != "bash" || !strings.Contains(spec.Userdata[0].Script, "set -euo pipefail") {
+		t.Errorf("userdata %v", spec.Userdata)
 	}
 	data, err := spec.JSON()
 	if err != nil {
@@ -83,10 +85,13 @@ func TestDefaultProfileAndLayouts(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"os", "hostname", "timezone", "storage", "kernel", "layout", "users", "userdata", "firewall", "provision", "profile"} {
+	for _, key := range []string{"os", "hostname", "timezone", "storage", "kernel", "layout", "users", "userdata", "firewall", "network", "profile"} {
 		if _, ok := back[key]; !ok {
 			t.Errorf("json lacks %s", key)
 		}
+	}
+	if len(back) != 11 {
+		t.Errorf("json has %d keys:\n%s", len(back), data)
 	}
 	if !strings.Contains(string(data), `"userdata": [`) || !strings.Contains(string(data), `"name": "ubuntu"`) || !strings.Contains(string(data), `"allow": [`) {
 		t.Errorf("json:\n%s", data)
@@ -144,11 +149,44 @@ provision:
 	if len(spec.Firewall.Allow) != 6 || spec.Firewall.Allow[4] != (Allow{Proto: "tcp", Port: "8000-8100"}) || spec.Firewall.Allow[5] != (Allow{Proto: "tcp", Port: "443", From: "10.0.0.0/8"}) {
 		t.Errorf("firewall: %+v", spec.Firewall.Allow)
 	}
-	if spec.Provision.Type != "ansible-pull" || spec.Provision.Options["repo"] != "https://git.example.net/infra.git" || spec.Provision.Options["playbook"] != "site.yml" {
-		t.Errorf("provision: %+v", spec.Provision)
+	// the provision section of an older profile is read and ignored: not
+	// in the specification, not written back
+	if data, _ := spec.JSON(); strings.Contains(string(data), "provision") || strings.Contains(string(data), "ansible-pull") {
+		t.Errorf("provision in the specification:\n%s", data)
+	}
+	if out, _ := yaml.Marshal(p); strings.Contains(string(out), "provision") {
+		t.Errorf("provision written back:\n%s", out)
 	}
 	if len(spec.Userdata) != 1 || spec.Userdata[0].Name != "web" || spec.Userdata[0].Type != "bash" || spec.Userdata[0].Script != "apt-get install -y nginx\n" {
 		t.Errorf("userdata: %+v", spec.Userdata)
+	}
+}
+
+// TestProvisionIgnored: the provision section of older profiles, in
+// whatever shape, is accepted and changes nothing.
+func TestProvisionIgnored(t *testing.T) {
+	base := "name: t\nos: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: root, keys: [ump]}\n"
+	layouts, _ := ParseLayouts(repoFile(t, "layouts.yaml"))
+	plain, err := Parse([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := plain.Resolve(layouts, nil, nil, nil, fakeResolver)
+	wantJSON, _ := want.JSON()
+	for _, section := range []string{"provision: {type: none}", "provision: {type: ansible-bootstrap}", "provision: {type: chef, repo: x}", "provision: none", "provision: [a, b]"} {
+		p, err := Parse([]byte(base + section + "\n"))
+		if err != nil {
+			t.Errorf("%s: %v", section, err)
+			continue
+		}
+		spec, err := p.Resolve(layouts, nil, nil, nil, fakeResolver)
+		if err != nil {
+			t.Errorf("%s: %v", section, err)
+			continue
+		}
+		if got, _ := spec.JSON(); string(got) != string(wantJSON) {
+			t.Errorf("%s: specification\n%s", section, got)
+		}
 	}
 }
 
@@ -174,7 +212,6 @@ func TestProfileErrors(t *testing.T) {
 		{"no admin", "os: ubuntu-26.04\ndisks: lvm-linear\nusers:\n  - {name: ops, keys: [ump]}\n", "no user has sudo and root is not listed"},
 		{"unknown user", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [nobody]\n", `user "nobody" is not in users.yaml (known: ump; ump config os update fetches the published ones)`},
 		{"user twice", "os: ubuntu-26.04\ndisks: lvm-linear\nusers: [ump, {name: ump, sudo: true, keys: [ump]}]\n", "user ump is listed twice"},
-		{"bad provision", base + "disks: lvm-linear\nprovision: {type: chef}\n", `provision type "chef"`},
 		{"bad userdata name", base + "disks: lvm-linear\nuserdata: [\"rm -rf\"]\n", "is not a userdata name"},
 		{"unknown userdata", base + "disks: lvm-linear\nuserdata: [nope]\n", `userdata "nope" is not in userdata.yaml`},
 		{"empty userdata", base + "disks: lvm-linear\nuserdata: [{name: x, script: \"\"}]\n", "the script is empty"},

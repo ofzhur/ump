@@ -41,13 +41,14 @@ func oldUpdateStatePath() string { return filepath.Join(config.UserConfigDir(), 
 
 // updateHint runs after a successful command: at most once a day, and
 // never for the commands that do not touch anything, with the check
-// off, or for a development build.
+// off, for a development build, or for an ump that ump runs (its parent
+// says it).
 func (a *app) updateHint(cmd *cobra.Command) {
 	switch cmd.Name() {
 	case "version", "completion", "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 		return
 	}
-	if Version == "dev" || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
+	if Version == "dev" || a.nested || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
 		return
 	}
 	cfg, _, err := a.loadConfig()

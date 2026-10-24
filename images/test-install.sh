@@ -93,7 +93,7 @@ jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --ar
 	users: [{name: "ump", sudo: true, groups: ["adm"], shell: "/bin/bash", keys: [$key]}],
 	userdata: $userdata,
 	firewall: {policy: "drop", allow: [{proto: "icmp"}, {proto: "tcp", port: "22"}]},
-	provision: {type: "none"}, network: {rename: true}, profile: {name: "test"}}' > "$WORK/spec.json"
+	network: {rename: true}, profile: {name: "test"}}' > "$WORK/spec.json"
 
 ssh_opts=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
 	-o ConnectTimeout=5 -o ServerAliveInterval=10 -p "$PORT")

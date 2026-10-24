@@ -70,6 +70,9 @@ type app struct {
 	pullFailed bool
 	store      *state.Store
 	doc        *state.Document
+	// nested says that an ump runs this one (UMP_PARENT): it leaves the
+	// mirror and the update check to that one.
+	nested bool
 	// now is the clock, for cache timestamps; nil means time.Now.
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.

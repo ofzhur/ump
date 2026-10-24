@@ -3,15 +3,18 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/provider"
@@ -32,8 +35,8 @@ func TestGroupFlags(t *testing.T) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
-	for _, own := range []string{"all", "ungrouped", "localhost"} {
-		if _, err := (groupFlags{own}).list(cmd); err == nil || exitCodeFor(err) != exitUsage || !strings.Contains(err.Error(), "group \""+own+"\": all, ungrouped and localhost are Ansible's own names") {
+	for _, own := range []string{"all", "ungrouped", "localhost", "_meta"} {
+		if _, err := (groupFlags{own}).list(cmd); err == nil || exitCodeFor(err) != exitUsage || !strings.Contains(err.Error(), "group \""+own+"\": all, ungrouped, localhost and _meta are Ansible's own names") {
 			t.Errorf("%q: %v", own, err)
 		}
 	}
@@ -318,7 +321,7 @@ func TestProvisionNeedsTheLayout(t *testing.T) {
 	// --no-provision needs no layout: the server is installed, and is in
 	// no inventory
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "web-01 is up:") || !strings.Contains(errOut, "web-01 is not in any inventory (no Ansible layout here); run ump server provision web-01 from the infrastructure repository later.\n") {
+	if code != 0 || !strings.Contains(errOut, "web-01 is up:") || !strings.Contains(errOut, "No host file for web-01 (no Ansible layout here): ump server provision web-01, run from the infrastructure repository, writes it; where ump is the inventory, web-01 is in it from its record on.\n") {
 		t.Errorf("--no-provision: code %d, %q", code, errOut)
 	}
 	if len(e.ansibleCalls) != 0 || e.hostFile("web-01.yml") != "" {
@@ -528,7 +531,7 @@ func TestReinstallProvisionFailures(t *testing.T) {
 	e.noAnsible, e.ansibleCalls = true, nil
 	resetFakePower()
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one")
-	if code != 0 || !strings.Contains(errOut, "web-01 is up:") || !strings.HasSuffix(errOut, "web-01 is not in the inventory (no ansible-inventory in PATH to check the names); run ump server provision web-01 from the infrastructure repository later.\n") {
+	if code != 0 || !strings.Contains(errOut, "web-01 is up:") || !strings.HasSuffix(errOut, "No host file for web-01 (no ansible-inventory in PATH to check the names): ump server provision web-01, run from the infrastructure repository, writes it; where ump is the inventory, web-01 is in it from its record on.\n") {
 		t.Errorf("--no-provision without ansible-inventory: code %d, %q", code, errOut)
 	}
 	e.noAnsible = false
@@ -536,7 +539,7 @@ func TestReinstallProvisionFailures(t *testing.T) {
 		os.Chmod(e.repo, 0o777)
 		resetFakePower()
 		_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one")
-		if code != 0 || !strings.HasSuffix(errOut, "web-01 is not in the inventory ("+e.repo+" is world-writable, Ansible takes no ansible.cfg from it); run ump server provision web-01 from the infrastructure repository later.\n") {
+		if code != 0 || !strings.HasSuffix(errOut, "No host file for web-01 ("+e.repo+" is world-writable, Ansible takes no ansible.cfg from it): ump server provision web-01, run from the infrastructure repository, writes it; where ump is the inventory, web-01 is in it from its record on.\n") {
 			t.Errorf("--no-provision, world-writable: code %d, %q", code, errOut)
 		}
 		os.Chmod(e.repo, 0o755)
@@ -743,7 +746,7 @@ func TestNoRebootThenProvision(t *testing.T) {
 	e.now = e.now.Add(time.Hour)
 	resetFakePower()
 	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-reboot", "--hostname", "web-02", "--group", "db", "--set", "users=[{name: ops, sudo: true, keys: [ump]}]", "--account", "one", "-o", "json")
-	if code != 0 || !strings.Contains(errOut, "Not provisioned: after the reboot, ump server provision web-01, run from the infrastructure repository, puts web-02 into the inventory and runs its run list.\n") {
+	if code != 0 || !strings.Contains(errOut, "Not provisioned: after the reboot, ump server provision web-01, run from the infrastructure repository, puts web-02 into the inventory and runs its run list (where ump is the inventory, web-02 is in it from its record on).\n") {
 		t.Fatalf("--no-reboot: code %d, %q", code, errOut)
 	}
 	for _, want := range []string{`"installed_at": "2026-10-12T10:00:00Z"`, `"groups": [
@@ -793,5 +796,523 @@ func TestStateRolesBecomeGroups(t *testing.T) {
 	}
 	if _, _, code := e.run("", false, "server", "set", "web-01", "--attr", "owner=alice", "--account", "one"); code != 0 || !strings.Contains(e.readState(), "    groups:\n      - web_app\n      - base\n") || strings.Contains(e.readState(), "roles") {
 		t.Errorf("written: code %d\n%s", code, e.readState())
+	}
+}
+
+// TestUmpInventoryFile: a YAML mapping with plugin: ofzhur.ansible.ump
+// directly in inventory/ makes ump the inventory; nothing else does.
+func TestUmpInventoryFile(t *testing.T) {
+	dir := t.TempDir()
+	inv := filepath.Join(dir, "inventory")
+	os.MkdirAll(filepath.Join(inv, "sub"), 0o755)
+	write := func(name, content string) {
+		os.WriteFile(filepath.Join(inv, name), []byte(content), 0o644)
+	}
+	write("groups.yml", "all:\n  children:\n    common:\n")
+	write("list.yml", "- plugin: ofzhur.ansible.ump\n")
+	write("host.yml", "plugin: ofzhur.ansible.host\n")
+	write(".ump.yml", "plugin: ofzhur.ansible.ump\n")
+	write("ump.txt", "plugin: ofzhur.ansible.ump\n")
+	write("sub/ump.yml", "plugin: ofzhur.ansible.ump\n")
+	write("broken.yml", "{not yaml")
+	if got := umpInventory(dir); got != "" {
+		t.Errorf("no plugin file: %q", got)
+	}
+	write("ump.yaml", "# ump is the inventory\nplugin: ofzhur.ansible.ump\n")
+	if got := umpInventory(dir); got != "inventory/ump.yaml" {
+		t.Errorf("plugin file: %q", got)
+	}
+	os.WriteFile(filepath.Join(dir, "ansible.cfg"), nil, 0o644)
+	a := &app{repoDir: dir}
+	if repo, missing, err := a.infraLayout(); err != nil || len(missing) != 0 || repo.plugin != "inventory/ump.yaml" {
+		t.Errorf("layout: %+v %v %v", repo, missing, err)
+	}
+}
+
+// TestServerListAnsible: -o ansible is the inventory of the servers ump
+// installed, with the hosts, groups and variables of their host files.
+func TestServerListAnsible(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	if _, _, code := e.run("", false, "server", "set", "web-01", "--attr", "owner=alice", "--attr", "note=a: b", "--account", "one"); code != 0 {
+		t.Fatal("server set failed")
+	}
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--group", "web,db", "--account", "one"); code != 0 {
+		t.Fatalf("reinstall: code %d, %q", code, errOut)
+	}
+	out, errOut, code := e.run("", false, "server", "list", "-o", "ansible", "--account", "one")
+	want := `{
+  "_meta": {
+    "hostvars": {
+      "web-01": {
+        "ansible_host": "203.0.113.10",
+        "ansible_user": "ump",
+        "ump_name": "web-01",
+        "ump_ref": "fake/1",
+        "ump_provider": "fake",
+        "ump_account": "one",
+        "ump_location": "eu-1",
+        "ump_product": "m1",
+        "ump_os": "ubuntu-26.04",
+        "ump_profile": "ubuntu-26.04",
+        "ump_installed_at": "2026-10-12T09:00:00Z",
+        "ump_attributes": {
+          "note": "a: b",
+          "owner": "alice"
+        }
+      }
+    }
+  },
+  "all": {
+    "children": [
+      "common",
+      "db",
+      "web"
+    ]
+  },
+  "common": {
+    "hosts": [
+      "web-01"
+    ]
+  },
+  "db": {
+    "hosts": [
+      "web-01"
+    ]
+  },
+  "web": {
+    "hosts": [
+      "web-01"
+    ]
+  }
+}
+`
+	if code != 0 || errOut != "" || out != want {
+		t.Fatalf("-o ansible: code %d, %q\n%s", code, errOut, out)
+	}
+	// the same as the host file: its groups, its variables
+	var file struct {
+		Groups []string       `yaml:"groups"`
+		Vars   map[string]any `yaml:"vars"`
+	}
+	if err := yaml.Unmarshal([]byte(e.hostFile("web-01.yml")), &file); err != nil {
+		t.Fatal(err)
+	}
+	var listed map[string]json.RawMessage
+	json.Unmarshal([]byte(out), &listed)
+	var meta struct {
+		Hostvars map[string]map[string]any `json:"hostvars"`
+	}
+	json.Unmarshal(listed["_meta"], &meta)
+	fromFile, _ := json.Marshal(file.Vars)
+	fromList, _ := json.Marshal(meta.Hostvars["web-01"])
+	if string(fromFile) != string(fromList) {
+		t.Errorf("variables differ:\nhost file %s\nlisted    %s", fromFile, fromList)
+	}
+	for _, g := range file.Groups {
+		if !strings.Contains(string(listed[g]), `"web-01"`) {
+			t.Errorf("group %s of the host file: %s", g, listed[g])
+		}
+	}
+	// what ump reads back through ansible-inventory --list
+	if inv, err := parseInventory([]byte(out)); err != nil || inv.hosts["web-01"] != "fake/1" || !inv.groups["db"] || len(inv.hosts) != 1 {
+		t.Errorf("parsed: %+v, %v", inv, err)
+	}
+	// --cached serves the same; a server ump did not install is not in it
+	if cached, errOut, code := e.run("", false, "server", "list", "-o", "ansible", "--cached", "--account", "one"); code != 0 || cached != out || errOut != "" {
+		t.Errorf("--cached: code %d, %q\n%s", code, errOut, cached)
+	}
+	empty := "{\n  \"_meta\": {\n    \"hostvars\": {}\n  },\n  \"all\": {\n    \"children\": []\n  }\n}\n"
+	if out, _, code := e.run("", false, "server", "list", "db-01", "-o", "ansible", "--account", "one"); code != 0 || out != empty {
+		t.Errorf("db-01: code %d\n%s", code, out)
+	}
+	if _, errOut, code := e.run("", false, "server", "list", "-o", "ansible", "--diff", "--account", "one"); code != 2 || !strings.Contains(errOut, "-o ansible cannot be combined with --diff or --since") {
+		t.Errorf("--diff: code %d, %q", code, errOut)
+	}
+	if _, errOut, code := e.run("", false, "server", "list", "-o", "ini", "--account", "one"); code != 2 || !strings.Contains(errOut, `unknown output format "ini" (use one of table, wide, json, yaml, name, ansible)`) {
+		t.Errorf("-o ini: code %d, %q", code, errOut)
+	}
+
+	// two servers with one hostname: the later installation has it
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "state.yaml")
+	setDB := func(at time.Time) {
+		data, _ := os.ReadFile(path)
+		d, err := state.Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Servers["fake/2"] = state.Server{Installed: &state.Install{OS: "debian-13", Profile: "debian-13", Hostname: "web-01", Admin: "ops", At: at}, Groups: []string{"db"}}
+		data, _ = d.Bytes()
+		os.WriteFile(path, data, 0o600)
+	}
+	setDB(e.now.Add(-time.Hour))
+	out, errOut, code = e.run("", false, "server", "list", "-o", "ansible", "--account", "one")
+	if code != 0 || !strings.Contains(out, `"ump_ref": "fake/1"`) || strings.Contains(out, "fake/2") || errOut != "ump: fake/2 (db-01, 203.0.113.11) is left out of the inventory: its hostname web-01 is that of fake/1, installed later\n" {
+		t.Errorf("earlier db-01: code %d, %q\n%s", code, errOut, out)
+	}
+	setDB(e.now.Add(time.Hour))
+	out, errOut, code = e.run("", false, "server", "list", "-o", "ansible", "--account", "one")
+	if code != 0 || !strings.Contains(out, `"ump_ref": "fake/2"`) || !strings.Contains(out, `"ansible_user": "ops"`) || strings.Contains(out, `"fake/1"`) || errOut != "ump: fake/1 (web-01, 203.0.113.10) is left out of the inventory: its hostname web-01 is that of fake/2, installed later\n" {
+		t.Errorf("later db-01: code %d, %q\n%s", code, errOut, out)
+	}
+
+	// a group of a state edited by hand that would break the inventory
+	data, _ := os.ReadFile(path)
+	os.WriteFile(path, []byte(strings.Replace(string(data), "    groups:\n      - db\n", "    groups:\n      - db\n      - _meta\n      - all\n      - Web\n", 1)), 0o600)
+	out, errOut, code = e.run("", false, "server", "list", "-o", "ansible", "--account", "one")
+	if inv, err := parseInventory([]byte(out)); code != 0 || err != nil || inv.hosts["web-01"] != "fake/2" || inv.groups["Web"] || !strings.Contains(out, `"db": {`) || !strings.Contains(errOut, "ump: the group \"_meta\" of fake/2 (db-01, 203.0.113.11) in the state is left out: not a group name ump gives\nump: the group \"all\" of fake/2") || !strings.Contains(errOut, "ump: the group \"Web\" of fake/2") {
+		t.Errorf("groups edited by hand: code %d, %q\n%s", code, errOut, out)
+	}
+}
+
+// TestUmpIsTheInventory: with inventory/ump.yml, reinstall and provision
+// write no host file and check and run as before; a host file of the
+// server beside it, or its hostname as another host of the inventory,
+// stops them first.
+func TestUmpIsTheInventory(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(testConfig)
+	e.writeProfiles()
+	os.WriteFile(filepath.Join(e.repo, "inventory", "ump.yml"), []byte("plugin: ofzhur.ansible.ump\n"), 0o644)
+	hosts := filepath.Join(e.repo, "inventory", "hosts")
+
+	resetFakePower()
+	out, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--group", "web", "--account", "one", "-o", "json")
+	if code != 0 || !strings.Contains(out, `"provisioned": true`) {
+		t.Fatalf("reinstall: code %d, %q\n%s", code, errOut, out)
+	}
+	up := strings.Index(errOut, "web-01 is up:")
+	none := strings.Index(errOut, "No host file: inventory/ump.yml makes ump the inventory, with web-01 in common, web.\nProvisioning web-01: common, web (ofzhur.ansible.common, ofzhur.ansible.web) ...\n")
+	if up < 0 || none < up || strings.Contains(errOut, "Wrote ") {
+		t.Errorf("progress:\n%s", errOut)
+	}
+	if _, err := os.Stat(hosts); err == nil {
+		t.Errorf("inventory/hosts/ written")
+	}
+	if len(e.ansibleCalls) != 3 || e.ansibleCalls[0].args[0] != "--syntax-check" || e.ansibleCalls[1].prog != "ansible-inventory" || len(e.ansibleRuns()) != 1 {
+		t.Errorf("ansible: %+v", e.ansibleCalls)
+	}
+	// an ump the runs call in turn is part of this one, with its configuration
+	for _, c := range e.ansibleCalls {
+		if !slices.Contains(c.env, "UMP_PARENT=local") || !slices.Contains(c.env, "UMP_CONFIG="+e.cfgPath) {
+			t.Errorf("%s env: %v", c.prog, c.env)
+		}
+	}
+	if st := e.readState(); !strings.Contains(st, "      hostname: web-01\n") || !strings.Contains(st, "    groups:\n      - web\n") {
+		t.Errorf("state:\n%s", st)
+	}
+
+	// provision: no host file either, the run list runs
+	e.ansibleCalls = nil
+	out, errOut, code = e.run("", false, "server", "provision", "web-01", "--group", "monitoring", "--account", "one")
+	if code != 0 || out != "fake/1 (web-01, 203.0.113.10): provisioned, run list common, web, monitoring.\n" || !strings.Contains(errOut, "No host file: inventory/ump.yml makes ump the inventory, with web-01 in common, web, monitoring.\nProvisioning web-01: ") || len(e.ansibleRuns()) != 1 {
+		t.Errorf("provision: code %d, %q\n%s", code, errOut, out)
+	}
+	// --no-provision: in the inventory through ump, nothing runs
+	resetFakePower()
+	e.ansibleCalls = nil
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--account", "one")
+	if code != 0 || !strings.Contains(errOut, "No host file: inventory/ump.yml makes ump the inventory, with web-01 in common.\nNot provisioned (--no-provision); ump server provision web-01 runs its run list.\n") || len(e.ansibleRuns()) != 0 {
+		t.Errorf("--no-provision: code %d, %q", code, errOut)
+	}
+	// another server's host file is no concern of this one
+	os.MkdirAll(hosts, 0o755)
+	os.WriteFile(filepath.Join(hosts, "db-01.yml"), []byte("plugin: ofzhur.ansible.host\nvars:\n  ump_ref: fake/2\n"), 0o644)
+	if _, errOut, code := e.run("", false, "server", "provision", "web-01", "--account", "one"); code != 0 {
+		t.Errorf("another server's host file: code %d, %q", code, errOut)
+	}
+
+	// a host file of the hostname, or one of the server under another
+	// name, beside the plugin: refused before anything happens
+	for _, f := range []struct{ name, content, want string }{
+		{"web-01.yml", "plugin: ofzhur.ansible.host\nvars:\n  ump_ref: fake/1\n", "inventory/hosts/web-01.yml defines the host web-01 too, and inventory/ump.yml makes ump the inventory: the host would be defined twice; remove the host file"},
+		{"web-01.yaml", "web-01:\n", "inventory/hosts/web-01.yaml defines the host web-01 too, and inventory/ump.yml makes ump the inventory: the host would be defined twice; remove the host file"},
+		{"old-name.yml", "plugin: ofzhur.ansible.host\nvars:\n  ump_ref: fake/1\n", "inventory/hosts/old-name.yml is the host file of fake/1, and inventory/ump.yml makes ump the inventory: the server would be in it twice; remove the host file"},
+	} {
+		os.WriteFile(filepath.Join(hosts, f.name), []byte(f.content), 0o644)
+		for _, args := range [][]string{{"server", "reinstall", "web-01", "--yes"}, {"server", "reinstall", "web-01", "--yes", "--no-provision"}, {"server", "provision", "web-01"}} {
+			e.remoteCalls, e.ansibleCalls = nil, nil
+			resetFakePower()
+			if _, errOut, code := e.run("", false, append(args, "--account", "one")...); code != 2 || !strings.HasSuffix(errOut, "ump: "+f.want+"\n") {
+				t.Errorf("%s, %v: code %d, %q", f.name, args, code, errOut)
+			}
+			if len(e.remoteCalls) != 0 || len(fakePower.actions) != 0 || len(e.ansibleRuns()) != 0 {
+				t.Errorf("%s, %v: remote %v, provider %v, runs %v", f.name, args, e.remoteCalls, fakePower.actions, e.ansibleRuns())
+			}
+		}
+		os.Remove(filepath.Join(hosts, f.name))
+	}
+
+	// the hostname as another host of the inventory
+	e.inventory = `{"_meta": {"hostvars": {"web-01": {"ump_ref": "fake/1"}, "web-02": {"ump_ref": {"__ansible_unsafe": "fake/2"}}, "lb": {"ansible_host": "192.0.2.9"}}}, "all": {"children": ["ungrouped", "common"]}, "common": {"hosts": ["web-01", "web-02"]}, "ungrouped": {"hosts": ["lb"]}}`
+	for host, want := range map[string]string{
+		"web-02": "the hostname web-02 is the host of fake/2 in the inventory (its ump_ref); give another --hostname",
+		"lb":     "the hostname lb is a host of the inventory without ump_ref; give another --hostname",
+	} {
+		resetFakePower()
+		if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--hostname", host, "--account", "one"); code != 2 || !strings.HasSuffix(errOut, "ump: "+want+"\n") || len(fakePower.actions) != 0 {
+			t.Errorf("hostname %s: code %d, %q", host, code, errOut)
+		}
+	}
+	// the server's own host is no conflict
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--account", "one"); code != 0 {
+		t.Errorf("own host: code %d, %q", code, errOut)
+	}
+	e.inventory = ""
+
+	// --no-reboot: in the inventory from its record on
+	resetFakePower()
+	e.ansibleCalls = nil
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-reboot", "--hostname", "web-02", "--account", "one")
+	if code != 0 || !strings.HasSuffix(errOut, "Not provisioned: inventory/ump.yml makes ump the inventory, which has web-02 from its record on; after the reboot, ump server provision web-01 runs its run list.\n") || len(e.ansibleRuns()) != 0 {
+		t.Errorf("--no-reboot: code %d, %q", code, errOut)
+	}
+
+	// the installation cannot be recorded: nothing runs against the old
+	// record, which ump as the inventory would list
+	home := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")
+	e.installHook = func() { os.Chmod(home, 0o500) }
+	t.Cleanup(func() { os.Chmod(home, 0o700) })
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		return // root writes anyway
+	}
+	for _, c := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"--group", "db"}, 6, "ump: provisioning failed: web-03 is installed but not recorded, and inventory/ump.yml makes ump the inventory, which lists the old record; record it and run ump server provision web-01\n"},
+		{[]string{"--no-provision"}, 0, "Not provisioned (--no-provision), and not in the inventory as installed: inventory/ump.yml makes ump the inventory, which lists the old record; record it.\n"},
+	} {
+		resetFakePower()
+		e.ansibleCalls = nil
+		out, errOut, code := e.run("", false, append([]string{"server", "reinstall", "web-01", "--yes", "--hostname", "web-03", "--account", "one", "-o", "json"}, c.args...)...)
+		os.Chmod(home, 0o700)
+		if code != c.code || !strings.HasSuffix(errOut, c.want) || len(e.ansibleRuns()) != 0 || !strings.Contains(out, `"provisioned": false`) {
+			t.Errorf("%v, not recorded: code %d, %q\n%s", c.args, code, errOut, out)
+		}
+		if !strings.Contains(errOut, "ump: the installation is not recorded in the state: ") || !strings.Contains(errOut, "Record it by hand: in state.yaml (ump config state view says where), the server's installed and groups are these:\nservers:\n  fake/1:\n    installed:\n      os: ubuntu-26.04\n") || !strings.Contains(errOut, "      hostname: web-03\n      admin: ump\n") {
+			t.Errorf("%v, the record to add:\n%s", c.args, errOut)
+		}
+		if strings.Contains(e.readState(), "web-03") {
+			t.Errorf("%v: recorded\n%s", c.args, e.readState())
+		}
+	}
+}
+
+// TestMain runs the test binary as ump when UMP_TEST_MAIN is set: the
+// ump that Ansible runs in TestNestedUmp, as the inventory plugin
+// ofzhur.ansible.ump does, with the fake provider type of the tests.
+func TestMain(m *testing.M) {
+	if os.Getenv("UMP_TEST_MAIN") != "" {
+		os.Exit(Main(os.Args[1:]))
+	}
+	os.Exit(m.Run())
+}
+
+// nestedAnsible stands in for ansible-playbook and ansible-inventory with
+// the inventory plugin ofzhur.ansible.ump: every run lists the inventory
+// with ump, the test binary, a child of the ump that runs Ansible. It
+// notes per run the child's UMP_PARENT and exit status, whether the
+// mirror's lock was held and whether the child changed the mirror's
+// manifest (a pull or a push), and keeps the child's output; the
+// inventory goes to ansible-inventory's stdout. UMP_TEST_BACKEND, when
+// set, is a backend directory to make readable again first;
+// UMP_TEST_HOLD holds the mirror's lock while the child runs, as a
+// parent that kept it would.
+const nestedAnsible = `#!/bin/sh
+n=$(cat "$UMP_TEST_LOG/n" 2>/dev/null || echo 0); n=$((n + 1)); echo $n >"$UMP_TEST_LOG/n"
+log="$UMP_TEST_LOG/$n"
+if [ -n "$UMP_TEST_BACKEND" ]; then chmod 700 "$UMP_TEST_BACKEND"; fi
+lock=free
+if [ -n "$UMP_TEST_MIRROR" ]; then
+	if [ -e "$UMP_TEST_MIRROR/.mirror.lock" ]; then lock=held; fi
+	cp "$UMP_TEST_MIRROR/.mirror.json" "$log.before"
+fi
+if [ -n "$UMP_TEST_HOLD" ]; then touch "$UMP_TEST_MIRROR/.mirror.lock"; fi
+UMP_TEST_MAIN=1 "$UMP_TEST_BIN" server list -o ansible >"$log.json" 2>"$log.err"
+code=$?
+if [ -n "$UMP_TEST_HOLD" ]; then rm -f "$UMP_TEST_MIRROR/.mirror.lock"; fi
+mirror=kept
+if [ -n "$UMP_TEST_MIRROR" ] && ! cmp -s "$UMP_TEST_MIRROR/.mirror.json" "$log.before"; then mirror=changed; fi
+echo "$(basename "$0") $UMP_PARENT $code lock=$lock mirror=$mirror" >"$log"
+if [ "$(basename "$0")" = ansible-inventory ]; then cat "$log.json"; fi
+exit $code
+`
+
+// nestedRun is what nestedAnsible noted of one run.
+type nestedRun struct {
+	note, stderr string
+	inv          *inventory
+	groups       map[string][]string
+	vars         map[string]map[string]any
+}
+
+// nestedRuns reads the runs nestedAnsible noted since the last call.
+func nestedRuns(t *testing.T, log string) []nestedRun {
+	t.Helper()
+	data, _ := os.ReadFile(filepath.Join(log, "n"))
+	var runs []nestedRun
+	for i := 1; ; i++ {
+		base := filepath.Join(log, strconv.Itoa(i))
+		note, err := os.ReadFile(base)
+		if err != nil {
+			break
+		}
+		out, _ := os.ReadFile(base + ".json")
+		errOut, _ := os.ReadFile(base + ".err")
+		r := nestedRun{note: strings.TrimSpace(string(note)), stderr: string(errOut), groups: map[string][]string{}}
+		r.inv, _ = parseInventory(out)
+		var raw map[string]json.RawMessage
+		json.Unmarshal(out, &raw)
+		for g, v := range raw {
+			var group struct {
+				Hosts    []string                  `json:"hosts"`
+				Hostvars map[string]map[string]any `json:"hostvars"`
+			}
+			json.Unmarshal(v, &group)
+			if g == "_meta" {
+				r.vars = group.Hostvars
+			} else if len(group.Hosts) > 0 {
+				r.groups[g] = group.Hosts
+			}
+		}
+		runs = append(runs, r)
+		for _, f := range []string{"", ".json", ".err", ".before"} {
+			os.Remove(base + f)
+		}
+	}
+	if len(data) > 0 {
+		os.Remove(filepath.Join(log, "n"))
+	}
+	return runs
+}
+
+// TestNestedUmp runs ump as the inventory the way Ansible does under ump
+// server reinstall and provision: ump runs Ansible (the scripts above,
+// with the real runner), and Ansible runs ump. The child sees the server
+// its parent recorded before the run, with the parent's configuration
+// and state, waits for no lock, and leaves the mirror alone: with the
+// local home, with a backend, and with a backend that did not answer the
+// parent but answers the child, which must still read the mirror the
+// parent wrote to.
+func TestNestedUmp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh stands in for Ansible")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t)
+	e.write("accounts:\n  one:\n    type: fake\n    login: bob\n    password: {env: FAKE_PASS}\n")
+	e.writeProfiles()
+	e.realAnsible = true
+	os.WriteFile(filepath.Join(e.repo, "inventory", "ump.yml"), []byte("plugin: ofzhur.ansible.ump\n"), 0o644)
+	bin, log := t.TempDir(), t.TempDir()
+	for _, prog := range []string{"ansible-playbook", "ansible-inventory"} {
+		os.WriteFile(filepath.Join(bin, prog), []byte(nestedAnsible), 0o755)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("UMP_TEST_BIN", self)
+	t.Setenv("UMP_TEST_LOG", log)
+	t.Setenv("UMP_TEST_MIRROR", "")
+	t.Setenv("UMP_TEST_BACKEND", "")
+	t.Setenv("UMP_TEST_HOLD", "")
+
+	// check runs what reinstall and provision ran: the syntax check, the
+	// inventory and the run list, each with a child that answered
+	// without a word, under parent, and the run list's child listing
+	// hostname in groups, as the server ref
+	check := func(what, parent, hostname, ref string, groups []string, extra string) {
+		t.Helper()
+		runs := nestedRuns(t, log)
+		if len(runs) != 3 || !strings.HasPrefix(runs[0].note, "ansible-playbook ") || !strings.HasPrefix(runs[1].note, "ansible-inventory ") || !strings.HasPrefix(runs[2].note, "ansible-playbook ") {
+			t.Fatalf("%s: runs %+v", what, runs)
+		}
+		for _, r := range runs {
+			if want := parent + " 0 lock=free mirror=kept"; !strings.HasSuffix(r.note, " "+want) || r.stderr != "" || r.inv == nil {
+				t.Errorf("%s: %q, want %q; stderr %q", what, r.note, want, r.stderr)
+			}
+		}
+		run := runs[2]
+		if run.inv == nil || run.inv.hosts[hostname] != ref {
+			t.Fatalf("%s: the run list's inventory lacks %s: %+v", what, hostname, run.inv)
+		}
+		for _, g := range append([]string{"common"}, groups...) {
+			if !slices.Contains(run.groups[g], hostname) {
+				t.Errorf("%s: %s not in %s: %v", what, hostname, g, run.groups)
+			}
+		}
+		if len(run.groups) != len(groups)+1 || run.vars[hostname]["ansible_host"] != "203.0.113.10" || run.vars[hostname]["ansible_user"] != "ump" {
+			t.Errorf("%s: groups %v, vars %v", what, run.groups, run.vars)
+		}
+		if extra != "" && !strings.Contains(run.note+run.stderr, extra) {
+			t.Errorf("%s: %q lacks %q", what, run.note, extra)
+		}
+	}
+
+	// the local home
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--group", "web"); code != 0 || !strings.Contains(errOut, "No host file: inventory/ump.yml makes ump the inventory, with web-01 in common, web.\n") {
+		t.Fatalf("reinstall, local: code %d, %q", code, errOut)
+	}
+	check("local", "local", "web-01", "fake/1", []string{"web"}, "")
+
+	// a backend: the state the parent records goes there, the child
+	// reads it there and leaves the mirror, which it shares, to the parent
+	backend := filepath.Join(t.TempDir(), "backend")
+	os.MkdirAll(filepath.Join(backend, "profiles"), 0o700)
+	for _, name := range profileFiles {
+		data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", name))
+		os.WriteFile(filepath.Join(backend, "profiles", name), data, 0o600)
+	}
+	t.Setenv("UMP_STATE", "file://"+backend)
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list, backend: code %d, %q", code, errOut)
+	}
+	mirrors, _ := filepath.Glob(filepath.Join(os.Getenv("XDG_CACHE_HOME"), "ump", "homes", "*"))
+	if len(mirrors) != 1 {
+		t.Fatalf("mirrors: %v", mirrors)
+	}
+	t.Setenv("UMP_TEST_MIRROR", mirrors[0])
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--group", "web"); code != 0 {
+		t.Fatalf("reinstall, backend: code %d, %q", code, errOut)
+	}
+	check("backend", "backend", "web-01", "fake/1", []string{"web"}, "")
+	if data, _ := os.ReadFile(filepath.Join(backend, "state.yaml")); !strings.Contains(string(data), "hostname: web-01") {
+		t.Errorf("backend state:\n%s", data)
+	}
+	// a group the parent adds before the run is in the child's inventory;
+	// a lock of the mirror held meanwhile does not stop the child
+	t.Setenv("UMP_TEST_HOLD", "1")
+	if _, errOut, code := e.run("", false, "server", "provision", "web-01", "--group", "monitoring"); code != 0 {
+		t.Fatalf("provision, backend: code %d, %q", code, errOut)
+	}
+	check("provision", "backend", "web-01", "fake/1", []string{"web", "monitoring"}, "")
+	t.Setenv("UMP_TEST_HOLD", "")
+
+	// the backend does not answer the parent's pull: the parent records
+	// on the mirror; it answers again by the time Ansible runs, and the
+	// child still reads the mirror, where the new hostname and groups are
+	if os.Geteuid() == 0 {
+		return // root reads the directory anyway
+	}
+	e.now = e.now.Add(time.Minute)
+	os.Chmod(backend, 0)
+	t.Cleanup(func() { os.Chmod(backend, 0o700) })
+	t.Setenv("UMP_TEST_BACKEND", backend)
+	resetFakePower()
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--hostname", "web-09", "--group", "db")
+	if code != 0 || !strings.Contains(errOut, "ump: the state could not be pulled from file://"+backend) {
+		t.Fatalf("reinstall, backend down: code %d, %q", code, errOut)
+	}
+	check("mirror", "mirror", "web-09", "fake/1", []string{"db"}, "")
+	if data, _ := os.ReadFile(filepath.Join(backend, "state.yaml")); strings.Contains(string(data), "web-09") {
+		t.Errorf("the mirror's state reached the backend:\n%s", data)
 	}
 }

@@ -112,7 +112,10 @@ secret_key: {file: ~/.config/ump/backend.secret_key}
 
 The state holds secrets, the accounts' and UMP's key, in clear text,
 as `~/.config/ump` does; choose a backend accordingly (a private
-bucket, a Vault, a repository nobody else reads).
+bucket, a Vault, a repository nobody else reads). The collection's fact
+cache `ofzhur.ansible.facts` takes the same URLs for Ansible's facts
+([provisioning](provisioning.md#facts-in-a-central-storage)): keep
+those apart, with credentials of their own.
 
 The accounts' secret files (`secrets/NAME`) are part of the state and
 move with it. A reference written as `file: secrets/NAME` is in the
@@ -138,6 +141,15 @@ Several ump processes on one machine, such as reinstalls of different
 servers side by side, share the mirror: a lock file in it
 (`.mirror.lock`) lets one pull or push at a time go ahead, and the
 others wait for it.
+
+An ump that ump itself runs, the inventory plugin `ofzhur.ansible.ump`
+under the Ansible of `ump server reinstall` and `provision`, is part of
+that run. ump sets `UMP_PARENT` for it, where it reads the state
+(`backend`; `mirror` when the backend did not answer its pull; `local`),
+and `UMP_CONFIG`, its configuration file. That ump reads the state
+there too, so it sees what its parent recorded before the run, and
+neither pulls nor pushes: the mirror is its parent's for the run, and
+it waits for no lock.
 
 ump goes to the backend only when it has to, so that it never makes
 you wait for nothing:

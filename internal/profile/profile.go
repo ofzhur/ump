@@ -1,7 +1,7 @@
 // Package profile reads the YAML profiles that say what a server becomes
 // when ump installs it (operating system, disk layout, users, userdata,
-// firewall, the reserved provision type), validates them and renders the
-// specification the installer takes.
+// firewall), validates them and renders the specification the installer
+// takes.
 package profile
 
 import (
@@ -27,9 +27,16 @@ type Profile struct {
 	Users       []UserRef     `yaml:"users"`
 	Userdata    []UserdataRef `yaml:"userdata,omitempty"`
 	Firewall    FirewallRef   `yaml:"firewall,omitempty"`
-	Provision   Provision     `yaml:"provision,omitempty"`
+	Provision   ignored       `yaml:"provision,omitempty"`
 	Network     Network       `yaml:"network,omitempty"`
 }
+
+// ignored is a section older profiles have and ump no longer reads, such
+// as provision (none, ansible-pull): whatever it holds is accepted and
+// dropped, and never written, so that those profiles still load.
+type ignored struct{}
+
+func (*ignored) UnmarshalYAML(*yaml.Node) error { return nil }
 
 // FirewallRef is either the name of a firewall from firewalls.yaml or an
 // inline one; neither means no firewall.
@@ -496,14 +503,6 @@ func (a *Allow) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// Provision is reserved for ansible-pull, the server converging itself
-// later. The type and the other fields are recorded on the server and
-// change nothing else: ump provisions by push (internal/cli/ansible.go).
-type Provision struct {
-	Type    string            `yaml:"type,omitempty" json:"type"`
-	Options map[string]string `yaml:",inline" json:"options,omitempty"`
-}
-
 // Parse reads a profile from YAML and fills in the defaults.
 func Parse(data []byte) (*Profile, error) {
 	var p Profile
@@ -517,9 +516,6 @@ func Parse(data []byte) (*Profile, error) {
 	}
 	if p.Firewall.Rules != nil && p.Firewall.Rules.Policy == "" {
 		p.Firewall.Rules.Policy = "drop"
-	}
-	if p.Provision.Type == "" {
-		p.Provision.Type = "none"
 	}
 	return &p, nil
 }
@@ -707,11 +703,6 @@ func (p *Profile) Validate() error {
 			return fmt.Errorf("profile %s: %w", p.Name, err)
 		}
 	}
-	switch p.Provision.Type {
-	case "none", "ansible-pull", "ansible-bootstrap":
-	default:
-		return fmt.Errorf("profile %s: provision type %q is not none, ansible-pull or ansible-bootstrap", p.Name, p.Provision.Type)
-	}
 	return nil
 }
 
@@ -755,19 +746,18 @@ func IsKeyLine(s string) bool { return keyLine.MatchString(strings.TrimSpace(s))
 // Spec is what the installer takes: the profile with the layout inlined,
 // the keys resolved and the machine's own values filled in.
 type Spec struct {
-	OS        string      `json:"os"`
-	Hostname  string      `json:"hostname"`
-	Timezone  string      `json:"timezone"`
-	Storage   string      `json:"storage"`
-	Kernel    KernelSpec  `json:"kernel"`
-	Layout    *Layout     `json:"layout"`
-	Disks     []string    `json:"disks,omitempty"`
-	Users     []User      `json:"users"`
-	Userdata  []Userdata  `json:"userdata"`
-	Firewall  Firewall    `json:"firewall"`
-	Provision Provision   `json:"provision"`
-	Network   NetworkSpec `json:"network"`
-	Profile   ProfileInfo `json:"profile"`
+	OS       string      `json:"os"`
+	Hostname string      `json:"hostname"`
+	Timezone string      `json:"timezone"`
+	Storage  string      `json:"storage"`
+	Kernel   KernelSpec  `json:"kernel"`
+	Layout   *Layout     `json:"layout"`
+	Disks    []string    `json:"disks,omitempty"`
+	Users    []User      `json:"users"`
+	Userdata []Userdata  `json:"userdata"`
+	Firewall Firewall    `json:"firewall"`
+	Network  NetworkSpec `json:"network"`
+	Profile  ProfileInfo `json:"profile"`
 }
 
 // NetworkSpec is Network with the default filled in.
@@ -850,12 +840,11 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 			IPv6:        p.Kernel.IPv6 != nil && *p.Kernel.IPv6,
 			Extra:       strings.TrimSpace(p.Kernel.Extra),
 		},
-		Layout:    layout,
-		Userdata:  resolvedUserdata,
-		Firewall:  firewall,
-		Provision: p.Provision,
-		Network:   NetworkSpec{Rename: p.Network.Rename == nil || *p.Network.Rename},
-		Profile:   ProfileInfo{Name: p.Name, Description: p.Description},
+		Layout:   layout,
+		Userdata: resolvedUserdata,
+		Firewall: firewall,
+		Network:  NetworkSpec{Rename: p.Network.Rename == nil || *p.Network.Rename},
+		Profile:  ProfileInfo{Name: p.Name, Description: p.Description},
 	}
 	for _, u := range resolvedUsers {
 		var keys []string

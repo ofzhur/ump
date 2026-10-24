@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/profile"
@@ -89,12 +90,17 @@ playbooks/GROUP.yml of the repository when it has one, else the
 collection's ofzhur.ansible.GROUP; ansible-playbook --syntax-check runs
 on them first, and ansible-inventory checks that no host and group share
 a name. ump writes inventory/hosts/HOSTNAME.yml and runs the run list
-for the server alone, as its administrator with UMP's key only. Exit
-status 6 means the run list did not complete: the server is installed
-and recorded; fix that and run ump server provision NAME.
+for the server alone, as its administrator with UMP's key only; where a
+file of inventory/ says plugin: ofzhur.ansible.ump, ump is the inventory
+and writes no host file (one in inventory/hosts/ for the server stops
+it). Exit status 6 means the run list did not complete: the server is
+installed and recorded; fix that and run ump server provision NAME.
 --no-provision runs nothing and needs no layout; where the layout is
 there, the host file is still written once ansible-inventory has
-checked the names. docs/provisioning.md describes the repository.
+checked the names. Where ump is the inventory, the server is in it from
+its record on; a record that fails is printed, to add by hand, and
+nothing runs (exit status 6). docs/provisioning.md describes the
+repository.
 
 --dry-run brings the server into the rescue system and prints the
 installer's plan and the run list without touching a disk or the
@@ -485,14 +491,21 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		admin := spec.Admin()
 		record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, "", a.now())
 		result.InstalledAt, result.Admin = &record.At, admin
-		a.recordInstallation(ctx, m, record, groups)
+		recorded := a.recordInstallation(ctx, m, record, groups)
 		a.forgetReplacedHostKey(entry.addr)
 		how := "a reboot"
 		if diskBoot {
 			how = "a reboot through the provider (ump server reboot " + ref + ")"
 		}
 		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, %s starts %s.\n", m.Name, how, spec.OS)
-		fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, ump server provision %s, run from the infrastructure repository, puts %s into the inventory and runs its run list.\n", ref, hostname)
+		switch {
+		case !recorded:
+			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, record it and run ump server provision %s from the infrastructure repository.\n", ref)
+		case repo != nil && repo.plugin != "":
+			fmt.Fprintf(a.stderr, "Not provisioned: %s makes ump the inventory, which has %s from its record on; after the reboot, ump server provision %s runs its run list.\n", repo.plugin, hostname, ref)
+		default:
+			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, ump server provision %s, run from the infrastructure repository, puts %s into the inventory and runs its run list (where ump is the inventory, %s is in it from its record on).\n", ref, hostname, hostname)
+		}
 		return a.installReport(result, format)
 	}
 
@@ -527,11 +540,19 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	// what was installed goes into the state, for the inventory
 	record := installRecord(spec.OS, prof.Name, spec.Layout.Name, hostname, admin, sys.Details, a.now())
 	result.InstalledAt = &record.At
-	a.recordInstallation(ctx, m, record, groups)
+	recorded := a.recordInstallation(ctx, m, record, groups)
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, hostname, sys.Root, admin, m.Name)
-	// the new system goes into the inventory and gets its run list
-	vars := hostVarsFor(m, record, admin)
+	// the new system goes into the inventory and gets its run list; ump
+	// as the inventory lists the record, and without it the old one
+	vars := a.inventoryVars(cfg, m, record)
 	switch {
+	case !recorded && repo != nil && repo.plugin != "" && !o.noProvision:
+		if err := a.installReport(result, format); err != nil {
+			return err
+		}
+		return withExit(exitProvision, fmt.Errorf("provisioning failed: %s is installed but not recorded, and %s makes ump the inventory, which lists the old record; record it and run ump server provision %s", hostname, repo.plugin, ref))
+	case !recorded && repo != nil && repo.plugin != "":
+		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision), and not in the inventory as installed: %s makes ump the inventory, which lists the old record; record it.\n", repo.plugin)
 	case !o.noProvision:
 		if err := a.provisionHost(ctx, repo, rl, hostname, vars, keyPath); err != nil {
 			// the result still says what was installed
@@ -548,28 +569,43 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 			break
 		}
 		fmt.Fprintf(a.stderr, "Not provisioned (--no-provision); ump server provision %s runs its run list.\n", ref)
-	case unchecked != "":
-		fmt.Fprintf(a.stderr, "%s is not in the inventory (%s); run ump server provision %s from the infrastructure repository later.\n", hostname, unchecked, ref)
 	default:
-		fmt.Fprintf(a.stderr, "%s is not in any inventory (no Ansible layout here); run ump server provision %s from the infrastructure repository later.\n", hostname, ref)
+		why := "no Ansible layout here"
+		if unchecked != "" {
+			why = unchecked
+		}
+		fmt.Fprintf(a.stderr, "No host file for %s (%s): ump server provision %s, run from the infrastructure repository, writes it", hostname, why, ref)
+		if recorded {
+			fmt.Fprintf(a.stderr, "; where ump is the inventory, %s is in it from its record on", hostname)
+		}
+		fmt.Fprintln(a.stderr, ".")
 	}
 	return a.installReport(result, format)
 }
 
 // recordInstallation puts the installation into the state, with the
 // groups: a new system has the groups it is installed with, none
-// without --group. A failure is told, not returned: the server is
-// installed either way.
-func (a *app) recordInstallation(ctx context.Context, m provider.Machine, record state.Install, groups []string) {
-	if err := a.updateState(ctx, func(d *state.Document) error {
+// without --group. A failure is told, with the record to add by hand,
+// and reported: the server is installed either way, but the state has
+// the old record.
+func (a *app) recordInstallation(ctx context.Context, m provider.Machine, record state.Install, groups []string) bool {
+	err := a.updateState(ctx, func(d *state.Document) error {
 		s := d.Servers[m.Ref()]
 		s.Installed = &record
 		s.Groups = groups
 		d.Servers[m.Ref()] = s
 		return nil
-	}); err != nil {
-		fmt.Fprintf(a.stderr, "ump: the installation is not recorded in the state: %v\n", err)
+	})
+	if err == nil {
+		return true
 	}
+	fmt.Fprintf(a.stderr, "ump: the installation is not recorded in the state: %v\n", err)
+	var entry bytes.Buffer
+	enc := yaml.NewEncoder(&entry)
+	enc.SetIndent(2)
+	enc.Encode(map[string]map[string]state.Server{"servers": {m.Ref(): {Installed: &record, Groups: groups}}})
+	fmt.Fprintf(a.stderr, "Record it by hand: in state.yaml (ump config state view says where), the server's installed and groups are these:\n%s", entry.String())
+	return false
 }
 
 // forgetReplacedHostKey removes the old system's host key of the

@@ -123,8 +123,8 @@ func Parse(data []byte) (*Document, error) {
 
 // rolesToGroups adds the roles an older ump recorded to the groups, as
 // group names: '-' and '.' become '_', a leading digit gets a '_' in
-// front; common (implied) and Ansible's own all, ungrouped and localhost
-// are left out, and no name comes twice.
+// front; common (implied) and Ansible's own all, ungrouped, localhost
+// and _meta are left out, and no name comes twice.
 func rolesToGroups(roles, groups []string) []string {
 	out := append([]string{}, groups...)
 	for _, r := range roles {
@@ -133,7 +133,7 @@ func rolesToGroups(roles, groups []string) []string {
 			g = "_" + g
 		}
 		switch g {
-		case "", "common", "all", "ungrouped", "localhost":
+		case "", "common", "all", "ungrouped", "localhost", "_meta":
 			continue
 		}
 		if !slices.Contains(out, g) {

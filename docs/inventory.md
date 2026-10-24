@@ -14,6 +14,7 @@ $ ump server list -o json | jq '.[] | select(.price == null)'
 $ ump server list --diff                  # added, removed and changed since the last listing
 $ ump server list --refresh               # ask the providers, not the cache
 $ ump server list --cached                # the last listing, however old, without the APIs
+$ ump server list -o ansible              # the Ansible inventory of the servers ump installed
 $ ump server show web-01                  # everything the provider knows, plus what ump knows
 ```
 
@@ -31,11 +32,12 @@ the disk layout of the last installation (`inline` when the profile
 carried its own layout) after the groups, the IPv6 address, product,
 kind and the attributes; `-o json` and `-o yaml` print every field,
 `os`, `installed_at`, `groups`, `profile` and `layout` among them, and
-the provider's labels; `-o name` prints `provider/id` per line.
-`--account NAME` restricts the listing, and references after the
-command select servers (`ump server list web-01 db-01`). An account
-whose API fails is reported on stderr and the others are still listed;
-the exit code says so (4).
+the provider's labels; `-o name` prints `provider/id` per line, `-o
+ansible` the Ansible inventory of the servers ump installed
+([below](#what-ump-installed)). `--account NAME` restricts the
+listing, and references after the command select servers (`ump server
+list web-01 db-01`). An account whose API fails is reported on stderr
+and the others are still listed; the exit code says so (4).
 
 A listing is served from the cache for 5 minutes (`cache_ttl` in the
 configuration, `UMP_CACHE_TTL` for one run, `0` turns it off), unless a
@@ -121,6 +123,14 @@ repository, ump also writes the server into its Ansible inventory, one
 file per server in `inventory/hosts/` with its groups, address,
 administrator and these facts (`ump_os`, `ump_profile`,
 `ump_attributes`, ...): see [provisioning](provisioning.md#host-files).
+
+The same inventory comes from the listing: `ump server list -o ansible`
+prints the servers ump installed with the hosts, groups and variables
+of their host files, in the JSON of an inventory script, and the
+collection's inventory plugin `ofzhur.ansible.ump` reads it, so that
+ump itself is the inventory of the repository and no host file is
+needed ([ump as the inventory](provisioning.md#ump-as-the-inventory)).
+`--account`, references and `--cached` select as for the other formats.
 
 What ump can do with a manual server is what SSH allows. `ump server
 rescue` and `ump server reinstall` work when the running system lets UMP
