@@ -40,20 +40,21 @@ As of October 2026, ump does what the [README](../README.md) and the
   `firewall`, `network`, `user` and `userdata` with list, get, create,
   edit and delete each, and `key`; the published defaults downloaded on
   first use.
-- **Private networks:** every server ump installs gets an address in a
-  private network (`default`, `10.0.0.0/24`), the lowest free one or
-  one given by hand, kept across reinstalls and never another server's,
-  in the state and the inventory (`ump_private_address`)
-  ([private networks](networks.md)).
+- **Private networks:** every server ump installs gets an address in
+  each of its private networks (`default`, `10.0.0.0/24`, or several),
+  the lowest free one or one given by hand, kept across reinstalls and
+  never another server's, in the state and the inventory
+  (`ump_private_networks`) ([private networks](networks.md)).
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
   Windows on the storage, `make release`.
 
 ## Next
 
-- **Mesh roles.** Roles in the collection that connect the servers over
-  their private addresses (WireGuard), from the inventory's
-  `ump_private_*` variables, with the interfaces configured on the
-  servers ([mesh roles](networks.md#mesh-roles)).
+- **Mesh roles.** `ofzhur.ansible.wireguard` in the collection: a mesh
+  per private network over the servers' private addresses, from the
+  inventory's `ump_private_networks`, with the interfaces configured on
+  the servers and isolation by group within a network ([mesh
+  roles](networks.md#mesh-roles)).
 - **Provider uplinks.** The providers' private networks (OVHcloud
   vRack, Hetzner vSwitch and Cloud Networks, Vultr, Linode and
   DigitalOcean VPCs) as uplinks of the private network, so that servers

@@ -77,12 +77,12 @@ func (a *app) newServerSetCmd() *cobra.Command {
 		unset      []string
 		groups     groupFlags
 		ungroups   groupFlags
-		privateNet string
-		privateIP  string
+		privateNet []string
+		privateIP  []string
 	)
 	cmd := &cobra.Command{
-		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group GROUP]... [--ungroup GROUP]... [--private-network NAME|none] [--private-ip ADDR]",
-		Short: "Set what ump remembers about a server: its profile, its price, your attributes, its groups, its private address",
+		Use:   "set NAME|ID|IP|PROVIDER/ID [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group GROUP]... [--ungroup GROUP]... [--private-network NAME[,NAME]|none]... [--private-ip [NETWORK=]ADDR]...",
+		Short: "Set what ump remembers about a server: its profile, its price, your attributes, its groups, its private addresses",
 		Long: `Remember, in the state, what ump cannot learn from the provider: the
 profile the server is reinstalled with (ump server reinstall NAME then
 takes it without --profile; --clear forgets it), the price it costs
@@ -92,17 +92,19 @@ wide and ump server show; --clear-price forgets it), attributes of your
 own for the inventory (--attr owner=alice --attr role=db; --unset-attr
 forgets one), and the groups of a server ump installed (--group adds,
 --ungroup removes; repeatable, or comma-separated) and its private
-address (--private-ip ADDR in its network, or in the one of
---private-network NAME, which alone gives the server the address it has
-there, else the lowest free one; --private-network none takes it away).
-The profile is checked to exist, locally or on the storage, a group to
-be no host's name: not the server's hostname, nor, run from the
-infrastructure repository, another host of its inventory, and the
-address to be in the network and no other server's; the address changes
-under the server's lock (exit status 3 while an installation holds it).
-Nothing runs: the next ump provision puts the server into its groups,
-gives the host file the address and runs the plays on it; what the plays
-of a group it left did stays until a reinstall.`,
+addresses: --private-network NAME[,NAME] replaces its private networks
+(repeatable, or comma-separated; in each the address it has there, else
+the lowest free one; none takes them all away), and --private-ip
+NETWORK=ADDR gives it that address in one of them (repeatable; ADDR
+alone in its only one), those of --private-network or else those it
+has. The profile is checked to exist, locally or on the storage, a group
+to be no host's name: not the server's hostname, nor, run from the
+infrastructure repository, another host of its inventory, and an
+address to be in its network and no other server's; the addresses
+change under the server's lock (exit status 3 while an installation
+holds it). Nothing runs: the next ump provision puts the server into its
+groups, gives the host file the addresses and runs the plays on it;
+what the plays of a group it left did stays until a reinstall.`,
 		Example: `  ump server set web-01 --profile db
   ump server set web-01 --clear
   ump server set rack-07 --price 89 --currency EUR --period month
@@ -110,6 +112,7 @@ of a group it left did stays until a reinstall.`,
   ump server set web-01 --unset-attr role --clear-price
   ump server set web-01 --group monitoring --ungroup lab
   ump server set web-01 --private-ip 10.0.0.10
+  ump server set web-01 --private-network default,db --private-ip db=10.0.1.10
   ump server set web-01 --private-network none`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -122,12 +125,14 @@ of a group it left did stays until a reinstall.`,
 			if (currency != "" || period != "") && price == "" {
 				return usageErrorf(cmd, "--currency and --period go with --price")
 			}
-			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 && len(groups) == 0 && len(ungroups) == 0 && privateNet == "" && privateIP == "" {
+			if profile == "" && !clear && price == "" && !clearPrice && len(attrs) == 0 && len(unset) == 0 && len(groups) == 0 && len(ungroups) == 0 && len(privateNet) == 0 && len(privateIP) == 0 {
 				return usageErrorf(cmd, "give at least one of --profile, --clear, --price, --clear-price, --attr, --unset-attr, --group, --ungroup, --private-network or --private-ip")
 			}
-			if err := checkPrivateFlags(cmd, privateNet, privateIP); err != nil {
+			private, err := checkPrivateFlags(cmd, privateNet, privateIP)
+			if err != nil {
 				return err
 			}
+			changePrivate := private.given || len(private.ips) > 0
 			add, err := groups.list(cmd)
 			if err != nil {
 				return err
@@ -192,12 +197,14 @@ of a group it left did stays until a reinstall.`,
 			}
 			// the private networks, for an address in one
 			var networks map[string]*prof.PrivateNetwork
-			if privateIP != "" || (privateNet != "" && privateNet != prof.NoPrivateNetwork) {
+			if len(private.ips) > 0 || len(private.networks) > 0 {
 				if networks, err = a.loadNetworks(cmd.Context(), cfg.StorageURL()); err != nil {
 					return err
 				}
-				if privateNet != "" && networks[privateNet] == nil {
-					return usageErrorf(cmd, "--private-network %s: not in networks.yaml (known: %s; ump config network create %s makes it)", privateNet, strings.Join(sortedKeys(networks), ", "), privateNet)
+				for _, n := range private.networks {
+					if networks[n] == nil {
+						return usageErrorf(cmd, "--private-network %s: not in networks.yaml (known: %s; ump config network create %s makes it)", n, strings.Join(sortedKeys(networks), ", "), n)
+					}
 				}
 			}
 			// a group is no host's name: not the server's hostname, nor
@@ -214,9 +221,9 @@ of a group it left did stays until a reinstall.`,
 					}
 				}
 			}
-			// the private address changes under the server's lock: not while
+			// the private addresses change under the server's lock: not while
 			// an installation runs on it
-			if privateNet != "" || privateIP != "" {
+			if changePrivate {
 				unlock, err := a.lockServer(cmd.Context(), m, "set")
 				if err != nil {
 					return err
@@ -288,18 +295,21 @@ of a group it left did stays until a reinstall.`,
 					}
 					said = append(said, "groups "+strings.Join(append([]string{commonGroup}, st.Groups...), ", ")+" (ump provision applies them)")
 				}
-				if privateNet != "" || privateIP != "" {
+				if changePrivate {
 					if st.Installed == nil {
-						return withExit(exitUsage, fmt.Errorf("ump did not install %s: its private address comes with the installation (ump server reinstall %s --private-network NAME)", m.Name, args[0]))
+						return withExit(exitUsage, fmt.Errorf("ump did not install %s: its private addresses come with the installation (ump server reinstall %s --private-network NAME)", m.Name, args[0]))
 					}
 					var err error
-					if st.Private, err = setPrivate(d, m, st.Private, networks, privateNet, privateIP); err != nil {
+					if st.Private, err = setPrivate(d, m, st.Private, networks, private); err != nil {
 						return err
 					}
-					if st.Private == nil {
-						said = append(said, "no private address (ump provision takes it out of the host file)")
-					} else {
-						said = append(said, "private address "+describePrivate(st.Private)+" (ump provision puts it into the host file)")
+					switch len(st.Private) {
+					case 0:
+						said = append(said, "no private addresses (ump provision takes them out of the host file)")
+					case 1:
+						said = append(said, privateAddresses(st.Private)+" (ump provision puts it into the host file)")
+					default:
+						said = append(said, privateAddresses(st.Private)+" (ump provision puts them into the host file)")
 					}
 				}
 				d.Servers[m.Ref()] = st
@@ -322,34 +332,46 @@ of a group it left did stays until a reinstall.`,
 	cmd.Flags().StringArrayVar(&unset, "unset-attr", nil, "forget an attribute (repeatable)")
 	groups.add(cmd, "group", "a group to put a server ump installed into")
 	ungroups.add(cmd, "ungroup", "a group to take a server ump installed out of")
-	cmd.Flags().StringVar(&privateNet, "private-network", "", "the private network of a server ump installed, by name from networks.yaml, or none")
-	cmd.Flags().StringVar(&privateIP, "private-ip", "", "the address of a server ump installed in its private network (or in that of --private-network)")
+	cmd.Flags().StringArrayVar(&privateNet, "private-network", nil, "the private networks of a server ump installed, by name from networks.yaml, in order, or none (repeatable, or comma-separated)")
+	cmd.Flags().StringArrayVar(&privateIP, "private-ip", nil, "the address of a server ump installed in one of its private networks (or of those of --private-network), NETWORK=ADDRESS, or ADDRESS alone in its only one (repeatable, or comma-separated)")
 	return cmd
 }
 
-// setPrivate is the private address of the server m, which has cur,
-// after ump server set --private-network network and --private-ip
-// address: none takes it away; otherwise the address is given, else
+// setPrivate is the private addresses of the server m, which has cur,
+// after ump server set --private-network and --private-ip (f): none takes
+// them away; otherwise, in each network, the address given, else the one
 // kept where the network stays, else the lowest free one (assignPrivate,
-// in doc). The network is --private-network, else the server's.
-func setPrivate(doc *state.Document, m provider.Machine, cur *state.Private, networks map[string]*prof.PrivateNetwork, network, address string) (*state.Private, error) {
-	if network == prof.NoPrivateNetwork {
-		return nil, nil
-	}
-	if network == "" {
-		if cur == nil {
-			return nil, withExit(exitUsage, fmt.Errorf("--private-ip %s: %s has no private network; give one, --private-network NAME", address, m.Name))
+// in doc). The networks are those of --private-network, else the
+// server's.
+func setPrivate(doc *state.Document, m provider.Machine, cur []state.Private, networks map[string]*prof.PrivateNetwork, f privateFlags) ([]state.Private, error) {
+	names := f.networks
+	if !f.given {
+		for _, p := range cur {
+			names = append(names, p.Network)
 		}
-		network = cur.Network
 	}
-	n := networks[network]
-	if n == nil {
-		return nil, withExit(exitUsage, fmt.Errorf("the private network %s of %s is not in networks.yaml (known: %s); give another, --private-network NAME", network, m.Name, strings.Join(sortedKeys(networks), ", ")))
+	if len(names) == 0 {
+		if f.given {
+			return nil, nil
+		}
+		return nil, withExit(exitUsage, fmt.Errorf("--private-ip %s: %s has no private network; give one, --private-network NAME", f.ips[0].text, m.Name))
 	}
-	if err := n.Validate(); err != nil {
+	given, err := f.addresses(names)
+	if err != nil {
 		return nil, withExit(exitUsage, err)
 	}
-	private, _, err := assignPrivate(doc, []privateRequest{{ref: m.Ref(), network: n, address: address}})
+	var nets []*prof.PrivateNetwork
+	for _, name := range names {
+		n := networks[name]
+		if n == nil {
+			return nil, withExit(exitUsage, fmt.Errorf("the private network %s of %s is not in networks.yaml (known: %s); give others, --private-network NAME", name, m.Name, strings.Join(sortedKeys(networks), ", ")))
+		}
+		if err := n.Validate(); err != nil {
+			return nil, withExit(exitUsage, err)
+		}
+		nets = append(nets, n)
+	}
+	private, _, err := assignPrivate(doc, []privateRequest{{ref: m.Ref(), networks: nets, given: given}})
 	if err != nil {
 		return nil, err
 	}

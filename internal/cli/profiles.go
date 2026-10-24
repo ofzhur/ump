@@ -267,9 +267,10 @@ func (a *app) newOSListCmd() *cobra.Command {
 		Aliases: verbAliases("list"),
 		Short:   "List the profiles",
 		Long: `List the profiles of the profiles directory: the default is marked, and
-each shows its image, disk layout, users, firewall, private network,
-whether it is a published one or yours, and its description. -o wide is
-the same table; -o json and -o yaml print the rows as data.`,
+each shows its image, disk layout, users, firewall, private networks
+(comma-separated), whether it is a published one or yours, and its
+description. -o wide is the same table; -o json and -o yaml print the
+rows as data.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.prepareProfiles(cmd)
@@ -321,10 +322,7 @@ the same table; -o json and -o yaml print the rows as data.`,
 				case fw == "":
 					fw = "none"
 				}
-				private := p.PrivateNetworkName()
-				if private == "" {
-					private = "none"
-				}
+				private := p.Network.Private.String()
 				rows = append(rows, []string{mark, n, p.OS, disks, strings.Join(users, ","), fw, private, kind, p.Description})
 				data = append(data, profileRow{Name: n, Default: n == def, OS: p.OS, Disks: disks, Users: users, Firewall: fw, Private: private, From: kind, Description: p.Description})
 			}
@@ -499,7 +497,7 @@ func (a *app) editProfile(cmd *cobra.Command, name string) error {
 }
 
 // checkProfile parses and validates a profile and resolves its layout
-// and its private network; the keys are not resolved, so a missing key
+// and its private networks; the keys are not resolved, so a missing key
 // file is found at install.
 func (a *app) checkProfile(ctx context.Context, name string) error {
 	p, err := profile.Load(profilePath(name))
@@ -541,7 +539,7 @@ func (a *app) checkProfile(ctx context.Context, name string) error {
 		return fmt.Errorf("the profile is kept, but it is not valid: %w", err)
 	}
 	var networks map[string]*profile.PrivateNetwork
-	if p.PrivateNetworkName() != "" {
+	if len(p.PrivateNetworkNames()) > 0 {
 		if networks, err = a.loadNetworks(ctx, cfg.StorageURL()); err != nil {
 			return err
 		}

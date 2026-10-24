@@ -219,7 +219,7 @@ func (a *app) lockServer(ctx context.Context, m provider.Machine, what string) (
 
 // applyState puts what the state knows onto the listed machines: a
 // price set by hand wins over the provider's, the attributes are the
-// user's alone, and so is the private address. The OS, profile and
+// user's alone, and so are the private addresses. The OS, profile and
 // layout are those of the last installation; the groups are those of
 // the inventory: common and the recorded ones (the state keeps them
 // without common) for a server ump installed, none for the others.
@@ -241,16 +241,22 @@ func applyState(d *state.Document, ms []provider.Machine) {
 			ms[i].Attributes = s.Attributes
 		}
 		ms[i].Groups, ms[i].Profile, ms[i].Layout = nil, "", ""
-		ms[i].PrivateNetwork, ms[i].PrivateAddress = "", ""
-		if s.Private != nil {
-			ms[i].PrivateNetwork, ms[i].PrivateAddress = s.Private.Network, s.Private.Address
-		}
+		putPrivate(&ms[i], s.Private)
 		if s.Installed != nil {
 			at := s.Installed.At
 			ms[i].OS, ms[i].InstalledAt = s.Installed.OS, &at
 			ms[i].Profile, ms[i].Layout = s.Installed.Profile, s.Installed.Layout
 			ms[i].Groups = append([]string{commonGroup}, s.Groups...)
 		}
+	}
+}
+
+// putPrivate puts the private addresses onto a machine: all of them, and
+// the network and address of the first alone.
+func putPrivate(m *provider.Machine, ps []state.Private) {
+	m.PrivateNetworks, m.PrivateNetwork, m.PrivateAddress = ps, "", ""
+	if len(ps) > 0 {
+		m.PrivateNetwork, m.PrivateAddress = ps[0].Network, ps[0].Address
 	}
 }
 

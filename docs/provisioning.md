@@ -39,16 +39,17 @@ Every `ump server reinstall` provisions, unless `--no-provision`: the
 server is then the operating system plus the userdata, nothing more,
 until the next `ump provision`, which includes it (below).
 
-Every server ump installs also gets an address in the [private
+Every server ump installs also gets an address in each [private
 network](networks.md) of its profile (the published profiles name
 `default`, `10.0.0.0/24`; a profile without `network.private` gives
 none), or of `--private-network`: the lowest free one, or the one
 `--private-ip` gives, kept across reinstalls and never another
-server's. The installation records it; the host files carry it as
-`ump_private_address`, `ump_private_network` and `ump_private_cidr`
+server's. The installation records them; the host files carry them as
+`ump_private_networks`, with `ump_private_address`,
+`ump_private_network` and `ump_private_cidr` of the first network
 ([host files](#host-files)), for the roles that connect the servers,
-such as a mesh. Nothing configures an interface with it before those
-roles do.
+such as a mesh per network. Nothing configures an interface with them
+before those roles do.
 
 ## Groups and playbooks
 
@@ -269,6 +270,10 @@ vars:
   ump_private_address: 10.0.0.1
   ump_private_network: default
   ump_private_cidr: 10.0.0.0/24
+  ump_private_networks:
+    default:
+      address: 10.0.0.1
+      cidr: 10.0.0.0/24
   ump_attributes:
     owner: alice
 ```
@@ -278,9 +283,11 @@ vars:
   one; `ump_admin` the administrator of the installation (`ump` with
   the published profiles), whom ump's runs log in as; there is no
   `ansible_user`, so that people log in as themselves
-  ([below](#logins-umps-and-yours)). `ump_private_*` are the server's
-  address in its [private network](networks.md), the network and its
-  CIDR. `ump_attributes` are your
+  ([below](#logins-umps-and-yours)). `ump_private_networks` are the
+  server's addresses in its [private networks](networks.md), by
+  network, each with the network's CIDR; `ump_private_address`,
+  `ump_private_network` and `ump_private_cidr` are those of its first
+  network. `ump_attributes` are your
   [attributes](inventory.md#attributes). Variables without a value
   (`ump_location`, `ump_product`, `ump_private_*` without a private
   network, ...) are left out.

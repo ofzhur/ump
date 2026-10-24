@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestPublishedNetworks(t *testing.T) {
@@ -24,7 +26,7 @@ func TestPublishedNetworks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := p.ResolvePrivate(networks); err != nil || got != n {
+		if got, err := p.ResolvePrivate(networks); err != nil || len(got) != 1 || got[0] != n {
 			t.Errorf("%s: %v, %+v", name, err, got)
 		}
 	}
@@ -131,9 +133,18 @@ func TestProfilePrivate(t *testing.T) {
 		{base, "", ""},
 		{base + "network:\n  rename: false\n", "", ""},
 		{base + "network:\n  private: none\n", "", ""},
+		{base + "network:\n  private: []\n", "", ""},
 		{base + "network:\n  private: db\n", "db", ""},
+		// several, in order
+		{base + "network:\n  private: [db, default]\n", "db,default", ""},
+		{base + "network:\n  private:\n    - default\n    - db\n", "default,db", ""},
+		{base + "network:\n  private: [none]\n", "", ""},
 		{base + "network:\n  private: nope\n", "", `profile p: private network "nope" is not in networks.yaml (known: db, default; ump config os update fetches the published ones)`},
+		{base + "network:\n  private: [default, nope]\n", "", `profile p: private network "nope" is not in networks.yaml (known: db, default; ump config os update fetches the published ones)`},
 		{base + "network:\n  private: Bad Net\n", "", `profile p: network.private "Bad Net" is not a network name or none`},
+		{base + "network:\n  private: [db, Bad]\n", "", `profile p: network.private "Bad" is not a network name or none`},
+		{base + "network:\n  private: [db, none]\n", "", "profile p: network.private: none is no network; it stands alone, for no private network"},
+		{base + "network:\n  private: [db, db]\n", "", "profile p: network.private names db twice"},
 	} {
 		p, err := Parse([]byte(c.yaml))
 		if err != nil {
@@ -141,19 +152,52 @@ func TestProfilePrivate(t *testing.T) {
 		}
 		got := ""
 		if err = p.Validate(); err == nil {
-			var n *PrivateNetwork
-			if n, err = p.ResolvePrivate(networks); n != nil {
-				got = n.Name
+			var ns []*PrivateNetwork
+			ns, err = p.ResolvePrivate(networks)
+			for _, n := range ns {
+				got += "," + n.Name
 			}
+			got = strings.TrimPrefix(got, ",")
 		}
 		if got != c.want || (c.err == "" && err != nil) || (c.err != "" && (err == nil || err.Error() != c.err)) {
 			t.Errorf("%q: %q, %v; want %q, %q", c.yaml, got, err, c.want, c.err)
 		}
 	}
+	for _, bad := range []string{"{a: b}", "[[db]]", "[{a: b}]"} {
+		if _, err := Parse([]byte(base + "network:\n  private: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "network.private: a ") {
+			t.Errorf("%s: %v", bad, err)
+		}
+	}
 	// --set reaches it, like any field
 	p, _ := Parse([]byte(base + "network:\n  private: default\n"))
 	q, err := p.Set([]string{"network.private=none"})
-	if err != nil || q.PrivateNetworkName() != "" || p.PrivateNetworkName() != "default" {
+	if err != nil || q.PrivateNetworkNames() != nil || strings.Join(p.PrivateNetworkNames(), ",") != "default" {
 		t.Errorf("--set network.private=none: %v, %q", err, q.Network.Private)
+	}
+	if q, err = p.Set([]string{"network.private=[default, db]"}); err != nil || strings.Join(q.PrivateNetworkNames(), ",") != "default,db" {
+		t.Errorf("--set network.private=[default, db]: %v, %q", err, q.Network.Private)
+	}
+	// written back as given: one name alone, several as a list, none
+	// absent
+	for _, c := range []struct{ private, want string }{
+		{"default", "network:\n    private: default\n"},
+		{"[default, db]", "network:\n    private:\n        - default\n        - db\n"},
+		{"none", "network:\n    private: none\n"},
+	} {
+		p, _ := Parse([]byte(base + "network:\n  private: " + c.private + "\n"))
+		data, err := yaml.Marshal(p)
+		if err != nil || !strings.Contains(string(data), c.want) {
+			t.Errorf("%s written:\n%s", c.private, data)
+		}
+	}
+	p, _ = Parse([]byte(base))
+	if data, _ := yaml.Marshal(p); strings.Contains(string(data), "private") {
+		t.Errorf("absent written:\n%s", data)
+	}
+	if s := (PrivateNetworks{"default", "db"}).String(); s != "default,db" {
+		t.Errorf("String: %q", s)
+	}
+	if s := (PrivateNetworks{"none"}).String() + " " + PrivateNetworks(nil).String(); s != "none none" {
+		t.Errorf("String of none: %q", s)
 	}
 }

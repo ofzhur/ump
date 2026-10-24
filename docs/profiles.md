@@ -5,7 +5,7 @@ it: which operating system image, which [disk layout](disk-layouts.md),
 which users with which SSH keys, which [userdata](userdata.md) runs in
 the new system, what the [firewall](firewalls.md) lets in, the kernel
 command line, the interface names and the [private
-network](networks.md) the server gets an address in. It is one YAML
+networks](networks.md) the server gets an address in. It is one YAML
 file per profile.
 
 ```console
@@ -188,7 +188,7 @@ firewall: default             # a firewall name from firewalls.yaml, or an inlin
                               # absent: no firewall
 network:                      # optional
   rename: true                # uniform interface names; false keeps the kernel's
-  private: default            # a private network from networks.yaml, or none (also when absent)
+  private: default            # a private network from networks.yaml, a list of them, or none (also when absent)
 ```
 
 | Field | Meaning |
@@ -210,7 +210,7 @@ network:                      # optional
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
 | `firewall` | A name from `firewalls.yaml`, or an inline [firewall](firewalls.md) (`{policy: drop, allow: [icmp, ssh]}`). Absent means no firewall. |
 | `network.rename` | `true` (the default) names the interfaces uniformly: `ext01`, `ext02`, ... for the ones with a public address, `int01`, ... for the rest; `false` keeps the kernel's names. See [interface names](#interface-names). |
-| `network.private` | The [private network](networks.md) the server gets an address in: a name from `networks.yaml`, or `none`. Absent means `none`, so profiles from before stay as they were; every published profile says `default`. |
+| `network.private` | The [private networks](networks.md) the server gets an address in: a name from `networks.yaml`, a list of names (`[default, db]`: an address in each, the first network first), or `none`. Absent means `none`, so profiles from before stay as they were; every published profile says `default`. |
 
 Unknown fields are an error, so a typo in a field name is caught by
 `ump config os edit`, not at installation. The `provision` section of
@@ -311,7 +311,7 @@ by MAC as before.
 ## Managing profiles
 
 ```
-ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall, private network
+ump config os list                         # the profiles in ~/.config/ump/profiles, with os, layout, users, firewall, private networks
 ump config os get NAME                     # print one
 ump config os create [NAME]                # on a terminal: the wizard (the name, then the questions below), then the file is written
 ump config os create NAME --from NAME      # copy one instead, rename it, open it in your editor
@@ -336,7 +336,7 @@ the only form.
 
 `edit` and `create --from` check the file when the editor returns: the YAML, the
 fields, the layout (an inline one, or that the named one exists in
-`layouts.yaml` and is valid), the firewall and the private network
+`layouts.yaml` and is valid), the firewall and the private networks
 likewise, and that an administrator and keys are there. An invalid profile is kept, with the
 problem named, so nothing is lost; fix it with another `edit`. What is
 not checked until an installation: that the key references yield keys,
@@ -360,8 +360,8 @@ A profile is valid when:
 - package names look like Debian package names;
 - an inline firewall passes [its checks](firewalls.md#fields); a named
   one exists in `firewalls.yaml`;
-- `network.private` is `none` or a network of `networks.yaml` that
-  passes [its checks](networks.md#fields).
+- `network.private` is `none`, or networks of `networks.yaml`, each
+  once, that pass [their checks](networks.md#fields).
 
 ## Using a profile
 
@@ -397,8 +397,8 @@ installation:
 | `--ssh-key REF` | adds the reference's keys to the administrator (repeatable) |
 | `--disks /dev/sda,/dev/sdb` | the disks the layout is applied to (default: every disk of the server) |
 | `--hostname NAME` | the hostname (default: the server's name at the provider) |
-| `--private-network NAME`, `none` | `network.private` |
-| `--private-ip ADDR` | the server's address in the private network (default: the one it has there, else the lowest free one; see [addresses](networks.md#addresses)) |
+| `--private-network NAME[,NAME...]`, `none` | `network.private`, with these networks in order (repeatable) |
+| `--private-ip NETWORK=ADDR`, `--private-ip ADDR` | the server's address in that private network, or in its only one (repeatable; default: the one it has there, else the lowest free one; see [addresses](networks.md#addresses)) |
 | `--set FIELD=VALUE` | any field, by its path in the YAML, with the value as YAML (repeatable) |
 
 Every other field has no flag of its own and is overridden with
@@ -427,7 +427,7 @@ stays on the installed system as `/etc/ump/spec.json` (mode 0600);
 image and its version, when it was installed, the profile and layout, the
 disks, the boot disk, root, hostname, administrator, interfaces, whether
 IPv6 and the mitigations are on, the firewall policy, the userdata, and
-the private network and address.
+the private networks and addresses.
 The message of the day shows the profile too.
 
 ## Example: a web server profile

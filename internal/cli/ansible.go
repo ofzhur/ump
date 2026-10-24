@@ -620,25 +620,35 @@ type hostFile struct {
 // hostVars are the variables of a host, in the host file and in ump
 // server list -o ansible. ump_admin is the administrator, whom ump's
 // runs log in as; there is no login of the inventory's, so that people
-// log in as themselves. ump_private_* are the host's address in its
-// private network, the network and its CIDR, for the roles that connect
-// the hosts.
+// log in as themselves. ump_private_networks are the host's addresses in
+// its private networks, by network, with each network's CIDR, for the
+// roles that connect the hosts; ump_private_address, ump_private_network
+// and ump_private_cidr are those of its first network, as ump v0.5.0
+// gave the one.
 type hostVars struct {
-	AnsibleHost    string            `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
-	UMPAdmin       string            `json:"ump_admin,omitempty" yaml:"ump_admin,omitempty"`
-	UMPName        string            `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
-	UMPRef         string            `json:"ump_ref,omitempty" yaml:"ump_ref,omitempty"`
-	UMPProvider    string            `json:"ump_provider,omitempty" yaml:"ump_provider,omitempty"`
-	UMPAccount     string            `json:"ump_account,omitempty" yaml:"ump_account,omitempty"`
-	UMPLocation    string            `json:"ump_location,omitempty" yaml:"ump_location,omitempty"`
-	UMPProduct     string            `json:"ump_product,omitempty" yaml:"ump_product,omitempty"`
-	UMPOS          string            `json:"ump_os,omitempty" yaml:"ump_os,omitempty"`
-	UMPProfile     string            `json:"ump_profile,omitempty" yaml:"ump_profile,omitempty"`
-	UMPInstalledAt string            `json:"ump_installed_at,omitempty" yaml:"ump_installed_at,omitempty"`
-	UMPPrivateAddr string            `json:"ump_private_address,omitempty" yaml:"ump_private_address,omitempty"`
-	UMPPrivateNet  string            `json:"ump_private_network,omitempty" yaml:"ump_private_network,omitempty"`
-	UMPPrivateCIDR string            `json:"ump_private_cidr,omitempty" yaml:"ump_private_cidr,omitempty"`
-	UMPAttributes  map[string]string `json:"ump_attributes,omitempty" yaml:"ump_attributes,omitempty"`
+	AnsibleHost    string                 `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
+	UMPAdmin       string                 `json:"ump_admin,omitempty" yaml:"ump_admin,omitempty"`
+	UMPName        string                 `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
+	UMPRef         string                 `json:"ump_ref,omitempty" yaml:"ump_ref,omitempty"`
+	UMPProvider    string                 `json:"ump_provider,omitempty" yaml:"ump_provider,omitempty"`
+	UMPAccount     string                 `json:"ump_account,omitempty" yaml:"ump_account,omitempty"`
+	UMPLocation    string                 `json:"ump_location,omitempty" yaml:"ump_location,omitempty"`
+	UMPProduct     string                 `json:"ump_product,omitempty" yaml:"ump_product,omitempty"`
+	UMPOS          string                 `json:"ump_os,omitempty" yaml:"ump_os,omitempty"`
+	UMPProfile     string                 `json:"ump_profile,omitempty" yaml:"ump_profile,omitempty"`
+	UMPInstalledAt string                 `json:"ump_installed_at,omitempty" yaml:"ump_installed_at,omitempty"`
+	UMPPrivateAddr string                 `json:"ump_private_address,omitempty" yaml:"ump_private_address,omitempty"`
+	UMPPrivateNet  string                 `json:"ump_private_network,omitempty" yaml:"ump_private_network,omitempty"`
+	UMPPrivateCIDR string                 `json:"ump_private_cidr,omitempty" yaml:"ump_private_cidr,omitempty"`
+	UMPPrivateNets map[string]hostPrivate `json:"ump_private_networks,omitempty" yaml:"ump_private_networks,omitempty"`
+	UMPAttributes  map[string]string      `json:"ump_attributes,omitempty" yaml:"ump_attributes,omitempty"`
+}
+
+// hostPrivate is a host's address in one of its private networks, with
+// the network's CIDR.
+type hostPrivate struct {
+	Address string `json:"address" yaml:"address"`
+	CIDR    string `json:"cidr" yaml:"cidr"`
 }
 
 // primaryAddress is the address ump reaches a server at: the IPv4, else
@@ -652,8 +662,8 @@ func primaryAddress(m provider.Machine) string {
 
 // hostVarsFor is what the host file says about a server ump installed;
 // admin is the administrator of the installation, private the server's
-// private address (nil: none).
-func hostVarsFor(m provider.Machine, rec state.Install, admin string, private *state.Private) hostVars {
+// private addresses, in order.
+func hostVarsFor(m provider.Machine, rec state.Install, admin string, private []state.Private) hostVars {
 	v := hostVars{
 		AnsibleHost: primaryAddress(m), UMPAdmin: admin,
 		UMPName: m.Name, UMPRef: m.Ref(), UMPProvider: m.Provider, UMPAccount: m.Account,
@@ -663,8 +673,12 @@ func hostVarsFor(m provider.Machine, rec state.Install, admin string, private *s
 	if !rec.At.IsZero() {
 		v.UMPInstalledAt = rec.At.UTC().Format(time.RFC3339)
 	}
-	if private != nil {
-		v.UMPPrivateAddr, v.UMPPrivateNet, v.UMPPrivateCIDR = private.Address, private.Network, private.CIDR
+	if len(private) > 0 {
+		v.UMPPrivateAddr, v.UMPPrivateNet, v.UMPPrivateCIDR = private[0].Address, private[0].Network, private[0].CIDR
+		v.UMPPrivateNets = map[string]hostPrivate{}
+		for _, p := range private {
+			v.UMPPrivateNets[p.Network] = hostPrivate{Address: p.Address, CIDR: p.CIDR}
+		}
 	}
 	return v
 }
@@ -681,8 +695,8 @@ func inventoryHostname(m provider.Machine, rec state.Install) string {
 
 // inventoryVars is what the inventory says about a server ump installed,
 // with the administrator of the installation (the profile's for a
-// record without one) and its private address.
-func (a *app) inventoryVars(cfg *config.Config, m provider.Machine, rec state.Install, private *state.Private) hostVars {
+// record without one) and its private addresses.
+func (a *app) inventoryVars(cfg *config.Config, m provider.Machine, rec state.Install, private []state.Private) hostVars {
 	admin := rec.Admin
 	if admin == "" {
 		admin = a.profileAdmin(cfg, rec.Profile)

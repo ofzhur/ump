@@ -61,7 +61,8 @@ server (--profile, --layout, --group and the others), or in a plan file
       profile: db
       group: [db, backup]
       hostname: db-01.example.net
-      private-ip: 10.0.0.10
+      private-network: [default, db]
+      private-ip: [default=10.0.0.10, db=10.0.1.10]
       user: [oleg:local, deploy]
 
 The keys are the flags' names (profile, layout, firewall, os, hostname,
@@ -70,18 +71,19 @@ userdata, group, ipv6, mitigations, via, storage), with a list for a
 repeatable one; a server's value replaces that of defaults. Any other
 key, a key without a value and a second YAML document are refused, and
 so is one of these flags on the command line with --plan; private-ip
-goes with one server alone (not in defaults, not with several on the
-command line).
+(NETWORK=ADDRESS, or ADDRESS alone in the server's only network) goes
+with one server alone (not in defaults, not with several on the command
+line).
 
 Every check comes first, and a failure stops ump (exit status 2) before
 any server is touched: each server is resolved, once; its profile,
 layout, firewall, users, userdata and keys, as reinstall resolves them,
 and its architecture where the provider tells it; the hostnames, each
 once among the servers, none a group of another server (new, or in the
-state) and none another's in the inventory; the private addresses, each
-one server's alone: the ones the servers keep first, then those given
-by hand (refused when another server of the run keeps it), then the
-lowest free ones; the Ansible layout, the playbooks, and --hosts against
+state) and none another's in the inventory; the private addresses, one
+per network of a server, each one server's alone: the ones the servers
+keep first, then those given by hand (refused when another server of
+the run keeps it), then the lowest free ones; the Ansible layout, the playbooks, and --hosts against
 the inventory with every new host in it; and no server may be locked. A
 table shows the servers, and one question covers them all (without a
 terminal, --yes is required). Then ump takes every server's lock, as
@@ -260,12 +262,12 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	rows := make([][]string, 0, len(plans))
 	for _, p := range plans {
 		private := "none"
-		if p.private != nil {
-			private = p.private.Address
+		if len(p.private) > 0 {
+			private = privateIPv4(p.private)
 		}
 		rows = append(rows, []string{p.ref, p.m.Ref(), p.spec.OS, p.spec.Layout.Name, p.hostname, private, strings.Join(p.inGroups(), ",")})
 	}
-	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "PRIVATE", "GROUPS"}, rows, false); err != nil {
+	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "PRIVATE-IPV4", "GROUPS"}, rows, false); err != nil {
 		return err
 	}
 	question := fmt.Sprintf("Install on these %s? Every disk of each is erased.", plural(len(plans), "server"))
@@ -523,7 +525,7 @@ func (a *app) multiSummary(res multiResult, dryRun, provisioning bool) error {
 func multiEntries(cmd *cobra.Command, refs []string, o multiOptions) ([]multiEntry, error) {
 	var entries []multiEntry
 	if o.plan == "" {
-		if o.server.privateIP != "" && len(refs) > 1 {
+		if len(o.server.privateIPs) > 0 && len(refs) > 1 {
 			return nil, usageErrorf(cmd, "--private-ip gives one server its address, not %d the same one; give each its own in a plan (private-ip:)", len(refs))
 		}
 		for _, r := range refs {
@@ -850,8 +852,8 @@ type planValues struct {
 	Firewall    *string  `yaml:"firewall"`
 	OS          *string  `yaml:"os"`
 	Hostname    *string  `yaml:"hostname"`
-	PrivateNet  *string  `yaml:"private-network"`
-	PrivateIP   *string  `yaml:"private-ip"`
+	PrivateNet  planList `yaml:"private-network"`
+	PrivateIP   planList `yaml:"private-ip"`
 	Timezone    *string  `yaml:"timezone"`
 	Disks       planList `yaml:"disks"`
 	SSHKey      planList `yaml:"ssh-key"`
@@ -910,7 +912,7 @@ func (v planValues) options() installOptions {
 	}
 	o := installOptions{
 		profile: str(v.Profile), layout: str(v.Layout), firewall: str(v.Firewall), os: str(v.OS),
-		hostname: str(v.Hostname), privateNetwork: str(v.PrivateNet), privateIP: str(v.PrivateIP),
+		hostname: str(v.Hostname), privateNetworks: v.PrivateNet, privateIPs: v.PrivateIP,
 		timezone: str(v.Timezone), storage: str(v.Storage), via: str(v.Via),
 		disks: strings.Join(v.Disks, ","), keyFiles: v.SSHKey, sets: v.Set, users: v.User, userdata: v.Userdata,
 		groups: groupFlags(v.Group), ipv6: v.IPv6 != nil && *v.IPv6, mitigations: v.Mitigations != nil && *v.Mitigations,

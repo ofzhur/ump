@@ -177,7 +177,7 @@ own](images/rescue/README.md#your-own-storage).
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
-| [Private networks](docs/networks.md) | the networks, the default one, addresses given automatically or by hand, kept and never shared; the inventory variables for mesh roles; provider uplinks (vRack, vSwitch, VPC) |
+| [Private networks](docs/networks.md) | the networks, the default one, servers in several, addresses given automatically or by hand, kept and never shared; the inventory variables for a mesh per network; provider uplinks (vRack, vSwitch, VPC) |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
 | [Userdata](docs/userdata.md) | what a new system gets on top of its profile: fields, how it runs, the published entries, managing and using them |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |

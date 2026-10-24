@@ -69,11 +69,12 @@ func (f FirewallRef) IsZero() bool { return f.Name == "" && f.Rules == nil }
 // Network holds the network choices. Rename (unset: on) gives the
 // interfaces uniform names: ext01, ext02, ... for the ones with a public
 // address and int01, ... for the others, instead of the kernel's.
-// Private names the private network of networks.yaml the server gets an
-// address in, or none (also when unset).
+// Private names the private networks of networks.yaml the server gets
+// an address in, in order: a name, a list of names, or none (also when
+// unset).
 type Network struct {
-	Rename  *bool  `yaml:"rename,omitempty"`
-	Private string `yaml:"private,omitempty"`
+	Rename  *bool           `yaml:"rename,omitempty"`
+	Private PrivateNetworks `yaml:"private,omitempty"`
 }
 
 // Kernel holds the kernel command line choices; unset means off for the
@@ -706,8 +707,8 @@ func (p *Profile) Validate() error {
 			return fmt.Errorf("profile %s: %w", p.Name, err)
 		}
 	}
-	if n := p.Network.Private; n != "" && n != NoPrivateNetwork && !IsNetworkName(n) {
-		return fmt.Errorf("profile %s: network.private %q is not a network name or none", p.Name, n)
+	if err := p.Network.Private.Validate(); err != nil {
+		return fmt.Errorf("profile %s: %w", p.Name, err)
 	}
 	return nil
 }
@@ -767,11 +768,13 @@ type Spec struct {
 }
 
 // NetworkSpec is Network with the default filled in, and the server's
-// address in its private network, which the caller fills in (none:
-// absent).
+// addresses in its private networks, which the caller fills in (none:
+// absent): PrivateNetworks all of them, in order, and Private the first,
+// as an installer from before several networks reads it.
 type NetworkSpec struct {
-	Rename  bool         `json:"rename"`
-	Private *PrivateSpec `json:"private,omitempty"`
+	Rename          bool          `json:"rename"`
+	Private         *PrivateSpec  `json:"private,omitempty"`
+	PrivateNetworks []PrivateSpec `json:"private_networks,omitempty"`
 }
 
 // PrivateSpec is a server's address in a private network.
@@ -799,7 +802,7 @@ type ProfileInfo struct {
 // profile's inline ones, or by name from layouts and firewalls) and
 // resolves the key references, and returns the specification. The
 // caller fills in the hostname, storage and disks, and the private
-// address (ResolvePrivate is the network).
+// addresses (ResolvePrivate is the networks).
 func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Firewall, users map[string]*User, userdata map[string]*Userdata, resolve KeyResolver) (*Spec, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err

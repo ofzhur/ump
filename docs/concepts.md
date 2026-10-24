@@ -73,7 +73,8 @@ step after the first boot. A **disk layout** is a list of parts
 server has; a **firewall** is an input policy and the allowed ports; a
 **private network** is an IPv4 network in which every server ump
 installs gets an address of its own, kept across reinstalls and never
-another server's, for the roles that connect the servers; a
+another server's, for the roles that connect the servers (a server can
+be in several, with an address in each); a
 **user** is an account with sudo, groups, a shell and key references; a
 **userdata** entry is a script that runs in the new system before its
 first boot (a declarative configuration later, for the systems that

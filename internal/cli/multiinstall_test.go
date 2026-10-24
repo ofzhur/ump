@@ -31,11 +31,13 @@ servers:                   # each over the defaults
     profile: db
     group: [db, backup]
     hostname: db-01.example.net
-    private-ip: 10.0.0.12
+    private-network: [default, db]
+    private-ip: [default=10.0.0.12, db=10.0.1.12]
     user: [oleg:local, deploy]
     ipv6: false
   203.0.113.12:
     private-network: none
+    private-ip: 10.0.0.13
     group: []
     ssh-key: local
     disks: [/dev/sda, /dev/sdb]
@@ -60,12 +62,15 @@ servers:                   # each over the defaults
 		t.Errorf("web-02: %+v", o)
 	}
 	o = p.defaults.over(p.servers[2].values).options()
-	if o.profile != "db" || strings.Join(o.groups, ",") != "db,backup" || o.hostname != "db-01.example.net" || o.privateIP != "10.0.0.12" || o.privateNetwork != "" || strings.Join(o.users, " ") != "oleg:local deploy" || o.ipv6 {
+	if o.profile != "db" || strings.Join(o.groups, ",") != "db,backup" || o.hostname != "db-01.example.net" || strings.Join(o.privateNetworks, " ") != "default db" || strings.Join(o.privateIPs, " ") != "default=10.0.0.12 db=10.0.1.12" || strings.Join(o.users, " ") != "oleg:local deploy" || o.ipv6 {
 		t.Errorf("db-01: %+v", o)
 	}
 	o = p.defaults.over(p.servers[3].values).options()
-	if len(o.groups) != 0 || strings.Join(o.keyFiles, ",") != "local" || o.disks != "/dev/sda,/dev/sdb" || strings.Join(o.sets, ",") != "kernel.extra=quiet" || o.via != "direct" || o.profile != "web" || o.privateNetwork != "none" || o.privateIP != "" {
+	if len(o.groups) != 0 || strings.Join(o.keyFiles, ",") != "local" || o.disks != "/dev/sda,/dev/sdb" || strings.Join(o.sets, ",") != "kernel.extra=quiet" || o.via != "direct" || o.profile != "web" || strings.Join(o.privateNetworks, " ") != "none" || strings.Join(o.privateIPs, " ") != "10.0.0.13" {
 		t.Errorf("203.0.113.12: %+v", o)
+	}
+	if o := p.defaults.over(p.servers[0].values).options(); o.privateNetworks != nil || o.privateIPs != nil {
+		t.Errorf("web-01, private: %+v", o)
 	}
 	if p, err := parsePlan([]byte("servers:\n  web-01:\n")); err != nil || len(p.servers) != 1 || p.defaults.over(p.servers[0].values).options().profile != "" {
 		t.Errorf("a server without values: %v %+v", err, p)
@@ -94,6 +99,8 @@ servers:                   # each over the defaults
 		{"servers:\n  web-01:\n    profil: web\n", "line 3: servers.web-01: profil is no flag of a server (profile, layout, firewall, os, hostname, private-network, private-ip, timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations, via, storage)"},
 		{"defaults:\n  no-reboot: true\nservers:\n  web-01:\n", "line 2: defaults: no-reboot is no flag of a server"},
 		{"defaults:\n  profile: web\n  private-ip: 10.0.0.5\nservers:\n  web-01:\n", "line 3: defaults: private-ip would give every server the same address; give it per server"},
+		{"defaults:\n  private-ip: [db=10.0.1.5]\nservers:\n  web-01:\n", "line 2: defaults: private-ip would give every server the same address; give it per server"},
+		{"servers:\n  web-01:\n    private-network: [[db]]\n", "servers.web-01: line 3: a list of values, one per line or in [ ]"},
 		{"servers:\n  web-01:\n    layout: a\n    layout: b\n", "line 4: servers.web-01: layout is given twice"},
 		{"servers:\n  web-01: lvm-raid1\n", "line 2: servers.web-01 is a mapping of reinstall's flags to their values"},
 		{"servers:\n  web-01:\n    profile: [web]\n", "servers.web-01: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!seq into string"},
@@ -216,7 +223,7 @@ servers:
 	// with its server in front
 	profiles := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
 	for _, want := range []string{
-		"SERVER   PROVIDER   OS             LAYOUT        HOSTNAME            PRIVATE    GROUPS\nweb-01   fake/1     ubuntu-26.04   lvm-striped   web-01              10.0.0.1   common,web\ndb-01    fake/2     debian-13      lvm-raid1     db-01.example.net   10.0.0.2   common,db,backup\nProvisioning after the installations: 00-base on the fleet.\nInstalling 2 servers, all at once ...\n",
+		"SERVER   PROVIDER   OS             LAYOUT        HOSTNAME            PRIVATE-IPV4   GROUPS\nweb-01   fake/1     ubuntu-26.04   lvm-striped   web-01              10.0.0.1       common,web\ndb-01    fake/2     debian-13      lvm-raid1     db-01.example.net   10.0.0.2       common,db,backup\nProvisioning after the installations: 00-base on the fleet.\nInstalling 2 servers, all at once ...\n",
 		"[web-01] Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n",
 		"[db-01] Checking root access to 203.0.113.11 over SSH ... yes (Ubuntu 26.04 LTS).\n",
 		"[web-01] Installing ubuntu-26.04 (profile ubuntu-26.04 from " + filepath.Join(profiles, "ubuntu-26.04.yaml") + ", layout lvm-striped, private address 10.0.0.1 in default) on web-01 as web-01 ...\n",
@@ -368,7 +375,7 @@ func TestMultiinstallChecksFirst(t *testing.T) {
 		{"a server locked", []string{"web-01", "db-01"}, "", func() {
 			b.Lock(context.Background(), "fake/2", backend.LockInfo{Key: "fake/2", Who: "bob@desk", What: "rescue", Since: time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)})
 		}, 2, "ump: db-01: fake/2 is locked by bob@desk since 2026-10-12T08:00:00Z (rescue); ump config state unlock fake/2 forces it; nothing was changed\n"},
-		{"no confirmation", []string{"web-01", "db-01"}, "", nil, 3, "web-01   fake/1     ubuntu-26.04   lvm-linear   web-01     10.0.0.1   common\ndb-01    fake/2     ubuntu-26.04   lvm-linear   db-01      10.0.0.2   common\nump: ump server multiinstall needs confirmation: run it in a terminal or pass --yes\n"},
+		{"no confirmation", []string{"web-01", "db-01"}, "", nil, 3, "web-01   fake/1     ubuntu-26.04   lvm-linear   web-01     10.0.0.1       common\ndb-01    fake/2     ubuntu-26.04   lvm-linear   db-01      10.0.0.2       common\nump: ump server multiinstall needs confirmation: run it in a terminal or pass --yes\n"},
 	}
 	for _, c := range cases {
 		args := append([]string{"server", "multiinstall"}, c.args...)
