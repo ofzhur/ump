@@ -500,9 +500,10 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 // fakeInventory is what the fake ansible-inventory --list prints: the
 // inventory of a source file (-i), which ump writes for the yaml plugin
 // (every group with its hosts and children as mappings), else
-// e.inventory, else the host files of the repository, each host in its
-// groups with its variables; limited to the hosts of a pattern of names,
-// groups, globs and all (",", ":", "!", "&") when one is given.
+// e.inventory, else the host files of the repository (or of the file://
+// storage a pointer of inventory/ names), each host in its groups with
+// its variables; limited to the hosts of a pattern of names, groups,
+// globs and all (",", ":", "!", "&") when one is given.
 func (e *testEnv) fakeInventory(source, pattern string) string {
 	type group struct {
 		Hosts    []string `json:"hosts,omitempty"`
@@ -538,7 +539,13 @@ func (e *testEnv) fakeInventory(source, pattern string) string {
 		json.Unmarshal(inv["_meta"], &meta)
 		hostvars = meta.Hostvars
 	} else {
-		files, _ := filepath.Glob(filepath.Join(e.repo, "inventory", "hosts", "*.yml"))
+		dir := filepath.Join(e.repo, "inventory", "hosts")
+		if _, pointers := inventoryFiles(e.repo); len(pointers) == 1 {
+			if p, err := readPointer(e.repo, pointers[0]); err == nil && strings.HasPrefix(p.url, "file://") {
+				dir = strings.TrimPrefix(p.url, "file://")
+			}
+		}
+		files, _ := filepath.Glob(filepath.Join(dir, "*.yml"))
 		children := []string{"ungrouped"}
 		for _, f := range files {
 			var hf struct {

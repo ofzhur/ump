@@ -91,9 +91,10 @@ touched. The server is in the group common and the groups given with
 and ansible-inventory checks that no host and group share a name and
 that --hosts matches a host with the server in it. Once the new system
 is up and recorded, ump provision runs: the host files of every server
-ump installed (none where a file of inventory/ says plugin:
-ofzhur.ansible.ump, and ump is the inventory), then every
-playbooks/*.yml on the whole fleet, each host logged in to as its
+ump installed (into inventory/hosts/, or the storage a file of
+inventory/ points to with url:, such as inventory/hosts.yml; none where
+one says plugin: ofzhur.ansible.ump, and ump is the inventory), then
+every playbooks/*.yml on the whole fleet, each host logged in to as its
 administrator with UMP's key only; the plays pick their hosts by their
 groups. --hosts PATTERN and --playbook NAME narrow it, as for ump
 provision; the confirmation covers it. Exit status 6 names the hosts
@@ -227,7 +228,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	var inv *inventory
 	var unchecked string
 	if o.noProvision {
-		repo, unchecked = a.inventoryRepo()
+		if repo, unchecked, err = a.inventoryRepo(); err != nil {
+			return err
+		}
 	} else {
 		var all []string
 		if repo, all, err = a.requireRepo(", or give --no-provision"); err != nil {
@@ -280,7 +283,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	// group, and --hosts matches a host of the inventory with the server
 	// in it
 	if repo != nil {
-		if err := repo.checkHost(hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
+		if err := repo.checkHost(cmd.Context(), hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
 			return err
 		}
 		if err := inv.check(hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
@@ -610,7 +613,6 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		}
 		fmt.Fprintf(a.stderr, "%s is provisioned. %s\n", hostname, res.summary())
 	case repo != nil:
-		// under the fleet's lock, as a run writes the host files
 		err := a.addToInventory(ctx, repo, m.Name, hostname, inGroups, a.inventoryVars(cfg, m, record))
 		if err != nil {
 			if rerr := a.installReport(result, format); rerr != nil {

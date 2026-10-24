@@ -195,7 +195,7 @@ own](images/rescue/README.md#your-own-storage).
 | [CLI](docs/cli.md) | every command with its flags, output formats and exit codes |
 | [Configuration](docs/configuration.md) | `config.yaml`, where everything lives, secret references, the storage and UMP's key |
 | [Rescue image](images/rescue/README.md) | UMP's own rescue system and how it is built, published and entered; the layout of the storage |
-| [Provisioning](docs/provisioning.md) | after the installation: groups and playbooks (`--group`, `ump provision`, `ump server set --group`), the infrastructure repository, the inventory (host files, or ump itself), ump's logins and yours, the fleet's lock, Ansible with the collection ofzhur.ansible, facts in a central storage and servers that pull |
+| [Provisioning](docs/provisioning.md) | after the installation: groups and playbooks (`--group`, `ump provision`, `ump server set --group`), the infrastructure repository, the inventory (host files in the repository or in a storage, or ump itself), ump's logins and yours, the fleet's lock, Ansible with the collection ofzhur.ansible, facts in a central storage and servers that pull |
 | [Next steps](docs/next-steps.md) | after the first installations (draft): an infrastructure repository, security profiles, advanced configurations, and professional help |
 | [Troubleshooting](docs/troubleshooting.md) | when the rescue system does not answer or the installed system does not boot: getting a server back, finding out without a console, a case study, contributing fixes |
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |

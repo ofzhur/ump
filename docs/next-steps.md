@@ -72,6 +72,7 @@ infra/
 │   │   └── prod.yml
 │   ├── host_vars/
 │   └── hosts/                written by ump: one file per server, with its groups;
+│                             or hosts.yml, the host files in a storage;
 │                             or ump.yml, ump itself as the inventory
 ├── playbooks/                every one runs on the hosts its plays name: 00-base.yml
 │                             (the collection's base), 10-web.yml, 20-db.yml, ...
@@ -98,11 +99,12 @@ $ ump server set web-03 --attr owner=alice
 $ ump server reinstall web-03 --profile ump/profiles/web.yaml --group web
 ```
 
-ump writes each server's host file into `inventory/hosts/` with its
-groups (`common` and those of `--group`), or lists it from its state
-when ump is the inventory (`inventory/ump.yml`), and runs the playbooks
-over the fleet; `ump provision` does that again whenever the fleet
-should converge, and writes every host file anew. Attributes come along
+ump writes each server's host file into `inventory/hosts/` (or the
+storage `inventory/hosts.yml` points to) with its groups (`common` and
+those of `--group`), or lists it from its state when ump is the
+inventory (`inventory/ump.yml`), and runs the playbooks over the fleet;
+`ump provision` does that again whenever the fleet should converge,
+and writes every host file anew. Attributes come along
 as `ump_attributes`, as they are when the host file is written. They
 are data for playbooks, not groups: that `web-03` is in `prod` comes
 from the group tree in `inventory/groups.yml` (`prod` with the children
@@ -112,9 +114,9 @@ from the group tree in `inventory/groups.yml` (`prod` with the children
 
 Turning an installed system into what the server is for is
 [provisioning](provisioning.md): groups and playbooks, the inventory
-(host files, or ump itself), Ansible from the repository on the whole
-fleet, the facts in a central storage, and servers that pull the
-repository themselves.
+(host files in the repository or in a storage, or ump itself), Ansible
+from the repository on the whole fleet, the facts in a central storage,
+and servers that pull the repository themselves.
 
 ## Security profiles
 

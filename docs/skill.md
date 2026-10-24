@@ -144,7 +144,8 @@ terraform output -json ──▶ ump machine import --from terraform    names, l
                                                                    machines Terraform created
 ump server reinstall … --group <role> ──▶ inventory/hosts/<host>.yml  the host in common and its groups,
                                                                    with address, administrator, facts
-                                         (or ump server list -o ansible, the same, through inventory/ump.yml)
+                                         (or the same in a storage, through inventory/hosts.yml;
+                                          or ump server list -o ansible, through inventory/ump.yml)
 ump provision [--hosts <pattern>]    ──▶ ansible-playbook playbooks/*.yml on the fleet, each play on
                                          the hosts its hosts: names, each host as its administrator
 ```
@@ -215,7 +216,7 @@ infra/
 │   ├── groups.yml                the group tree: env above role
 │   ├── group_vars/               by env, role, provider, location
 │   ├── host_vars/                rare; most per-host facts come from the host files
-│   └── hosts/                    written by ump: one file per machine (or ump.yml: ump is the inventory)
+│   └── hosts/                    written by ump: one file per machine (or hosts.yml: in a storage; ump.yml: ump is the inventory)
 ├── playbooks/
 │   └── NN-<role>.yml             every one runs, in order, on the hosts it names; 00-base imports ofzhur.ansible.base
 ├── roles/                        one role per concern; no logic in playbooks

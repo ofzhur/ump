@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -21,6 +20,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/state"
@@ -37,7 +37,9 @@ import (
 // plugin ofzhur.ansible.ump, ump itself is the inventory (ump server list
 // -o ansible) and writes nothing. Either way the inventory has the same
 // hosts, groups and variables, and ump runs the playbooks over all of
-// it, or over the hosts of a pattern.
+// it, or over the hosts of a pattern. Where a file of inventory/ points
+// the plugin ofzhur.ansible.host to host files in a storage
+// (inventory/hosts.yml with url:), ump writes them there (storage.go).
 
 const (
 	// commonGroup is the group of every server ump installs.
@@ -109,11 +111,19 @@ type infraRepo struct {
 	// plugin is the file of inventory/ that makes ump the inventory
 	// (inventory/ump.yml), relative to dir; empty: host files.
 	plugin string
+	// pointer points to the host files in a storage (inventory/hosts.yml),
+	// where ump writes them, and store is that storage; nil:
+	// inventory/hosts/.
+	pointer *storagePointer
+	store   backend.Objects
 }
 
 // infraLayout looks for the Ansible layout in the current directory:
 // ansible.cfg and inventory/. A layout that is not there is no error:
-// missing says what is missing.
+// missing says what is missing. A pointer to host files in a storage
+// beside other host files, or beside ump as the inventory, is (exit
+// status 2), and so is a storage that cannot be opened: its URL, its
+// credentials.
 func (a *app) infraLayout() (repo *infraRepo, missing []string, err error) {
 	dir := a.repoDir
 	if dir == "" {
@@ -130,39 +140,44 @@ func (a *app) infraLayout() (repo *infraRepo, missing []string, err error) {
 	repo = &infraRepo{dir: dir}
 	if fi, err := os.Stat(filepath.Join(dir, "inventory")); err != nil || !fi.IsDir() {
 		missing = append(missing, "inventory/")
-	} else {
-		repo.plugin = umpInventory(dir)
+		return repo, missing, nil
+	}
+	plugins, pointers := inventoryFiles(dir)
+	if len(plugins) > 0 {
+		repo.plugin = plugins[0]
+	}
+	switch {
+	case len(pointers) == 0:
+		return repo, missing, nil
+	case len(pointers) > 1:
+		return nil, nil, withExit(exitUsage, fmt.Errorf("%s all point to host files in a storage; keep one", strings.Join(pointers, ", ")))
+	case repo.plugin != "":
+		return nil, nil, withExit(exitUsage, fmt.Errorf("%s points to host files in a storage, and %s makes ump the inventory; keep one of the two", pointers[0], repo.plugin))
+	}
+	if repo.pointer, err = readPointer(dir, pointers[0]); err != nil {
+		return nil, nil, withExit(exitUsage, err)
+	}
+	local, err := (&backend.Directory{Dir: filepath.Join(dir, hostsDir)}).All(context.Background())
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", hostsDir, err)
+	}
+	if len(local) > 0 {
+		return nil, nil, withExit(exitUsage, fmt.Errorf("%s points to host files in a storage, and %s/ has host files too (%s): ump writes them to the storage alone; move them there, or remove them", repo.pointer.file, hostsDir, strings.Join(sortedNames(local), ", ")))
+	}
+	if repo.store, err = a.openStorage(dir, repo.pointer); err != nil {
+		return nil, nil, err
 	}
 	return repo, missing, nil
 }
 
-// umpInventory returns the file directly in the repository's inventory/
-// that makes ump the inventory, a YAML mapping with plugin:
-// ofzhur.ansible.ump, relative to the repository; empty when there is
-// none. Ansible skips dot names, and so does ump.
-func umpInventory(dir string) string {
-	entries, err := os.ReadDir(filepath.Join(dir, "inventory"))
-	if err != nil {
-		return ""
+// sortedNames are the names of host files, in order.
+func sortedNames(files map[string][]byte) []string {
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
 	}
-	for _, e := range entries {
-		n := e.Name()
-		if e.IsDir() || strings.HasPrefix(n, ".") || !isYAMLFile(n) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, "inventory", n))
-		if err != nil {
-			continue
-		}
-		var f map[string]any
-		if yaml.Unmarshal(data, &f) != nil {
-			continue
-		}
-		if p, _ := f["plugin"].(string); p == umpPlugin {
-			return "inventory/" + n
-		}
-	}
-	return ""
+	slices.Sort(names)
+	return names
 }
 
 // isYAMLFile says whether a file name is one Ansible reads as YAML.
@@ -265,19 +280,22 @@ func (r *infraRepo) worldWritable() bool {
 // inventoryRepo is the repository a server installed with --no-provision
 // goes into: the one ump runs in, when it has the layout and
 // ansible-inventory can check the names there first. Without the layout
-// it is nil; without the check, nil and why not.
-func (a *app) inventoryRepo() (repo *infraRepo, unchecked string) {
+// it is nil; without the check, nil and why not. A layout ump would not
+// provision from is an error.
+func (a *app) inventoryRepo() (repo *infraRepo, unchecked string, err error) {
 	repo, missing, err := a.infraLayout()
 	switch {
-	case err != nil || len(missing) > 0:
-		return nil, ""
+	case err != nil:
+		return nil, "", err
+	case len(missing) > 0:
+		return nil, "", nil
 	case repo.worldWritable():
-		return nil, repo.dir + " is world-writable, Ansible takes no ansible.cfg from it"
+		return nil, repo.dir + " is world-writable, Ansible takes no ansible.cfg from it", nil
 	}
 	if _, err := a.lookPath("ansible-inventory"); err != nil {
-		return nil, "no ansible-inventory in PATH to check the names"
+		return nil, "no ansible-inventory in PATH to check the names", nil
 	}
-	return repo, ""
+	return repo, "", nil
 }
 
 // ansibleSSHArgs are the SSH arguments ump's runs need, each with the
@@ -789,29 +807,37 @@ func renderHostFile(hostname string, groups []string, v hostVars) ([]byte, error
 }
 
 // hostFileRef is the ump_ref of a host file: the server it was written
-// for; empty when the file has none or is no YAML. The error is that of
-// reading it (fs.ErrNotExist: there is none).
-func hostFileRef(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
+// for; empty when it has none or is no YAML.
+func hostFileRef(data []byte) string {
 	var f struct {
 		Vars struct {
 			UMPRef string `yaml:"ump_ref"`
 		} `yaml:"vars"`
 	}
 	if yaml.Unmarshal(data, &f) != nil {
-		return "", nil
+		return ""
 	}
-	return f.Vars.UMPRef, nil
+	return f.Vars.UMPRef
 }
 
 // checkHost refuses a host that cannot go into the inventory as it is:
 // its name is one of its groups or Ansible's own, or a host file of its
 // name is not its own. retry is what the user can do about the name;
 // server is the server's name when its groups are those of the state.
-func (r *infraRepo) checkHost(hostname, ref string, groups []string, retry, server string) error {
+func (r *infraRepo) checkHost(ctx context.Context, hostname, ref string, groups []string, retry, server string) error {
+	if err := checkHostName(hostname, groups, retry, server); err != nil {
+		return err
+	}
+	h, err := r.readHostFiles(ctx)
+	if err != nil {
+		return err
+	}
+	return h.check(hostname, ref, retry)
+}
+
+// checkHostName refuses a hostname that is a group of the server, or one
+// of Ansible's own names.
+func checkHostName(hostname string, groups []string, retry, server string) error {
 	switch {
 	case slices.Contains(groups, hostname) && server != "":
 		return withExit(exitUsage, fmt.Errorf("the hostname %s is also a group of the server: %s; %s, or %s", hostname, sameName, ungroup(server, hostname), retry))
@@ -822,134 +848,146 @@ func (r *infraRepo) checkHost(hostname, ref string, groups []string, retry, serv
 	case hostname == "localhost" || hostname == "127.0.0.1":
 		return withExit(exitUsage, fmt.Errorf("the hostname %s is one of Ansible's own names: plays and tasks for localhost would run on the server; %s", hostname, retry))
 	}
-	return r.checkHostFiles(hostname, ref, retry)
-}
-
-// checkHostFiles refuses the host files of the hostname that ump would
-// overwrite or write its own beside: HOSTNAME.yml or HOSTNAME.yaml
-// without ump_ref, or with another server's. When ump is the inventory,
-// it refuses every host file of the hostname or of the server instead:
-// the host would be defined twice.
-func (r *infraRepo) checkHostFiles(hostname, ref, retry string) error {
-	if r.plugin != "" {
-		return r.checkNoHostFile(hostname, ref)
-	}
-	for _, ext := range []string{".yml", ".yaml"} {
-		rel := hostsDir + "/" + hostname + ext
-		other, err := hostFileRef(filepath.Join(r.dir, rel))
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-		case err != nil:
-			return err
-		case other == "":
-			return withExit(exitUsage, fmt.Errorf("%s has no ump_ref: written by hand or by another tool; remove it, ump writes %s/%s.yml", rel, hostsDir, hostname))
-		case other != ref:
-			return withExit(exitUsage, fmt.Errorf("%s is the host file of %s (its ump_ref); %s, or remove the file if that server is gone", rel, other, retry))
-		}
-	}
 	return nil
 }
 
-// checkNoHostFile refuses a host file of the hostname, or one written
-// for the server under another name, beside the plugin that makes ump
-// the inventory.
-func (r *infraRepo) checkNoHostFile(hostname, ref string) error {
-	dir := filepath.Join(r.dir, hostsDir)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
+// hostFiles are the host files where ump writes them, by name, as read:
+// the files of inventory/hosts/, or the objects of the storage a pointer
+// names. When ump is the inventory (plugin), those of inventory/hosts/,
+// of which none may be a server's.
+type hostFiles struct {
+	objects backend.Objects
+	// where names the place in messages: inventory/hosts, or the
+	// storage's URL.
+	where  string
+	plugin string
+	files  map[string][]byte
+}
+
+func (h *hostFiles) path(name string) string { return h.where + "/" + name }
+
+// readHostFiles reads the host files as they are now.
+func (r *infraRepo) readHostFiles(ctx context.Context) (*hostFiles, error) {
+	h := &hostFiles{plugin: r.plugin}
+	if r.pointer == nil {
+		h.objects, h.where = &backend.Directory{Dir: filepath.Join(r.dir, hostsDir), DirMode: 0o755, FileMode: 0o644}, hostsDir
+	} else {
+		h.objects, h.where = r.store, r.store.String()
+	}
+	files, err := h.objects.All(ctx)
+	if err != nil {
+		if r.pointer != nil {
+			return nil, fmt.Errorf("%s: %s: %w", r.pointer.file, h.where, err)
+		}
+		return nil, fmt.Errorf("%s: %w", hostsDir, err)
+	}
+	h.files = files
+	return h, nil
+}
+
+// check refuses the host files of the hostname that ump would overwrite
+// or write its own beside: HOSTNAME.yml or HOSTNAME.yaml without
+// ump_ref, or with another server's. When ump is the inventory, it
+// refuses every host file of the hostname or of the server instead: the
+// host would be defined twice.
+func (h *hostFiles) check(hostname, ref, retry string) error {
+	if h.plugin != "" {
+		for _, n := range sortedNames(h.files) {
+			if n == hostname+".yml" || n == hostname+".yaml" {
+				return withExit(exitUsage, fmt.Errorf("%s defines the host %s too, and %s makes ump the inventory: the host would be defined twice; remove the host file", h.path(n), hostname, h.plugin))
+			}
+			if hostFileRef(h.files[n]) == ref {
+				return withExit(exitUsage, fmt.Errorf("%s is the host file of %s, and %s makes ump the inventory: the server would be in it twice; remove the host file", h.path(n), ref, h.plugin))
+			}
+		}
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		n := e.Name()
-		if e.IsDir() || strings.HasPrefix(n, ".") || !isYAMLFile(n) {
+	for _, ext := range []string{".yml", ".yaml"} {
+		data, ok := h.files[hostname+ext]
+		if !ok {
 			continue
 		}
-		rel := hostsDir + "/" + n
-		if n == hostname+".yml" || n == hostname+".yaml" {
-			return withExit(exitUsage, fmt.Errorf("%s defines the host %s too, and %s makes ump the inventory: the host would be defined twice; remove the host file", rel, hostname, r.plugin))
-		}
-		if other, err := hostFileRef(filepath.Join(dir, n)); err == nil && other == ref {
-			return withExit(exitUsage, fmt.Errorf("%s is the host file of %s, and %s makes ump the inventory: the server would be in it twice; remove the host file", rel, ref, r.plugin))
+		switch other := hostFileRef(data); {
+		case other == "":
+			return withExit(exitUsage, fmt.Errorf("%s has no ump_ref: written by hand or by another tool; remove it, ump writes %s", h.path(hostname+ext), h.path(hostname+".yml")))
+		case other != ref:
+			return withExit(exitUsage, fmt.Errorf("%s is the host file of %s (its ump_ref); %s, or remove the file if that server is gone", h.path(hostname+ext), other, retry))
 		}
 	}
 	return nil
 }
 
-// writeHostFile writes inventory/hosts/<hostname>.yml under a dot name,
-// which Ansible ignores, and renames it into place, unless the file says
-// that already; the files of other names that were written for the same
-// server (an old hostname) go. A file of the hostname that is not the
-// server's stops it, as up front. It returns the path written (empty:
-// unchanged) and those removed, relative to the repository.
-func (r *infraRepo) writeHostFile(hostname, ref string, data []byte) (written string, removed []string, err error) {
-	if err := r.checkHostFiles(hostname, ref, "give another hostname"); err != nil {
-		return "", nil, err
-	}
-	dir := filepath.Join(r.dir, hostsDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// write writes HOSTNAME.yml, unless it says that already, as a whole
+// (a file under a dot name, which Ansible ignores, renamed into place);
+// the host files of other names that were written for the same server
+// (an old hostname) go. A host file of the hostname that is not the
+// server's stops it, as up front. It returns where it wrote (empty:
+// unchanged) and what it removed.
+func (h *hostFiles) write(ctx context.Context, hostname, ref string, data []byte) (written string, removed []string, err error) {
+	if err := h.check(hostname, ref, "give another hostname"); err != nil {
 		return "", nil, err
 	}
 	name := hostname + ".yml"
-	if old, err := os.ReadFile(filepath.Join(dir, name)); err != nil || !bytes.Equal(old, data) {
-		tmp := filepath.Join(dir, "."+name+".tmp")
-		if err := os.WriteFile(tmp, data, 0o644); err != nil {
-			os.Remove(tmp)
-			return "", nil, err
+	if old, ok := h.files[name]; !ok || !bytes.Equal(old, data) {
+		if err := h.objects.Put(ctx, name, data); err != nil {
+			return "", nil, fmt.Errorf("%s: %w", h.where, err)
 		}
-		if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
-			os.Remove(tmp)
-			return "", nil, err
-		}
-		written = hostsDir + "/" + name
+		h.files[name] = data
+		written = h.path(name)
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	for _, e := range entries {
-		n := e.Name()
-		if n == name || strings.HasPrefix(n, ".") || e.IsDir() || !isYAMLFile(n) {
+	for _, n := range sortedNames(h.files) {
+		if n == name || hostFileRef(h.files[n]) != ref {
 			continue
 		}
-		if other, err := hostFileRef(filepath.Join(dir, n)); err != nil || other != ref {
-			continue
+		if err := h.objects.Remove(ctx, n); err != nil {
+			return written, removed, fmt.Errorf("%s: %w", h.where, err)
 		}
-		if err := os.Remove(filepath.Join(dir, n)); err != nil {
-			return "", nil, err
-		}
-		removed = append(removed, hostsDir+"/"+n)
+		delete(h.files, n)
+		removed = append(removed, h.path(n))
 	}
 	return written, removed, nil
 }
 
+// writeHostFile reads the host files and writes that of a host.
+func (r *infraRepo) writeHostFile(ctx context.Context, hostname, ref string, data []byte) (written string, removed []string, err error) {
+	h, err := r.readHostFiles(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	return h.write(ctx, hostname, ref, data)
+}
+
 // putInInventory writes the host file and says what changed; when ump
 // is the inventory, the state has the server already, and it says that.
-func (a *app) putInInventory(repo *infraRepo, hostname string, groups []string, v hostVars) error {
+func (a *app) putInInventory(ctx context.Context, repo *infraRepo, hostname string, groups []string, v hostVars) error {
+	h, err := repo.readHostFiles(ctx)
+	if err != nil {
+		return err
+	}
 	if repo.plugin != "" {
-		if err := repo.checkNoHostFile(hostname, v.UMPRef); err != nil {
+		if err := h.check(hostname, v.UMPRef, ""); err != nil {
 			return err
 		}
 		fmt.Fprintf(a.stderr, "No host file: %s makes ump the inventory, with %s in %s.\n", repo.plugin, hostname, strings.Join(groups, ", "))
 		return nil
 	}
+	return a.writeHost(ctx, h, hostname, groups, v)
+}
+
+// writeHost writes the host file of a host and says what changed.
+func (a *app) writeHost(ctx context.Context, h *hostFiles, hostname string, groups []string, v hostVars) error {
 	data, err := renderHostFile(hostname, groups, v)
 	if err != nil {
 		return err
 	}
-	written, removed, err := repo.writeHostFile(hostname, v.UMPRef, data)
-	if err != nil {
-		return fmt.Errorf("the host file %s/%s.yml: %w", hostsDir, hostname, err)
-	}
+	written, removed, err := h.write(ctx, hostname, v.UMPRef, data)
 	for _, f := range removed {
 		fmt.Fprintf(a.stderr, "Removed %s: %s has the hostname %s now.\n", f, v.UMPRef, hostname)
 	}
 	if written != "" {
 		fmt.Fprintf(a.stderr, "Wrote %s: %s in %s.\n", written, hostname, strings.Join(groups, ", "))
 	}
-	return nil
+	return err
 }
 
 // hostRecap is what the PLAY RECAP of ansible-playbook says of a host.

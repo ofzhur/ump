@@ -114,7 +114,8 @@ infra/
 │   ├── group_vars/            common.yml, web.yml, ...
 │   ├── host_vars/             overrides per host
 │   ├── hosts/                 written by ump: one file per server
-│   └── ump.yml                or this instead: ump as the inventory (below)
+│   ├── hosts.yml              or this instead: the host files in a storage (below)
+│   └── ump.yml                or this: ump as the inventory (below)
 ├── playbooks/                 00-base.yml, 10-web.yml, ...: every one runs, in this order
 └── collections/ansible_collections/ofzhur/ansible    the collection, a git submodule
 ```
@@ -147,7 +148,9 @@ lock), ump checks:
    `playbooks/00-base.yml`. `--no-provision` needs none of them. A
    world-writable directory stops it too: Ansible ignores an
    `ansible.cfg` there, and ump, which names it in `ANSIBLE_CONFIG`,
-   does not take it either.
+   does not take it either. So does a pointer to host files in a
+   storage beside another form of the inventory
+   ([below](#the-inventory-three-forms)).
 2. **The playbooks:** `ansible-playbook --syntax-check` on those of the
    run, which also reads the inventory. A playbook that does not parse
    or a broken inventory stop it with exit status 2 and Ansible's
@@ -162,11 +165,14 @@ lock), ump checks:
    has in the state, the message says how to take it away: `ump server
    set NAME --ungroup GROUP`.
 4. **The host files:** `inventory/hosts/HOSTNAME.yml` or `HOSTNAME.yaml`
-   that ump did not write for that server stops it with exit status 2:
-   one without `ump_ref` (written by hand), or one of another server.
-   When ump is the inventory, any host file of the hostname or of the
-   server stops it (the host would be defined twice), and so does the
-   hostname as another host of the inventory.
+   (or the object of that name in the storage) that ump did not write
+   for that server stops it with exit status 2: one without `ump_ref`
+   (written by hand), or one of another server. When ump is the
+   inventory, any host file of the hostname or of the server stops it
+   (the host would be defined twice), and so does the hostname as
+   another host of the inventory. A storage that cannot be opened (its
+   URL, its credentials) is exit status 2 as well, one that does not
+   answer exit status 1.
 5. **The hosts:** `--hosts` must match a host of the inventory as it
    will be: the current one plus the hosts ump writes (for a reinstall,
    the server under its hostname in `common` and its `--group` groups).
@@ -180,38 +186,53 @@ checks them for every server ump installed, under the fleet's lock
 (below), before it writes a file. `--dry-run` makes the checks, shows
 the playbooks with the plan and writes nothing.
 
-## The inventory: host files or ump
+## The inventory: three forms
 
-Every server ump installed is in the inventory, one of two ways, with
-the same hosts, groups and variables either way:
+Every server ump installed is in the inventory, one of three ways, with
+the same hosts, groups and variables in each:
 
-1. **Host files**, the default: ump writes one file per server into
-   `inventory/hosts/`, read by the collection's inventory plugin
-   `ofzhur.ansible.host`. The files are committed with the rest, and
-   Ansible runs from the repository without ump.
-2. **ump as the inventory**: `inventory/ump.yml` configures the
+1. **Host files in the repository**, the default: ump writes one file
+   per server into `inventory/hosts/`, read by the collection's
+   inventory plugin `ofzhur.ansible.host`. The files are committed with
+   the rest, and Ansible runs from the repository without ump.
+2. **Host files in a storage**, like the facts: `inventory/hosts.yml`
+   points the same plugin to a storage (S3, R2, Consul, Vault, a
+   directory over SSH), and ump writes the same files there, one object
+   per server, instead of into `inventory/hosts/`. Ansible runs without
+   ump, and a new server needs no commit.
+3. **ump as the inventory**: `inventory/ump.yml` configures the
    collection's inventory plugin `ofzhur.ansible.ump`, which runs `ump
    server list -o ansible` and takes the servers ump installed from
    there. ump writes no host file.
 
 Which to choose:
 
-- **Host files** where Ansible runs without ump: in CI without the
-  state, on a colleague's laptop, and on [servers that
-  pull](#servers-that-pull), which must never hold ump's state. The
-  repository says what the fleet is, and a review shows every new
-  server.
+- **Host files in the repository** where the repository says what the
+  fleet is: a review shows every new server, and Ansible runs wherever
+  the repository is, without credentials (CI, a colleague's laptop,
+  [servers that pull](#servers-that-pull)). ump writes the files;
+  committing them is yours.
+- **Host files in a storage** where Ansible runs in several places that
+  should see a new server at once, without a commit: control machines
+  and servers that pull read the storage with credentials of their own,
+  never ump's state. It goes with the [facts in a
+  storage](#facts-in-a-central-storage), each in a place of its own
+  ([three places](#three-places)).
 - **ump as the inventory** where Ansible runs only beside ump and its
   state (your laptop, a bastion, a CI job with the state backend's
-  credentials): always current, no file to commit for a new server, none
-  to remove for one that is gone. Every Ansible run lists the servers
-  with ump.
+  credentials): always current, nothing to write or remove for a
+  server. Every Ansible run lists the servers with ump.
+
+One form at a time: ump refuses `inventory/hosts.yml` beside host files
+in `inventory/hosts/`, beside `inventory/ump.yml` or beside another
+pointer (exit status 2), since Ansible would read them all.
 
 ### Host files
 
 Every run of `ump provision`, and the one after a reinstall, writes
 the host file of every server ump installed,
-`inventory/hosts/HOSTNAME.yml`, read by the collection's inventory
+`inventory/hosts/HOSTNAME.yml` (or `HOSTNAME.yml` in the storage,
+[below](#host-files-in-a-storage)), read by the collection's inventory
 plugin `ofzhur.ansible.host`:
 
 ```yaml
@@ -257,11 +278,11 @@ vars:
   `inventory/group_vars/`, group trees (`prod` with the children `web`
   and `db`) to `inventory/groups.yml`.
 - Commit the files: the inventory is the repository's, and Ansible runs
-  from it without ump.
+  from it without ump. ump commits nothing.
 - ump does not remove the host file of a server that is gone: `git rm`
-  it, or every run finds it unreachable. With the last one, remove
-  `inventory/hosts/` too: Ansible fails on an empty directory, and so
-  does ump's syntax check.
+  it (in a storage, delete its object), or every run finds it
+  unreachable. With the last one, remove `inventory/hosts/` too:
+  Ansible fails on an empty directory, and so does ump's syntax check.
 
 A server installed with `--no-provision` from the repository gets its
 host file at once, under the fleet's lock: ump installed it, so it
@@ -273,6 +294,99 @@ written then (another's in its way meanwhile, the lock held too long)
 ends the reinstall with that exit status. With `--no-reboot` the host
 file waits for the next run too, and until the reboot the run finds the
 server unreachable.
+
+### Host files in a storage
+
+```yaml
+# inventory/hosts.yml
+plugin: ofzhur.ansible.host
+url: r2://ACCOUNT/fleet-inventory/hosts
+```
+
+```ini
+# ansible.cfg
+[ofzhur_storage]
+access_key_file = secrets/storage.access_key
+secret_key_file = secrets/storage.secret_key
+```
+
+- The URL is one of ump's [state backends](state.md#backends) but
+  `http(s)://`: `s3://BUCKET/PREFIX` (S3, or an S3-compatible store at
+  `endpoint`), `r2://ACCOUNT/BUCKET/PREFIX`, `consul://HOST:8500/PREFIX`
+  (`http+consul://` for plain http), `vault://HOST:8200/MOUNT/PREFIX`
+  (`http+vault://`), `ssh://[USER@]HOST[:PORT]/PATH`, `file:///PATH`.
+- A file directly in `inventory/` that says `plugin:
+  ofzhur.ansible.host` and `url:` is the pointer. ump writes
+  `PREFIX/HOSTNAME.yml` for every server, with the content of a file of
+  `inventory/hosts/`, by the same rules: only an object that changed,
+  as a whole (an object replaced at once, or a file written under a dot
+  name and renamed into place); the object of the server's old hostname
+  goes; one of the hostname without `ump_ref`, or of another server,
+  stops ump up front. Nothing goes into `inventory/hosts/`.
+- The plugin reads every object directly under the prefix whose name
+  ends in `.yml` or `.yaml` (but for dot names) as a host file; no
+  object is an empty inventory. In Vault, an object is the field `json`
+  of a secret.
+- Next to `url`, the pointer may set the options that are no
+  credentials: `endpoint`, `region`, `vault_namespace`, `ca_file`
+  (relative to the pointer) and `ssh_args`. Any other key, a credential
+  among them, is refused, by the plugin and by ump.
+- A place of its own, not that of the facts: the fact cache's flush
+  deletes every object under its prefix, and servers that pull write
+  the facts but must not write the host files ([three
+  places](#three-places)).
+
+#### The storage's credentials
+
+ump reads them as the collection does, so that ump and Ansible reach
+the same storage with the same credentials:
+
+- From `[ofzhur_storage]` of the repository's `ansible.cfg`, or from
+  the collection's variables, `ANSIBLE_OFZHUR_STORAGE_` and the
+  option's name in capitals (`ANSIBLE_OFZHUR_STORAGE_ACCESS_KEY_FILE`),
+  which win over it, also when empty. The pointer's options win over
+  both.
+- Each credential is a value or, better, a file: `access_key_file`,
+  `secret_key_file`, `session_token_file` (S3, R2), `consul_token_file`,
+  `vault_token_file`. A file wins over a value; an empty file is no
+  credential. A relative path is relative to `ansible.cfg` there, and
+  to the repository in a variable; `~` and `$VAR` are expanded.
+- `ansible.cfg` is read as Ansible reads it: `;` after a blank starts a
+  comment, an indented line continues a value, `[DEFAULT]` applies to
+  the section. A value in quotes is refused: ansible-core 2.19 and
+  later take the quotes off, earlier versions keep them.
+- Never `AWS_*`, `VAULT_TOKEN`, `CONSUL_HTTP_TOKEN` or `backend.yaml`:
+  those are the credentials of ump's state, and ump hands its
+  environment to Ansible. A credential that is missing stops ump with
+  exit status 2 and says where it goes.
+
+| URL | Options |
+|---|---|
+| `s3://` | `access_key`, `secret_key`, `session_token`, `endpoint`, `region` (`us-east-1`) |
+| `r2://` | `access_key`, `secret_key` |
+| `consul://` | `consul_token` |
+| `vault://` | `vault_token` (required), `vault_namespace` |
+| `ssh://` | `ssh_args`: options of your ssh client, such as `-i ~/.ssh/fleet` |
+| over https | `ca_file`: CA certificates (PEM) in place of the system's |
+
+#### Three places
+
+ump's state, the host files and the facts take a place each (a bucket,
+a prefix, a Vault path, a directory), each with credentials of its own:
+
+- **The state** holds UMP's private key and the accounts' secrets:
+  control machines alone read and write it.
+- **The inventory**, the host files: control machines write it, servers
+  that pull read it. Whoever can write it changes what every run does.
+- **The facts**: every machine that runs Ansible writes them, a server
+  that pulls its own.
+
+On R2, which scopes a token to buckets, not to prefixes, that is three
+buckets (a control machine's token for those of the inventory and the
+facts, a pulling server's reading the one and writing the other); on
+S3, Consul and Vault a prefix each will do, never one under the state.
+Give each machine no more than its part; the collection's README lists
+the policies per storage.
 
 ### ump as the inventory
 
@@ -311,7 +425,8 @@ $ ump server list -o ansible
   ofzhur.ansible.ump` makes ump the inventory for `ump server reinstall`
   and `ump provision`: they write no host file and say so (`No host
   files: inventory/ump.yml makes ump the inventory.`); the checks and
-  the run stay as they are.
+  the run stay as they are. A pointer to host files in a storage beside
+  it is refused.
 - A host file of a server beside it, of its hostname or with its
   `ump_ref`, stops them with exit status 2: the host would be defined
   twice. Switching from host files, `git rm -r inventory/hosts`.
@@ -479,10 +594,11 @@ the `exit_status` of `ansible-playbook`; after a reinstall it is its
 json|yaml] [-- ANSIBLE-ARGS...]`** converges the fleet: the checks, then
 under the fleet's lock the names and the hosts of `--hosts` (an Ansible
 host pattern: `web-01`, `web`, `'web:&prod'`, `'all:!lab-*'`; it must
-match a host), the host files of every server ump installed (none when
-ump is the inventory), and every playbook (or those of `--playbook`) on
-the hosts. Without `--hosts` it asks first on a terminal, since it runs
-on the whole fleet; without a terminal, `--yes` is required.
+match a host), the host files of every server ump installed (in
+`inventory/hosts/` or the storage; none when ump is the inventory), and
+every playbook (or those of `--playbook`) on the hosts. Without
+`--hosts` it asks first on a terminal, since it runs on the whole
+fleet; without a terminal, `--yes` is required.
 
 **`ump server reinstall NAME [--group GROUP]... [--hosts PATTERN]
 [--playbook NAME]... [--no-provision]`** installs, records the
@@ -515,7 +631,8 @@ its groups come with the installation.
 of ump, written once and used by every infrastructure repository that
 includes it:
 
-- `ofzhur.ansible.host`: the inventory plugin for the host files;
+- `ofzhur.ansible.host`: the inventory plugin for the host files, in
+  the repository or in a storage;
 - `ofzhur.ansible.ump`: the inventory plugin that makes ump the
   inventory;
 - `ofzhur.ansible.facts`: the fact cache in a central storage (below);
@@ -541,14 +658,14 @@ directory of the repository, `.cache/facts`, on that machine alone.
 ### Facts in a central storage
 
 The collection's fact cache `ofzhur.ansible.facts` keeps them in a
-central storage instead, with the URLs of ump's [state
-backends](state.md#backends) but `http(s)://`:
+central storage instead, with the URLs and the credentials of the [host
+files in a storage](#host-files-in-a-storage), in a place of its own:
 
 ```ini
 # ansible.cfg
 [defaults]
 fact_caching = ofzhur.ansible.facts
-fact_caching_connection = r2://ACCOUNT/BUCKET/facts
+fact_caching_connection = r2://ACCOUNT/fleet-facts/facts
 fact_caching_timeout = 604800
 
 [ofzhur_storage]
@@ -556,22 +673,11 @@ access_key_file = secrets/storage.access_key
 secret_key_file = secrets/storage.secret_key
 ```
 
-`s3://BUCKET/PREFIX`, `consul://HOST:8500/PREFIX` (`http+consul://`
-for plain http), `vault://HOST:8200/MOUNT/PREFIX` (`http+vault://`),
-`ssh://[USER@]HOST/PATH` and `file:///PATH` work the same way.
-
-The credentials are the collection's own: in `[ofzhur_storage]` of
-`ansible.cfg`, preferably as files (`access_key_file`,
-`secret_key_file`, the token's file for Consul and Vault; relative to
-`ansible.cfg`, a file wins over a value), or its
-`ANSIBLE_OFZHUR_STORAGE_*` variables; the collection's README lists
-them. It never takes `AWS_*`, `VAULT_TOKEN` or `CONSUL_HTTP_TOKEN`:
-those are ump's for its state, and ump hands its environment to
-Ansible. Keep the facts out of ump's state, in a bucket of their own
-(R2 gives a token access to whole buckets) or a prefix of their own,
-with credentials of their own: everything that runs Ansible, pulling
-servers included, reads and writes the facts, and the state holds
-UMP's key.
+The [credentials](#the-storages-credentials) are the collection's own,
+in `[ofzhur_storage]` or its variables, never ump's. Keep the facts out
+of ump's state and apart from the host files ([three
+places](#three-places)): everything that runs Ansible, pulling servers
+included, reads and writes the facts, and the state holds UMP's key.
 
 Runs from several control machines then share the facts: a run from
 CI knows what a run from your laptop gathered. And one more option
@@ -593,12 +699,12 @@ A pulling server needs:
   facts are stored under other names from 2.19 on, and the two do not
   share them;
 - `git`, and read access to the repository: a read-only deploy key;
-- the inventory in the repository: [host
-  files](#the-inventory-host-files-or-ump), since ump as the inventory
-  needs ump's state;
-- the credentials of the facts storage, as files in `[ofzhur_storage]`
-  of its `ansible.cfg`, as narrow as the storage allows: it reads the
-  facts of the others and writes its own;
+- host files, in the repository or in the storage
+  ([three forms](#the-inventory-three-forms)), since ump as the
+  inventory needs ump's state;
+- the credentials of the storage, as files in `[ofzhur_storage]` of its
+  `ansible.cfg`, as narrow as the storage allows: it reads the host
+  files and the facts of the others, and writes its own facts;
 - a playbook at the root of the repository for `ansible-pull`
   (`local.yml`, which it runs when given none) that imports those of
   `playbooks/` in their order, as ump runs them; their `hosts:` pick

@@ -16,6 +16,8 @@ make dist         # the binaries for every platform, into dist/
 ```
 
 The tests need no provider accounts: the providers' APIs are faked.
+Where Docker answers, one test runs MinIO in a container for the host
+files in a storage (`-short` skips it).
 Images are built in a privileged Debian container (`make rescue-image`,
 `make os-image`; Docker or Podman) and the rescue image boots in QEMU
 with `make rescue-test`. See [the rescue image](images/rescue/README.md)

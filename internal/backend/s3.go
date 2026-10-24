@@ -27,9 +27,11 @@ type S3 struct {
 	Region    string
 	AccessKey string
 	SecretKey string
-	Client    *http.Client
-	Now       func() time.Time
-	label     string
+	// SessionToken is that of temporary credentials (a storage's).
+	SessionToken string
+	Client       *http.Client
+	Now          func() time.Time
+	label        string
 }
 
 func (s *S3) String() string {
@@ -80,6 +82,9 @@ func (s *S3) do(ctx context.Context, method, key string, body []byte, headers ma
 	}
 	if method == http.MethodPut && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	if s.SessionToken != "" {
+		req.Header.Set("X-Amz-Security-Token", s.SessionToken)
 	}
 	now := time.Now
 	if s.Now != nil {

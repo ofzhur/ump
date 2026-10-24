@@ -113,10 +113,15 @@ secret_key: {file: ~/.config/ump/backend.secret_key}
 
 The state holds secrets, the accounts' and UMP's key, in clear text,
 as `~/.config/ump` does; choose a backend accordingly (a private
-bucket, a Vault, a repository nobody else reads). The collection's fact
-cache `ofzhur.ansible.facts` takes the same URLs for Ansible's facts
-([provisioning](provisioning.md#facts-in-a-central-storage)): keep
-those apart, with credentials of their own.
+bucket, a Vault, a repository nobody else reads). The host files of
+the Ansible inventory and Ansible's facts take the same URLs but
+`http(s)://` ([host files in a
+storage](provisioning.md#host-files-in-a-storage), [facts in a central
+storage](provisioning.md#facts-in-a-central-storage)): keep each in a
+place of its own, out of the state, with credentials of their own, the
+collection's in `[ofzhur_storage]` of `ansible.cfg`, which ump takes
+for the host files instead of these; on R2, that is three buckets
+([three places](provisioning.md#three-places)).
 
 The accounts' secret files (`secrets/NAME`) are part of the state and
 move with it. A reference written as `file: secrets/NAME` is in the

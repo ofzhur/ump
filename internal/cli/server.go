@@ -179,7 +179,11 @@ reinstall.`,
 			// another host of the inventory where the repository is at hand
 			var inv *inventory
 			if len(add) > 0 {
-				if repo, _ := a.inventoryRepo(); repo != nil {
+				repo, _, err := a.inventoryRepo()
+				if err != nil {
+					return err
+				}
+				if repo != nil {
 					if inv, err = a.readInventory(cmd.Context(), repo, ""); err != nil {
 						return err
 					}
