@@ -41,6 +41,7 @@ $ ump server reinstall web-01 --no-provision     # erase, install, reboot, verif
 $ ump ssh web-01
 $ cd ~/src/infra                                 # your infrastructure repository (Ansible)
 $ ump server reinstall web-02 --group web        # install, then provision: common, web
+$ ump server multiinstall --plan fleet.yaml      # several at once, each its own, then one run
 ```
 
 The [quickstart](docs/quickstart.md) walks through these with their

@@ -100,6 +100,12 @@ func (a *app) resolveOne(cmd *cobra.Command, ref string) (provider.Machine, prov
 	if err != nil {
 		return provider.Machine{}, nil, err
 	}
+	return a.resolveListed(cmd, machines, byAccount, failed, total, ref)
+}
+
+// resolveListed resolves a server reference against a listing of
+// listedMachines, as resolveOne does.
+func (a *app) resolveListed(cmd *cobra.Command, machines []provider.Machine, byAccount map[string]listResult, failed, total int, ref string) (provider.Machine, provider.Provider, error) {
 	m, err := a.resolveServer(a.resolverUI(cmd), machines, ref)
 	switch {
 	case errors.Is(err, errQuit):

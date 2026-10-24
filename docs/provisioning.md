@@ -9,13 +9,16 @@ Ansible from your infrastructure repository: it puts every server it
 installs into the repository's inventory, in **groups**, and runs the
 repository's playbooks over the fleet, each play on the hosts its
 `hosts:` names. A reinstall ends with that run; `ump provision` runs it
-whenever you want the fleet converged. Servers can also
-[pull](#servers-that-pull) the repository themselves.
+whenever you want the fleet converged; `ump server multiinstall`
+installs several servers side by side and ends in one run for all of
+them. Servers can also [pull](#servers-that-pull) the repository
+themselves.
 
 ```console
 $ cd ~/src/infra                                        # the infrastructure repository
 $ ump server reinstall web-01 --group web                # install, then provision the fleet
 $ ump server reinstall db-01 --group db --hosts db-01   # install, then provision db-01 alone
+$ ump server multiinstall --plan fleet.yaml             # several at once, then one run
 $ ump server set web-01 --group monitoring              # a group more; the next run applies it
 $ ump provision                                         # converge the fleet
 $ ump provision --hosts web --playbook 10-web           # some hosts, some playbooks
@@ -30,7 +33,7 @@ $ ump server reinstall lab-01 --no-provision            # install only
 | What | the OS, disks, users, network, firewall, userdata | what the server's groups say: users after day one, services, their configuration |
 | Defined by | the [profile](profiles.md) | the playbooks of your repository, which use the collection [ofzhur.ansible](https://github.com/ofzhur/ansible) |
 | When | before the first boot | after the first boot, and with every `ump provision` or pull |
-| Run by | `ump server reinstall` | `ump server reinstall`, `ump provision`, `ansible-playbook` from the repository, or `ansible-pull` on the server |
+| Run by | `ump server reinstall`, `multiinstall` | `ump server reinstall`, `multiinstall`, `ump provision`, `ansible-playbook` from the repository, or `ansible-pull` on the server |
 
 Every `ump server reinstall` provisions, unless `--no-provision`: the
 server is then the operating system plus the userdata, nothing more,
@@ -554,11 +557,12 @@ host files and Ansible; so does the host file of a reinstall with
 holds it, up to the configured wait (`wait:` in `config.yaml`,
 `UMP_WAIT`; 15 minutes), and then gives up with exit status 3, as a
 locked server does. Two reinstalls run side by side and provision one
-after the other. The lock keeps runs apart, not servers: a server that a
-reinstall has in hand meanwhile is in the run, and unreachable; its
-reinstall provisions it. `ump config state locks` lists the lock; `ump
-config state unlock fleet` releases one that an ump left behind when it
-died.
+after the other; `ump server multiinstall` runs its installations side
+by side and provisions once, after the last. The lock keeps runs apart,
+not servers: a server that a reinstall has in hand meanwhile is in the
+run, and unreachable; its reinstall provisions it. `ump config state
+locks` lists the lock; `ump config state unlock fleet` releases one that
+an ump left behind when it died.
 
 ## Failures: exit status 6
 
@@ -616,6 +620,21 @@ provisioning, and `--hosts` is checked before it.
   HOSTNAME` after the reboot. When ump is the inventory, the server is
   in it from the record on.
 - `--dry-run`: the checks and the plan, nothing written.
+
+**`ump server multiinstall NAME... | --plan FILE [--parallel N] [--hosts
+PATTERN] [--playbook NAME]... [--no-provision]`** installs several
+servers side by side, `--parallel N` at a time, each as `reinstall`
+does, with the flags of a server shared or, from a [plan
+file](cli.md#install-several-ump-server-multiinstall), its own (groups
+among them). Parallel installations end in one fleet run: once the last
+is done, ump records every server it installed and runs `ump
+provision` once, under the fleet's lock, with the host files of all of
+them, on the fleet or on `--hosts`. Each new server is provisioned by
+its own line of the recap; a failed installation stops neither the
+others nor the run, and comes first in the exit status (1, then 6).
+`--hosts` is checked, with every new host in the inventory, before the
+one question, and so are the hostnames, each once and none a group of
+another server (new, or in the state).
 
 **`ump server set NAME --group GROUP / --ungroup GROUP`** changes the
 groups of a server ump installed in the state (repeatable, or

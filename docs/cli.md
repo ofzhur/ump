@@ -37,6 +37,8 @@ ump
 │   │                                                  the Ansible inventory of the servers ump installed
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
 │   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── multiinstall (parallel-install) <ref>... | --plan <file> [reinstall's flags of a server] [--parallel <n>] [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+│   │                                                  several servers at once, each as reinstall does, then one provisioning run
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
 │   ├── reboot       <ref> [--hard|--power-cycle] [--wait] [--yes]
@@ -620,6 +622,116 @@ Providers that keep their rescue system as the boot option (OVHcloud)
 have it disabled before the reboot. Asks for confirmation on a
 terminal; without one, `--yes` is required.
 
+## Install several: `ump server multiinstall`
+
+```
+ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+ump server multiinstall --plan FILE [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+```
+
+Installs several servers at once (alias `parallel-install`), each the
+way `reinstall` installs one, and provisions them with one run of `ump
+provision`. Named on the command line, the servers share the values of
+`reinstall`'s flags that concern a server (those above before
+`--parallel`); a plan file gives each its own:
+
+```yaml
+# fleet.yaml
+defaults:                    # for every server
+  profile: web
+  group: [web]
+servers:                     # each over the defaults
+  web-01: {}
+  web-02:
+    layout: lvm-raid1
+  db-01:
+    profile: db
+    group: [db, backup]
+    hostname: db-01.example.net
+    user: [oleg:local, deploy]
+    ipv6: true
+```
+
+The keys are the flags' names: `profile`, `layout`, `firewall`, `os`,
+`hostname`, `timezone`, `disks`, `ssh-key`, `set`, `user`, `userdata`,
+`group`, `ipv6`, `mitigations`, `via` and `storage`; a repeatable flag
+(and `disks`) takes a list or one value, `ipv6` and `mitigations` take
+`true` or `false`. A server is named as on the command line (name, ID,
+IP address, `provider/id`); its value of a key replaces that of
+`defaults`, a list as a whole (`group: []`: none but `common`). The file
+is read strictly: a second YAML document, another key, a key or a server
+given twice, a key without a value, or a value of the wrong kind is
+refused with its line, and so is one of these flags on the command line
+beside `--plan`.
+
+Every check comes before any server is touched, and a failure is exit
+status 2 with nothing changed: each server is resolved, once (two
+references to one server are refused); its profile, layout, firewall,
+users, userdata and keys resolve as for `reinstall`; an OS the storage
+has no image of for its architecture is refused where the provider tells
+the architecture, and warned about where it does not; the hostnames are
+unique among the servers, none is a group of another server (new, or in
+the state), and none collides with the inventory, as for `reinstall`;
+the Ansible layout and the playbooks pass, and `--hosts` matches a host
+of the inventory with every new host in it; and no server is locked.
+Then one table and one question; without a terminal, `--yes` is
+required:
+
+```console
+$ ump server multiinstall --plan fleet.yaml
+SERVER   PROVIDER             OS             LAYOUT       HOSTNAME            GROUPS
+web-01   hetzner-cloud/1001   ubuntu-26.04   lvm-linear   web-01              common,web
+web-02   hetzner-cloud/1002   ubuntu-26.04   lvm-raid1    web-02              common,web
+db-01    hetzner-robot/2345   debian-13      lvm-linear   db-01.example.net   common,db,backup
+Install on these 3 servers? Every disk of each is erased. Then ump provision runs 00-base, 10-web on the fleet. [y/N] y
+Provisioning after the installations: 00-base, 10-web on the fleet.
+Installing 3 servers, all at once ...
+[web-01] Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 24.04.3 LTS).
+[db-01] Checking root access to 203.0.113.30 over SSH ... no (tried root, oleg, ump).
+[db-01] Going through the provider's rescue system.
+...
+[web-02] web-02 is up: Ubuntu 26.04 LTS, hostname web-02, root on /dev/md/root; log in as ump (ump ssh web-02).
+...
+Wrote inventory/hosts/db-01.example.net.yml: db-01.example.net in common, db, backup.
+Wrote inventory/hosts/web-01.yml: web-01 in common, web.
+Wrote inventory/hosts/web-02.yml: web-02 in common, web.
+Provisioning: 00-base, 10-web on the fleet (5 hosts) ...
+...
+Provisioned 5 hosts, 3 changed.
+SERVER   HOSTNAME            INSTALLED   PROVISIONED   REASON
+web-01   web-01              yes         yes
+web-02   web-02              yes         yes
+db-01    db-01.example.net   yes         yes
+```
+
+The installations run side by side, `--parallel N` at a time (default:
+all), each under its server's lock, which an installed server keeps
+through the provisioning; every line of their progress is whole, with
+its server in front. A failed installation does not stop the others; its
+server stays where it stopped, as with `reinstall` (after a failed
+installer, in the UMP rescue system). Once all are done, ump records the
+servers it installed, in one change of the state, and runs `ump
+provision` once, under the fleet's lock: the host files of every server
+it installed, then the playbooks on the fleet, or on the hosts of
+`--hosts` (`--playbook` narrows them). A server whose installation
+failed is in that run as the inventory had it before. Each new server is
+provisioned by its own line of the recap. `--no-provision` runs nothing,
+and writes the host files where the layout is there, under the fleet's
+lock. `--dry-run` brings every server into the rescue system and prints
+each installer's plan, side by side; nothing is erased, recorded or
+provisioned. An interrupt stops the installations; those that completed
+are recorded, and the next `ump provision` includes them.
+
+The summary on stdout says per server whether it was installed (`dry-run`
+for a plan alone) and provisioned (`-` where nothing ran for it), and why
+not; `-o json` prints `servers`, each the result of `reinstall -o json`
+with `installed` and `reason`, and `provision`, the result of the run.
+Exit status 1 means an installation failed, 6 that the provisioning did
+not complete (on any host, named as by `ump provision`), 2 or 3 that it
+could not run (`--hosts` matching nothing once the host files were
+written, the fleet's lock), 0 that all went well; a failed installation
+comes first.
+
 ## Provision: `ump provision`
 
 ```console
@@ -880,6 +992,10 @@ $ ump server reinstall web-01                      # the profile set for it, els
 $ ump server reinstall web-01 --profile web --layout lvm-raid1 --firewall web
 $ ump server reinstall web-01 --user oleg:local --userdata ubuntu,web
 $ ump server set web-01 --profile web              # from now on without --profile
+
+# several at once, then one provisioning run
+$ ump server multiinstall web-01 web-02 --group web --dry-run
+$ ump server multiinstall --plan fleet.yaml --parallel 4
 
 # without a terminal (CI, agents): --yes, and -o json for the result
 $ ump server reinstall hetzner-cloud/234567 --yes -o json
