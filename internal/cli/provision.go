@@ -593,15 +593,28 @@ func (a *app) writeHostFiles(ctx context.Context, repo *infraRepo, files *hostFi
 	return nil
 }
 
-// addToInventory writes the host file of a server installed without
-// provisioning, under the fleet's lock.
-func (a *app) addToInventory(ctx context.Context, repo *infraRepo, name, hostname string, groups []string, v hostVars) error {
-	unlock, err := a.lockFleet(ctx, "inventory after reinstalling "+name)
+// hostEntry is a host for the inventory: its name, its groups, its
+// variables.
+type hostEntry struct {
+	hostname string
+	groups   []string
+	vars     hostVars
+}
+
+// addToInventory writes the host files of servers installed without
+// provisioning, under the fleet's lock; what names the installation.
+func (a *app) addToInventory(ctx context.Context, repo *infraRepo, what string, hosts []hostEntry) error {
+	unlock, err := a.lockFleet(ctx, "inventory after "+what)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	return a.putInInventory(ctx, repo, hostname, groups, v)
+	for _, h := range hosts {
+		if err := a.putInInventory(ctx, repo, h.hostname, h.groups, h.vars); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // notProvisioned is the error of the provisioning after an

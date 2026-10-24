@@ -28,6 +28,7 @@ configured account.`,
 		Example: `  ump server list
   ump server show web-01
   ump server reinstall web-01 --profile db --group db
+  ump server multiinstall web-01 web-02 web-03 --group web
   ump server set web-01 --group monitoring
   ump server rescue web-01
   ump server reboot web-01 --wait
@@ -47,6 +48,7 @@ configured account.`,
 		a.newServerListCmd(),
 		a.newServerShowCmd(),
 		a.newServerReinstallCmd(),
+		a.newServerMultiinstallCmd(),
 		a.newServerRescueCmd(),
 		a.newServerUnrescueCmd(),
 		a.newServerRebootCmd(),

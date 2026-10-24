@@ -46,14 +46,16 @@ var fakeType = provider.Type{
 		{Key: "url", Label: "URL", Hidden: true},
 		{Key: "variant", Label: "Variant", Hidden: true},
 	},
-	New: func(account string, s map[string]string, _ provider.Options) (provider.Provider, error) {
-		return &fakeProvider{account: account, settings: s}, nil
+	New: func(account string, s map[string]string, o provider.Options) (provider.Provider, error) {
+		return &fakeProvider{account: account, settings: s, logf: o.Logf}, nil
 	},
 }
 
 type fakeProvider struct {
 	account  string
 	settings map[string]string
+	// logf logs an API call, as the providers do with --verbose
+	logf func(format string, args ...any)
 }
 
 // fakePTRs is the reverse DNS state shared by all fake providers in a test.
@@ -89,6 +91,9 @@ func (f *fakeProvider) PowerOff(ctx context.Context, m provider.Machine, hard bo
 }
 
 func (f *fakeProvider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
+	if f.logf != nil {
+		f.logf("fake: GET /servers/%s/rescue", m.ID)
+	}
 	return fakePower.rescue[m.Ref()], nil
 }
 
@@ -262,8 +267,11 @@ type testEnv struct {
 	// entry script; versionAfter: how many version checks the kexec'd
 	// system needs before it answers.
 	directRoot bool
-	// forgotHosts are the addresses whose old host keys ump removed
+	// forgotHosts are the addresses whose old host keys ump removed;
+	// interruptAt interrupts the run, as Ctrl-C does, once ump removes
+	// that address's, the last step of an installation
 	forgotHosts []string
+	interruptAt string
 	// uname is what the running system says for uname -m; empty: nothing
 	uname string
 	// directSudo: the running system refuses root, but lets UMP in as
@@ -322,6 +330,33 @@ type testEnv struct {
 	// realAnsible runs ansible-playbook and ansible-inventory from PATH,
 	// the way ump does, instead of playing them
 	realAnsible bool
+
+	// mu keeps the runs of the fake ssh apart, for installations side by
+	// side; machines plays a machine per address then, each with the
+	// state the fields above have for one (kexeced, installed, booted,
+	// versionPolls), and installExitAt is installExit per address;
+	// remoteGate sees every run first, outside mu
+	mu            sync.Mutex
+	machines      map[string]*fakeMachine
+	installExitAt map[string]int
+	remoteGate    func(addr string, argv []string)
+}
+
+// fakeMachine is the state of one machine behind the fake ssh, when
+// there are several.
+type fakeMachine struct {
+	kexeced, installed, booted bool
+	versionPolls               int
+}
+
+// sshAddr is the address an ssh command line connects to.
+func sshAddr(argv []string) string {
+	i := slices.Index(argv, "--")
+	if i < 1 {
+		i = len(argv)
+	}
+	_, addr, _ := strings.Cut(argv[i-1], "@")
+	return addr
 }
 
 // ansibleCall is one run of an Ansible program: where, which, with what,
@@ -405,6 +440,8 @@ func (e *testEnv) read() string {
 func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr string, code int) {
 	e.t.Helper()
 	var out, errb bytes.Buffer
+	ctx, interrupt := context.WithCancel(context.Background())
+	defer interrupt()
 	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
 		ssh: func(argv []string, interactive bool) (int, error) {
 			e.sshCalls = append(e.sshCalls, argv)
@@ -414,7 +451,12 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 		probe:      func(ctx context.Context, addr string) bool { return true },
 		httpClient: localOnlyClient,
 		forgetHostKey: func(addr string) (bool, error) {
+			e.mu.Lock()
+			defer e.mu.Unlock()
 			e.forgotHosts = append(e.forgotHosts, addr)
+			if addr == e.interruptAt {
+				interrupt()
+			}
 			return true, nil
 		},
 		editor: func(path string) error {
@@ -477,8 +519,28 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 				b, _ := io.ReadAll(stdin)
 				in = string(b)
 			}
+			addr := sshAddr(argv)
+			if e.remoteGate != nil {
+				e.remoteGate(addr, argv)
+			}
+			e.mu.Lock()
+			defer e.mu.Unlock()
 			e.remoteCalls = append(e.remoteCalls, argv)
 			e.remoteStdin = append(e.remoteStdin, in)
+			var m *fakeMachine
+			if e.machines != nil {
+				if m = e.machines[addr]; m == nil {
+					m = &fakeMachine{}
+					e.machines[addr] = m
+				}
+				exit := e.installExit
+				e.kexeced, e.installed, e.booted, e.versionPolls = m.kexeced, m.installed, m.booted, m.versionPolls
+				e.installExit = e.installExitAt[addr]
+				defer func() {
+					m.kexeced, m.installed, m.booted, m.versionPolls = e.kexeced, e.installed, e.booted, e.versionPolls
+					e.installExit = exit
+				}()
+			}
 			out, errOut, code := e.remote(argv)
 			io.WriteString(stdout, out)
 			io.WriteString(stderr, errOut)
@@ -487,13 +549,16 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	}
 	e.kexeced, e.versionPolls = false, 0
 	e.installed, e.booted, e.reboots = false, false, 0
+	if e.machines != nil {
+		e.machines = map[string]*fakeMachine{}
+	}
 	if e.realAnsible {
 		a.ansible = nil
 	}
 	if tty {
 		a.isTTY = func() bool { return true }
 	}
-	code = a.run(context.Background(), append([]string{"--config", e.cfgPath}, args...))
+	code = a.run(ctx, append([]string{"--config", e.cfgPath}, args...))
 	return out.String(), errb.String(), code
 }
 
