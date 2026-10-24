@@ -86,10 +86,20 @@ type Machine struct {
 	// layout); from the state, like OS.
 	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Layout  string `json:"layout,omitempty" yaml:"layout,omitempty"`
-	// PrivateNetwork is the private network ump gave the machine an
-	// address in, and PrivateAddress that address; from the state.
-	PrivateNetwork string `json:"private_network,omitempty" yaml:"private_network,omitempty"`
-	PrivateAddress string `json:"private_address,omitempty" yaml:"private_address,omitempty"`
+	// PrivateNetworks are the machine's addresses in the private networks
+	// ump gave it, in their order, and PrivateNetwork and PrivateAddress
+	// those of the first; from the state.
+	PrivateNetwork  string    `json:"private_network,omitempty" yaml:"private_network,omitempty"`
+	PrivateAddress  string    `json:"private_address,omitempty" yaml:"private_address,omitempty"`
+	PrivateNetworks []Private `json:"private_networks,omitempty" yaml:"private_networks,omitempty"`
+}
+
+// Private is a machine's address in a private network of ump's, with
+// the network's CIDR as it was when the address was given.
+type Private struct {
+	Network string `json:"network" yaml:"network"`
+	CIDR    string `json:"cidr" yaml:"cidr"`
+	Address string `json:"address" yaml:"address"`
 }
 
 // Price is what a machine costs per period.

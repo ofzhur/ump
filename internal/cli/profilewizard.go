@@ -233,7 +233,7 @@ func (a *app) profileWizard(cmd *cobra.Command, ui *prompter, name string) error
 	if networks, err := a.loadNetworks(ctx, storage); err != nil {
 		ui.Printf("Warning: no private network for the profile (%v); network.private is left out, ump config os edit %s adds it.\n", err, name)
 	} else if networks["default"] != nil {
-		p.Network.Private = "default"
+		p.Network.Private = profile.PrivateNetworks{"default"}
 	}
 	if p.Description, err = ui.Line("Description (one line)", ""); err != nil {
 		return err

@@ -1,11 +1,12 @@
-# Named private networks for the profiles' network.private field;
-# docs/networks.md of the ump repository (github.com/ofzhur/ump)
-# describes them. Every server ump installs in a network gets an address
-# of its own there: the lowest free one, or the one --private-ip gives,
-# kept across reinstalls and never another server's. The host files
-# carry it (ump_private_address, ump_private_network, ump_private_cidr)
-# for the roles that connect the servers; nothing configures an
-# interface yet.
+# Named private networks for the profiles' network.private field (one,
+# or a list: a server can be in several); docs/networks.md of the ump
+# repository (github.com/ofzhur/ump) describes them. Every server ump
+# installs in a network gets an address of its own there: the lowest
+# free one, or the one --private-ip gives, kept across reinstalls and
+# never another server's. The host files carry them (ump_private_networks,
+# and ump_private_address, ump_private_network and ump_private_cidr of
+# a server's first network) for the roles that connect the servers, a
+# mesh per network; nothing configures an interface yet.
 #
 #   cidr      an IPv4 network, /8 to /30 (10.0.0.0/24)
 #   reserved  addresses no server gets, such as a gateway's (optional)

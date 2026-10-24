@@ -40,5 +40,6 @@ firewall: default
 network:
   rename: true          # uniform interface names: ext01, ext02, ... (public address or the uplink),
                         # int01, ... (the rest); false keeps the kernel's names (enp0s3, eth0, ...)
-  private: default      # a private network from networks.yaml (ump config network): the server gets
-                        # an address of its own there, kept across reinstalls; none for no address
+  private: default      # a private network from networks.yaml (ump config network), or a list of them
+                        # ([default, db]): the server gets an address of its own in each, kept across
+                        # reinstalls; none for no address

@@ -51,10 +51,10 @@ type installOptions struct {
 	hosts       string
 	playbooks   listFlag
 
-	// privateNetwork is --private-network (a name, or none), privateIP
-	// --private-ip
-	privateNetwork string
-	privateIP      string
+	// privateNetworks is --private-network (names, or none), privateIPs
+	// --private-ip (NETWORK=ADDRESS, or an address alone)
+	privateNetworks []string
+	privateIPs      []string
 }
 
 // serverFlags are the flags of reinstall that concern the installation
@@ -69,8 +69,8 @@ func addServerFlags(sub *cobra.Command, o *installOptions) {
 	sub.Flags().StringVar(&o.firewall, "firewall", "", "the firewall, by name from firewalls.yaml (default: the profile's)")
 	sub.Flags().StringVar(&o.os, "os", "", "the operating system image (default: the profile's)")
 	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name)")
-	sub.Flags().StringVar(&o.privateNetwork, "private-network", "", "the private network, by name from networks.yaml, or none (default: the profile's)")
-	sub.Flags().StringVar(&o.privateIP, "private-ip", "", "the server's address in the private network (default: the one it has there, else the lowest free one)")
+	sub.Flags().StringArrayVar(&o.privateNetworks, "private-network", nil, "the private networks, by name from networks.yaml, in order, or none (repeatable, or comma-separated; default: the profile's)")
+	sub.Flags().StringArrayVar(&o.privateIPs, "private-ip", nil, "the server's address in a private network, NETWORK=ADDRESS, or ADDRESS alone in its only one (repeatable, or comma-separated; default: the one it has there, else the lowest free one)")
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
 	sub.Flags().StringVar(&o.timezone, "timezone", "", "time zone of the new system (default: the profile's)")
 	sub.Flags().StringVar(&o.disks, "disks", "", "the disks to use, comma-separated (default: every disk)")
@@ -116,17 +116,18 @@ aside, is the administrator, the user ump logs in as, and gets UMP's
 key; root takes its keys alone), --userdata its userdata, by name from
 userdata.yaml, and --set FIELD=VALUE any field, after the other flags.
 
-The server gets an address in the profile's private network (the
-published profiles name default, 10.0.0.0/24, from networks.yaml; a
-profile without network.private gives none), or in that of
---private-network NAME (none: no address): the one --private-ip gives,
-else the one it has there, else the lowest free one; never another
-server's. It is checked with everything else, recorded in the state
-before the installation starts (an installation that fails before the
-installer wrote the disks gives it back), goes to the installer, and
-into the inventory as ump_private_address, ump_private_network and
-ump_private_cidr; nothing configures an interface yet
-(docs/networks.md).
+The server gets an address in each of the profile's private networks
+(the published profiles name default, 10.0.0.0/24, from networks.yaml;
+a profile without network.private gives none), or in those of
+--private-network NAME[,NAME] (none: no address): the one --private-ip
+NETWORK=ADDRESS gives (ADDRESS alone in the server's only network), else
+the one it has there, else the lowest free one; never another server's.
+They are checked with everything else, recorded in the state before the
+installation starts (an installation that fails before the installer
+wrote the disks gives them back), go to the installer, and into the
+inventory as ump_private_networks, with ump_private_address,
+ump_private_network and ump_private_cidr of the first network; nothing
+configures an interface yet (docs/networks.md).
 
 After the first boot ump provisions from the infrastructure repository
 it runs in: ansible.cfg, inventory/ and playbooks/ in the current
@@ -164,6 +165,7 @@ without one, --yes is required.`,
   ump server reinstall web-01 --group web --hosts web-01
   ump server reinstall web-01 --user oleg:local --user deploy --userdata ubuntu,web
   ump server reinstall db-01 --private-ip 10.0.0.10
+  ump server reinstall db-01 --private-network default,db --private-ip db=10.0.1.10
   ump server reinstall lab-01 --no-provision --private-network none`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -199,7 +201,7 @@ type installResult struct {
 	// System is what answered after the reboot.
 	System *installedSystem `json:"system,omitempty" yaml:"system,omitempty"`
 	// written says that the installer wrote the disks, or may have (the
-	// connection ended while it ran): the private address is the new
+	// connection ended while it ran): the private addresses are the new
 	// system's then
 	written bool
 }
@@ -212,11 +214,12 @@ type installedSystem struct {
 
 // installFlags are the flags of one installation as checked: the groups
 // of --group (common aside), the users of --user, the userdata of
-// --userdata.
+// --userdata, the private networks and addresses.
 type installFlags struct {
 	groups   []string
 	users    []userFlag
 	userdata []string
+	private  privateFlags
 }
 
 // checkServerFlags checks what the flags of one installation say by
@@ -240,7 +243,7 @@ func checkServerFlags(cmd *cobra.Command, o installOptions) (installFlags, error
 			return f, usageErrorf(cmd, "%v", err)
 		}
 	}
-	if err := checkPrivateFlags(cmd, o.privateNetwork, o.privateIP); err != nil {
+	if f.private, err = checkPrivateFlags(cmd, o.privateNetworks, o.privateIPs); err != nil {
 		return f, err
 	}
 	if f.users, err = parseUserFlags(cmd, o.users); err != nil {
@@ -311,16 +314,16 @@ type installPlan struct {
 	from     string
 	spec     *profile.Spec
 	specJSON []byte
-	// privateNet is the private network (nil: none) and privateIP the
-	// address given by hand; private is the address the server gets
-	// (assignPlans), had the one it had then; reserved says that
-	// reservePrivate recorded it, over before
-	privateNet *profile.PrivateNetwork
-	privateIP  string
-	private    *state.Private
-	had        *state.Private
-	reserved   bool
-	before     *state.Private
+	// privateNets are the private networks (none: none) and privateIPs
+	// the addresses given by hand, by network; private are the addresses
+	// the server gets (assignPlans), had those it had then; reserved says
+	// that reservePrivate recorded them, over before
+	privateNets []*profile.PrivateNetwork
+	privateIPs  map[string]string
+	private     []state.Private
+	had         []state.Private
+	reserved    bool
+	before      []state.Private
 	// logins are the users tried on the running system
 	logins []string
 }
@@ -355,18 +358,15 @@ func (p *installPlan) result(dryRun bool) installResult {
 	r := installResult{Machine: p.m, Hostname: p.hostname, DryRun: dryRun}
 	r.OS, r.Profile, r.Layout = p.spec.OS, p.profile, p.spec.Layout.Name
 	r.Groups, r.InstalledAt = p.inGroups(), nil
-	r.PrivateNetwork, r.PrivateAddress = "", ""
-	if p.private != nil {
-		r.PrivateNetwork, r.PrivateAddress = p.private.Network, p.private.Address
-	}
+	putPrivate(&r.Machine, p.private)
 	return r
 }
 
 // what is the installation in words.
 func (p *installPlan) what() string {
 	private := ""
-	if p.private != nil {
-		private = ", private address " + describePrivate(p.private)
+	if len(p.private) > 0 {
+		private = ", " + privateAddresses(p.private)
 	}
 	return fmt.Sprintf("%s (profile %s from %s, layout %s%s)", p.spec.OS, p.profile, p.from, p.spec.Layout.Name, private)
 }
@@ -377,7 +377,7 @@ func (p *installPlan) what() string {
 func assignPlans(doc *state.Document, plans []*installPlan) (int, error) {
 	reqs := make([]privateRequest, len(plans))
 	for i, p := range plans {
-		reqs[i] = privateRequest{ref: p.m.Ref(), network: p.privateNet, address: p.privateIP}
+		reqs[i] = privateRequest{ref: p.m.Ref(), networks: p.privateNets, given: p.privateIPs}
 	}
 	private, i, err := assignPrivate(doc, reqs)
 	if err != nil {
@@ -385,9 +385,13 @@ func assignPlans(doc *state.Document, plans []*installPlan) (int, error) {
 	}
 	for i, p := range plans {
 		p.private, p.had = private[i], doc.Servers[p.m.Ref()].Private
-		p.spec.Network.Private = nil
-		if p.private != nil {
-			p.spec.Network.Private = &profile.PrivateSpec{Network: p.private.Network, CIDR: p.private.CIDR, Address: p.private.Address}
+		p.spec.Network.Private, p.spec.Network.PrivateNetworks = nil, nil
+		for _, q := range p.private {
+			p.spec.Network.PrivateNetworks = append(p.spec.Network.PrivateNetworks, profile.PrivateSpec{Network: q.Network, CIDR: q.CIDR, Address: q.Address})
+		}
+		if len(p.private) > 0 {
+			first := p.spec.Network.PrivateNetworks[0]
+			p.spec.Network.Private = &first
 		}
 		if p.specJSON, err = p.spec.JSON(); err != nil {
 			return i, err
@@ -399,8 +403,8 @@ func assignPlans(doc *state.Document, plans []*installPlan) (int, error) {
 // resolveInstall resolves the profile of a planned installation into
 // the specification the installer takes: --profile, else the one set for
 // the server in the state (doc), else default, with the other flags
-// over it and --set last; its private network; and the users ump tries
-// on the running system. assignPlans gives the address and renders the
+// over it and --set last; its private networks; and the users ump tries
+// on the running system. assignPlans gives the addresses and renders the
 // specification.
 func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *config.Config, doc *state.Document, p *installPlan, o installOptions, f installFlags) error {
 	storage := strings.TrimRight(o.storage, "/")
@@ -443,8 +447,11 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 		t := true
 		prof.Kernel.Mitigations = &t
 	}
-	if o.privateNetwork != "" {
-		prof.Network.Private = o.privateNetwork
+	if f.private.given {
+		prof.Network.Private = profile.PrivateNetworks{profile.NoPrivateNetwork}
+		if len(f.private.networks) > 0 {
+			prof.Network.Private = f.private.networks
+		}
 	}
 	// the named users, when the profile or --user refers to any (or
 	// --ssh-key must find the administrator)
@@ -507,21 +514,27 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 	if err != nil {
 		return err
 	}
-	// the private network: --private-network, else the profile's
+	// the private networks: --private-network, else the profile's
 	var networks map[string]*profile.PrivateNetwork
-	if name := prof.PrivateNetworkName(); name != "" {
+	names := prof.PrivateNetworkNames()
+	if len(names) > 0 {
 		if networks, err = a.loadNetworks(ctx, storage); err != nil {
 			return err
 		}
-		if name == o.privateNetwork && networks[name] == nil {
-			return usageErrorf(cmd, "--private-network %s: not in networks.yaml (known: %s; ump config network create %s makes it)", name, strings.Join(sortedKeys(networks), ", "), name)
+		for _, name := range names {
+			if slices.Contains(f.private.networks, name) && networks[name] == nil {
+				return usageErrorf(cmd, "--private-network %s: not in networks.yaml (known: %s; ump config network create %s makes it)", name, strings.Join(sortedKeys(networks), ", "), name)
+			}
 		}
 	}
-	if p.privateNet, err = prof.ResolvePrivate(networks); err != nil {
+	if p.privateNets, err = prof.ResolvePrivate(networks); err != nil {
 		return err
 	}
-	if p.privateIP = o.privateIP; p.privateIP != "" && p.privateNet == nil {
-		return usageErrorf(cmd, "--private-ip %s: profile %s gives the server no private network; --private-network NAME gives it one", p.privateIP, prof.Name)
+	if len(f.private.ips) > 0 && len(names) == 0 {
+		return usageErrorf(cmd, "--private-ip %s: profile %s gives the server no private network; --private-network NAME gives it one", f.private.ips[0].text, prof.Name)
+	}
+	if p.privateIPs, err = f.private.addresses(names); err != nil {
+		return usageErrorf(cmd, "%v", err)
 	}
 	spec.Hostname = p.hostname
 	spec.Storage = storage
@@ -650,9 +663,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return err
 	}
 	defer unlock()
-	// the private address is the server's from now on: no other
-	// installation gets it meanwhile; one whose installer did not write
-	// the disks gives it back, under the lock
+	// the private addresses are the server's from now on: no other
+	// installation gets them meanwhile; one whose installer did not write
+	// the disks gives them back, under the lock
 	if !o.dryRun {
 		if err := a.reservePrivate(ctx, []*installPlan{p}); err != nil {
 			return err
@@ -884,13 +897,13 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 }
 
 // serverRecord is an installation to record: the server, the record and
-// the groups it was installed with, and its private address, for the
-// inventory (reservePrivate recorded it before the installation).
+// the groups it was installed with, and its private addresses, for the
+// inventory (reservePrivate recorded them before the installation).
 type serverRecord struct {
 	m       provider.Machine
 	record  state.Install
 	groups  []string
-	private *state.Private
+	private []state.Private
 }
 
 // recordInstallation puts the installation into the state, with the

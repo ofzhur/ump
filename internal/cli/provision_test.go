@@ -564,7 +564,7 @@ func TestReinstallProvisions(t *testing.T) {
 		t.Errorf("result has a run list:\n%s", out)
 	}
 	host := e.hostFile("web-01.yml")
-	if !strings.HasPrefix(host, "# web-01: written by ump (ump server reinstall, ump provision).\n# Edits are overwritten; overrides go to inventory/host_vars/web-01.yml.\nplugin: ofzhur.ansible.host\ngroups: [common, web, db]\nvars:\n  ansible_host: 203.0.113.10\n  ump_admin: ump\n  ump_name: web-01\n  ump_ref: fake/1\n  ump_provider: fake\n  ump_account: one\n  ump_location: eu-1\n  ump_product: m1\n  ump_os: ubuntu-26.04\n  ump_profile: ubuntu-26.04\n  ump_installed_at: \"2026-10-12T09:00:00Z\"\n  ump_private_address: 10.0.0.1\n  ump_private_network: default\n  ump_private_cidr: 10.0.0.0/24\n  ump_attributes:\n    owner: alice\n") {
+	if !strings.HasPrefix(host, "# web-01: written by ump (ump server reinstall, ump provision).\n# Edits are overwritten; overrides go to inventory/host_vars/web-01.yml.\nplugin: ofzhur.ansible.host\ngroups: [common, web, db]\nvars:\n  ansible_host: 203.0.113.10\n  ump_admin: ump\n  ump_name: web-01\n  ump_ref: fake/1\n  ump_provider: fake\n  ump_account: one\n  ump_location: eu-1\n  ump_product: m1\n  ump_os: ubuntu-26.04\n  ump_profile: ubuntu-26.04\n  ump_installed_at: \"2026-10-12T09:00:00Z\"\n  ump_private_address: 10.0.0.1\n  ump_private_network: default\n  ump_private_cidr: 10.0.0.0/24\n  ump_private_networks:\n    default:\n      address: 10.0.0.1\n      cidr: 10.0.0.0/24\n  ump_attributes:\n    owner: alice\n") {
 		t.Errorf("host file:\n%s", host)
 	}
 	if st := e.readState(); !strings.Contains(st, "    groups:\n      - web\n      - db\n") {
@@ -574,9 +574,9 @@ func TestReinstallProvisions(t *testing.T) {
 	// install have none
 	out, _, _ = e.run("", false, "server", "list", "--account", "one")
 	expectRows(t, out, [][]string{
-		{"ACCOUNT", "PROVIDER", "NAME", "IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PRICE"},
-		{"one", "fake", "db-01", "203.0.113.11", "eu-1", "off", "<none>", "<none>", "<none>"},
-		{"one", "fake", "web-01", "203.0.113.10", "eu-1", "running", "ubuntu-26.04", "common,web,db", "<none>"},
+		{"ACCOUNT", "PROVIDER", "NAME", "IPV4", "PRIVATE-IPV4", "LOCATION", "STATUS", "OS", "GROUPS", "PRICE"},
+		{"one", "fake", "db-01", "203.0.113.11", "<none>", "eu-1", "off", "<none>", "<none>", "<none>"},
+		{"one", "fake", "web-01", "203.0.113.10", "10.0.0.1", "eu-1", "running", "ubuntu-26.04", "common,web,db", "<none>"},
 	})
 	if out, _, code := e.run("", false, "server", "show", "web-01", "--account", "one"); code != 0 || !strings.Contains(out, "Groups:") || !strings.Contains(out, "common, web, db") {
 		t.Errorf("show: code %d\n%s", code, out)
@@ -1459,7 +1459,7 @@ func TestNoRebootThenProvision(t *testing.T) {
 			t.Errorf("result lacks %s:\n%s", want, out)
 		}
 	}
-	if st := e.readState(); !strings.Contains(st, "      hostname: web-02\n      admin: ops\n      at: 2026-10-12T10:00:00Z\n    groups:\n      - db\n    private:\n      network: default\n      cidr: 10.0.0.0/24\n      address: 10.0.0.1\n    stale_facts: true\n") {
+	if st := e.readState(); !strings.Contains(st, "      hostname: web-02\n      admin: ops\n      at: 2026-10-12T10:00:00Z\n    groups:\n      - db\n    private_networks:\n      - network: default\n        cidr: 10.0.0.0/24\n        address: 10.0.0.1\n    stale_facts: true\n") {
 		t.Errorf("state:\n%s", st)
 	}
 	if strings.Join(e.forgotHosts, ",") != "203.0.113.10" || !strings.Contains(errOut, "Removed the old host key of 203.0.113.10 from ~/.ssh/known_hosts") {
@@ -1571,6 +1571,12 @@ func TestServerListAnsible(t *testing.T) {
         "ump_private_address": "10.0.0.1",
         "ump_private_network": "default",
         "ump_private_cidr": "10.0.0.0/24",
+        "ump_private_networks": {
+          "default": {
+            "address": "10.0.0.1",
+            "cidr": "10.0.0.0/24"
+          }
+        },
         "ump_attributes": {
           "note": "a: b",
           "owner": "alice"

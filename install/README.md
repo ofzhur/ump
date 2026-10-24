@@ -102,9 +102,10 @@ root and the keys of a file).
     and the initramfs rebuilt first. Then `update-grub`.
 12. Writes `/etc/ump/install` (what was installed, when, on which disks,
     which profile and layout, the administrator, the interfaces with
-    their MAC addresses, the private network and address the
-    specification gives, `private_network=` and `private_address=`,
-    which no interface carries yet) and
+    their MAC addresses, the private networks and addresses the
+    specification gives, `private=` (`default:10.0.0.1,db:10.0.1.1`)
+    and, of the first network, `private_network=` and
+    `private_address=`, which no interface carries yet) and
     `/etc/ump/spec.json` (the specification), unmounts everything and
     reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
@@ -120,9 +121,11 @@ install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/
 The specification is JSON with the fields of a resolved profile (`os`,
 `hostname`, `timezone`, `storage`, `kernel`, `layout` with its parts,
 `disks`, `users` with key lines, `userdata` with scripts, `firewall`,
-`network` with `rename` and, where the server has one, `private`: its
-[private network](../docs/networks.md) as `network`, `cidr` and
-`address`);
+`network` with `rename` and, where the server has them,
+`private_networks`: its addresses in its [private
+networks](../docs/networks.md), in order, each as `network`, `cidr` and
+`address`, and `private`, the first, which a specification of ump
+v0.5.0 has alone);
 `ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`
 layout with root alone (which then logs in over SSH, since it is the

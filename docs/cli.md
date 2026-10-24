@@ -36,7 +36,7 @@ ump
 │   │                                                  what changed since the last listing; the cached listing;
 │   │                                                  the Ansible inventory of the servers ump installed
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--private-network <name>|none] [--private-ip <addr>] [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--private-network <list>|none]... [--private-ip [<network>=]<addr>]... [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 │   ├── multiinstall (parallel-install) <ref>... | --plan <file> [reinstall's flags of a server] [--parallel <n>] [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
 │   │                                                  several servers at once, each as reinstall does, then one provisioning run
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
@@ -49,8 +49,8 @@ ump
 │   │   ├── get      [ref...] [-o table|json|yaml]     reverse DNS entries of servers' public addresses
 │   │   ├── set      <ref> [ptr-name] [--ip <addr>]    set the PTR of the primary IPv4 (or --ip); default: the server name
 │   │   └── delete   <ref> [--ip <addr>]               remove the PTR
-│   ├── set          <ref> [--profile <name> | --clear] [--price <amount> [--currency <cur>] [--period month|hour] | --clear-price] [--attr k=v]... [--unset-attr k]... [--group <list>]... [--ungroup <list>]... [--private-network <name>|none] [--private-ip <addr>]
-│   │                                                  what ump remembers about a server: profile, price, your attributes, groups, private address
+│   ├── set          <ref> [--profile <name> | --clear] [--price <amount> [--currency <cur>] [--period month|hour] | --clear-price] [--attr k=v]... [--unset-attr k]... [--group <list>]... [--ungroup <list>]... [--private-network <list>|none]... [--private-ip [<network>=]<addr>]...
+│   │                                                  what ump remembers about a server: profile, price, your attributes, groups, private addresses
 │   ├── add (a, new) <name> --ipv4 <addr> [--ipv6 <addr>] [--location <s>] [--product <s>] [--kind bare-metal|cloud] [--note <s>]
 │   │                                                  a server by hand, without a provider API (account "manual")
 │   └── remove (rm, d) <name> [--yes]                  forget a server added by hand
@@ -170,11 +170,13 @@ put the server in, as in the inventory: `common` first, then those of
 `--group` ([provisioning](provisioning.md)); none for a server ump never
 installed. `profile` and `layout` are the profile and the disk layout of
 that installation (`inline` when the profile carried its own layout).
-`private_network` and `private_address` are the server's [private
-network](networks.md) and its address there. `-o wide` adds the ID,
-IPv6, private address (`PRIVATE`), product, kind, profile, layout and
-attributes columns (the ID right after the provider, the profile and
-the layout after the groups, `PRIVATE` after IPv6); the price is in the default table; `-o name`
+`private_networks` are the server's addresses in its [private
+networks](networks.md), in their order, each with the network and its
+CIDR, and `private_network` and `private_address` those of the first;
+the table has the addresses as `PRIVATE-IPV4`, right after `IPV4`
+(comma-separated). `-o wide` adds the ID, IPv6, product, kind, profile,
+layout and attributes columns (the ID right after the provider, the
+profile and the layout after the groups); the price is in the default table; `-o name`
 prints `provider/id` per line. `defaults.output` in the configuration
 sets the default format. `price` comes from the provider's API where it
 tells (Hetzner Cloud) or from `ump server set --price`; `attributes`
@@ -185,7 +187,7 @@ from `ump server set --attr`; see [inventory](inventory.md).
 script, for the inventory plugin `ofzhur.ansible.ump`: each server under
 the hostname of its installation, in `common` and its groups, with the
 variables of its host file (`ansible_host`, `ump_admin`, `ump_ref`,
-`ump_os`, `ump_private_address`, ...;
+`ump_os`, `ump_private_networks`, ...;
 [provisioning](provisioning.md#ump-as-the-inventory)).
 `--account`, references and `--cached` select as for the other
 formats, and the exit code is the same. A server without an address or
@@ -479,7 +481,7 @@ their boot option until `unrescue`.
 ## Install: `ump server reinstall`
 
 ```
-ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network NAME|none] [--private-ip ADDR] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -569,23 +571,26 @@ other field, after the other flags ([overrides](profiles.md#overrides)).
 `--storage` names another storage than the configured one for the
 installer, the images, the profiles and the rescue image.
 
-The server gets an address in the profile's [private
-network](networks.md) (the published profiles name `default`,
-`10.0.0.0/24`; a profile without `network.private` gives none), or in
-that of `--private-network NAME` (`none`: no address, and the one it had
-is free again): `--private-ip ADDR`, else the one it has in that
-network, else the lowest free one, never the network's own or broadcast
-address, a reserved one or another server's (in any network that has
-it). The address is checked with everything else (exit status 2, naming
-the server that has it), shown in the question and the progress,
-recorded in the state once the question is answered, in a
-read-modify-write that stops the reinstall when another ump gave it, or
-changed the server's, meanwhile (exit status 2, nothing touched), given
-back, under the server's lock, when the installation fails before the
-installer wrote the disks (once it wrote them, the address is the new
-system's), and handed to the installer (`/etc/ump/install` records it)
-and to the inventory (`ump_private_address`, `ump_private_network`,
-`ump_private_cidr`). Nothing configures an interface with it yet.
+The server gets an address in each of the profile's [private
+networks](networks.md) (the published profiles name `default`,
+`10.0.0.0/24`; a profile without `network.private` gives none), or of
+those of `--private-network NAME[,NAME]` (repeatable, in order; `none`:
+no address, and those it had are free again): in each, the one of
+`--private-ip NETWORK=ADDR` (repeatable; `ADDR` alone when the server is
+in one network), else the one it has in that network, else the lowest
+free one, never the network's own or broadcast address, a reserved one
+or another server's (in any network that has it). The addresses are
+checked with everything else (exit status 2, naming the server that has
+one), shown in the question and the progress, recorded in the state
+once the question is answered, in a read-modify-write that stops the
+reinstall when another ump gave one, or changed the server's, meanwhile
+(exit status 2, nothing touched), given back, under the server's lock,
+when the installation fails before the installer wrote the disks (once
+it wrote them, the addresses are the new system's), and handed to the
+installer (`/etc/ump/install` records them) and to the inventory
+(`ump_private_networks`, and `ump_private_address`,
+`ump_private_network` and `ump_private_cidr` of the first network).
+Nothing configures an interface with them yet.
 
 After the first boot ump [provisions](provisioning.md) from the
 infrastructure repository it runs in: it needs `ansible.cfg`,
@@ -634,7 +639,8 @@ server in the rescue system, not provisioned: `ump provision --hosts
 HOSTNAME` after the reboot (when ump is the inventory, the server is in
 it already). `-o json` prints the result (the profile and layout, the
 way in, the hostname, what answered after the reboot, `groups` as in
-the inventory, `private_network` and `private_address`, `playbooks`,
+the inventory, `private_networks` with `private_network` and
+`private_address` of the first, `playbooks`,
 `provisioned`, and `provision`, the result of `ump provision`).
 
 Exit status 1 means the installer failed (its output says where; the
@@ -652,7 +658,7 @@ terminal; without one, `--yes` is required.
 ## Install several: `ump server multiinstall`
 
 ```
-ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network NAME|none] [--private-ip ADDR] [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
 ump server multiinstall --plan FILE [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
 ```
 
@@ -675,7 +681,8 @@ servers:                     # each over the defaults
     profile: db
     group: [db, backup]
     hostname: db-01.example.net
-    private-ip: 10.0.0.10
+    private-network: [default, db]
+    private-ip: [default=10.0.0.10, db=10.0.1.10]
     user: [oleg:local, deploy]
     ipv6: true
 ```
@@ -691,7 +698,9 @@ IP address, `provider/id`); its value of a key replaces that of
 is read strictly: a second YAML document, another key, a key or a server
 given twice, a key without a value, or a value of the wrong kind is
 refused with its line, and so is one of these flags on the command line
-beside `--plan`. `private-ip` gives one server its address: it is
+beside `--plan`. `private-network` is a list of networks (or `none`),
+`private-ip` a list of `NETWORK=ADDR` (or one `ADDR`, for a server in
+one network); `private-ip` gives one server its addresses: it is
 refused in `defaults`, and `--private-ip` with more than one server on
 the command line.
 
@@ -703,20 +712,21 @@ has no image of for its architecture is refused where the provider tells
 the architecture, and warned about where it does not; the hostnames are
 unique among the servers, none is a group of another server (new, or in
 the state), and none collides with the inventory, as for `reinstall`;
-the [private addresses](networks.md#addresses) are each one server's
-alone, the other servers of the run included (those the servers keep
-first, then those given by hand, refused when another server of the run
-keeps it, then the lowest free ones, in order); the Ansible layout and
+the [private addresses](networks.md#addresses), one per network of a
+server, are each one server's alone, the other servers of the run
+included (those the servers keep first, then those given by hand,
+refused when another server of the run keeps it, then the lowest free
+ones, in order); the Ansible layout and
 the playbooks pass, and `--hosts` matches a host of the inventory with
 every new host in it; and no server is locked. Then one table and one question; without a terminal,
 `--yes` is required:
 
 ```console
 $ ump server multiinstall --plan fleet.yaml
-SERVER   PROVIDER             OS             LAYOUT       HOSTNAME            PRIVATE     GROUPS
-web-01   hetzner-cloud/1001   ubuntu-26.04   lvm-linear   web-01              10.0.0.1    common,web
-web-02   hetzner-cloud/1002   ubuntu-26.04   lvm-raid1    web-02              10.0.0.2    common,web
-db-01    hetzner-robot/2345   debian-13      lvm-linear   db-01.example.net   10.0.0.10   common,db,backup
+SERVER   PROVIDER             OS             LAYOUT       HOSTNAME            PRIVATE-IPV4          GROUPS
+web-01   hetzner-cloud/1001   ubuntu-26.04   lvm-linear   web-01              10.0.0.1              common,web
+web-02   hetzner-cloud/1002   ubuntu-26.04   lvm-raid1    web-02              10.0.0.2              common,web
+db-01    hetzner-robot/2345   debian-13      lvm-linear   db-01.example.net   10.0.0.10,10.0.1.10   common,db,backup
 Install on these 3 servers? Every disk of each is erased. Then ump provision runs 00-base, 10-web on the fleet. [y/N] y
 Provisioning after the installations: 00-base, 10-web on the fleet.
 Installing 3 servers, all at once ...
@@ -752,8 +762,8 @@ through the provisioning; every line of their progress is whole, with
 its server in front. A failed installation does not stop the others; its
 server stays where it stopped, as with `reinstall` (after a failed
 installer, in the UMP rescue system), and, when the installer did not
-write the disks, gives its new private address back before it lets the
-lock go. Once all are done, ump records the servers it installed, in one
+write the disks, gives its new private addresses back before it lets
+the lock go. Once all are done, ump records the servers it installed, in one
 change of the state, and runs `ump provision` once, under the fleet's
 lock: the host files of every server it installed, then the playbooks on
 the fleet, or on the hosts of `--hosts` (`--playbook` narrows them). A
@@ -810,7 +820,7 @@ whole fleet); without one, `--yes` is required. See
 ## `ump server set`, `add` and `remove`
 
 ```
-ump server set REF [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group LIST]... [--ungroup LIST]... [--private-network NAME|none] [--private-ip ADDR]
+ump server set REF [--profile NAME | --clear] [--price AMOUNT [--currency CUR] [--period month|hour] | --clear-price] [--attr KEY=VALUE]... [--unset-attr KEY]... [--group LIST]... [--ungroup LIST]... [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]...
 ump server add NAME --ipv4 ADDR [--ipv6 ADDR] [--location S] [--product S] [--kind bare-metal|cloud] [--note S]
 ump server remove NAME [--yes]
 ```
@@ -828,15 +838,17 @@ away; it prints them, `common` first, and runs nothing: the next `ump
 provision` applies them. A group that is the server's hostname, or,
 from the infrastructure repository, another host of its inventory
 (`ansible-inventory`), is refused, and so is a server ump did not
-install (exit status 2). `--private-ip ADDR` gives a server ump
-installed that address in its [private network](networks.md), or in
-the one of `--private-network NAME`, which alone gives the server the
-address it has there, else the lowest free one; `--private-network
-none` takes the address away. The address is checked as for
-`reinstall`, within the state's read-modify-write (exit status 2,
-naming the server that has it), under the server's lock (exit status 3
+install (exit status 2). `--private-network NAME[,NAME]` (repeatable)
+replaces the [private networks](networks.md) of a server ump installed,
+in order, each with the address the server has there, else the lowest
+free one; `--private-network none` takes them all away. `--private-ip
+NETWORK=ADDR` (repeatable; `ADDR` alone for a server in one network)
+gives it that address in one of its networks, those of
+`--private-network` or else those it has. The addresses are checked as
+for `reinstall`, within the state's read-modify-write (exit status 2,
+naming the server that has one), under the server's lock (exit status 3
 while an installation holds it); nothing runs, the next `ump provision`
-writes the host file with it.
+writes the host file with them.
 
 `add` puts a server no provider lists into the [state](state.md#the-state-document)
 (`manual:`), listed by the account `manual` of provider type `manual`;
@@ -929,7 +941,7 @@ arguments. A command group refuses an unknown word with exit code 2.
 `ump config os` is the [profiles](profiles.md): the first run
 downloads the published profiles, layouts, firewalls, networks, users
 and userdata into `~/.config/ump/profiles`, `list` shows what is there
-(the default marked with `*`, the private network of each, and whether
+(the default marked with `*`, the private networks of each, and whether
 each is published or yours), `get` prints one,
 `create [NAME]` asks on a terminal what the profile should hold (the
 name when none is given; the image, from the storage's `os/index.json`; the disk layout; the
@@ -964,12 +976,13 @@ without a name opens the whole file and checks every layout afterwards,
 server reinstall --firewall NAME` picks one for an installation. `ump
 config network` (`net`) is the same for the named [private
 networks](networks.md) in `networks.yaml` (`default`: `10.0.0.0/24`),
-which a profile names in `network.private` (`none` for no address); a
+which a profile names in `network.private` (one, a list, or `none` for
+no address); a
 new one may not be called `none`, networks may not overlap (`create`
 warns about a copy until its `cidr` changes, `edit` refuses it), `list`
 shows each network's CIDR, the addresses it gives and the reserved
-ones, and `ump server reinstall --private-network NAME` picks one for
-an installation. `ump
+ones, and `ump server reinstall --private-network NAME[,NAME]` picks
+them for an installation. `ump
 config user` (`u`) is the same for the named [users](profiles.md#users)
 in `users.yaml` (`ump`, the administrator UMP provides), which a
 profile lists by name in `users`, and `ump config userdata` (`ud`) for

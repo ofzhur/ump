@@ -167,28 +167,92 @@ func (n *PrivateNetwork) Free(taken func(netip.Addr) bool) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("the network %s (%s) has no free address left", n.Name, n.CIDR)
 }
 
-// PrivateNetworkName is the private network the profile names; empty
-// for none.
-func (p *Profile) PrivateNetworkName() string {
-	if p.Network.Private == NoPrivateNetwork {
-		return ""
+// PrivateNetworks is network.private of a profile: the names of private
+// networks, in order, written as one name or a list, or none, alone.
+type PrivateNetworks []string
+
+func (l *PrivateNetworks) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		*l = nil
+		if n.Value != "" {
+			*l = PrivateNetworks{n.Value}
+		}
+		return nil
+	case yaml.SequenceNode:
+		out := PrivateNetworks{}
+		for _, c := range n.Content {
+			if c.Kind != yaml.ScalarNode {
+				return fmt.Errorf("line %d: network.private: a list of network names", c.Line)
+			}
+			out = append(out, c.Value)
+		}
+		*l = out
+		return nil
 	}
-	return p.Network.Private
+	return fmt.Errorf("network.private: a network name, a list of them, or none, not a %s", kindName(n.Kind))
 }
 
-// ResolvePrivate is the private network the profile names, looked up in
-// networks; nil for none.
-func (p *Profile) ResolvePrivate(networks map[string]*PrivateNetwork) (*PrivateNetwork, error) {
-	name := p.PrivateNetworkName()
-	if name == "" {
-		return nil, nil
+// MarshalYAML writes one name as it is, several as a list.
+func (l PrivateNetworks) MarshalYAML() (any, error) {
+	if len(l) == 1 {
+		return l[0], nil
 	}
-	n, ok := networks[name]
-	if !ok {
-		return nil, fmt.Errorf("profile %s: private network %q is not in networks.yaml (known: %s; ump config os update fetches the published ones)", p.Name, name, strings.Join(sortedKeys(networks), ", "))
+	return []string(l), nil
+}
+
+// IsZero makes an absent network.private stay absent when a profile is
+// written.
+func (l PrivateNetworks) IsZero() bool { return len(l) == 0 }
+
+// Names are the networks named, in order; none for none.
+func (l PrivateNetworks) Names() []string {
+	if len(l) == 1 && l[0] == NoPrivateNetwork {
+		return nil
 	}
-	if err := n.Validate(); err != nil {
-		return nil, fmt.Errorf("profile %s: %w", p.Name, err)
+	return l
+}
+
+// Validate checks the names: each a network name, once, or none alone.
+func (l PrivateNetworks) Validate() error {
+	for i, n := range l {
+		switch {
+		case n == NoPrivateNetwork && len(l) > 1:
+			return fmt.Errorf("network.private: none is no network; it stands alone, for no private network")
+		case n != NoPrivateNetwork && !IsNetworkName(n):
+			return fmt.Errorf("network.private %q is not a network name or none", n)
+		case slices.Contains(l[:i], n):
+			return fmt.Errorf("network.private names %s twice", n)
+		}
 	}
-	return n, nil
+	return nil
+}
+
+// String is the names, comma-separated, or none.
+func (l PrivateNetworks) String() string {
+	if len(l.Names()) == 0 {
+		return NoPrivateNetwork
+	}
+	return strings.Join(l, ",")
+}
+
+// PrivateNetworkNames are the private networks the profile names, in
+// order; none for none.
+func (p *Profile) PrivateNetworkNames() []string { return p.Network.Private.Names() }
+
+// ResolvePrivate is the private networks the profile names, looked up in
+// networks, in order; none for none.
+func (p *Profile) ResolvePrivate(networks map[string]*PrivateNetwork) ([]*PrivateNetwork, error) {
+	var out []*PrivateNetwork
+	for _, name := range p.PrivateNetworkNames() {
+		n, ok := networks[name]
+		if !ok {
+			return nil, fmt.Errorf("profile %s: private network %q is not in networks.yaml (known: %s; ump config os update fetches the published ones)", p.Name, name, strings.Join(sortedKeys(networks), ", "))
+		}
+		if err := n.Validate(); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", p.Name, err)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }

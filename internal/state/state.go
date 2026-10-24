@@ -23,10 +23,11 @@ import (
 	"github.com/ofzhur/ump/internal/provider"
 )
 
-// FormatVersion is the version of the document's layout: 2 since the
-// private addresses. An ump reads the versions up to its own and refuses
-// a later one before it reads anything else.
-const FormatVersion = 2
+// FormatVersion is the version of the document's layout: 3 since a
+// server's private addresses are a list (2 had one, under private). An
+// ump reads the versions up to its own and refuses a later one before it
+// reads anything else.
+const FormatVersion = 3
 
 // File is the document's name in the home.
 const File = "state.yaml"
@@ -59,11 +60,12 @@ type Server struct {
 	// order: set by ump server reinstall --group (none without), changed
 	// by ump server set --group and --ungroup.
 	Groups []string `yaml:"groups,omitempty"`
-	// Private is the server's address in a private network: given with
-	// an installation (reserved before it starts) or by ump server set
-	// --private-ip and --private-network, one server's alone in its
+	// Private are the server's addresses in private networks, one per
+	// network, in the order its networks were given: given with an
+	// installation (reserved before it starts) or by ump server set
+	// --private-network and --private-ip, each one server's alone in its
 	// network, and kept across reinstalls.
-	Private *Private `yaml:"private,omitempty"`
+	Private []Private `yaml:"private_networks,omitempty"`
 	// StaleFacts says that the facts a fact cache has of the server are
 	// those of its old system: set when an installation is recorded,
 	// taken away once a provisioning run completed on it.
@@ -71,6 +73,9 @@ type Server struct {
 	// Roles is what an older ump wrote for the groups; Parse turns it
 	// into Groups, so it is never written.
 	Roles []string `yaml:"roles,omitempty"`
+	// OnePrivate is the one address of version 2 (ump v0.5.0); Parse
+	// turns it into Private, so it is never written.
+	OnePrivate *Private `yaml:"private,omitempty"`
 }
 
 // Install is the record of an installation, as ump saw it finish.
@@ -88,36 +93,27 @@ type Install struct {
 
 // Private is a server's address in a private network of networks.yaml,
 // with the network's CIDR as it was when the address was given.
-type Private struct {
-	Network string `yaml:"network"`
-	CIDR    string `yaml:"cidr"`
-	Address string `yaml:"address"`
-}
-
-// Equal reports whether two private addresses are the same, nil for
-// none.
-func (p *Private) Equal(q *Private) bool {
-	if p == nil || q == nil {
-		return p == q
-	}
-	return *p == *q
-}
+type Private = provider.Private
 
 // PrivateHolder is the server (provider/id) that has the address of p
 // in a network that overlaps p's, whatever its name, leaving out the
 // servers of except; empty when none has it.
-func (d *Document) PrivateHolder(p *Private, except ...string) string {
+func (d *Document) PrivateHolder(p Private, except ...string) string {
 	want, err := netip.ParsePrefix(p.CIDR)
 	if err != nil {
 		return ""
 	}
 	for _, ref := range slices.Sorted(maps.Keys(d.Servers)) {
-		q := d.Servers[ref].Private
-		if q == nil || q.Address != p.Address || slices.Contains(except, ref) {
+		if slices.Contains(except, ref) {
 			continue
 		}
-		if c, err := netip.ParsePrefix(q.CIDR); err == nil && c.Overlaps(want) {
-			return ref
+		for _, q := range d.Servers[ref].Private {
+			if q.Address != p.Address {
+				continue
+			}
+			if c, err := netip.ParsePrefix(q.CIDR); err == nil && c.Overlaps(want) {
+				return ref
+			}
 		}
 	}
 	return ""
@@ -125,7 +121,7 @@ func (d *Document) PrivateHolder(p *Private, except ...string) string {
 
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
-	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && s.Private == nil && !s.StaleFacts
+	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && len(s.Private) == 0 && !s.StaleFacts
 }
 
 // New returns an empty document.
@@ -166,11 +162,24 @@ func Parse(data []byte) (*Document, error) {
 				return nil, fmt.Errorf("servers.%s.price: needs amount, currency and period (month or hour)", ref)
 			}
 		}
-		if p := s.Private; p != nil {
-			a, aerr := netip.ParseAddr(p.Address)
-			c, cerr := netip.ParsePrefix(p.CIDR)
-			if p.Network == "" || aerr != nil || !a.Is4() || cerr != nil || !c.Contains(a) {
+		if p := s.OnePrivate; p != nil {
+			if len(s.Private) > 0 {
+				return nil, fmt.Errorf("servers.%s: private is the one address of version 2, private_networks the list of version 3; give one of them", ref)
+			}
+			if !validPrivate(*p) {
 				return nil, fmt.Errorf("servers.%s.private: needs network, cidr and an IPv4 address in it", ref)
+			}
+			s.Private, s.OnePrivate = []Private{*p}, nil
+			d.Servers[ref] = s
+		}
+		for i, p := range s.Private {
+			if !validPrivate(p) {
+				return nil, fmt.Errorf("servers.%s.private_networks[%d]: needs network, cidr and an IPv4 address in it", ref, i)
+			}
+			for _, q := range s.Private[:i] {
+				if q.Network == p.Network {
+					return nil, fmt.Errorf("servers.%s.private_networks: the network %s is given twice", ref, p.Network)
+				}
 			}
 		}
 		if len(s.Roles) > 0 {
@@ -180,6 +189,14 @@ func Parse(data []byte) (*Document, error) {
 		}
 	}
 	return d, nil
+}
+
+// validPrivate reports whether a private address names its network and
+// is an IPv4 address inside the CIDR.
+func validPrivate(p Private) bool {
+	a, aerr := netip.ParseAddr(p.Address)
+	c, cerr := netip.ParsePrefix(p.CIDR)
+	return p.Network != "" && aerr == nil && a.Is4() && cerr == nil && c.Contains(a)
 }
 
 // rolesToGroups adds the roles an older ump recorded to the groups, as

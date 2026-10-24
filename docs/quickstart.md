@@ -83,9 +83,9 @@ Where the credentials come from and what each provider can do is in
 
 ```console
 $ ump server list
-ACCOUNT   PROVIDER        NAME     IPV4            LOCATION   STATUS    OS       GROUPS   PRICE
-hcloud    hetzner-cloud   web-01   198.51.100.22   hel1       running   <none>   <none>   3.79 EUR/mo
-hrobot    hetzner-robot   db-01    203.0.113.10    fsn1-dc7   running   <none>   <none>   <none>
+ACCOUNT   PROVIDER        NAME     IPV4            PRIVATE-IPV4   LOCATION   STATUS    OS       GROUPS   PRICE
+hcloud    hetzner-cloud   web-01   198.51.100.22   <none>         hel1       running   <none>   <none>   3.79 EUR/mo
+hrobot    hetzner-robot   db-01    203.0.113.10    <none>         fsn1-dc7   running   <none>   <none>   <none>
 
 $ ump server show web-01            # everything the provider knows about it
 $ ump server list -o json           # for scripts; also yaml, wide, name
@@ -157,7 +157,7 @@ Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from ~/.config/ump/prof
 ==>   vg0/root: rest linear ext4 at /
 ==> network: ext01 (96:00:01:ab:cd:ef) 198.51.100.22/32,172.31.1.1; IPv6 off; DNS 1.1.1.1 8.8.8.8; hostname web-01; time zone UTC
 ==> interfaces: ext01 (ext, 96:00:01:ab:cd:ef, now eth0)
-==> private network: default, address 10.0.0.1 (of 10.0.0.0/24; recorded, no interface configured)
+==> private network: 10.0.0.1 in default (10.0.0.0/24); recorded, no interface configured
 ==> users: ump (2 key(s), sudo)
 ==> userdata: ubuntu; firewall: drop, allow icmp, tcp/22
 ==> dry run: stopping here, no disk was touched
