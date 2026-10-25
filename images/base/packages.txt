@@ -10,6 +10,9 @@ systemd
 systemd-sysv
 systemd-resolved !jammy
 systemd-timesyncd
+# systemd's sysctl defaults, a package of their own on Debian 13: ping as a
+# user needs their net.ipv4.ping_group_range (ping has no capability there)
+linux-sysctl-defaults @trixie
 udev
 dbus
 kmod

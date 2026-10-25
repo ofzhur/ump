@@ -35,7 +35,10 @@ long. A line of `packages.txt` may end with `@suite,suite` (those
 releases only) or `!suite` (all but that one): `wtmpdb` exists from
 Ubuntu 26.04 and Debian 13 on, `systemd-resolved` as a package from
 Ubuntu 24.04 on, the firmware packages are Debian's (Ubuntu's kernel
-brings `linux-firmware`), `cpufrequtils` is gone from Debian 13. The
+brings `linux-firmware`), `cpufrequtils` is gone from Debian 13, and
+Debian 13 has systemd's sysctl defaults as a package of their own,
+`linux-sysctl-defaults` (its `ping` has no capability: a user's ping
+needs their `net.ipv4.ping_group_range`). The
 apt sources of the image are the distribution's, with its updates and
 security archives; Debian's static `/etc/motd` is emptied so that only
 UMP's banner shows. The result,
