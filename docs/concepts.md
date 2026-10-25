@@ -1,7 +1,8 @@
 # Concepts
 
 The vocabulary of UMP, and how the pieces fit together. Each term links to
-the document that goes into depth.
+the document that goes into depth. Where the name comes from and what it
+stands for: [unus mundus](unus-mundus.md).
 
 ## Servers and references
 

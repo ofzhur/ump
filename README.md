@@ -168,6 +168,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Concepts](docs/concepts.md) | the vocabulary and how the pieces fit, briefly |
 | [Inventory](docs/inventory.md) | the listing as the inventory of the fleet: formats, the Ansible inventory, what changed, prices, attributes, servers added by hand |
 | [The state backend](docs/state.md) | where ump keeps everything: the local directory, or a backend shared by a team (a directory, SSH, S3, R2, HTTP, Consul, Vault), the setup wizard and migration, the mirror, locks per server |
+| [Unus mundus](docs/unus-mundus.md) | the name: what *unus mundus* means, where it comes from (Dorn, Jung, Pauli), what it stands for in ump's design and what it does not claim |
 
 **Objects**
 
@@ -238,6 +239,17 @@ own](images/rescue/README.md#your-own-storage).
 - Ordering, billing or contract management at providers.
 - Replacing Terraform for cloud resources. UMP is happy to take over
   instances that something else created.
+
+## The name
+
+*Unus mundus* is Latin for "one world": the idea that the many things
+of the world rest on one underlying unity. Gerhard Dorn, a physician
+and alchemist of the 16th century, wrote that God first created one
+world in his mind; C. G. Jung took the phrase up for a reality beneath
+both psyche and matter, and called it a metaphysical speculation and a
+probable hypothesis. UMP uses it as an image for its design, not as a
+doctrine: beneath many providers, one rescue system, one profile, one
+inventory and one state. See [unus mundus](docs/unus-mundus.md).
 
 ## Author, support and services
 
