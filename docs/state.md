@@ -155,7 +155,9 @@ it reads the state (`backend`; `mirror` when the backend did not answer
 its pull; `local`), and `UMP_CONFIG`, its configuration file. That ump
 reads the state there too, so it sees what its parent recorded before
 the run, and neither pulls nor pushes: the mirror is its parent's for
-the run, and it waits for no lock.
+the run, and it waits for no lock. It forgets no server gone from its
+provider ([below](#servers-gone-from-their-providers)): its parent
+decides.
 
 ump goes to the backend only when it has to, so that it never makes
 you wait for nothing:
@@ -253,10 +255,12 @@ state upgrades ump together: once one writes it, the others refuse it
 until they upgrade.
 
 `servers` is keyed by `provider/id`; a record that holds nothing
-disappears. `installed` is written by `ump server reinstall` when the
-new system answered, from what `/etc/ump/install` on the machine says
-(with `--no-reboot` when the installer finished, without the image
-version, kernel and interfaces), and shown by `ump server show`.
+disappears, and so does that of a server gone from its provider
+([below](#servers-gone-from-their-providers)). `installed` is written by
+`ump server reinstall` when the new system answered, from what
+`/etc/ump/install` on the machine says (with `--no-reboot` when the
+installer finished, without the image version, kernel and interfaces),
+and shown by `ump server show`.
 `groups` are the server's Ansible groups besides `common`
 ([provisioning](provisioning.md)): set by `ump server reinstall
 --group`, changed by `ump server set --group` and `--ungroup`; the
@@ -283,3 +287,37 @@ or in the mirror and push) or with `ump server set`, `add` and
 `remove`; unknown fields are an error, so a typo is caught before
 anything is written, and a command rewrites the file in its own layout,
 so a server's `note` is the place for remarks.
+
+### Servers gone from their providers
+
+A server of `servers` is gone when every configured account of its
+provider type was asked in one run, completely, and none listed it (no
+account failed, was left out with `--account`, was served from the
+[listing cache](cli.md#the-listing-cache-and---diff) or skipped a kind
+of servers its credentials may not list), and when the account that
+listed it before (the listing cache says which), asked for that server
+alone, answers that it has none (HTTP 404). A listing can leave out a
+server that is there (an answer without the list, a page shifted by a
+server deleted meanwhile): asked, the provider has it. A server no
+account of the configuration listed before (one of another
+configuration that shares the state, or of an account taken out of
+it), and one its provider still has or does not answer for, stays,
+with a line on stderr that says why; take out an entry that is gone
+for good in `state.yaml`.
+
+The first listing that shows it gone, of any command that lists the
+accounts (`ump server list` in every format, `reinstall`,
+`multiinstall`, `set`, `ump provision`, ...), forgets it, once per run:
+its entry goes, whatever it holds (profile, price, attributes, note,
+installation, groups, private addresses), and a line on stderr says so
+(`ump: hrobot-test-i7-7700 (hetzner-robot/3099248) is gone from its
+provider: forgotten; 10.0.0.2 in default is free again`). It goes
+within the read-modify-write, and only where the entry is still as ump
+read it before the listing: one written meanwhile, such as another
+ump's installation on a server created after the listing began, stays
+for the next listing to decide. `--dry-run` forgets nothing and says
+what it would, and the plugin's ump under ump's own Ansible
+(`UMP_PARENT`) forgets nothing: its parent lists in the same run. A
+server added by hand (`manual`) is never gone; `ump server remove`
+forgets one. The host files of the servers gone go when ump next
+writes the host files ([provisioning](provisioning.md#host-files)).

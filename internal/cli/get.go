@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/provider/manual"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 var getResources = []string{"servers", "rdns"}
@@ -44,7 +46,11 @@ Positional arguments select single servers by name, provider ID, IP
 address or "provider/id". All accounts are queried in parallel; on a
 terminal the table shows each account's servers as soon as it answered,
 with the accounts still being asked under it. An account whose API fails
-is reported on stderr and the others are still listed.
+is reported on stderr and the others are still listed. A server of the
+state that every account of its provider type, asked completely,
+leaves out, and that the account which listed it before, asked for it
+alone, no longer has, is gone: ump forgets it, with its private
+addresses, and says so on stderr.
 
 PRIVATE-IPV4 is the server's addresses in its private networks, in
 their order; OS and GROUPS are the system ump installed last and the
@@ -480,6 +486,10 @@ type listResult struct {
 	// stale is why the provider could not be asked when the listing is
 	// the cache's last one instead (offline, the API down).
 	stale error
+	// skipped are the kinds of machines the provider left out, which the
+	// credentials may not list (provider.Partial): the listing is not
+	// complete.
+	skipped []string
 }
 
 // listOptions say how listAccounts lists.
@@ -500,9 +510,11 @@ func (a *app) cachedListing(cfg *config.Config) listOptions {
 
 // listAccounts queries the named accounts, all in parallel (each account
 // has its own credentials, and providers limit requests per credential),
-// serves fresh listings from the cache, and records each listing the
-// providers returned in the store (when one is given).
+// serves fresh listings from the cache, records each listing the
+// providers returned in the store (when one is given), and forgets the
+// servers of the state that are gone from their providers (forgetGone).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store, lo listOptions) []listResult {
+	// the state before the listings: what forgetGone may forget
 	doc, err := a.loadState(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
@@ -534,7 +546,231 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 			fmt.Fprintf(a.stderr, "account %s: from the cache, listed %s ago\n", r.account, a.now().Sub(r.cachedAt).Round(time.Second))
 		}
 	}
+	a.forgetGone(ctx, cfg, doc, store, results)
 	return results
+}
+
+// errNothingGone ends the state's read-modify-write of forgetGone without
+// a write: every server found gone was written meanwhile.
+var errNothingGone = errors.New("nothing gone")
+
+// forgetGone forgets the servers that are gone from their providers:
+// those the listings (results) leave out (missingServers), once per run
+// and provider type, each confirmed by its provider (checkGone). Their
+// entries go from the state, private addresses and all, within its
+// read-modify-write, each where it is still as in was, the state as read
+// before the listings; an entry written since stays. A notice on stderr
+// names each, with the addresses it frees, and each server left out but
+// kept, with why. With --dry-run nothing is written: the notice says
+// what a run would forget, and this run's copy of the state goes without
+// them, as the run would. An ump that ump runs (the inventory plugin's)
+// forgets nothing: its parent lists in the same run, and decides.
+func (a *app) forgetGone(ctx context.Context, cfg *config.Config, was *state.Document, store *cache.Store, results []listResult) {
+	if was == nil || a.nested || ctx.Err() != nil {
+		return
+	}
+	missing, decided := missingServers(cfg, was, results, a.goneDecided)
+	if a.goneDecided == nil {
+		a.goneDecided = map[string]bool{}
+	}
+	for _, t := range decided {
+		a.goneDecided[t] = true
+	}
+	var gone []string
+	checks := map[string]goneCheck{}
+	for _, ref := range missing {
+		c := a.checkGone(ctx, cfg, store, ref)
+		if ctx.Err() != nil {
+			return
+		}
+		checks[ref] = c
+		if !c.gone {
+			fmt.Fprintf(a.stderr, "ump: %s is missing from the listings but kept: %s\n", who(goneName(c.m, was.Servers[ref]), ref), c.why)
+			continue
+		}
+		gone = append(gone, ref)
+	}
+	if len(gone) == 0 {
+		return
+	}
+	if a.dryRun {
+		forgotten := was.Forget(was, gone)
+		for _, ref := range slices.Sorted(maps.Keys(forgotten)) {
+			fmt.Fprintln(a.stderr, goneNotice(goneName(checks[ref].m, forgotten[ref]), ref, forgotten[ref], true))
+		}
+		return
+	}
+	var forgotten map[string]state.Server
+	err := a.updateState(ctx, func(d *state.Document) error {
+		if forgotten = d.Forget(was, gone); len(forgotten) == 0 {
+			return errNothingGone
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errNothingGone):
+	case err != nil:
+		fmt.Fprintf(a.stderr, "ump: gone from their providers, but still in the state: %s (%v)\n", strings.Join(gone, ", "), err)
+	default:
+		for _, ref := range slices.Sorted(maps.Keys(forgotten)) {
+			fmt.Fprintln(a.stderr, goneNotice(goneName(checks[ref].m, forgotten[ref]), ref, forgotten[ref], false))
+		}
+	}
+}
+
+// missingServers are the servers of the state (was) that the listings
+// leave out: those of a provider type every configured account of which
+// was listed from its provider in this run, completely (no error, no
+// kind of machines skipped, not served from the cache, not left out by
+// --account), none listing them; never a server added by hand, nor one
+// of a type in skip. decided are the provider types whose listings were
+// complete.
+func missingServers(cfg *config.Config, was *state.Document, results []listResult, skip map[string]bool) (missing, decided []string) {
+	byAccount := map[string]listResult{}
+	for _, r := range results {
+		byAccount[r.account] = r
+	}
+	complete := map[string]bool{}
+	listed := map[string]bool{}
+	for _, name := range cfg.AccountNames() {
+		t := cfg.Accounts[name].Type
+		if t == manual.TypeName || skip[t] {
+			continue
+		}
+		r, ok := byAccount[name]
+		full := ok && r.err == nil && r.stale == nil && len(r.skipped) == 0 && r.cachedAt.IsZero()
+		if c, seen := complete[t]; seen {
+			full = full && c
+		}
+		complete[t] = full
+		for _, m := range r.machines {
+			listed[m.Ref()] = true
+		}
+	}
+	for _, t := range slices.Sorted(maps.Keys(complete)) {
+		if complete[t] {
+			decided = append(decided, t)
+		}
+	}
+	for _, ref := range slices.Sorted(maps.Keys(was.Servers)) {
+		if t, _, _ := strings.Cut(ref, "/"); complete[t] && !listed[ref] {
+			missing = append(missing, ref)
+		}
+	}
+	return missing, decided
+}
+
+// goneCheck is what a server's provider said about a server the
+// listings leave out: gone, or why it is kept; m is the server as its
+// account last listed it.
+type goneCheck struct {
+	gone bool
+	m    provider.Machine
+	why  string
+}
+
+// checkGone asks the provider whether a server (ref, provider/id) is
+// gone: it is when each account of the configuration that listed it
+// before (the listing cache, store), asked for it alone, answers that it
+// has no such server (HTTP 404). A listing can leave out a server it
+// has (an empty answer, a page shifted by a server deleted meanwhile):
+// asked for it, the provider tells. A server no account of the
+// configuration listed before, as one of another configuration sharing
+// the state, is kept. Each server is asked once per run.
+func (a *app) checkGone(ctx context.Context, cfg *config.Config, store *cache.Store, ref string) goneCheck {
+	if c, ok := a.goneChecks[ref]; ok {
+		return c
+	}
+	c := goneCheck{why: "no account of this configuration listed it before"}
+	t, _, _ := strings.Cut(ref, "/")
+	for _, name := range cfg.AccountNames() {
+		acct := cfg.Accounts[name]
+		if store == nil || t == manual.TypeName || acct.Type != t {
+			continue
+		}
+		m, ok := store.LastSeen(name, ref)
+		if !ok {
+			continue
+		}
+		c.m = m
+		if why := a.askGone(ctx, name, acct, m); why != "" {
+			c.gone, c.why = false, why
+			break
+		}
+		c.gone, c.why = true, ""
+	}
+	if ctx.Err() == nil {
+		if a.goneChecks == nil {
+			a.goneChecks = map[string]goneCheck{}
+		}
+		a.goneChecks[ref] = c
+	}
+	return c
+}
+
+// askGone asks an account for one server, as its listing had it: empty
+// when the provider answers that it has no such server, else why it
+// cannot be taken for gone.
+func (a *app) askGone(ctx context.Context, name string, acct config.Account, m provider.Machine) string {
+	p, err := a.buildProvider(name, acct)
+	if err != nil {
+		return err.Error()
+	}
+	d, ok := p.(provider.Describer)
+	if !ok {
+		return fmt.Sprintf("account %s cannot be asked for one server", name)
+	}
+	_, err = d.Describe(ctx, m)
+	switch {
+	case err == nil:
+		return fmt.Sprintf("account %s still has it", name)
+	case provider.IsNotFound(err):
+		return ""
+	}
+	return fmt.Sprintf("account %s: %v", name, err)
+}
+
+// goneName is the name of a server gone from its provider: the hostname
+// of its installation, else its name as its account last listed it (m);
+// empty when neither says.
+func goneName(m provider.Machine, s state.Server) string {
+	if s.Installed != nil && s.Installed.Hostname != "" {
+		return s.Installed.Hostname
+	}
+	return m.Name
+}
+
+// who names a server by its name, when there is one, and its ref.
+func who(name, ref string) string {
+	if name == "" {
+		return ref
+	}
+	return name + " (" + ref + ")"
+}
+
+// goneNotice says that a server is gone from its provider and forgotten
+// (with --dry-run: would be), with the private addresses it frees.
+func goneNotice(name, ref string, s state.Server, dryRun bool) string {
+	if dryRun {
+		line := "ump: " + who(name, ref) + " is gone from its provider: it would be forgotten (dry run)"
+		if len(s.Private) > 0 {
+			line += "; " + describePrivate(s.Private) + " would be free again"
+		}
+		return line
+	}
+	line := "ump: " + who(name, ref) + " is gone from its provider: forgotten"
+	if len(s.Private) > 0 {
+		line += "; " + describePrivate(s.Private) + " " + isAre(len(s.Private)) + " free again"
+	}
+	return line
+}
+
+// isAre is the verb for n things.
+func isAre(n int) string {
+	if n == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func (a *app) listAccount(ctx context.Context, name string, acct config.Account, store *cache.Store, ttl time.Duration) listResult {
@@ -575,6 +811,9 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 		return r
 	}
 	r.machines = ms
+	if pa, ok := p.(provider.Partial); ok {
+		r.skipped = pa.Skipped()
+	}
 	if store != nil {
 		if _, _, err := store.Record(name, acct.Type, ms, a.now()); err != nil {
 			r.cacheErr = fmt.Errorf("account %s: cache: %w", name, err)

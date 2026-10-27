@@ -42,8 +42,9 @@ As of October 2026, ump does what the [README](../README.md) and the
   first use.
 - **Private networks:** every server ump installs gets an address in
   each of its private networks (`default`, `10.0.0.0/24`, or several),
-  the lowest free one or one given by hand, kept across reinstalls and
-  never another server's, in the state and the inventory
+  the lowest free one or one given by hand, kept across reinstalls,
+  never another server's and free again once the server is gone from
+  its provider, in the state and the inventory
   (`ump_private_networks`) ([private networks](networks.md)).
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
   Windows on the storage, `make release`.

@@ -118,6 +118,8 @@ type Provider struct {
 	account string
 	client  *Client
 	logf    func(format string, args ...any)
+	// skipped are the families the last List left out (Skipped)
+	skipped []string
 }
 
 func newProvider(account string, settings map[string]string, opts provider.Options) (provider.Provider, error) {
@@ -988,8 +990,10 @@ func (p *Provider) describeInstance(ctx context.Context, projectID, projectName,
 // List implements provider.Inventory. Dedicated servers and Public Cloud
 // instances are listed concurrently. A consumer key that is not allowed to
 // see one of the two families (403 NOT_GRANTED_CALL on the list call) is
-// tolerated: that family is skipped, and mentioned in verbose output.
+// tolerated: that family is skipped, mentioned in verbose output, and
+// named by Skipped.
 func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
+	p.skipped = nil
 	var (
 		wg                          sync.WaitGroup
 		dedicated, cloud, vps       []provider.Machine
@@ -1032,6 +1036,15 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 		return nil, &provider.APIError{Provider: TypeName, Status: http.StatusForbidden, Code: "NOT_GRANTED_CALL",
 			Message: "the consumer key may list neither dedicated servers, VPS nor Public Cloud projects (check its access rules)"}
 	}
+	if skippedDed {
+		p.skipped = append(p.skipped, "dedicated servers")
+	}
+	if skipVPS {
+		p.skipped = append(p.skipped, "VPS")
+	}
+	if skipCl {
+		p.skipped = append(p.skipped, "Public Cloud instances")
+	}
 	if p.logf != nil {
 		if skippedDed {
 			p.logf("ovh: consumer key is not allowed to list dedicated servers; skipped")
@@ -1046,6 +1059,10 @@ func (p *Provider) List(ctx context.Context) ([]provider.Machine, error) {
 	out := append(dedicated, vps...)
 	return append(out, cloud...), nil
 }
+
+// Skipped implements provider.Partial: the families the last List left
+// out, which the consumer key may not list.
+func (p *Provider) Skipped() []string { return p.skipped }
 
 func (p *Provider) listVPS(ctx context.Context) ([]provider.Machine, error) {
 	names, err := p.client.ListVPS(ctx)

@@ -75,6 +75,14 @@ type app struct {
 	// nested says that an ump runs this one (UMP_PARENT): it leaves the
 	// mirror and the update check to that one.
 	nested bool
+	// dryRun says that the command changes nothing (--dry-run): a server
+	// gone from its provider is reported, not forgotten. goneDecided are
+	// the provider types whose gone servers this run decided on, once;
+	// goneChecks what the providers said about servers the listings left
+	// out, by ref, asked once (checkGone).
+	dryRun      bool
+	goneDecided map[string]bool
+	goneChecks  map[string]goneCheck
 	// now is the clock, for cache timestamps; nil means time.Now.
 	now func() time.Time
 	// tz is the time zone for times shown to people; nil means local.

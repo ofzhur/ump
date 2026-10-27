@@ -10,6 +10,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -217,6 +218,15 @@ type Provider interface {
 type Inventory interface {
 	Provider
 	List(ctx context.Context) ([]Machine, error)
+}
+
+// Partial is implemented by providers whose listing leaves out the
+// machines of a kind the credentials may not list, rather than fail
+// (OVHcloud's consumer keys are granted the API path by path): Skipped
+// names the kinds the last List left out, none when it listed every
+// kind. Such a listing is not complete.
+type Partial interface {
+	Skipped() []string
 }
 
 // Field describes one configuration setting of a provider type. The wizard
@@ -480,6 +490,13 @@ type APIError struct {
 	Status   int    // HTTP status, 0 if the request never completed
 	Code     string // provider-specific error code, if any
 	Message  string
+}
+
+// IsNotFound reports whether err is the provider's answer that it has
+// no such thing (HTTP 404), such as a machine asked for by its ID.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
 }
 
 func (e *APIError) Error() string {

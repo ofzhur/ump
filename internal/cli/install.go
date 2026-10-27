@@ -555,6 +555,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if err != nil {
 		return err
 	}
+	a.dryRun = o.dryRun
 	f, err := checkServerFlags(cmd, o)
 	if err != nil {
 		return err
@@ -603,13 +604,21 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	p.keys, p.keyPaths, p.keyPath = keys, keyPaths, keyPath
 	hostname, inGroups := p.hostname, p.inGroups()
+	// the state after the listing, which forgot the servers gone from
+	// their providers
+	doc, err := a.loadState(ctx, cfg)
+	if err != nil {
+		return err
+	}
 	// the host file goes where no other's is, under a name that is no
 	// group, and --hosts matches a host of the inventory with the server
-	// in it
+	// in it; the hosts of servers gone are none
 	if repo != nil {
-		if err := repo.checkHost(ctx, hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
+		files, err := repo.checkHost(ctx, a.goneServer(ctx, cfg, doc), hostname, m.Ref(), inGroups, "give another --hostname", "")
+		if err != nil {
 			return err
 		}
+		inv = inv.without(files.goneHosts())
 		if err := inv.check(hostname, m.Ref(), inGroups, "give another --hostname", ""); err != nil {
 			return err
 		}
@@ -624,10 +633,6 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	a.warnNoRescue(m, prov)
 	a.warnPreflight(ctx, m, prov)
 	// the hostname is no group of another server in the state
-	doc, err := a.loadState(ctx, cfg)
-	if err != nil {
-		return err
-	}
 	if err := checkStateGroups(doc, hostname, m.Ref(), "give another --hostname"); err != nil {
 		return err
 	}
@@ -726,7 +731,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		}
 		fmt.Fprintf(a.stderr, "%s is provisioned. %s\n", hostname, res.summary())
 	case repo != nil:
-		err := a.addToInventory(ctx, repo, "reinstalling "+m.Name, []hostEntry{{hostname, inGroups, a.inventoryVars(cfg, m, *record, p.private)}})
+		err := a.addToInventory(ctx, cfg, repo, "reinstalling "+m.Name, []hostEntry{{hostname, inGroups, a.inventoryVars(cfg, m, *record, p.private)}})
 		if err != nil {
 			if rerr := a.installReport(result, format); rerr != nil {
 				return rerr

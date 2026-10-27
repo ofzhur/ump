@@ -79,6 +79,20 @@ func TestStore(t *testing.T) {
 		t.Error("Oldest of unknown account")
 	}
 
+	// a machine the newest listing lacks, as the newest one with it had it
+	if _, _, err := s.Record("acc", "fake", machines("off", "a"), t2.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := s.LastSeen("acc", "fake/id-b"); !ok || m.Name != "b" || m.Status != "off" {
+		t.Errorf("LastSeen: %+v %v", m, ok)
+	}
+	if m, ok := s.LastSeen("acc", "fake/id-c"); ok {
+		t.Errorf("LastSeen of a machine never listed: %+v", m)
+	}
+	if _, ok := s.LastSeen("none", "fake/id-a"); ok {
+		t.Error("LastSeen of unknown account")
+	}
+
 	// pruning keeps the newest MaxSnapshots
 	for i := 0; i < MaxSnapshots+5; i++ {
 		if _, _, err := s.Record("acc", "fake", machines("s"+string(rune('a'+i%26))+string(rune('a'+i/26)), "a"), t2.Add(time.Duration(i+1)*time.Minute)); err != nil {

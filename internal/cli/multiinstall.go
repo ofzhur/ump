@@ -201,6 +201,7 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	if err != nil {
 		return err
 	}
+	a.dryRun = o.dryRun
 	if cmd.Flags().Changed("parallel") && o.parallel < 1 {
 		return usageErrorf(cmd, "--parallel %d: give 1 or more (default: all at once)", o.parallel)
 	}
@@ -397,7 +398,7 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		for i, r := range done {
 			hosts[i] = hostEntry{r.record.Hostname, append([]string{commonGroup}, r.groups...), a.inventoryVars(cfg, r.m, r.record, r.private)}
 		}
-		if err := a.addToInventory(ctx, repo, "installing "+strings.Join(records, ", "), hosts); err != nil {
+		if err := a.addToInventory(ctx, cfg, repo, "installing "+strings.Join(records, ", "), hosts); err != nil {
 			provErr = withExit(exitCodeFor(err), fmt.Errorf("%s installed and recorded, but not all written into the inventory: %w", namesAre(records), err))
 			break
 		}
@@ -649,6 +650,8 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 		if err != nil {
 			return nil, nil, err
 		}
+		files.forget(a.goneServer(ctx, cfg, doc))
+		inv = inv.without(files.goneHosts())
 		for _, p := range plans {
 			retry := "give " + p.ref + " another hostname"
 			if err := checkHostName(p.hostname, p.inGroups(), retry, ""); err != nil {

@@ -21,8 +21,10 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/backend"
+	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/provider/manual"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -506,6 +508,29 @@ func (inv *inventory) with(hosts map[string]inventoryHost) *inventory {
 	return out
 }
 
+// without is the inventory without the hosts whose host files go, by
+// name with the ump_ref of each (hostFiles.goneHosts): those of servers
+// that are gone.
+func (inv *inventory) without(hosts map[string]string) *inventory {
+	if len(hosts) == 0 {
+		return inv
+	}
+	out := &inventory{groups: maps.Clone(inv.groups), members: map[string][]string{}, children: maps.Clone(inv.children), hosts: maps.Clone(inv.hosts), plugin: inv.plugin}
+	gone := func(h string) bool {
+		ref, ok := hosts[h]
+		return ok && inv.hosts[h] == ref
+	}
+	for g, hs := range inv.members {
+		out.members[g] = slices.DeleteFunc(slices.Clone(hs), gone)
+	}
+	for h := range inv.hosts {
+		if gone(h) {
+			delete(out.hosts, h)
+		}
+	}
+	return out
+}
+
 // source is the inventory as Ansible's yaml inventory plugin reads it
 // (in JSON, which it reads too): every group with its hosts and
 // children.
@@ -845,17 +870,20 @@ func hostFileRef(data []byte) string {
 
 // checkHost refuses a host that cannot go into the inventory as it is:
 // its name is one of its groups or Ansible's own, or a host file of its
-// name is not its own. retry is what the user can do about the name;
-// server is the server's name when its groups are those of the state.
-func (r *infraRepo) checkHost(ctx context.Context, hostname, ref string, groups []string, retry, server string) error {
+// name is not its own; that of a server gone is none (forget, with
+// gone). It returns the host files, as read, without those of servers
+// gone. retry is what the user can do about the name; server is the
+// server's name when its groups are those of the state.
+func (r *infraRepo) checkHost(ctx context.Context, gone func(ref string) bool, hostname, ref string, groups []string, retry, server string) (*hostFiles, error) {
 	if err := checkHostName(hostname, groups, retry, server); err != nil {
-		return err
+		return nil, err
 	}
 	h, err := r.readHostFiles(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return h.check(hostname, ref, retry)
+	h.forget(gone)
+	return h, h.check(hostname, ref, retry)
 }
 
 // checkHostName refuses a hostname that is a group of the server, or one
@@ -885,6 +913,9 @@ type hostFiles struct {
 	where  string
 	plugin string
 	files  map[string][]byte
+	// gone are the files ump wrote for servers that are gone, by name:
+	// taken out of files (forget), for removeGone.
+	gone map[string][]byte
 }
 
 func (h *hostFiles) path(name string) string { return h.where + "/" + name }
@@ -906,6 +937,105 @@ func (r *infraRepo) readHostFiles(ctx context.Context) (*hostFiles, error) {
 	}
 	h.files = files
 	return h, nil
+}
+
+// forget takes the host files ump wrote (HOSTNAME.yml with its header)
+// for servers that are gone, by their ump_ref (gone, goneServer), out of
+// files into gone. The checks no longer see them, a write of their name
+// replaces them, and removeGone removes the others. A file ump did not
+// write stays, and so does every file when ump is the inventory, or
+// without gone.
+func (h *hostFiles) forget(gone func(ref string) bool) {
+	if h.plugin != "" || gone == nil {
+		return
+	}
+	for _, n := range sortedNames(h.files) {
+		ref := hostFileRef(h.files[n])
+		if ref == "" || !umpWrote(n, h.files[n]) || !gone(ref) {
+			continue
+		}
+		if h.gone == nil {
+			h.gone = map[string][]byte{}
+		}
+		h.gone[n] = h.files[n]
+		delete(h.files, n)
+	}
+}
+
+// goneHosts are the hosts whose files forget took out, with the ump_ref
+// of each: hosts of the inventory as read that go (inventory.without).
+func (h *hostFiles) goneHosts() map[string]string {
+	hosts := map[string]string{}
+	for n, data := range h.gone {
+		hosts[strings.TrimSuffix(n, ".yml")] = hostFileRef(data)
+	}
+	return hosts
+}
+
+// goneServer says which servers are gone, for the host files (forget):
+// one the state (doc) no longer has, and that its provider no longer has
+// either (checkGone), or added by hand and removed (ump server remove).
+// A server taken out of the state while its provider still has it is
+// not gone, and when the state is the mirror as it was (its pull failed),
+// no server is: the mirror may lack servers installed meanwhile.
+func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Document) func(ref string) bool {
+	if doc == nil || a.pullFailed {
+		return nil
+	}
+	var store *cache.Store
+	if _, path, err := a.loadConfig(); err == nil {
+		store = cache.Open(path)
+	}
+	return func(ref string) bool {
+		if inState(doc, ref) {
+			return false
+		}
+		if t, _, _ := strings.Cut(ref, "/"); t == manual.TypeName {
+			return true
+		}
+		return a.checkGone(ctx, cfg, store, ref).gone
+	}
+}
+
+// umpWrote says that ump wrote the host file of that name: HOSTNAME.yml,
+// its first line the header renderHostFile gives it.
+func umpWrote(name string, data []byte) bool {
+	hostname, ok := strings.CutSuffix(name, ".yml")
+	line, _, _ := strings.Cut(string(data), "\n")
+	return ok && strings.HasPrefix(line, "# "+hostname+": written by ump (")
+}
+
+// inState says that the state has the server ref (provider/id): an
+// entry of servers, or a server added by hand.
+func inState(doc *state.Document, ref string) bool {
+	if _, ok := doc.Servers[ref]; ok {
+		return true
+	}
+	t, id, _ := strings.Cut(ref, "/")
+	_, ok := doc.Manual[id]
+	return t == manual.TypeName && ok
+}
+
+// removeGone removes the host files forget took out that no write
+// replaced, and says so; with the last one of inventory/hosts/ the
+// directory goes too, when nothing else is in it: Ansible fails on an
+// empty one.
+func (a *app) removeGone(ctx context.Context, h *hostFiles) error {
+	if len(h.gone) == 0 {
+		return nil
+	}
+	for _, n := range sortedNames(h.gone) {
+		if err := h.objects.Remove(ctx, n); err != nil {
+			return fmt.Errorf("%s: %w", h.where, err)
+		}
+		fmt.Fprintf(a.stderr, "Removed %s: %s is gone.\n", h.path(n), hostFileRef(h.gone[n]))
+		delete(h.gone, n)
+	}
+	if d, ok := h.objects.(*backend.Directory); ok && len(h.files) == 0 {
+		// os.Remove takes an empty directory alone
+		os.Remove(d.Dir)
+	}
+	return nil
 }
 
 // check refuses the host files of the hostname that ump would overwrite
@@ -956,6 +1086,7 @@ func (h *hostFiles) write(ctx context.Context, hostname, ref string, data []byte
 			return "", nil, fmt.Errorf("%s: %w", h.where, err)
 		}
 		h.files[name] = data
+		delete(h.gone, name)
 		written = h.path(name)
 	}
 	for _, n := range sortedNames(h.files) {
@@ -980,18 +1111,15 @@ func (r *infraRepo) writeHostFile(ctx context.Context, hostname, ref string, dat
 	return h.write(ctx, hostname, ref, data)
 }
 
-// putInInventory writes the host file and says what changed; when ump
-// is the inventory, the state has the server already, and it says that.
-func (a *app) putInInventory(ctx context.Context, repo *infraRepo, hostname string, groups []string, v hostVars) error {
-	h, err := repo.readHostFiles(ctx)
-	if err != nil {
-		return err
-	}
-	if repo.plugin != "" {
+// putInInventory writes the host file into h and says what changed;
+// when ump is the inventory, the state has the server already, and it
+// says that.
+func (a *app) putInInventory(ctx context.Context, h *hostFiles, hostname string, groups []string, v hostVars) error {
+	if h.plugin != "" {
 		if err := h.check(hostname, v.UMPRef, ""); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.stderr, "No host file: %s makes ump the inventory, with %s in %s.\n", repo.plugin, hostname, strings.Join(groups, ", "))
+		fmt.Fprintf(a.stderr, "No host file: %s makes ump the inventory, with %s in %s.\n", h.plugin, hostname, strings.Join(groups, ", "))
 		return nil
 	}
 	return a.writeHost(ctx, h, hostname, groups, v)
