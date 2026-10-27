@@ -418,7 +418,7 @@ func (a *app) provision(ctx context.Context, cfg *config.Config, repo *infraRepo
 		return nil, err
 	}
 	if run.pattern != "" {
-		if err := a.matchHosts(ctx, repo, inv.with(refresh), run.pattern, fmt.Sprintf("--hosts %s matches no host of the inventory; nothing ran", run.pattern)); err != nil {
+		if err := a.matchHosts(ctx, repo, inv.without(files.goneHosts()).with(refresh), run.pattern, fmt.Sprintf("--hosts %s matches no host of the inventory; nothing ran", run.pattern)); err != nil {
 			return nil, err
 		}
 	}
@@ -515,10 +515,11 @@ func (a *app) freshFacts(ctx context.Context, hosts map[string]inventoryHost, st
 // and the providers have it now, once all of them pass the checks (a
 // hostname that is a group of another host, a host file in the way, a
 // name the inventory has the other way round), with the host files they
-// go into, as read (inventory/hosts/, or the storage): none when one
-// does not. When ump is the inventory, the checks are those of the host
-// files beside it. The servers of an account that could not be listed
-// are none: their host files stay as they are.
+// go into, as read (inventory/hosts/, or the storage), those of servers
+// gone taken out (hostFiles.forget): none when one does not. When ump is
+// the inventory, the checks are those of the host files beside it. The
+// servers of an account that could not be listed are none: their host
+// files stay as they are.
 func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraRepo, inv *inventory, known []provider.Machine) (map[string]inventoryHost, *hostFiles, error) {
 	_, path, err := a.loadConfig()
 	if err != nil {
@@ -545,6 +546,10 @@ func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraR
 			}
 		}
 	}
+	// without the servers the listing found gone from their providers
+	if doc, err = a.loadState(ctx, cfg); err != nil {
+		return nil, nil, err
+	}
 	hosts := a.inventoryHosts(cfg, doc, ms)
 	names := slices.Sorted(maps.Keys(hosts))
 	// no hostname is a group of another host; common, a group of every
@@ -561,6 +566,8 @@ func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraR
 	if err != nil {
 		return nil, nil, err
 	}
+	files.forget(a.goneServer(ctx, cfg, doc))
+	inv = inv.without(files.goneHosts())
 	for _, host := range names {
 		h := hosts[host]
 		retry := "reinstall " + h.m.Name + " with another --hostname"
@@ -577,8 +584,9 @@ func (a *app) refreshHosts(ctx context.Context, cfg *config.Config, repo *infraR
 	return hosts, files, nil
 }
 
-// writeHostFiles writes the host files of the hosts into files; when ump
-// is the inventory there is nothing to write.
+// writeHostFiles writes the host files of the hosts into files, and
+// removes those of the servers gone (hostFiles.forget); when ump is the
+// inventory there is nothing to write.
 func (a *app) writeHostFiles(ctx context.Context, repo *infraRepo, files *hostFiles, hosts map[string]inventoryHost) error {
 	if repo.plugin != "" {
 		fmt.Fprintf(a.stderr, "No host files: %s makes ump the inventory.\n", repo.plugin)
@@ -590,7 +598,7 @@ func (a *app) writeHostFiles(ctx context.Context, repo *infraRepo, files *hostFi
 			return err
 		}
 	}
-	return nil
+	return a.removeGone(ctx, files)
 }
 
 // hostEntry is a host for the inventory: its name, its groups, its
@@ -602,19 +610,32 @@ type hostEntry struct {
 }
 
 // addToInventory writes the host files of servers installed without
-// provisioning, under the fleet's lock; what names the installation.
-func (a *app) addToInventory(ctx context.Context, repo *infraRepo, what string, hosts []hostEntry) error {
+// provisioning, under the fleet's lock, and removes those of the servers
+// gone, by the state as it is then (goneServer); what names the
+// installation.
+func (a *app) addToInventory(ctx context.Context, cfg *config.Config, repo *infraRepo, what string, hosts []hostEntry) error {
 	unlock, err := a.lockFleet(ctx, "inventory after "+what)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	files, err := repo.readHostFiles(ctx)
+	if err != nil {
+		return err
+	}
+	if repo.plugin == "" {
+		doc, _, err := a.stateStore().Read(ctx)
+		if err != nil {
+			return err
+		}
+		files.forget(a.goneServer(ctx, cfg, doc))
+	}
 	for _, h := range hosts {
-		if err := a.putInInventory(ctx, repo, h.hostname, h.groups, h.vars); err != nil {
+		if err := a.putInInventory(ctx, files, h.hostname, h.groups, h.vars); err != nil {
 			return err
 		}
 	}
-	return nil
+	return a.removeGone(ctx, files)
 }
 
 // notProvisioned is the error of the provisioning after an

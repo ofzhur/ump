@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -85,6 +86,24 @@ func TestAPIErrorString(t *testing.T) {
 	for want, e := range cases {
 		if got := e.Error(); got != want {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{&APIError{Provider: "x", Status: 404, Code: "not_found"}, true},
+		{fmt.Errorf("account a: %w", &APIError{Provider: "x", Status: 404}), true},
+		{&APIError{Provider: "x", Status: 403, Code: "NOT_GRANTED_CALL"}, false},
+		{&APIError{Provider: "x", Message: "connection refused"}, false},
+		{errors.New("404"), false},
+		{nil, false},
+	} {
+		if got := IsNotFound(c.err); got != c.want {
+			t.Errorf("IsNotFound(%v) = %v", c.err, got)
 		}
 	}
 }

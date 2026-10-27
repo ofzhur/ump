@@ -529,3 +529,32 @@ func TestPreflightNoFirewall(t *testing.T) {
 		t.Fatalf("Preflight = %q, %v; want nothing", warnings, err)
 	}
 }
+
+// TestDescribeGone: asked for a server it no longer has, the API answers
+// 404, which tells ump that the server is gone (provider.IsNotFound);
+// another failure does not.
+func TestDescribeGone(t *testing.T) {
+	status := http.StatusNotFound
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/server/321") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.WriteHeader(status)
+		if status == http.StatusNotFound {
+			w.Write([]byte(`{"error":{"status":404,"code":"SERVER_NOT_FOUND","message":"Server not found"}}`))
+		}
+	}))
+	defer srv.Close()
+	p, err := Type.New("a", map[string]string{"login": "#ws+user", "password": "pass", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := provider.Machine{ID: "321"}
+	if _, err := p.(provider.Describer).Describe(context.Background(), m); !provider.IsNotFound(err) {
+		t.Errorf("404: %v", err)
+	}
+	status = http.StatusInternalServerError
+	if _, err := p.(provider.Describer).Describe(context.Background(), m); err == nil || provider.IsNotFound(err) {
+		t.Errorf("500: %v", err)
+	}
+}

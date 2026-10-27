@@ -84,8 +84,10 @@ set; instances carry their project as labels; VPS are labelled
   the commands need and shows the validation URL; a consumer key made
   elsewhere needs the same rules, and a missing one shows up as
   `NOT_GRANTED_CALL` with the path. A key that may not see one family
-  (say, no Public Cloud) is tolerated: that family is skipped. A consumer
-  key made before VPS support lacks the `/vps` rules and shows no VPS;
+  (say, no Public Cloud) is tolerated: that family is skipped, and the
+  listing forgets no server
+  ([state](state.md#servers-gone-from-their-providers)). A consumer key
+  made before VPS support lacks the `/vps` rules and shows no VPS;
   `ump config isp add` requests a new key with them.
 - Rename: Public Cloud instances and VPS can be renamed; dedicated servers
   cannot through the API (the display name is read-only there), and ump

@@ -404,3 +404,32 @@ func TestPowerAndRescue(t *testing.T) {
 		t.Errorf("disable_rescue should run once:\n%s", joined)
 	}
 }
+
+// TestDescribeGone: asked for a server it no longer has, the API answers
+// 404, which tells ump that the server is gone (provider.IsNotFound);
+// another failure does not.
+func TestDescribeGone(t *testing.T) {
+	status := http.StatusNotFound
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/servers/42") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.WriteHeader(status)
+		if status == http.StatusNotFound {
+			w.Write([]byte(`{"error":{"code":"not_found","message":"server with ID '42' not found"}}`))
+		}
+	}))
+	defer srv.Close()
+	p, err := Type.New("a", map[string]string{"token": "tok", "url": srv.URL}, provider.Options{HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := provider.Machine{ID: "42"}
+	if _, err := p.(provider.Describer).Describe(context.Background(), m); !provider.IsNotFound(err) {
+		t.Errorf("404: %v", err)
+	}
+	status = http.StatusInternalServerError
+	if _, err := p.(provider.Describer).Describe(context.Background(), m); err == nil || provider.IsNotFound(err) {
+		t.Errorf("500: %v", err)
+	}
+}

@@ -164,8 +164,16 @@ func (f *fakeProvider) SetPTR(ctx context.Context, m provider.Machine, ip netip.
 	return nil
 }
 
-// Describe adds a section; it fails for db-01 to exercise the error path.
+// Describe adds a section; it fails for db-01 to exercise the error path,
+// and answers 404 for a machine the account does not have.
 func (f *fakeProvider) Describe(ctx context.Context, m provider.Machine) (*provider.Details, error) {
+	ms, err := f.machines()
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(ms, func(h provider.Machine) bool { return h.ID == m.ID }) {
+		return nil, &provider.APIError{Provider: "fake", Status: 404, Code: "not_found", Message: "server not found"}
+	}
 	if m.ID == "2" {
 		return nil, &provider.APIError{Provider: "fake", Status: 500, Message: "describe failed"}
 	}
@@ -201,7 +209,45 @@ func (f *fakeProvider) List(ctx context.Context) ([]provider.Machine, error) {
 	return f.listMachines()
 }
 
+// fakeMore are machines the fake accounts have besides their own; of all
+// of them, fakeGone are those they no longer have, and fakeUnlisted those
+// their listings leave out although they have them (an answer cut
+// short), which Describe still finds. fakeSkipped makes the listings
+// partial (provider.Partial).
+var (
+	fakeMore     []provider.Machine
+	fakeGone     map[string]bool
+	fakeUnlisted map[string]bool
+	fakeSkipped  []string
+)
+
+// resetFakeMachines lets the fake accounts have their own machines
+// again, all listed, after the test.
+func resetFakeMachines(t *testing.T) {
+	t.Cleanup(func() { fakeMore, fakeGone, fakeUnlisted, fakeSkipped = nil, nil, nil, nil })
+}
+
+func (f *fakeProvider) Skipped() []string { return fakeSkipped }
+
 func (f *fakeProvider) listMachines() ([]provider.Machine, error) {
+	ms, err := f.machines()
+	return slices.DeleteFunc(ms, func(m provider.Machine) bool { return fakeUnlisted[m.ID] }), err
+}
+
+// machines are the machines the account has, listed or not.
+func (f *fakeProvider) machines() ([]provider.Machine, error) {
+	ms, err := f.ownMachines()
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range fakeMore {
+		m.Provider, m.Account = "fake", f.account
+		ms = append(ms, m)
+	}
+	return slices.DeleteFunc(ms, func(m provider.Machine) bool { return fakeGone[m.ID] }), nil
+}
+
+func (f *fakeProvider) ownMachines() ([]provider.Machine, error) {
 	if f.settings["password"] != "s3cret" {
 		return nil, &provider.APIError{Provider: "fake", Status: 401, Code: "UNAUTHORIZED", Message: "authentication failed"}
 	}

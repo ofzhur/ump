@@ -40,7 +40,10 @@ ansible` the Ansible inventory of the servers ump installed
 ([below](#what-ump-installed)). `--account NAME` restricts the
 listing, and references after the command select servers (`ump server
 list web-01 db-01`). An account whose API fails is reported on stderr
-and the others are still listed; the exit code says so (4).
+and the others are still listed; the exit code says so (4). A server
+of the state that its provider no longer has, asked for it alone, is
+forgotten, with its private addresses
+([state](state.md#servers-gone-from-their-providers)).
 
 A listing is served from the cache for 5 minutes (`cache_ttl` in the
 configuration, `UMP_CACHE_TTL` for one run, `0` turns it off), unless a

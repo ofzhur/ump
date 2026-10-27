@@ -119,6 +119,33 @@ func (d *Document) PrivateHolder(p Private, except ...string) string {
 	return ""
 }
 
+// Forget takes the servers of refs out of the document, each where its
+// entry is exactly as in was: the document as read before the listings
+// that found the servers gone from their providers, so that an entry
+// written since (an installation, an address given meanwhile by another
+// ump, for a server created after the listings began) stays. It returns
+// the entries it took out, by ref.
+func (d *Document) Forget(was *Document, refs []string) map[string]Server {
+	out := map[string]Server{}
+	for _, ref := range refs {
+		s, ok := d.Servers[ref]
+		old, had := was.Servers[ref]
+		if !ok || !had || !sameServer(s, old) {
+			continue
+		}
+		delete(d.Servers, ref)
+		out[ref] = s
+	}
+	return out
+}
+
+// sameServer reports whether two entries say the same, as written.
+func sameServer(a, b Server) bool {
+	x, xerr := yaml.Marshal(a)
+	y, yerr := yaml.Marshal(b)
+	return xerr == nil && yerr == nil && string(x) == string(y)
+}
+
 // Empty returns whether the record holds nothing.
 func (s Server) Empty() bool {
 	return s.Profile == "" && s.Price == nil && len(s.Attributes) == 0 && s.Note == "" && s.Installed == nil && len(s.Groups) == 0 && len(s.Private) == 0 && !s.StaleFacts

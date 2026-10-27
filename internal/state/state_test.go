@@ -182,3 +182,30 @@ func TestPrivate(t *testing.T) {
 		}
 	}
 }
+
+func TestForget(t *testing.T) {
+	// what was read before the listings: three servers gone, one of them
+	// written since by another ump, one taken out by hand meanwhile
+	was, err := Parse([]byte("servers:\n  fake/1:\n    profile: web\n    installed: {os: ubuntu-26.04, profile: web, hostname: web-01, at: 2026-10-14T11:58:30Z}\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}]\n  fake/2:\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.2}]\n  fake/3:\n    note: gone\n  fake/4:\n    attributes: {owner: alice}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Parse([]byte("servers:\n  fake/1:\n    profile: web\n    installed: {os: ubuntu-26.04, profile: web, hostname: web-01, at: 2026-10-14T11:58:30Z}\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}]\n  fake/2:\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.5}]\n  fake/4:\n    attributes: {owner: alice}\n  fake/5:\n    profile: db\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone := d.Forget(was, []string{"fake/1", "fake/2", "fake/3", "fake/5"})
+	if len(gone) != 1 || gone["fake/1"].Installed == nil || gone["fake/1"].Installed.Hostname != "web-01" || gone["fake/1"].Private[0].Address != "10.0.0.1" {
+		t.Errorf("forgotten: %+v", gone)
+	}
+	if _, ok := d.Servers["fake/1"]; ok {
+		t.Error("fake/1 kept")
+	}
+	// changed since, new since, not named: kept
+	if d.Servers["fake/2"].Private[0].Address != "10.0.0.5" || d.Servers["fake/5"].Profile != "db" || d.Servers["fake/4"].Attributes["owner"] != "alice" {
+		t.Errorf("kept: %+v", d.Servers)
+	}
+	if len(d.Forget(was, nil)) != 0 || len(d.Servers) != 3 {
+		t.Errorf("nothing named: %+v", d.Servers)
+	}
+}

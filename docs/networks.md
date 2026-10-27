@@ -137,9 +137,14 @@ $ ump server list                                      # the PRIVATE-IPV4 column
   installation holds it: a multiinstall from its question on, for every
   server of the run). Nothing runs: the next `ump provision` writes the
   host file with them.
-- **A server that is gone** from its provider keeps its entry in the
-  state, and its addresses with it, until the entry is removed (in
-  `state.yaml`; `ump server remove` does it for a server added by hand).
+- **A server that is gone** from its provider is forgotten at the first
+  complete listing without it, once the provider, asked for it alone,
+  has none, and its addresses are free again
+  ([state](state.md#servers-gone-from-their-providers)): `ump server
+  reinstall` and `multiinstall` list before they give addresses, so a
+  freed one can go to another server in the same run; `--dry-run`
+  plans without the server and forgets nothing. A server added by hand
+  keeps its addresses until `ump server remove`.
 
 ## Where the addresses show
 

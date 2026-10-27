@@ -143,6 +143,28 @@ func (s *Store) AsOf(account string, t time.Time) (*Snapshot, error) {
 	return nil, nil
 }
 
+// LastSeen returns the machine of ref (provider/id) as the account's
+// newest snapshot with it has it; false when none has it. A server the
+// listings leave out is asked for by the accounts that listed it.
+func (s *Store) LastSeen(account, ref string) (provider.Machine, bool) {
+	files, err := s.files(account)
+	if err != nil {
+		return provider.Machine{}, false
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		snap, err := s.load(account, files[i])
+		if err != nil {
+			continue
+		}
+		for _, m := range snap.Machines {
+			if m.Ref() == ref {
+				return m, true
+			}
+		}
+	}
+	return provider.Machine{}, false
+}
+
 // Oldest returns when the account's history begins.
 func (s *Store) Oldest(account string) (time.Time, bool) {
 	files, err := s.files(account)

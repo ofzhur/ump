@@ -306,21 +306,28 @@ vars:
   and `db`) to `inventory/groups.yml`.
 - Commit the files: the inventory is the repository's, and Ansible runs
   from it without ump. ump commits nothing.
-- ump does not remove the host file of a server that is gone: `git rm`
-  it (in a storage, delete its object), or every run finds it
-  unreachable. With the last one, remove `inventory/hosts/` too:
-  Ansible fails on an empty directory, and so does ump's syntax check.
+- The file of a server that is gone goes: ump wrote it (its header),
+  and its `ump_ref` names a server neither the state nor its provider,
+  asked for it, has any more
+  ([state](state.md#servers-gone-from-their-providers)), or one added
+  by hand that `ump server remove` took out. It is no longer in the way
+  of a new server with its hostname. With the last file,
+  `inventory/hosts/` goes too: Ansible fails on an empty directory, and
+  so does ump's syntax check. Every other file stays, and so does every
+  file while ump works with the mirror as it is (its pull failed): `git
+  rm` one whose server is gone (in a storage, delete its object), or
+  every run finds its host unreachable.
 
 A server installed with `--no-provision` from the repository gets its
 host file at once, under the fleet's lock: ump installed it, so it
-belongs in the inventory. Its names and host file are checked first, as
-above, which takes `ansible-inventory` in `PATH`; without it (or in a
-world-writable directory), and from anywhere else, the next `ump
-provision` from the repository writes it. A host file that cannot be
-written then (another's in its way meanwhile, the lock held too long)
-ends the reinstall with that exit status. With `--no-reboot` the host
-file waits for the next run too, and until the reboot the run finds the
-server unreachable.
+belongs in the inventory. The files of servers that are gone go then
+too. Its names and host file are checked first, as above, which takes
+`ansible-inventory` in `PATH`; without it (or in a world-writable
+directory), and from anywhere else, the next `ump provision` from the
+repository writes it. A host file that cannot be written then (another's
+in its way meanwhile, the lock held too long) ends the reinstall with
+that exit status. With `--no-reboot` the host file waits for the next
+run too, and until the reboot the run finds the server unreachable.
 
 ### Host files in a storage
 
@@ -561,7 +568,8 @@ $ ansible-playbook playbooks/.ump-provision-4711.yml --private-key ~/.config/ump
   and the same configuration file, so it lists the installation and the
   groups ump recorded before the run. It leaves the mirror of a [state
   backend](state.md#how-the-mirror-works) to this one: no pull, no
-  push, no lock to wait for.
+  push, no lock to wait for; and it forgets no server gone from its
+  provider, which this one decides.
 - Arguments after `--` go to `ansible-playbook` after ump's, and
   `--limit PATTERN` of `--hosts` after them: `--check --diff`, `-v`,
   `--tags`, `-e`. `--limit` and `--inventory` are refused there, in

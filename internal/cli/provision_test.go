@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/backend"
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/state"
 )
@@ -164,7 +165,7 @@ func TestWriteHostFile(t *testing.T) {
 	groups := []string{"common", "web"}
 
 	// no file yet: nothing in the way; the directory is created
-	if err := repo.checkHost(ctx, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
+	if _, err := repo.checkHost(ctx, nil, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
 		t.Errorf("no file: %v", err)
 	}
 	written, removed, err := repo.writeHostFile(ctx, "web-01", "fake/1", file("fake/1"))
@@ -181,29 +182,29 @@ func TestWriteHostFile(t *testing.T) {
 		t.Errorf("unchanged file rewritten")
 	}
 	// the server's own file is no conflict; another server's is
-	if err := repo.checkHost(ctx, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
+	if _, err := repo.checkHost(ctx, nil, "web-01", "fake/1", groups, "give another --hostname", ""); err != nil {
 		t.Errorf("own file: %v", err)
 	}
-	err = repo.checkHost(ctx, "web-01", "fake/2", groups, "give another --hostname", "")
+	_, err = repo.checkHost(ctx, nil, "web-01", "fake/2", groups, "give another --hostname", "")
 	if err == nil || exitCodeFor(err) != exitUsage || err.Error() != "inventory/hosts/web-01.yml is the host file of fake/1 (its ump_ref); give another --hostname, or remove the file if that server is gone" {
 		t.Errorf("conflict: %v", err)
 	}
 	os.WriteFile(filepath.Join(hosts, "db-01.yaml"), file("fake/2"), 0o644)
-	if err := repo.checkHost(ctx, "db-01", "fake/3", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "inventory/hosts/db-01.yaml is the host file of fake/2") {
+	if _, err := repo.checkHost(ctx, nil, "db-01", "fake/3", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "inventory/hosts/db-01.yaml is the host file of fake/2") {
 		t.Errorf("conflict with .yaml: %v", err)
 	}
 	// a hostname that is a group of the server, or Ansible's own
 	for _, name := range []string{"web", "common"} {
-		if err := repo.checkHost(ctx, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is also a group of the server: a host and a group with the same name make the group's plays match only the host; give another --hostname" {
+		if _, err := repo.checkHost(ctx, nil, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is also a group of the server: a host and a group with the same name make the group's plays match only the host; give another --hostname" {
 			t.Errorf("hostname %s: %v", name, err)
 		}
 	}
-	if err := repo.checkHost(ctx, "all", "fake/1", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "the hostname all is one of Ansible's own groups: a host and a group") {
+	if _, err := repo.checkHost(ctx, nil, "all", "fake/1", groups, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "the hostname all is one of Ansible's own groups: a host and a group") {
 		t.Errorf("hostname all: %v", err)
 	}
 	// a host of the controller's own names would take its plays
 	for _, name := range []string{"localhost", "127.0.0.1"} {
-		if err := repo.checkHost(ctx, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is one of Ansible's own names: plays and tasks for localhost would run on the server; give another --hostname" {
+		if _, err := repo.checkHost(ctx, nil, name, "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != "the hostname "+name+" is one of Ansible's own names: plays and tasks for localhost would run on the server; give another --hostname" {
 			t.Errorf("hostname %s: %v", name, err)
 		}
 	}
@@ -216,7 +217,7 @@ func TestWriteHostFile(t *testing.T) {
 	} {
 		os.WriteFile(filepath.Join(hosts, f.name), []byte(f.content), 0o644)
 		want := "inventory/hosts/" + f.name + " has no ump_ref: written by hand or by another tool; remove it, ump writes inventory/hosts/hand-01.yml"
-		if err := repo.checkHost(ctx, "hand-01", "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != want {
+		if _, err := repo.checkHost(ctx, nil, "hand-01", "fake/1", groups, "give another --hostname", ""); err == nil || exitCodeFor(err) != exitUsage || err.Error() != want {
 			t.Errorf("%s: %v", f.name, err)
 		}
 		if _, _, err := repo.writeHostFile(ctx, "hand-01", "fake/1", file("fake/1")); err == nil || err.Error() != want {
@@ -2042,5 +2043,337 @@ func TestNestedUmp(t *testing.T) {
 	check("mirror", "mirror", "web-09", "fake/1", []string{"db"}, true, false)
 	if data, _ := os.ReadFile(filepath.Join(backend, "state.yaml")); strings.Contains(string(data), "web-09") {
 		t.Errorf("the mirror's state reached the backend:\n%s", data)
+	}
+}
+
+// TestNestedForgetsNothing: where ump is the inventory, the Ansible runs
+// of a reinstall come before its listing, and the plugin's ump lists in
+// each; it forgets nothing, so that --dry-run leaves the state as it is
+// and nothing goes unsaid.
+func TestNestedForgetsNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh stands in for Ansible")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t)
+	resetFakeMachines(t)
+	e.write(goneConfig)
+	e.writeProfiles()
+	e.realAnsible = true
+	os.WriteFile(filepath.Join(e.repo, "inventory", "ump.yml"), []byte("plugin: ofzhur.ansible.ump\n"), 0o644)
+	bin, log := t.TempDir(), t.TempDir()
+	for _, prog := range []string{"ansible-playbook", "ansible-inventory"} {
+		os.WriteFile(filepath.Join(bin, prog), []byte(nestedAnsible), 0o755)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("UMP_TEST_BIN", self)
+	t.Setenv("UMP_TEST_LOG", log)
+	t.Setenv("UMP_TEST_MIRROR", "")
+	t.Setenv("UMP_TEST_BACKEND", "")
+	t.Setenv("UMP_TEST_HOLD", "")
+
+	// the listing cache knows fake/5, which its provider (the plugin's
+	// ump's too) no longer has
+	fakeMore = []provider.Machine{{ID: "5"}}
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	e.now = e.now.Add(10 * time.Minute)
+	e.writeState("servers:\n  fake/5:\n    installed: {os: ubuntu-26.04, profile: ubuntu-26.04, hostname: gone-01, at: 2026-10-01T08:00:00Z}\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}]\n")
+	before := e.readState()
+	resetFakePower()
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--dry-run")
+	if code != 0 || e.readState() != before {
+		t.Errorf("--dry-run: code %d, %q\n%s", code, errOut, e.readState())
+	}
+	runs := nestedRuns(t, log)
+	if len(runs) == 0 {
+		t.Fatal("no Ansible ran")
+	}
+	for _, r := range runs {
+		if r.stderr != "" {
+			t.Errorf("%s: %q", r.note, r.stderr)
+		}
+	}
+	// a listing of ump's own forgets it
+	e.now = e.now.Add(10 * time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 || errOut != "ump: gone-01 (fake/5) is gone from its provider: forgotten; 10.0.0.1 in default is free again\n" {
+		t.Errorf("list: code %d, %q", code, errOut)
+	}
+}
+
+// TestGoneHostFiles: the host files ump wrote for servers that are gone
+// are out of the way of the checks and go with the next write; the
+// others stay, and so does every file ump did not write.
+func TestGoneHostFiles(t *testing.T) {
+	ctx := context.Background()
+	repo := &infraRepo{dir: t.TempDir()}
+	hosts := filepath.Join(repo.dir, "inventory", "hosts")
+	os.MkdirAll(hosts, 0o755)
+	ump := func(hostname, ref string) string {
+		data, err := renderHostFile(hostname, []string{commonGroup}, hostVars{AnsibleHost: "192.0.2.1", UMPRef: ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	files := map[string]string{
+		"web-01.yml":  ump("web-01", "fake/1"),
+		"db-01.yml":   ump("db-01", "fake/2"),
+		"rack-07.yml": ump("rack-07", "manual/rack-07"),
+		"old-01.yml":  "# old-01: written by ump (ump server reinstall, ump server provision).\nplugin: ofzhur.ansible.host\ngroups: [common]\nvars:\n  ump_ref: fake/4\n",
+		"hand-01.yml": "plugin: ofzhur.ansible.host\ngroups: [common]\nvars:\n  ump_ref: fake/3\n",
+		"copy-01.yml": ump("db-01", "fake/3"),
+		"db-02.yaml":  ump("db-02", "fake/3"),
+		"live-01.yml": ump("live-01", "fake/6"),
+	}
+	for name, content := range files {
+		os.WriteFile(filepath.Join(hosts, name), []byte(content), 0o644)
+	}
+	// fake/2, fake/3 and fake/4 are gone; fake/6, out of the state, is
+	// not (its provider still has it)
+	gone := func(ref string) bool { return ref == "fake/2" || ref == "fake/3" || ref == "fake/4" }
+	h, err := repo.readHostFiles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.forget(gone)
+	if got := strings.Join(sortedNames(h.gone), " "); got != "db-01.yml old-01.yml" {
+		t.Errorf("gone: %s", got)
+	}
+	if got := h.goneHosts(); len(got) != 2 || got["db-01"] != "fake/2" || got["old-01"] != "fake/4" {
+		t.Errorf("gone hosts: %v", got)
+	}
+	// a new server may take the hostname of a gone one, not that of one
+	// that is not gone
+	if err := h.check("db-01", "fake/5", "give another --hostname"); err != nil {
+		t.Errorf("the hostname of a gone server: %v", err)
+	}
+	if hf, err := repo.checkHost(ctx, gone, "db-01", "fake/5", []string{commonGroup}, "give another --hostname", ""); err != nil || len(hf.gone) != 2 {
+		t.Errorf("checkHost, the hostname of a gone server: %v", err)
+	}
+	if _, err := repo.checkHost(ctx, nil, "db-01", "fake/5", []string{commonGroup}, "give another --hostname", ""); err == nil {
+		t.Error("checkHost without gone let the file go")
+	}
+	if _, err := repo.checkHost(ctx, gone, "live-01", "fake/5", []string{commonGroup}, "give another --hostname", ""); err == nil || !strings.Contains(err.Error(), "inventory/hosts/live-01.yml is the host file of fake/6") {
+		t.Errorf("checkHost, the hostname of a server not gone: %v", err)
+	}
+	var errb bytes.Buffer
+	a := &app{stderr: &errb}
+	if err := a.removeGone(ctx, h); err != nil || errb.String() != "Removed inventory/hosts/db-01.yml: fake/2 is gone.\nRemoved inventory/hosts/old-01.yml: fake/4 is gone.\n" {
+		t.Errorf("removed: %v %q", err, errb.String())
+	}
+	var names []string
+	entries, _ := os.ReadDir(hosts)
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, " ") != "copy-01.yml db-02.yaml hand-01.yml live-01.yml rack-07.yml web-01.yml" {
+		t.Errorf("left: %v", names)
+	}
+
+	// when ump is the inventory, the files are the user's to remove
+	all := func(string) bool { return true }
+	repo.plugin = "inventory/ump.yml"
+	h, _ = repo.readHostFiles(ctx)
+	h.forget(all)
+	if len(h.gone) != 0 {
+		t.Errorf("gone beside the plugin: %v", sortedNames(h.gone))
+	}
+	repo.plugin = ""
+
+	// with the last host file the directory goes, unless something else
+	// is in it
+	for _, n := range []string{"copy-01.yml", "db-02.yaml", "hand-01.yml"} {
+		os.Remove(filepath.Join(hosts, n))
+	}
+	os.WriteFile(filepath.Join(hosts, ".keep"), nil, 0o644)
+	h, _ = repo.readHostFiles(ctx)
+	h.forget(all)
+	errb.Reset()
+	if err := a.removeGone(ctx, h); err != nil || strings.Count(errb.String(), "Removed ") != 3 {
+		t.Errorf("the last ones: %v %q", err, errb.String())
+	}
+	if _, err := os.Stat(hosts); err != nil {
+		t.Errorf("the directory with .keep in it: %v", err)
+	}
+	os.Remove(filepath.Join(hosts, ".keep"))
+	os.WriteFile(filepath.Join(hosts, "web-01.yml"), []byte(ump("web-01", "fake/1")), 0o644)
+	h, _ = repo.readHostFiles(ctx)
+	h.forget(all)
+	if err := a.removeGone(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(hosts); err == nil {
+		t.Error("the empty directory stays")
+	}
+}
+
+// TestGoneServer: for the host files, a server is gone when the state no
+// longer has it and its provider, asked for it, has none either; one
+// added by hand when ump server remove took it out; none while the
+// state is the mirror as it was.
+func TestGoneServer(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakeMachines(t)
+	e.write(goneConfig)
+	// the listing cache knows fake/1, fake/2 and fake/9
+	fakeMore = []provider.Machine{{ID: "9", Name: "old-01"}}
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeGone = map[string]bool{"9": true}
+	cfg, err := config.Load(e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := state.Parse([]byte("servers:\n  fake/1: {note: listed}\nmanual:\n  rack-07: {ipv4: 192.0.2.7}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errb bytes.Buffer
+	a := &app{stderr: &errb, configFlag: e.cfgPath, now: func() time.Time { return e.now }}
+	gone := a.goneServer(context.Background(), cfg, doc)
+	for ref, want := range map[string]bool{
+		"fake/1":         false, // in the state
+		"fake/2":         false, // out of the state, but its provider has it
+		"fake/9":         true,  // its provider has it no more
+		"fake/8":         false, // no account listed it before
+		"manual/rack-07": false,
+		"manual/rack-08": true,
+	} {
+		if got := gone(ref); got != want {
+			t.Errorf("%s: gone %v", ref, got)
+		}
+	}
+	if a.goneServer(context.Background(), cfg, nil) != nil {
+		t.Error("without a state")
+	}
+	a.pullFailed = true
+	if a.goneServer(context.Background(), cfg, doc) != nil {
+		t.Error("the mirror as it was")
+	}
+	if errb.Len() != 0 {
+		t.Errorf("stderr: %q", errb.String())
+	}
+}
+
+// TestProvisionGone: ump provision and the host files step of
+// reinstall remove the host file of a server gone from its provider,
+// once the listing forgot it; that of a server taken out of the state
+// while its provider has it stays, and so does every host file while
+// the state is the mirror as it was.
+func TestProvisionGone(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakeMachines(t)
+	e.write(goneConfig)
+	e.writeProfiles()
+	e.directRoot = true
+	for _, name := range []string{"web-01", "db-01"} {
+		resetFakePower()
+		if _, errOut, code := e.run("", false, "server", "reinstall", name, "--yes", "--no-provision"); code != 0 {
+			t.Fatalf("reinstall %s: code %d, %q", name, code, errOut)
+		}
+	}
+	dbFile, webFile := e.hostFile("db-01.yml"), e.hostFile("web-01.yml")
+	hand := "plugin: ofzhur.ansible.host\ngroups: [common]\nvars:\n  ansible_host: 192.0.2.1\n  ump_ref: fake/7\n"
+	os.WriteFile(filepath.Join(e.repo, "inventory", "hosts", "hand-01.yml"), []byte(hand), 0o644)
+
+	// db-01 is gone; --hosts naming it alone matches no host of the
+	// inventory as it will be, and nothing is written
+	e.write(goneConfig + variantB)
+	e.now = e.now.Add(time.Minute)
+	_, errOut, code := e.run("", false, "provision", "--yes", "--hosts", "db-01")
+	if code != 2 || errOut != "ump: db-01 (fake/2) is gone from its provider: forgotten; 10.0.0.2 in default is free again\nump: --hosts db-01 matches no host of the inventory; nothing ran\n" || e.hostFile("db-01.yml") != dbFile || e.hostFile("web-01.yml") != webFile {
+		t.Errorf("--hosts db-01: code %d, %q", code, errOut)
+	}
+	// so does that of reinstall, before anything is changed
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--hosts", "db-01")
+	if code != 2 || !strings.HasSuffix(errOut, "ump: --hosts db-01 matches no host of the inventory with web-01 in common; nothing was changed\n") || len(fakePower.actions) != 0 || e.hostFile("db-01.yml") != dbFile {
+		t.Errorf("reinstall --hosts db-01: code %d, %q, %v", code, errOut, fakePower.actions)
+	}
+	// ump provision removes its host file
+	_, errOut, code = e.run("", false, "provision", "--yes")
+	if code != 0 || !strings.HasPrefix(errOut, "Wrote inventory/hosts/web-01.yml: web-01 in common.\nRemoved inventory/hosts/db-01.yml: fake/2 is gone.\nProvisioning: 00-base on the fleet (2 hosts) ...\n") {
+		t.Errorf("provision: code %d, %q", code, errOut)
+	}
+	if e.hostFile("db-01.yml") != "" || e.hostFile("web-01.yml") == "" || e.hostFile("hand-01.yml") != hand {
+		t.Errorf("host files: db-01 %q, web-01 %q, hand-01 %q", e.hostFile("db-01.yml"), e.hostFile("web-01.yml"), e.hostFile("hand-01.yml"))
+	}
+
+	// a host file left of it is no longer in the way of a new server with
+	// its hostname, which replaces it; another left goes
+	os.WriteFile(filepath.Join(e.repo, "inventory", "hosts", "db-01.yml"), []byte(dbFile), 0o644)
+	os.WriteFile(filepath.Join(e.repo, "inventory", "hosts", "db-02.yml"), []byte(strings.ReplaceAll(dbFile, "db-01", "db-02")), 0o644)
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "reinstall", "cache-01", "--hostname", "db-01", "--yes", "--no-provision")
+	if code != 0 || !strings.Contains(errOut, "Wrote inventory/hosts/db-01.yml: db-01 in common.\nRemoved inventory/hosts/db-02.yml: fake/2 is gone.\n") || e.hostFile("db-02.yml") != "" || !strings.Contains(e.hostFile("db-01.yml"), "  ump_ref: fake/3\n") || privateOf(t, e, "fake/3") != "10.0.0.2 default 10.0.0.0/24" {
+		t.Errorf("the hostname of a gone server: code %d, %q\n%s", code, errOut, e.hostFile("db-01.yml"))
+	}
+
+	// servers taken out of the state by hand, which their provider still
+	// has: their host files stay
+	os.Remove(filepath.Join(e.repo, "inventory", "hosts", "hand-01.yml"))
+	e.writeState("servers: {}\n")
+	_, errOut, code = e.run("", false, "provision", "--yes")
+	if code != 0 || strings.Contains(errOut, "Removed ") || e.hostFile("db-01.yml") == "" || e.hostFile("web-01.yml") == "" {
+		t.Errorf("by hand: code %d, %q", code, errOut)
+	}
+	// gone from their provider too: their host files go, and with the
+	// last one the directory
+	fakeGone = map[string]bool{"1": true, "3": true}
+	e.now = e.now.Add(time.Minute)
+	_, errOut, code = e.run("", false, "provision", "--yes")
+	if !strings.Contains(errOut, "Removed inventory/hosts/db-01.yml: fake/3 is gone.\nRemoved inventory/hosts/web-01.yml: fake/1 is gone.\n") {
+		t.Errorf("gone: code %d, %q", code, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(e.repo, "inventory", "hosts")); err == nil {
+		t.Error("inventory/hosts stays empty")
+	}
+}
+
+// TestProvisionGoneMirror: the backend does not answer the pull, and the
+// mirror is older than the repository: the host file of a server that
+// the mirror's state lacks stays, and the server is provisioned.
+func TestProvisionGoneMirror(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads the directory anyway")
+	}
+	e := newTestEnv(t)
+	e.write(goneConfig)
+	e.writeProfiles()
+	e.directRoot = true
+	backend := filepath.Join(t.TempDir(), "backend")
+	os.MkdirAll(filepath.Join(backend, "profiles"), 0o700)
+	for _, name := range profileFiles {
+		data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", name))
+		os.WriteFile(filepath.Join(backend, "profiles", name), data, 0o600)
+	}
+	t.Setenv("UMP_STATE", "file://"+backend)
+	resetFakePower()
+	if _, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision"); code != 0 {
+		t.Fatalf("reinstall web-01: code %d, %q", code, errOut)
+	}
+	// another machine installs db-01 (fake/2): its record goes to the
+	// backend, its host file comes with git pull
+	data, _ := os.ReadFile(filepath.Join(backend, "state.yaml"))
+	st := strings.Replace(string(data), "servers:\n", "servers:\n  fake/2:\n    installed: {os: ubuntu-26.04, profile: ubuntu-26.04, hostname: db-01, at: 2026-10-12T08:30:00Z}\n", 1)
+	os.WriteFile(filepath.Join(backend, "state.yaml"), []byte(st), 0o600)
+	hf, err := renderHostFile("db-01", []string{commonGroup}, hostVars{AnsibleHost: "203.0.113.11", UMPRef: "fake/2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(e.repo, "inventory", "hosts", "db-01.yml"), hf, 0o644)
+	e.now = e.now.Add(time.Minute)
+	os.Chmod(backend, 0)
+	t.Cleanup(func() { os.Chmod(backend, 0o700) })
+	_, errOut, code := e.run("", false, "provision", "--yes")
+	if code != 0 || !strings.Contains(errOut, "working with the mirror as it is") || strings.Contains(errOut, "Removed ") || string(hf) != e.hostFile("db-01.yml") || !strings.Contains(errOut, "(2 hosts)") {
+		t.Errorf("provision: code %d, %q", code, errOut)
 	}
 }

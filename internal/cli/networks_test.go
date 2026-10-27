@@ -3,13 +3,17 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ofzhur/ump/internal/backend"
+	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/state"
@@ -1097,5 +1102,433 @@ func TestConfigNetwork(t *testing.T) {
 	out, errOut, code := e.run("", false, "config", "net", "list", "--no-headers")
 	if code != 0 || errOut != "Downloaded the published networks.yaml into "+dir+".\n" || !strings.HasPrefix(out, "default   10.0.0.0/24") {
 		t.Errorf("download: code %d, %q\n%s", code, errOut, out)
+	}
+}
+
+// goneConfig is one account of type fake, the only one: its complete
+// listings say which servers of the type are gone.
+const goneConfig = "accounts:\n  one:\n    type: fake\n    login: bob\n    password: {env: FAKE_PASS}\n"
+
+// writeState writes the state file of the local home.
+func (e *testEnv) writeState(text string) {
+	e.t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")
+	os.MkdirAll(dir, 0o700)
+	if err := os.WriteFile(filepath.Join(dir, "state.yaml"), []byte(text), 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func TestMissingServers(t *testing.T) {
+	was, err := state.Parse([]byte("servers:\n  fake/1: {note: listed}\n  fake/2: {note: gone}\n  fake/3: {note: listed by two}\n  other/1: {note: no account of its type}\n  manual/rack-07: {note: by hand}\nmanual:\n  rack-07: {ipv4: 192.0.2.7}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := func(account string, ids ...string) listResult {
+		r := listResult{account: account, typ: "fake"}
+		for _, id := range ids {
+			r.machines = append(r.machines, provider.Machine{Provider: "fake", Account: account, ID: id})
+		}
+		return r
+	}
+	failed := listed("two")
+	failed.err = errors.New("account two: authentication failed")
+	stale := listed("two", "3")
+	stale.stale, stale.cachedAt = errors.New("account two: offline"), time.Now()
+	cached := listed("two", "3")
+	cached.cachedAt = time.Now()
+	partial := listed("two", "3")
+	partial.skipped = []string{"VPS"}
+	manualList := listResult{account: "manual", typ: "manual", machines: []provider.Machine{{Provider: "manual", Account: "manual", ID: "rack-07"}}}
+	for _, c := range []struct {
+		what     string
+		accounts []string
+		results  []listResult
+		skip     map[string]bool
+		gone     string
+		decided  string
+	}{
+		{"one account", []string{"one"}, []listResult{listed("one", "1", "3"), manualList}, nil, "fake/2", "fake"},
+		{"two accounts, in one of them or in neither", []string{"one", "two"}, []listResult{listed("one", "1"), listed("two", "3")}, nil, "fake/2", "fake"},
+		{"two accounts, in neither", []string{"one", "two"}, []listResult{listed("one"), listed("two")}, nil, "fake/1 fake/2 fake/3", "fake"},
+		{"a failed account", []string{"one", "two"}, []listResult{listed("one", "1"), failed}, nil, "", ""},
+		{"a listing from the cache, the provider offline", []string{"one", "two"}, []listResult{listed("one", "1"), stale}, nil, "", ""},
+		{"a listing from the cache, fresh", []string{"one", "two"}, []listResult{listed("one", "1"), cached}, nil, "", ""},
+		{"an account left out (--account)", []string{"one", "two"}, []listResult{listed("one", "1")}, nil, "", ""},
+		{"a partial listing", []string{"one", "two"}, []listResult{listed("one", "1"), partial}, nil, "", ""},
+		{"decided before in the run", []string{"one"}, []listResult{listed("one", "1")}, map[string]bool{"fake": true}, "", ""},
+	} {
+		cfg := &config.Config{Accounts: map[string]config.Account{"manual": {Type: "manual"}}}
+		for _, n := range c.accounts {
+			cfg.Accounts[n] = config.Account{Type: "fake"}
+		}
+		gone, decided := missingServers(cfg, was, c.results, c.skip)
+		if strings.Join(gone, " ") != c.gone || strings.Join(decided, " ") != c.decided {
+			t.Errorf("%s: gone %v, decided %v; want %q, %q", c.what, gone, decided, c.gone, c.decided)
+		}
+	}
+
+	// the notice: the name, the addresses it frees
+	s := state.Server{Private: []state.Private{{Network: "default", CIDR: "10.0.0.0/24", Address: "10.0.0.2"}}}
+	for _, c := range []struct {
+		name   string
+		s      state.Server
+		dryRun bool
+		want   string
+	}{
+		{"hrobot-test-i7-7700", s, false, "ump: hrobot-test-i7-7700 (hetzner-robot/3099248) is gone from its provider: forgotten; 10.0.0.2 in default is free again"},
+		{"", s, false, "ump: hetzner-robot/3099248 is gone from its provider: forgotten; 10.0.0.2 in default is free again"},
+		{"db-01", state.Server{Private: append(s.Private, state.Private{Network: "db", CIDR: "10.0.1.0/24", Address: "10.0.1.2"})}, false, "ump: db-01 (hetzner-robot/3099248) is gone from its provider: forgotten; 10.0.0.2 in default, 10.0.1.2 in db are free again"},
+		{"db-01", state.Server{Note: "no address"}, false, "ump: db-01 (hetzner-robot/3099248) is gone from its provider: forgotten"},
+		{"db-01", s, true, "ump: db-01 (hetzner-robot/3099248) is gone from its provider: it would be forgotten (dry run); 10.0.0.2 in default would be free again"},
+		{"db-01", state.Server{}, true, "ump: db-01 (hetzner-robot/3099248) is gone from its provider: it would be forgotten (dry run)"},
+	} {
+		if got := goneNotice(c.name, "hetzner-robot/3099248", c.s, c.dryRun); got != c.want {
+			t.Errorf("notice:\n%s\nwant\n%s", got, c.want)
+		}
+	}
+}
+
+// TestForgetGone: a server of the state that every account of its
+// provider type, listed completely, leaves out, and that the account
+// which listed it before no longer has, is forgotten, with its
+// addresses; a listing that is not complete leaves everything, and so
+// do a server its provider still has, one no account of the
+// configuration listed before, and an entry written since the state was
+// read.
+func TestForgetGone(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakeMachines(t)
+	e.write(goneConfig)
+	// the listing cache knows db-01 and old-01 (fake/9), which is gone
+	// from its provider then
+	fakeMore = []provider.Machine{{ID: "9", Name: "old-01"}}
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	const before = `servers:
+  fake/1:
+    installed: {os: ubuntu-26.04, profile: ubuntu-26.04, hostname: web-01, at: 2026-10-12T08:00:00Z}
+    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}]
+  fake/2:
+    attributes: {owner: alice}
+    private_networks:
+      - {network: default, cidr: 10.0.0.0/24, address: 10.0.0.2}
+      - {network: db, cidr: 10.0.1.0/24, address: 10.0.1.2}
+  fake/9:
+    installed: {os: debian-13, profile: debian-13, hostname: old-01, at: 2026-10-01T08:00:00Z}
+    groups: [db]
+    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.9}]
+  manual/rack-07:
+    note: KVM at 192.0.2.250
+manual:
+  rack-07: {ipv4: 192.0.2.7}
+`
+	e.writeState(before)
+	refs := func() string {
+		d, err := state.Parse([]byte(e.readState()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(slices.Sorted(maps.Keys(d.Servers)), " ") + " | " + strings.Join(slices.Sorted(maps.Keys(d.Manual)), " ")
+	}
+	all := "fake/1 fake/2 fake/9 manual/rack-07 | rack-07"
+
+	// a listing served from the cache, a failed account, an account left
+	// out, a partial listing: nothing is forgotten
+	e.write(goneConfig + variantB)
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 || strings.Contains(errOut, "gone") || refs() != all {
+		t.Errorf("from the cache: code %d, %q, %s", code, errOut, refs())
+	}
+	e.write(testConfig + variantB)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 4 || strings.Contains(errOut, "gone") || refs() != all {
+		t.Errorf("a failed account: code %d, %q, %s", code, errOut, refs())
+	}
+	two := goneConfig + variantB + "  three:\n    type: fake\n    login: carol\n    password: {env: FAKE_PASS}\n"
+	e.write(two)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh", "--account", "one"); code != 0 || strings.Contains(errOut, "gone") || refs() != all {
+		t.Errorf("--account: code %d, %q, %s", code, errOut, refs())
+	}
+	fakeSkipped = []string{"VPS"}
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || strings.Contains(errOut, "gone") || refs() != all {
+		t.Errorf("partial: code %d, %q, %s", code, errOut, refs())
+	}
+	fakeSkipped = nil
+	// an account whose provider fails is listed from its last listing:
+	// that decides nothing either
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh", "--account", "three"); code != 0 || strings.Contains(errOut, "gone") {
+		t.Errorf("--account three: code %d, %q", code, errOut)
+	}
+	e.write(goneConfig + variantB + "  three:\n    type: fake\n    login: carol\n    password: wrong\n")
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 4 || !strings.Contains(errOut, "ump: account three: ") || strings.Contains(errOut, "gone") || refs() != all {
+		t.Errorf("from the last listing: code %d, %q, %s", code, errOut, refs())
+	}
+	e.write(two)
+
+	// two accounts of the type: one lists fake/1 and fake/3, the other
+	// fake/1 and fake/2; fake/9 is in neither, and the account that
+	// listed it before has it no more: it goes, with its address; stdout
+	// stays the listing's
+	out, errOut, code := e.run("", false, "server", "list", "--refresh", "-o", "json")
+	var listing []map[string]any
+	if code != 0 || json.Unmarshal([]byte(out), &listing) != nil || len(listing) != 5 || errOut != "ump: old-01 (fake/9) is gone from its provider: forgotten; 10.0.0.9 in default is free again\n" {
+		t.Errorf("two accounts: code %d, %q\n%s", code, errOut, out)
+	}
+	if refs() != "fake/1 fake/2 manual/rack-07 | rack-07" {
+		t.Errorf("two accounts: %s", refs())
+	}
+
+	// a listing that leaves out servers its provider still has (an
+	// answer cut short, a page shifted): asked for them, the provider has
+	// one, and cannot say for the other; both stay
+	e.write(goneConfig)
+	fakeUnlisted = map[string]bool{"1": true, "2": true}
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: web-01 (fake/1) is missing from the listings but kept: account one still has it\nump: db-01 (fake/2) is missing from the listings but kept: account one: fake: describe failed (HTTP 500)\n" || refs() != "fake/1 fake/2 manual/rack-07 | rack-07" {
+		t.Errorf("left out: code %d, %q, %s", code, errOut, refs())
+	}
+	fakeUnlisted = nil
+
+	// one account: fake/2 goes, named as the listing cache last had it;
+	// the server added by hand stays, and so does the one listed
+	e.write(goneConfig + variantB)
+	out, errOut, code = e.run("", false, "server", "list", "--refresh", "-o", "yaml")
+	if code != 0 || strings.Contains(out, "ump:") || errOut != "ump: db-01 (fake/2) is gone from its provider: forgotten; 10.0.0.2 in default, 10.0.1.2 in db are free again\n" {
+		t.Errorf("one account: code %d, %q\n%s", code, errOut, out)
+	}
+	if refs() != "fake/1 manual/rack-07 | rack-07" || privateOf(t, e, "fake/1") != "10.0.0.1 default 10.0.0.0/24" {
+		t.Errorf("one account:\n%s", e.readState())
+	}
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || strings.Contains(errOut, "gone") {
+		t.Errorf("again: code %d, %q", code, errOut)
+	}
+
+	// a server only an account taken out of the configuration listed
+	// (as one of another configuration sharing the state) stays
+	e.write("accounts:\n  three:\n    type: fake\n    login: carol\n    password: {env: FAKE_PASS}\n")
+	fakeMore = []provider.Machine{{ID: "8", Name: "other-01"}}
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 {
+		t.Fatalf("three: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	e.now = e.now.Add(time.Minute)
+	store := &state.Store{Backend: &backend.Local{Dir: filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump")}}
+	if err := store.Update(context.Background(), func(d *state.Document) error {
+		d.Servers["fake/8"] = state.Server{Profile: "web"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.write(goneConfig + variantB)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: fake/8 is missing from the listings but kept: no account of this configuration listed it before\n" || refs() != "fake/1 fake/8 manual/rack-07 | rack-07" {
+		t.Errorf("another configuration's: code %d, %q, %s", code, errOut, refs())
+	}
+	if err := store.Update(context.Background(), func(d *state.Document) error {
+		delete(d.Servers, "fake/8")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// written while the listing ran: fake/4 changed by another ump, and
+	// fake/6 new (installed on a server created after the listing
+	// began); they stay, fake/5, as it was read, goes; -o ansible
+	// forgets as well. All three were listed before, and are gone now.
+	fakeMore = []provider.Machine{{ID: "4"}, {ID: "5"}, {ID: "6"}}
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	e.now = e.now.Add(time.Minute)
+	if err := store.Update(context.Background(), func(d *state.Document) error {
+		d.Servers["fake/4"] = state.Server{Profile: "web"}
+		d.Servers["fake/5"] = state.Server{Profile: "web"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	listGate = func(typ string, start bool) {
+		once.Do(func() {
+			if err := store.Update(context.Background(), func(d *state.Document) error {
+				d.Servers["fake/4"] = state.Server{Profile: "web", Private: []state.Private{{Network: "default", CIDR: "10.0.0.0/24", Address: "10.0.0.4"}}}
+				d.Servers["fake/6"] = state.Server{Private: []state.Private{{Network: "default", CIDR: "10.0.0.0/24", Address: "10.0.0.6"}}}
+				return nil
+			}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	t.Cleanup(func() { listGate = nil })
+	out, errOut, code = e.run("", false, "server", "list", "--refresh", "-o", "ansible")
+	listGate = nil
+	if code != 0 || !strings.HasPrefix(out, "{") || errOut != "ump: fake/5 is gone from its provider: forgotten\n" {
+		t.Errorf("written meanwhile: code %d, %q\n%s", code, errOut, out)
+	}
+	if refs() != "fake/1 fake/4 fake/6 manual/rack-07 | rack-07" || privateOf(t, e, "fake/4") != "10.0.0.4 default 10.0.0.0/24" {
+		t.Errorf("written meanwhile:\n%s", e.readState())
+	}
+	// the next listing finds them gone
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: fake/4 is gone from its provider: forgotten; 10.0.0.4 in default is free again\nump: fake/6 is gone from its provider: forgotten; 10.0.0.6 in default is free again\n" {
+		t.Errorf("next: code %d, %q", code, errOut)
+	}
+	// --cached asks no provider, and decides nothing
+	if err := store.Update(context.Background(), func(d *state.Document) error {
+		d.Servers["fake/7"] = state.Server{Profile: "web"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := e.run("", false, "server", "list", "--cached"); code != 0 || strings.Contains(errOut, "gone") || refs() != "fake/1 fake/7 manual/rack-07 | rack-07" {
+		t.Errorf("--cached: code %d, %q, %s", code, errOut, refs())
+	}
+
+	// an ump that ump runs (the inventory plugin's, UMP_PARENT) forgets
+	// nothing and says nothing: its parent lists in the same run
+	fakeMore = []provider.Machine{{ID: "7"}}
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	e.now = e.now.Add(time.Minute)
+	t.Setenv(parentEnv, "local")
+	if out, errOut, code := e.run("", false, "server", "list", "--refresh", "-o", "ansible"); code != 0 || !strings.HasPrefix(out, "{") || errOut != "" || refs() != "fake/1 fake/7 manual/rack-07 | rack-07" {
+		t.Errorf("nested: code %d, %q, %s", code, errOut, refs())
+	}
+	t.Setenv(parentEnv, "")
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: fake/7 is gone from its provider: forgotten\n" || refs() != "fake/1 manual/rack-07 | rack-07" {
+		t.Errorf("not nested: code %d, %q, %s", code, errOut, refs())
+	}
+}
+
+// TestGoneFreesAddresses: the listing of reinstall and multiinstall
+// forgets the servers gone from their providers before the addresses
+// are given, so that theirs are free in the same run; --dry-run says so
+// and forgets nothing.
+func TestGoneFreesAddresses(t *testing.T) {
+	e := newTestEnv(t)
+	resetFakeMachines(t)
+	e.write(goneConfig)
+	e.writeProfiles()
+	e.directRoot = true
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ump", "profiles")
+	// the listing cache knows fake/5 and fake/6, gone from their provider
+	// then
+	fakeMore = []provider.Machine{{ID: "5"}, {ID: "6"}}
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	fakeMore = nil
+	e.now = e.now.Add(10 * time.Minute)
+	gone := "  fake/5:\n    installed: {os: ubuntu-26.04, profile: ubuntu-26.04, hostname: gone-01, at: 2026-10-01T08:00:00Z}\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.1}]\n"
+	e.writeState("servers:\n" + gone)
+	before := e.readState()
+	resetFakePower()
+	_, errOut, code := e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision", "--dry-run")
+	if code != 0 || !strings.Contains(errOut, "ump: gone-01 (fake/5) is gone from its provider: it would be forgotten (dry run); 10.0.0.1 in default would be free again\n") || !strings.Contains(errOut, "Installation plan for ubuntu-26.04 (profile ubuntu-26.04 from "+filepath.Join(dir, "ubuntu-26.04.yaml")+", layout lvm-linear, private address 10.0.0.1 in default) on web-01:\n") || e.readState() != before {
+		t.Errorf("--dry-run: code %d, %q\n%s", code, errOut, e.readState())
+	}
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--yes", "--no-provision")
+	if code != 0 || !strings.Contains(errOut, "ump: gone-01 (fake/5) is gone from its provider: forgotten; 10.0.0.1 in default is free again\n") || privateOf(t, e, "fake/1") != "10.0.0.1 default 10.0.0.0/24" || strings.Contains(e.readState(), "fake/5") {
+		t.Errorf("reinstall: code %d, %q\n%s", code, errOut, e.readState())
+	}
+
+	// multiinstall, an address given by hand that a gone server had
+	e.writeState(strings.Replace(e.readState(), "servers:\n", "servers:\n"+strings.ReplaceAll(strings.ReplaceAll(gone, "fake/5", "fake/6"), "10.0.0.1", "10.0.0.7"), 1))
+	e.machines = map[string]*fakeMachine{}
+	e.now = e.now.Add(10 * time.Minute)
+	resetFakePower()
+	_, errOut, code = e.run("", false, "server", "multiinstall", "--plan", writePlan(t, "servers:\n  web-01: {}\n  db-01:\n    private-ip: 10.0.0.7\n"), "--yes", "--no-provision")
+	if code != 0 || !strings.Contains(errOut, "ump: gone-01 (fake/6) is gone from its provider: forgotten; 10.0.0.7 in default is free again\n") || privateOf(t, e, "fake/2") != "10.0.0.7 default 10.0.0.0/24" || privateOf(t, e, "fake/1") != "10.0.0.1 default 10.0.0.0/24" || strings.Contains(e.readState(), "fake/6") {
+		t.Errorf("multiinstall: code %d, %q\n%s", code, errOut, e.readState())
+	}
+}
+
+// TestGoneAskedAlone: a Hetzner Cloud listing that leaves out a server
+// its project still has (a page shifted by a server deleted meanwhile,
+// an answer without the list) forgets nothing: asked for the server
+// alone, the API has it. Once it answers 404, the server is forgotten.
+func TestGoneAskedAlone(t *testing.T) {
+	var mu sync.Mutex
+	var ids []int
+	for id := 1; id <= 51; id++ {
+		ids = append(ids, id)
+	}
+	deleteDuring, empty := 0, false
+	server := func(id int) map[string]any {
+		return map[string]any{"id": id, "name": fmt.Sprintf("s-%d", id), "status": "running",
+			"public_net": map[string]any{"ipv4": map[string]any{"ip": fmt.Sprintf("192.0.2.%d", id)}}}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if empty {
+			w.Write([]byte(`{}`))
+			return
+		}
+		if id, ok := strings.CutPrefix(r.URL.Path, "/servers/"); ok {
+			n, _ := strconv.Atoi(id)
+			if !slices.Contains(ids, n) {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error":{"code":"not_found","message":"server not found"}}`))
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"server": server(n)})
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		start, end := min((page-1)*per, len(ids)), min(page*per, len(ids))
+		var servers []map[string]any
+		for _, id := range ids[start:end] {
+			servers = append(servers, server(id))
+		}
+		var next any
+		if end < len(ids) {
+			next = page + 1
+		}
+		json.NewEncoder(w).Encode(map[string]any{"servers": servers, "meta": map[string]any{"pagination": map[string]any{"next_page": next}}})
+		if page == 1 && deleteDuring != 0 {
+			// a server of the first page is deleted while the listing runs
+			ids = slices.DeleteFunc(ids, func(id int) bool { return id == deleteDuring })
+		}
+	}))
+	defer srv.Close()
+
+	e := newTestEnv(t)
+	e.write("accounts:\n  h:\n    type: hetzner-cloud\n    token: t\n    url: " + srv.URL + "\n")
+	if _, errOut, code := e.run("", false, "server", "list"); code != 0 {
+		t.Fatalf("list: code %d, %q", code, errOut)
+	}
+	e.writeState("servers:\n  hetzner-cloud/50: {note: listed before}\n  hetzner-cloud/51:\n    installed: {os: ubuntu-26.04, profile: ubuntu-26.04, hostname: s-51, at: 2026-10-01T08:00:00Z}\n    private_networks: [{network: default, cidr: 10.0.0.0/24, address: 10.0.0.51}]\n")
+	before := e.readState()
+
+	// s-10 goes while the listing runs, and s-51 moves onto the page read
+	deleteDuring = 10
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: s-51 (hetzner-cloud/51) is missing from the listings but kept: account h still has it\n" || e.readState() != before {
+		t.Errorf("a page shifted: code %d, %q\n%s", code, errOut, e.readState())
+	}
+	deleteDuring = 0
+
+	// an answer without the list: complete by its look, but the servers
+	// are there
+	empty = true
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: s-50 (hetzner-cloud/50) is missing from the listings but kept: account h still has it\nump: s-51 (hetzner-cloud/51) is missing from the listings but kept: account h still has it\nNo servers found.\n" || e.readState() != before {
+		t.Errorf("an answer without the list: code %d, %q\n%s", code, errOut, e.readState())
+	}
+	empty = false
+
+	// s-51 is deleted: 404 for it alone, and it is forgotten
+	ids = slices.DeleteFunc(ids, func(id int) bool { return id == 51 })
+	e.now = e.now.Add(time.Minute)
+	if _, errOut, code := e.run("", false, "server", "list", "--refresh"); code != 0 || errOut != "ump: s-51 (hetzner-cloud/51) is gone from its provider: forgotten; 10.0.0.51 in default is free again\n" || strings.Contains(e.readState(), "hetzner-cloud/51") || !strings.Contains(e.readState(), "hetzner-cloud/50") {
+		t.Errorf("deleted: code %d, %q\n%s", code, errOut, e.readState())
 	}
 }

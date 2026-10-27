@@ -137,7 +137,13 @@ Lists dedicated servers and cloud instances from every configured account
 select single servers by name, provider ID, IP address (an address inside
 the machine's IPv6 prefix matches too) or `provider/id`. An account whose
 API fails is reported on stderr, the others are still listed, and the exit
-code is 4. A reference that matches nothing gives exit code 1.
+code is 4. A reference that matches nothing gives exit code 1. A
+server of the state that every account of its provider type, asked
+completely, leaves out, and that the account which listed it before,
+asked for it alone, no longer has, is gone: ump forgets it, with its
+private addresses, and says so on stderr
+([state](state.md#servers-gone-from-their-providers)); `--cached` and
+a listing served from the cache forget nothing.
 
 `-o json` is a plain array of machines with stable field names:
 
@@ -192,8 +198,9 @@ variables of its host file (`ansible_host`, `ump_admin`, `ump_ref`,
 `--account`, references and `--cached` select as for the other
 formats, and the exit code is the same. A server without an address or
 a valid hostname, or whose hostname a later installation took, is left
-out with a note on stderr; nothing else goes there unless something is
-wrong (the plugin warns with it).
+out with a note on stderr; nothing else goes there but a server ump
+forgot or kept although no listing has it, and what is wrong (the
+plugin warns with them).
 
 ```json
 {

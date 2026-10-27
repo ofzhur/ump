@@ -108,6 +108,12 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		f.handleIP(w, r, body)
 		return
 	}
+	// a server, VPS or instance the account no longer has
+	if strings.HasSuffix(r.URL.Path, "/gone") {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"class":"Client::NotFound","message":"The requested object (serviceName = gone) does not exist"}`))
+		return
+	}
 	switch r.URL.Path {
 	case "/dedicated/server":
 		if f.denyDedicate {
@@ -388,17 +394,27 @@ func TestList(t *testing.T) {
 
 func TestNotGrantedFamilyIsSkipped(t *testing.T) {
 	f := newFakeAPI(t)
+	p := f.provider(t)
+	if _, err := p.List(context.Background()); err != nil || p.(provider.Partial).Skipped() != nil {
+		t.Fatalf("every family: %v, skipped %v", err, p.(provider.Partial).Skipped())
+	}
 	f.denyCloud = true
-	ms, err := f.provider(t).List(context.Background())
+	ms, err := p.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ms) != 3 {
 		t.Errorf("got %d machines, want the 2 dedicated ones and the VPS", len(ms))
 	}
+	if got := p.(provider.Partial).Skipped(); !reflect.DeepEqual(got, []string{"Public Cloud instances"}) {
+		t.Errorf("skipped: %v", got)
+	}
 	f.denyVPS = true
-	if ms, err = f.provider(t).List(context.Background()); err != nil || len(ms) != 2 {
+	if ms, err = p.List(context.Background()); err != nil || len(ms) != 2 {
 		t.Errorf("VPS denied: %v, %d machines", err, len(ms))
+	}
+	if got := p.(provider.Partial).Skipped(); !reflect.DeepEqual(got, []string{"VPS", "Public Cloud instances"}) {
+		t.Errorf("skipped: %v", got)
 	}
 	f.denyDedicate = true
 	_, err = f.provider(t).List(context.Background())
@@ -822,5 +838,22 @@ func TestPowerAndRescue(t *testing.T) {
 	}
 	if got := strings.Join(f.instanceActions, ","); got != "reboot:soft,reboot:hard,stop,start,stop,start,rescue:true,rescue:false" {
 		t.Errorf("instance actions: %s", got)
+	}
+}
+
+// TestDescribeGone: asked for a server, VPS or instance it no longer
+// has, the API answers 404, which tells ump that it is gone
+// (provider.IsNotFound).
+func TestDescribeGone(t *testing.T) {
+	f := newFakeAPI(t)
+	p := f.provider(t).(provider.Describer)
+	for _, m := range []provider.Machine{
+		{ID: "gone", Kind: provider.KindBareMetal},
+		{ID: "gone", Kind: provider.KindCloud, Labels: map[string]string{"family": "vps"}},
+		{ID: "gone", Kind: provider.KindCloud, Labels: map[string]string{"project_id": "p1", "project": "Production"}},
+	} {
+		if _, err := p.Describe(context.Background(), m); !provider.IsNotFound(err) {
+			t.Errorf("%+v: %v", m, err)
+		}
 	}
 }
