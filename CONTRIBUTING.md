@@ -11,7 +11,7 @@ ump is one Go binary; `go.mod` names the Go version (with
 
 ```sh
 make build        # ./ump
-make check        # gofmt, go vet, the tests and the shell syntax checks: what CI runs
+make check        # gofmt, go vet, the tests and the shell checks (bash 4 or later, jq): what CI runs
 make dist         # the binaries for every platform, into dist/
 ```
 

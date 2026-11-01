@@ -1,0 +1,367 @@
+#!/bin/bash
+# The UMP rescue system's part of a network boot: ump-pxe hello reports
+# the machine to the PXE server it booted from (ump-pxe-hello.service),
+# ump-pxe install runs the unattended installation armed there
+# (ump-pxe-install.service). Both read the boot config the server put in
+# front of the image (/etc/ump/boot, see init) and do nothing without it:
+#
+#   ump.pxe=URL            the PXE server, http://192.0.2.5:8067
+#   ump.pxe.boot=ID        this boot
+#   ump.pxe.mode=install   an installation is armed for it
+#   ump.boot-mac=MAC       the interface the machine booted from
+#   token                  the token of this boot, sent with every request
+#                          (Authorization: Bearer)
+#
+# hello posts what the machine is (addresses, MACs, SSH host keys, DMI,
+# disks, memory, firmware, boot order, BMC) to URL/api/v1/hello, for 10
+# minutes until the server takes it. Its guard_disks are the disks the
+# disk guard counts, in install.sh's order, each with its ID (wwn:WWN,
+# else serial:SERIAL, else null): a seen arm takes its ids from there,
+# verbatim. install takes the specification once (GET URL/api/v1/spec:
+# {"spec": ..., "firmware": "uefi|bios", "disks": {"rule":
+# "pinned|seen|blank", "names": [...], "ids": [...]}}; this boot's token
+# gets the same answer again until its report, so a lost answer costs
+# nothing; 409: another boot claimed it, or this one reported it),
+# checks the firmware and the disk rule (the disk guard), fetches
+# install.sh from the specification's storage, runs it with --record,
+# posts its output as it comes (URL/api/v1/log?offset=N; a part sent
+# again, at an offset the server has, changes nothing and never shortens
+# the log) and the result (URL/api/v1/report) until the server
+# acknowledges it, and reboots only after that, and only when the
+# installation succeeded. A refusal (exit status 2) writes nothing.
+set -u
+umask 077
+boot=/etc/ump/boot
+work=/run/ump-pxe
+
+words="$(cat "$boot/cmdline" 2>/dev/null) $(cat /proc/cmdline)"
+param() {
+	local w
+	for w in $words; do
+		case "$w" in "$1="*) printf '%s' "${w#*=}"; return 0 ;; esac
+	done
+	return 1
+}
+url="$(param ump.pxe || true)"; url="${url%/}"
+boot_id="$(param ump.pxe.boot || true)"
+mode="$(param ump.pxe.mode || true)"
+boot_mac="$( (param ump.boot-mac || true) | tr 'A-F-' 'a-f:')"
+
+say() { # say MESSAGE: on the console and in the journal (the unit's output), and to whoever logs in
+	echo "ump-pxe: $*"
+	printf '  UMP: %s\n\n' "$*" >> /etc/motd
+}
+
+# request METHOD PATH OUT [CURL ARGS...]: the HTTP status of a request to
+# the PXE server (000 without an answer), the body into OUT
+request() {
+	local method="$1" path="$2" out="$3"
+	shift 3
+	curl -s --connect-timeout 10 --max-time 300 -X "$method" -A "ump-rescue/$(cat /etc/ump-rescue-version 2>/dev/null)" \
+		-H "@$work/auth" -o "$out" -w '%{http_code}' "$@" "$url$path" 2>/dev/null || true
+}
+
+# retryable CODE: no answer, or one that may change (a server or its
+# backend that is not there yet)
+retryable() { case "$1" in 000|408|429|5??) return 0 ;; esac; return 1; }
+
+# --- disks -----------------------------------------------------------------
+
+# disks: the disks install.sh takes by default, in its order (NVMe first):
+# whole disks, writable, not RAM, loop or virtual devices, not on USB
+disks() {
+	local path type ro tran all=()
+	while read -r path type ro tran; do
+		[ "$type" = disk ] && [ "$ro" = 0 ] || continue
+		case "$(basename "$path")" in loop*|ram*|zram*|sr*|fd*|nbd*|md*|dm-*) continue ;; esac
+		[ "${tran:-}" = usb ] && continue
+		all+=("$path")
+	done < <(lsblk -dnr -o PATH,TYPE,RO,TRAN | sort)
+	printf '%s\n' "${all[@]}" | grep '^/dev/nvme'
+	printf '%s\n' "${all[@]}" | grep -v '^/dev/nvme'
+	return 0
+}
+
+# disk_id DISK: what tells the disk apart: wwn:WWN, else serial:SERIAL
+disk_id() {
+	local v
+	v="$(lsblk -dn -o WWN "$1" | tr -d '[:space:]')"
+	[ -n "$v" ] && { echo "wwn:$v"; return 0; }
+	v="$(lsblk -dn -o SERIAL "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+	[ -n "$v" ] && { echo "serial:$v"; return 0; }
+	return 0
+}
+
+# guard_disks: the disks the disk guard counts, with their IDs (null for
+# a disk without either), as JSON
+guard_disks() {
+	local d
+	for d in $(disks); do
+		jq -n --arg path "$d" --arg id "$(disk_id "$d")" '{path: $path, id: (if $id == "" then null else $id end)}'
+	done | jq -s .
+}
+
+# --- hello -----------------------------------------------------------------
+
+# iface_of MAC: the interface with that MAC
+iface_of() {
+	local d
+	for d in /sys/class/net/*; do
+		[ "$(cat "$d/address" 2>/dev/null)" = "$1" ] && { basename "$d"; return 0; }
+	done
+	return 1
+}
+
+# an address on the interface of the boot (any, without ump.boot-mac)
+has_address() {
+	local i
+	if [ -n "$boot_mac" ] && i="$(iface_of "$boot_mac")"; then
+		[ -n "$(ip -4 -o addr show dev "$i" scope global 2>/dev/null)" ]
+	else
+		[ -n "$(ip -4 -o addr show scope global 2>/dev/null)" ]
+	fi
+}
+
+dmi() {
+	local f out='{}'
+	for f in sys_vendor product_name product_version product_serial product_uuid board_vendor board_name board_serial \
+		bios_vendor bios_version bios_date chassis_serial; do
+		[ -r "/sys/class/dmi/id/$f" ] || continue
+		out="$(jq --arg k "$f" --arg v "$(tr -d '\0' < "/sys/class/dmi/id/$f" | sed 's/[[:space:]]*$//')" '. + {($k): $v}' <<< "$out")"
+	done
+	printf '%s' "$out"
+}
+
+hello_json() {
+	local fw=bios ipmi=""
+	[ -d /sys/firmware/efi ] && fw=uefi
+	modprobe -q ipmi_devintf 2>/dev/null
+	[ -e /dev/ipmi0 ] && ipmi="$(timeout 20 ipmitool lan print 2>/dev/null)"
+	# every disk there, as the disk guard waits for them
+	udevadm settle 2>/dev/null
+	jq -n --arg boot "$boot_id" --arg rescue "$(cat /etc/ump-rescue-version 2>/dev/null)" \
+		--arg arch "$(dpkg --print-architecture 2>/dev/null || uname -m)" --arg hostname "$(hostname)" \
+		--arg firmware "$fw" --arg boot_mac "$boot_mac" \
+		--argjson interfaces "$(ip -j addr show | jq '[.[] | select(.link_type == "ether") | {name: .ifname, mac: .address,
+			up: (.operstate == "UP"), addresses: [.addr_info[] | select(.scope == "global") | "\(.local)/\(.prefixlen)"]}]')" \
+		--argjson host_keys "$(cat /etc/ssh/ssh_host_*_key.pub 2>/dev/null | awk '{print $1, $2}' | jq -R . | jq -s .)" \
+		--argjson dmi "$(dmi)" \
+		--argjson disks "$(lsblk -J -b -e 1,7 -o NAME,PATH,TYPE,SIZE,RO,RM,TRAN,ROTA,SERIAL,WWN,MODEL | jq .blockdevices)" \
+		--argjson guard_disks "$(guard_disks)" \
+		--argjson memory_mb "$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)" \
+		--arg efibootmgr "$(efibootmgr -v 2>/dev/null)" --arg ipmi "$ipmi" '{
+		boot: $boot, rescue: $rescue, arch: $arch, hostname: $hostname, firmware: $firmware, boot_mac: $boot_mac,
+		interfaces: $interfaces, host_keys: $host_keys, dmi: $dmi, disks: $disks, guard_disks: $guard_disks,
+		memory_mb: $memory_mb, efibootmgr: $efibootmgr, ipmi_lan: $ipmi}'
+}
+
+run_hello() {
+	local deadline code
+	deadline=$(( $(date +%s) + 600 ))
+	# not network-online: only the interface of the boot matters
+	until has_address; do
+		[ "$(date +%s)" -lt "$deadline" ] || { say "no address on the interface of the network boot ($boot_mac) within 10 minutes; no hello to $url"; exit 1; }
+		sleep 2
+	done
+	hello_json > "$work/hello.json"
+	while :; do
+		code="$(request POST /api/v1/hello /dev/null -H 'Content-Type: application/json' --data-binary "@$work/hello.json")"
+		case "$code" in 2??) echo "ump-pxe: hello to $url (boot $boot_id): taken"; return 0 ;; esac
+		retryable "$code" || { say "the PXE server $url refused the hello of boot $boot_id (HTTP $code)"; exit 1; }
+		[ "$(date +%s)" -lt "$deadline" ] || { say "no answer from the PXE server $url to the hello within 10 minutes (HTTP $code)"; exit 1; }
+		sleep 5
+	done
+}
+
+# --- install ---------------------------------------------------------------
+
+arm="$work/arm.json"
+record="$work/record"
+log="$work/install.log"
+
+# guard: the disks the arm's rule lets the installation erase (guarded),
+# or why it refuses (refusal); a disk that cannot be probed refuses:
+#   pinned  each of names, a name under /dev/disk/by-id (nvme-eui...,
+#           wwn-...) or serial:SERIAL, is one disk of this machine
+#   seen    the disks of this machine are those of ids (the IDs of a
+#           hello's guard_disks), no more, no fewer, and no two alike
+#   blank   every disk, and none has a partition or a signature
+guard() {
+	local rule name dev d i id want have missing new parts sig ids=()
+	guarded=()
+	udevadm settle 2>/dev/null
+	rule="$(jq -r '.disks.rule // empty' "$arm")"
+	case "$rule" in
+	pinned)
+		while read -r name; do
+			[ -n "$name" ] || continue
+			dev=""
+			case "$name" in
+			serial:*)
+				for d in $(disks); do
+					id="$(lsblk -dn -o SERIAL "$d")" || { refusal="cannot read the serial number of $d"; return 1; }
+					[ "$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<< "$id")" = "${name#serial:}" ] || continue
+					[ -z "$dev" ] || { refusal="two disks have the serial number ${name#serial:} ($dev, $d)"; return 1; }
+					dev="$d"
+				done ;;
+			*/*) refusal="$name is not a name under /dev/disk/by-id"; return 1 ;;
+			*) [ -e "/dev/disk/by-id/$name" ] && dev="$(readlink -f "/dev/disk/by-id/$name")" ;;
+			esac
+			[ -n "$dev" ] || { refusal="the disk $name is not in this machine"; return 1; }
+			[ "$(lsblk -dn -o TYPE "$dev")" = disk ] || { refusal="$name is $dev, not a whole disk"; return 1; }
+			for d in "${guarded[@]}"; do [ "$d" != "$dev" ] || { refusal="$name is $dev, named twice"; return 1; }; done
+			guarded+=("$dev")
+		done < <(jq -r '.disks.names // [] | .[]' "$arm")
+		[ ${#guarded[@]} -gt 0 ] || { refusal="the arm pins no disk"; return 1; }
+		;;
+	seen)
+		want="$(jq -r '.disks.ids // [] | .[]' "$arm" | LC_ALL=C sort)"
+		[ -n "$want" ] || { refusal="the arm records no disks"; return 1; }
+		id="$(LC_ALL=C uniq -d <<< "$want" | paste -sd, -)"
+		[ -z "$id" ] || { refusal="the arm records the disk $id twice"; return 1; }
+		for d in $(disks); do
+			id="$(disk_id "$d")"
+			[ -n "$id" ] || { refusal="$d has neither a WWN nor a serial number, and the disks seen at a boot are told apart by those"; return 1; }
+			for i in "${!ids[@]}"; do
+				[ "${ids[i]}" != "$id" ] || { refusal="two disks have the ID $id (${guarded[i]}, $d), and the disks seen at a boot are told apart by it"; return 1; }
+			done
+			ids+=("$id")
+			guarded+=("$d")
+		done
+		have="$(printf '%s\n' "${ids[@]}" | LC_ALL=C sort)"
+		if [ "$want" != "$have" ]; then
+			missing="$(LC_ALL=C comm -23 <(echo "$want") <(echo "$have") | paste -sd, -)"
+			new="$(LC_ALL=C comm -13 <(echo "$want") <(echo "$have") | paste -sd, -)"
+			refusal="the disks are not those seen when the installation was armed (missing: ${missing:-none}; new: ${new:-none})"
+			return 1
+		fi
+		;;
+	blank)
+		for d in $(disks); do
+			parts="$(lsblk -nr -o NAME "$d")" && [ -n "$parts" ] || { refusal="cannot read the partitions of $d"; return 1; }
+			[ -z "$(tail -n +2 <<< "$parts")" ] || { refusal="$d has partitions, and the arm takes blank disks only"; return 1; }
+			sig="$(wipefs --no-act --noheadings --output TYPE "$d")" || { refusal="cannot probe $d for signatures (wipefs)"; return 1; }
+			[ -z "$sig" ] || { refusal="$d is not blank (${sig//$'\n'/,}), and the arm takes blank disks only"; return 1; }
+			guarded+=("$d")
+		done
+		[ ${#guarded[@]} -gt 0 ] || { refusal="this machine has no disk"; return 1; }
+		;;
+	*) refusal="the arm names no disk rule (pinned, seen or blank)"; return 1 ;;
+	esac
+}
+
+# post_log: the output of install.sh the server does not have yet, in
+# chunks of at most 1 MB; where it stopped is in log.offset
+post_log() {
+	local off size n
+	off="$(cat "$work/log.offset" 2>/dev/null || echo 0)"
+	while size="$(stat -c %s "$log")" && [ "$size" -gt "$off" ]; do
+		n=$((size - off)); [ "$n" -le 1048576 ] || n=1048576
+		tail -c +$((off + 1)) "$log" | head -c "$n" > "$work/log.chunk"
+		[ "$(request POST "/api/v1/log?offset=$off" /dev/null -H 'Content-Type: application/octet-stream' --data-binary "@$work/log.chunk")" = 200 ] || return 0
+		off=$((off + n))
+		echo "$off" > "$work/log.offset"
+	done
+	return 0
+}
+
+# report EXIT [REASON]: the result, until the server has it (its 200
+# means the outcome is recorded); never given up
+report() {
+	local code wait=5
+	jq -n --arg boot "$boot_id" --argjson exit "$1" --arg reason "${2:-}" \
+		--arg record "$(cat "$record/install" 2>/dev/null)" \
+		--argjson host_keys "$(cat "$record"/ssh_host_*_key.pub 2>/dev/null | awk '{print $1, $2}' | jq -R . | jq -s .)" \
+		--arg log_tail "$(tail -c 65536 "$log" 2>/dev/null)" \
+		'{boot: $boot, exit: $exit, reason: $reason, record: $record, host_keys: $host_keys, log_tail: $log_tail}' > "$work/report.json"
+	until code="$(request POST /api/v1/report /dev/null -H 'Content-Type: application/json' --data-binary "@$work/report.json")" && [ "$code" = 200 ]; do
+		echo "ump-pxe: the report got no acknowledgement from $url (HTTP $code); again in ${wait}s"
+		sleep "$wait"
+		wait=$((wait * 2)); [ "$wait" -le 60 ] || wait=60
+	done
+	echo "ump-pxe: report acknowledged (exit status $1)"
+}
+
+# refuse REASON: nothing was written; the server learns why, the machine
+# stays in the rescue system
+refuse() {
+	say "the unattended installation is refused: $1; nothing was written, the machine stays in the rescue system"
+	report 2 "$1"
+	exit 2
+}
+
+run_install() {
+	local code deadline fw want i rc poster storage
+	if [ "$mode" != install ]; then
+		echo "ump-pxe: no installation is armed for this boot"
+		return 0
+	fi
+	rm -rf "$record" "$log"
+	# the specification, claimed once; asked again, the server gives this
+	# boot the same answer until its report, so a lost one costs nothing
+	deadline=$(( $(date +%s) + 600 ))
+	while :; do
+		code="$(request GET /api/v1/spec "$arm")"
+		[ "$code" = 200 ] && break
+		if [ "$code" = 409 ]; then
+			say "the specification was claimed by another boot (a machine with this one's MAC?), or this boot reported it already; nothing was written"
+			exit 2
+		fi
+		if ! retryable "$code" || [ "$(date +%s)" -ge "$deadline" ]; then
+			say "no specification from the PXE server $url (HTTP $code); nothing was written"
+			exit 1
+		fi
+		sleep 5
+	done
+	jq -e '.spec | type == "object"' "$arm" >/dev/null 2>&1 || refuse "the PXE server's answer holds no specification"
+	echo "ump-pxe: specification claimed (boot $boot_id)"
+	fw=bios; [ -d /sys/firmware/efi ] && fw=uefi
+	want="$(jq -r '.firmware // empty' "$arm")"
+	[ -z "$want" ] || [ "$want" = "$fw" ] || refuse "this boot is $fw, and the installation was armed for $want"
+	guard || refuse "$refusal"
+	echo "ump-pxe: disks ($(jq -r '.disks.rule' "$arm")): ${guarded[*]}"
+	jq --argjson disks "$(printf '%s\n' "${guarded[@]}" | jq -R . | jq -s .)" '.spec | .disks = $disks' "$arm" > "$work/spec.json"
+	storage="$(jq -r '.storage // empty' "$work/spec.json")"
+	storage="${storage%/}"
+	[ -n "$storage" ] || refuse "the specification names no storage"
+	i=0
+	until curl -fsSL --connect-timeout 10 -o "$work/install.sh" "$storage/install/install.sh"; do
+		i=$((i + 1))
+		[ "$i" -lt 6 ] || refuse "cannot fetch $storage/install/install.sh"
+		sleep 5
+	done
+
+	: > "$log"
+	echo 0 > "$work/log.offset"
+	rm -f "$work/log.done"
+	# the output as it comes; the poster stops by itself, so none of its
+	# requests is cut off or overtaken by the last one
+	(until [ -e "$work/log.done" ]; do post_log; sleep 5; done) &
+	poster=$!
+	bash "$work/install.sh" --spec "$work/spec.json" --record "$record" 2>&1 | tee -a "$log"
+	rc=${PIPESTATUS[0]}
+	touch "$work/log.done"
+	wait "$poster"
+	post_log
+	report "$rc"
+	if [ "$rc" = 0 ]; then
+		echo "ump-pxe: installed; rebooting into the new system"
+		systemctl reboot
+		return 0
+	fi
+	say "the unattended installation failed (exit status $rc, see $log); the machine stays in the rescue system"
+	exit "$rc"
+}
+
+case "${1:-}" in
+hello|install) ;;
+*) echo "usage: ump-pxe hello|install" >&2; exit 2 ;;
+esac
+what="$1"
+if [ -z "$url" ] || [ ! -f "$boot/token" ]; then
+	echo "ump-pxe: not a network boot of a PXE server (no ump.pxe or no token)"
+	exit 0
+fi
+mkdir -p "$work"
+printf 'Authorization: Bearer %s\n' "$(tr -d '[:space:]' < "$boot/token")" > "$work/auth"
+"run_$what"

@@ -130,6 +130,55 @@ func exercise(t *testing.T, b Backend) {
 	if locks, _ := b.Locks(ctx); len(locks) != 0 {
 		t.Fatalf("locks left: %+v", locks)
 	}
+	pxeFiles(t, b)
+}
+
+// pxeFiles: the files of PXEDir, a dot path, are read, written over
+// their version, listed and deleted like any other; other dot paths
+// stay refused, and so does PXEDir itself.
+func pxeFiles(t *testing.T, b Backend) {
+	t.Helper()
+	ctx := context.Background()
+	const arm = ".pxe/fra1/arm/web-07.json"
+	v1, err := b.Write(ctx, arm, []byte(`{"id":"a1"}`), "")
+	if err != nil || v1 == "" {
+		t.Fatalf("%s: first write: %q %v", arm, v1, err)
+	}
+	if _, err := b.Write(ctx, arm, []byte(`{"id":"a2"}`), ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("%s: second first write: %v", arm, err)
+	}
+	v2, err := b.Write(ctx, arm, []byte(`{"id":"a2"}`), v1)
+	if err != nil || v2 == "" || v2 == v1 {
+		t.Fatalf("%s: conditional write: %q %v", arm, v2, err)
+	}
+	if data, version, err := b.Read(ctx, arm); err != nil || string(data) != `{"id":"a2"}` || version != v2 {
+		t.Fatalf("%s: read: %q %q (want %q) %v", arm, data, version, v2, err)
+	}
+	entries, err := b.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := false
+	for _, e := range entries {
+		listed = listed || e.Path == arm && e.Version == v2
+	}
+	if !listed {
+		t.Fatalf("%s not listed with its version %q: %v", arm, v2, entries)
+	}
+	if err := b.Delete(ctx, arm); err != nil {
+		t.Fatalf("%s: delete: %v", arm, err)
+	}
+	if data, version, err := b.Read(ctx, arm); err != nil || data != nil || version != "" {
+		t.Fatalf("%s: read after delete: %q %q %v", arm, data, version, err)
+	}
+	for _, bad := range []string{".pxe", ".pxe/", ".pxeboot/x", ".git/HEAD", ".pxe/../config.yaml"} {
+		if _, err := b.Write(ctx, bad, []byte("no"), ""); err == nil {
+			t.Errorf("write of %q accepted", bad)
+		}
+		if _, _, err := b.Read(ctx, bad); err == nil {
+			t.Errorf("read of %q accepted", bad)
+		}
+	}
 }
 
 func TestLocal(t *testing.T) {
@@ -600,6 +649,28 @@ func TestLocalUnlockDots(t *testing.T) {
 	for _, k := range []string{"..", ".", "", "a.b"} {
 		if got := unlockKey(lockKey(k)); got != k {
 			t.Errorf("unlockKey(lockKey(%q)) = %q", k, got)
+		}
+	}
+}
+
+func TestValidPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"config.yaml":                  true,
+		"profiles/.keep":               true,
+		".published":                   true,
+		".pxe/fra1/site.json":          true,
+		"/.pxe/fra1/arm/web-07.json":   true,
+		".pxe/fra1/logs/web-07.log":    true,
+		".pxe":                         false,
+		".pxe/":                        false,
+		".pxeboot/x":                   false,
+		".pxe/../secrets/acc.password": false,
+		".git/HEAD":                    false,
+		".gitkeep":                     false,
+		"":                             false,
+	} {
+		if got := ValidPath(p); got != want {
+			t.Errorf("ValidPath(%q) = %v", p, got)
 		}
 	}
 }

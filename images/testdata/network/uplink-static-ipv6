@@ -1,0 +1,98 @@
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    int01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      set-name: int01
+      dhcp4: false
+      optional: true
+    ext01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      set-name: ext01
+      dhcp4: false
+      addresses:
+        - "192.0.2.17/24"
+        - "2001:db8::17/64"
+      routes:
+        - to: default
+          via: "192.0.2.1"
+          on-link: true
+        - to: "::/0"
+          via: "fe80::1"
+          on-link: true
+      accept-ra: false
+      nameservers:
+        addresses: [192.0.2.53, 2001:db8::53]
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "192.0.2.17/24",
+  "gw4": "192.0.2.1",
+  "ip6": "2001:db8::17/64",
+  "gw6": "fe80::1",
+  "dns": [
+    "192.0.2.53",
+    "2001:db8::53"
+  ],
+  "dhcp4": false,
+  "auto6": false
+}
+==> etc/systemd/network/10-ump-ext01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Link]
+Name=ext01
+==> etc/systemd/network/10-ump-int01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+Name=int01
+==> etc/systemd/network/20-ump-ext01.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+Address=192.0.2.17/24
+Address=2001:db8::17/64
+DNS=192.0.2.53
+DNS=2001:db8::53
+IPv6AcceptRA=no
+
+[Route]
+Gateway=192.0.2.1
+GatewayOnLink=yes
+
+[Route]
+Gateway=fe80::1
+GatewayOnLink=yes
+==> etc/systemd/network/20-ump-int01.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: the resolvers of the specification (network.uplink.dns); the
+# uplink's configuration sets the same. Replace both to use others.
+[Resolve]
+DNS=192.0.2.53 2001:db8::53
+==> etc/ump/install.network
+network=static
+network6=static
+dns=192.0.2.53,2001:db8::53
+==> plan
+ext01 (0c:c4:7a:aa:bb:11) IPv4 static 192.0.2.17/24,192.0.2.1, IPv6 static 2001:db8::17/64,fe80::1 (the specification's uplink); IPv6 on; DNS 192.0.2.53 2001:db8::53

@@ -1,0 +1,2 @@
+install.sh: network.uplink.dns_from_dhcp: no lease to take resolvers from (ipv4 static, ipv6 none)
+(exit status 1)

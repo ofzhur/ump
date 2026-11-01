@@ -20,7 +20,8 @@ root and the keys of a file).
    devices, and not on USB; NVMe first, so `first` in a layout is an
    NVMe disk when there is one), the network of the rescue system (the
    address, gateway and MAC that `ump server rescue` carried over on the kernel
-   command line, or what is configured).
+   command line, or what is configured), unless the specification gives
+   the uplink (`network.uplink`, below).
 2. **Plans the layout** against the disks: every partition with its
    number and size per disk, every md array, every volume group and
    volume. A target that matches no disk, two parts taking the rest of
@@ -58,8 +59,9 @@ root and the keys of a file).
    uniformly (`ext01`, ... for the uplink and the interfaces with a
    public address, `int01`, ... for the rest), the uplink with the
    static address and on-link gateway, or DHCP when nothing is known,
-   the others up without an address,
-   IPv6 only when the profile keeps it, resolvers 1.1.1.1 and 8.8.8.8,
+   or as `network.uplink` says, the others up without an address,
+   IPv6 only when the profile keeps it, resolvers 1.1.1.1 and 8.8.8.8
+   unless `network.uplink` names others or those of the lease,
    the kernel command line (`mitigations=off ipv6.disable=1` unless the
    profile keeps them, the profile's extra, and `kho=off`: the kernel's
    kexec handover would reserve up to half the memory of a small machine
@@ -105,17 +107,24 @@ root and the keys of a file).
     their MAC addresses, the private networks and addresses the
     specification gives, `private=` (`default:10.0.0.1,db:10.0.1.1`)
     and, of the first network, `private_network=` and
-    `private_address=`, which no interface carries yet) and
-    `/etc/ump/spec.json` (the specification), unmounts everything and
+    `private_address=`, which no interface carries yet; with
+    `network.uplink` also `network=` and `network6=`, how the uplink
+    gets its addresses, and `dns=`, its resolvers or `dhcp`) and
+    `/etc/ump/spec.json` (the specification); with `--record DIR` it
+    copies `/etc/ump/install` and the new system's SSH host keys (the
+    public ones; on NixOS made now rather than at the first boot) into
+    DIR, for whoever runs it unattended (the [rescue system's
+    installation runner](../images/rescue/README.md#booting-over-the-network))
+    to report. Then it unmounts everything and
     reports; `ump server reinstall` then reboots the machine and waits for the
     new system.
 
 ## Usage
 
 ```
-install.sh --spec FILE [--dry-run] [--force]
+install.sh --spec FILE [--record DIR] [--dry-run] [--force]
 install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
-           [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
+           [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--record DIR] [--dry-run] [--force]
 ```
 
 The specification is JSON with the fields of a resolved profile (`os`,
@@ -125,7 +134,8 @@ The specification is JSON with the fields of a resolved profile (`os`,
 `private_networks`: its addresses in its [private
 networks](../docs/networks.md), in order, each as `network`, `cidr` and
 `address`, and `private`, the first, which a specification of ump
-v0.5.0 has alone);
+v0.5.0 has alone, and `uplink` where the provider knows the machine's
+network, below);
 `ump server reinstall` writes it, and `/etc/ump/spec.json` of an installed system
 is one to start from. Without `--spec`, the flags give the `lvm-linear`
 layout with root alone (which then logs in over SSH, since it is the
@@ -145,6 +155,37 @@ Exit status 0 means the machine is ready to reboot; 2 is a usage or
 environment problem (not the rescue system, a missing tool), 1 a failed
 step, with the reason on stderr. A failed installation leaves the
 machine in the rescue system, with whatever was mounted unmounted again.
+
+## The uplink of the specification
+
+A machine whose provider knows its network (a PXE machine, from
+`pxe.yaml`) gets `network.uplink` in its specification, and the
+installer configures that instead of what the rescue system has:
+
+```json
+"uplink": {
+  "mac": "0c:c4:7a:aa:bb:11",
+  "ipv4": {"mode": "static", "address": "192.0.2.17/24", "gateway": "192.0.2.1"},
+  "ipv6": {"mode": "none"},
+  "dns": ["192.0.2.53", "192.0.2.54"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `mac` | the uplink (`ext01`); without it, the interface the rescue system reaches the network through. An interface the machine lacks stops the installation |
+| `ipv4` | `static` with `address` (with its prefix length) and `gateway` (on-link; none: no default route), `dhcp` (with the MAC as the client identifier, as iPXE and the rescue system send it), or `none` |
+| `ipv6` | `static` likewise, `auto` (router advertisements, an EUI-64 address), or `none`; only when the profile keeps IPv6 |
+| `dns` | the resolvers, in netplan, networkd or NixOS and in resolved's configuration; without it 1.1.1.1 and 8.8.8.8 |
+| `dns_from_dhcp` | `true`: the resolvers of the lease (or of router advertisements), none written |
+
+Without `network.uplink` the installer writes what it always has,
+byte for byte; [`images/test-network.sh`](../images/test-network.sh)
+(`make network-test`, part of `make check`) checks that and every
+uplink, for every renderer, without a machine, and `UPLINK=dhcp` or
+`UPLINK=static` of [`images/test-install.sh`](../images/test-install.sh)
+on a machine in QEMU. An installer from before `network.uplink`
+ignores it.
 
 ## Turning IPv6 or the mitigations back on
 

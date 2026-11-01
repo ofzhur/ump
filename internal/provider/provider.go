@@ -355,6 +355,24 @@ type Type struct {
 	// and may fill in settings interactively (for example by requesting
 	// an API credential and handing the user a validation URL).
 	Complete func(ctx context.Context, ui Prompter, settings map[string]string, opts Options) error
+	// HomeListed marks a type whose servers the home lists, not an API
+	// (manual: those of the state, from ump server add). ump adds its
+	// one account itself: ump config isp add refuses the type, pointing
+	// to AddHint, and the wizard leaves it out. Its listing is never
+	// served from the listing cache, though recorded there, and its
+	// servers are never taken for gone from a provider: they go when
+	// the home no longer lists them.
+	HomeListed bool
+	// AddHint says how a server of a home-listed type comes in: "ump
+	// server add NAME --ipv4 ADDRESS puts one into the inventory".
+	AddHint string
+}
+
+// HomeListed says whether the provider type of that name is home-listed
+// (Type.HomeListed); an unknown type is not.
+func HomeListed(typeName string) bool {
+	t, ok := Lookup(typeName)
+	return ok && t.HomeListed
 }
 
 // Field returns the field with the given key.

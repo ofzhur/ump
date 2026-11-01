@@ -133,3 +133,13 @@ func TestRegistry(t *testing.T) {
 	}()
 	Register(typ)
 }
+
+func TestHomeListed(t *testing.T) {
+	Register(Type{Name: "home-listed-test", HomeListed: true, New: func(string, map[string]string, Options) (Provider, error) { return nil, nil }})
+	Register(Type{Name: "api-listed-test", New: func(string, map[string]string, Options) (Provider, error) { return nil, nil }})
+	for name, want := range map[string]bool{"home-listed-test": true, "api-listed-test": false, "nope": false} {
+		if got := HomeListed(name); got != want {
+			t.Errorf("HomeListed(%q) = %v", name, got)
+		}
+	}
+}

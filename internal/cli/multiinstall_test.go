@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ofzhur/ump/internal/backend"
+	"github.com/ofzhur/ump/internal/plan"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -54,25 +55,25 @@ servers:                   # each over the defaults
 	if strings.Join(names, " ") != "web-01 web-02 db-01 203.0.113.12" {
 		t.Errorf("servers: %v", names)
 	}
-	o := p.defaults.over(p.servers[0].values).options()
+	o := planOptions(p.defaults.Over(p.servers[0].values))
 	if o.profile != "web" || strings.Join(o.groups, ",") != "web" || !o.ipv6 || o.layout != "" || o.via != "auto" {
 		t.Errorf("web-01: %+v", o)
 	}
-	if o := p.defaults.over(p.servers[1].values).options(); o.profile != "web" || o.layout != "lvm-raid1" {
+	if o := planOptions(p.defaults.Over(p.servers[1].values)); o.profile != "web" || o.layout != "lvm-raid1" {
 		t.Errorf("web-02: %+v", o)
 	}
-	o = p.defaults.over(p.servers[2].values).options()
+	o = planOptions(p.defaults.Over(p.servers[2].values))
 	if o.profile != "db" || strings.Join(o.groups, ",") != "db,backup" || o.hostname != "db-01.example.net" || strings.Join(o.privateNetworks, " ") != "default db" || strings.Join(o.privateIPs, " ") != "default=10.0.0.12 db=10.0.1.12" || strings.Join(o.users, " ") != "oleg:local deploy" || o.ipv6 {
 		t.Errorf("db-01: %+v", o)
 	}
-	o = p.defaults.over(p.servers[3].values).options()
+	o = planOptions(p.defaults.Over(p.servers[3].values))
 	if len(o.groups) != 0 || strings.Join(o.keyFiles, ",") != "local" || o.disks != "/dev/sda,/dev/sdb" || strings.Join(o.sets, ",") != "kernel.extra=quiet" || o.via != "direct" || o.profile != "web" || strings.Join(o.privateNetworks, " ") != "none" || strings.Join(o.privateIPs, " ") != "10.0.0.13" {
 		t.Errorf("203.0.113.12: %+v", o)
 	}
-	if o := p.defaults.over(p.servers[0].values).options(); o.privateNetworks != nil || o.privateIPs != nil {
+	if o := planOptions(p.defaults.Over(p.servers[0].values)); o.privateNetworks != nil || o.privateIPs != nil {
 		t.Errorf("web-01, private: %+v", o)
 	}
-	if p, err := parsePlan([]byte("servers:\n  web-01:\n")); err != nil || len(p.servers) != 1 || p.defaults.over(p.servers[0].values).options().profile != "" {
+	if p, err := parsePlan([]byte("servers:\n  web-01:\n")); err != nil || len(p.servers) != 1 || planOptions(p.defaults.Over(p.servers[0].values)).profile != "" {
 		t.Errorf("a server without values: %v %+v", err, p)
 	}
 	if p, err := parsePlan([]byte("---\ndefaults:\nservers:\n  web-01:\n...\n")); err != nil || len(p.servers) != 1 {
@@ -113,6 +114,14 @@ servers:                   # each over the defaults
 		if err == nil || !strings.HasPrefix(err.Error(), c.err) {
 			t.Errorf("%q: %v, want %s", c.plan, err, c.err)
 		}
+	}
+}
+
+// TestPlanKeys: the keys of a plan are the flags of a server, in their
+// order.
+func TestPlanKeys(t *testing.T) {
+	if !slices.Equal(plan.Keys(), serverFlags) {
+		t.Errorf("plan keys %v, server flags %v", plan.Keys(), serverFlags)
 	}
 }
 

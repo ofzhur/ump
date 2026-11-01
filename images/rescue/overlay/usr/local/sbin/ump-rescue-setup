@@ -7,14 +7,25 @@
 #   ump.mac=aa:bb:cc:dd:ee:ff         the interface to configure (or ump.iface=NAME)
 #   ump.ip=203.0.113.10/26,203.0.113.1    IPv4 address/prefix and gateway (on-link)
 #   ump.ip6=2001:db8::2/64,fe80::1        IPv6 address/prefix and gateway
-#   ump.dns=10.0.0.53,10.0.0.54         resolvers; default 1.1.1.1 and 8.8.8.8
+#   ump.dns=10.0.0.53,10.0.0.54         resolvers; default 1.1.1.1 and 8.8.8.8; dhcp
+#                                     for the DHCP lease's
+#   ump.boot-mac=aa:bb:cc:dd:ee:ff    DHCP on that interface alone (the one a network
+#                                     boot came from), the MAC as the client identifier;
+#                                     the other Ethernet interfaces up without addresses
+#   ump.time=EPOCH                    the clock, when it is more than 5 minutes off
 #
 # Without ump.ip/ump.ip6, every Ethernet interface uses DHCP and router
-# advertisements (80-dhcp.network); the resolvers stay the public ones,
-# not the provider's, unless ump.dns says otherwise.
+# advertisements (80-dhcp.network), or the one of ump.boot-mac alone; the
+# resolvers stay the public ones, not the provider's, unless ump.dns says
+# otherwise.
+#
+# A boot config in front of the image (/etc/ump/boot, see init) comes
+# first: the words of its cmdline win over the kernel command line's, and
+# its authorized_keys over ump.authorized_keys.
 set -u
 
 cmdline="$(cat /proc/cmdline)"
+[ -f /etc/ump/boot/cmdline ] && cmdline="$(cat /etc/ump/boot/cmdline) $cmdline"
 param() {
 	for w in $cmdline; do
 		case "$w" in
@@ -24,6 +35,20 @@ param() {
 	return 1
 }
 
+# a new board's clock is often years behind, and TLS then fails
+t="$(param ump.time || true)"
+case "$t" in
+"") ;;
+*[!0-9]*) echo "ump-rescue-setup: ump.time=$t is not seconds since 1970" >&2 ;;
+*)
+	off=$((t - $(date +%s)))
+	[ "$off" -ge 0 ] || off=$((-off))
+	if [ "$off" -gt 300 ]; then
+		date -s "@$t" >/dev/null && echo "ump-rescue-setup: the clock was $off s off; set from ump.time"
+	fi
+	;;
+esac
+
 hostname="$(param ump.hostname || true)"
 if [ -n "$hostname" ]; then
 	echo "$hostname" > /etc/hostname
@@ -32,7 +57,12 @@ if [ -n "$hostname" ]; then
 fi
 
 keys="$(param ump.authorized_keys || true)"
-if [ -n "$keys" ]; then
+if [ -f /etc/ump/boot/authorized_keys ]; then
+	mkdir -p /root/.ssh
+	chmod 700 /root/.ssh
+	cp /etc/ump/boot/authorized_keys /root/.ssh/authorized_keys
+	chmod 600 /root/.ssh/authorized_keys
+elif [ -n "$keys" ]; then
 	mkdir -p /root/.ssh
 	chmod 700 /root/.ssh
 	if echo "$keys" | base64 -d > /root/.ssh/authorized_keys 2>/dev/null; then
@@ -49,6 +79,7 @@ dns="$(param ump.dns || true)"
 [ -n "$dns" ] || dns="1.1.1.1,8.8.8.8"
 mac="$(param ump.mac || true)"
 iface="$(param ump.iface || true)"
+bootmac="$( (param ump.boot-mac || true) | tr 'A-F-' 'a-f:')"
 if [ -n "$ip4$ip6" ]; then
 	if [ -z "$mac$iface" ]; then
 		# no interface named: the first Ethernet interface with a carrier
@@ -70,19 +101,49 @@ if [ -n "$ip4$ip6" ]; then
 		[ -n "$ip4" ] && echo "Address=${ip4%%,*}"
 		[ -n "$ip6" ] && echo "Address=${ip6%%,*}"
 		if [ -n "$ip6" ]; then echo "IPv6AcceptRA=no"; else echo "IPv6AcceptRA=yes"; fi
-		oldifs="$IFS"; IFS=,
-		for s in $dns; do [ -n "$s" ] && echo "DNS=$s"; done
-		IFS="$oldifs"
+		if [ "$dns" != dhcp ]; then
+			oldifs="$IFS"; IFS=,
+			for s in $dns; do [ -n "$s" ] && echo "DNS=$s"; done
+			IFS="$oldifs"
+		fi
 		case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac
 		case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac
 	} > "$f"
 	chmod 644 "$f"
 fi
-# the same resolvers for DHCP interfaces (80-dhcp.network ignores the
-# lease's) and as the global fallback
-mkdir -p /etc/systemd/resolved.conf.d /etc/systemd/network/80-dhcp.network.d
-printf '[Resolve]\nDNS=%s\n' "$(echo "$dns" | tr ',' ' ')" > /etc/systemd/resolved.conf.d/ump.conf
-{ printf '[Network]\n'; echo "$dns" | tr ',' '\n' | sed 's/^/DNS=/'; } > /etc/systemd/network/80-dhcp.network.d/dns.conf
+# a network boot: DHCP on the interface it came from, with the client
+# identifier iPXE used (the MAC), so that a DHCP server keyed by it gives
+# the same lease; the other interfaces up without addresses, and not
+# waited for
+if [ -n "$bootmac" ]; then
+	usedns=no; [ "$dns" = dhcp ] && usedns=yes
+	{
+		echo "# the interface of the network boot (ump.boot-mac)"
+		echo "[Match]"
+		echo "MACAddress=$bootmac"
+		echo
+		echo "[Network]"
+		echo "DHCP=yes"
+		echo "IPv6AcceptRA=yes"
+		[ "$dns" = dhcp ] || echo "$dns" | tr ',' '\n' | sed '/^$/d; s/^/DNS=/'
+		printf '\n[DHCPv4]\nClientIdentifier=mac\nUseHostname=no\nUseDNS=%s\n\n[IPv6AcceptRA]\nUseDNS=%s\n' "$usedns" "$usedns"
+	} > /etc/systemd/network/20-ump-boot.network
+	printf '# the other interfaces of a network boot (ump.boot-mac): up, without addresses\n[Match]\nType=ether\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nLinkLocalAddressing=no\nIPv6AcceptRA=no\n' \
+		> /etc/systemd/network/30-ump-others.network
+	chmod 644 /etc/systemd/network/20-ump-boot.network /etc/systemd/network/30-ump-others.network
+fi
+mkdir -p /etc/systemd/network/80-dhcp.network.d
+if [ "$dns" = dhcp ]; then
+	# the lease's resolvers (and those of router advertisements), which
+	# 80-dhcp.network ignores otherwise; no global ones
+	printf '[DHCPv4]\nUseDNS=yes\n\n[IPv6AcceptRA]\nUseDNS=yes\n' > /etc/systemd/network/80-dhcp.network.d/dns.conf
+else
+	# the same resolvers for DHCP interfaces (80-dhcp.network ignores the
+	# lease's) and as the global fallback
+	mkdir -p /etc/systemd/resolved.conf.d
+	printf '[Resolve]\nDNS=%s\n' "$(echo "$dns" | tr ',' ' ')" > /etc/systemd/resolved.conf.d/ump.conf
+	{ printf '[Network]\n'; echo "$dns" | tr ',' '\n' | sed 's/^/DNS=/'; } > /etc/systemd/network/80-dhcp.network.d/dns.conf
+fi
 
 # fresh host keys every boot: this system never keeps state
 ssh-keygen -A >/dev/null 2>&1 || true

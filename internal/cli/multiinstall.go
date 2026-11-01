@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/plan"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
@@ -547,7 +547,7 @@ func multiEntries(cmd *cobra.Command, refs []string, o multiOptions) ([]multiEnt
 			return nil, withExit(exitUsage, fmt.Errorf("%s: %w", o.plan, err))
 		}
 		for _, s := range p.servers {
-			entries = append(entries, multiEntry{ref: s.name, o: p.defaults.over(s.values).options(), where: o.plan + ": servers." + s.name})
+			entries = append(entries, multiEntry{ref: s.name, o: planOptions(p.defaults.Over(s.values)), where: o.plan + ": servers." + s.name})
 		}
 	}
 	for i := range entries {
@@ -838,75 +838,17 @@ func (l *linePrefix) Flush() {
 // installPlanFile is a plan of multiinstall as read: the values for
 // every server, and the servers in the file's order, each with its own.
 type installPlanFile struct {
-	defaults planValues
+	defaults plan.Values
 	servers  []planServer
 }
 
 type planServer struct {
 	name   string
-	values planValues
+	values plan.Values
 }
 
-// planValues are the values of a plan's defaults or of one of its
-// servers, under the names of the flags (serverFlags); nil is not given.
-type planValues struct {
-	Profile     *string  `yaml:"profile"`
-	Layout      *string  `yaml:"layout"`
-	Firewall    *string  `yaml:"firewall"`
-	OS          *string  `yaml:"os"`
-	Hostname    *string  `yaml:"hostname"`
-	PrivateNet  planList `yaml:"private-network"`
-	PrivateIP   planList `yaml:"private-ip"`
-	Timezone    *string  `yaml:"timezone"`
-	Disks       planList `yaml:"disks"`
-	SSHKey      planList `yaml:"ssh-key"`
-	Set         planList `yaml:"set"`
-	User        planList `yaml:"user"`
-	Userdata    planList `yaml:"userdata"`
-	Group       planList `yaml:"group"`
-	IPv6        *bool    `yaml:"ipv6"`
-	Mitigations *bool    `yaml:"mitigations"`
-	Via         *string  `yaml:"via"`
-	Storage     *string  `yaml:"storage"`
-}
-
-// planList is the value of a repeatable flag: a list, or one value.
-type planList []string
-
-func (l *planList) UnmarshalYAML(n *yaml.Node) error {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		*l = planList{n.Value}
-		return nil
-	case yaml.SequenceNode:
-		out := planList{}
-		for _, c := range n.Content {
-			if c.Kind != yaml.ScalarNode {
-				return fmt.Errorf("line %d: a list of values, one per line or in [ ]", c.Line)
-			}
-			out = append(out, c.Value)
-		}
-		*l = out
-		return nil
-	}
-	return fmt.Errorf("line %d: a value, or a list of values", n.Line)
-}
-
-// over is the values of a server over the defaults: each it gives
-// replaces theirs.
-func (v planValues) over(server planValues) planValues {
-	out := v
-	dst, src := reflect.ValueOf(&out).Elem(), reflect.ValueOf(server)
-	for i := range src.NumField() {
-		if !src.Field(i).IsNil() {
-			dst.Field(i).Set(src.Field(i))
-		}
-	}
-	return out
-}
-
-// options are the values as the flags of one installation.
-func (v planValues) options() installOptions {
+// planOptions are a server's values as the flags of one installation.
+func planOptions(v plan.Values) installOptions {
 	str := func(s *string) string {
 		if s == nil {
 			return ""
@@ -1009,8 +951,8 @@ func parsePlan(data []byte) (*installPlanFile, error) {
 
 // planEntry reads the values of defaults or of a server (where): a
 // mapping of the flags' names, or nothing.
-func planEntry(n *yaml.Node, where string) (planValues, error) {
-	var v planValues
+func planEntry(n *yaml.Node, where string) (plan.Values, error) {
+	var v plan.Values
 	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null" {
 		return v, nil
 	}

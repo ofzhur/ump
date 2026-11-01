@@ -1,0 +1,2 @@
+install.sh: network.uplink has neither IPv4 nor IPv6; the new system would be unreachable
+(exit status 1)

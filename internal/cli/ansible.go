@@ -24,7 +24,6 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
-	"github.com/ofzhur/ump/internal/provider/manual"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -974,10 +973,11 @@ func (h *hostFiles) goneHosts() map[string]string {
 
 // goneServer says which servers are gone, for the host files (forget):
 // one the state (doc) no longer has, and that its provider no longer has
-// either (checkGone), or added by hand and removed (ump server remove).
-// A server taken out of the state while its provider still has it is
-// not gone, and when the state is the mirror as it was (its pull failed),
-// no server is: the mirror may lack servers installed meanwhile.
+// either (checkGone), or one of a type the home lists that the home no
+// longer lists (homeLists: ump server remove). A server taken out of the
+// state while its provider still has it is not gone, and when the state
+// is the mirror as it was (its pull failed), no server is: the mirror
+// may lack servers installed meanwhile.
 func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Document) func(ref string) bool {
 	if doc == nil || a.pullFailed {
 		return nil
@@ -987,11 +987,11 @@ func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Doc
 		store = cache.Open(path)
 	}
 	return func(ref string) bool {
-		if inState(doc, ref) {
+		if _, ok := doc.Servers[ref]; ok {
 			return false
 		}
-		if t, _, _ := strings.Cut(ref, "/"); t == manual.TypeName {
-			return true
+		if t, id, _ := strings.Cut(ref, "/"); provider.HomeListed(t) {
+			return !homeLists(doc, t, id)
 		}
 		return a.checkGone(ctx, cfg, store, ref).gone
 	}
@@ -1003,17 +1003,6 @@ func umpWrote(name string, data []byte) bool {
 	hostname, ok := strings.CutSuffix(name, ".yml")
 	line, _, _ := strings.Cut(string(data), "\n")
 	return ok && strings.HasPrefix(line, "# "+hostname+": written by ump (")
-}
-
-// inState says that the state has the server ref (provider/id): an
-// entry of servers, or a server added by hand.
-func inState(doc *state.Document, ref string) bool {
-	if _, ok := doc.Servers[ref]; ok {
-		return true
-	}
-	t, id, _ := strings.Cut(ref, "/")
-	_, ok := doc.Manual[id]
-	return t == manual.TypeName && ok
 }
 
 // removeGone removes the host files forget took out that no write

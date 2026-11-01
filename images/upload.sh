@@ -22,7 +22,7 @@
 #   bin/latest/ump-<os>-<arch>, SHA256SUMS, VERSION
 #   bin/v/<version>/...                    (kept; UMP_VERSION= of get.sh)
 #   rescue/kexec-into-rescue.sh
-#   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
+#   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, kexec-tools-<version>.tar.xz, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh, install/nixos/ump.nix, install/motd.sh, install/bashrc.sh
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/networks.yaml, profiles/users.yaml, profiles/userdata.yaml
@@ -174,13 +174,19 @@ list_dirs() { # list_dirs PREFIX: the directory names right below it
 # <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the rescue
 # image has no name level: rescue/<arch>/)
 publish_image() {
-	local d="$1" k="$2" name="$3" arch version base files f
+	local d="$1" k="$2" name="$3" arch version base files f src
 	arch="$(basename "$d")"
 	version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 	[ -n "$version" ] || { echo "upload.sh: no version in $d/manifest.json" >&2; exit 2; }
 	base="$k${name:+/$name}"
 	files=()
 	for f in vmlinuz initrd.zst kexec rootfs.tar.zst SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
+	# the static kexec (GPL-2.0) goes out with its source, or not at all
+	if [ -f "$d/kexec" ]; then
+		src="$(cd "$d" && ls kexec-tools-*.tar.xz 2>/dev/null | head -n 1 || true)"
+		[ -n "$src" ] || { echo "upload.sh: $d/kexec without its source (kexec-tools-*.tar.xz); build the image again" >&2; exit 2; }
+		files+=("$src")
+	fi
 	echo "==> uploading $base $arch, version $version, to $TARGET"
 	for f in "${files[@]}"; do put "$d/$f" "$base/v/$version/$arch/$f"; done
 	put "$d/manifest.json" "$base/v/$version/$arch/manifest.json"

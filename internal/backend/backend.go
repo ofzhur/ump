@@ -94,10 +94,17 @@ func ValidPath(p string) bool {
 	return err == nil
 }
 
-// cleanPath rejects paths that leave the home.
+// PXEDir is the directory of the PXE server's documents in the home: a
+// dot path, read and written in the backend itself and never mirrored,
+// since daemons write there often.
+const PXEDir = ".pxe/"
+
+// cleanPath rejects paths that leave the home, and dot paths but
+// .published and the files of PXEDir.
 func cleanPath(p string) (string, error) {
 	p = strings.TrimPrefix(strings.TrimSpace(p), "/")
-	if p == "" || strings.Contains(p, "..") || strings.HasPrefix(p, ".") && !strings.HasPrefix(p, ".published") {
+	pxe := strings.HasPrefix(p, PXEDir) && len(p) > len(PXEDir)
+	if p == "" || strings.Contains(p, "..") || strings.HasPrefix(p, ".") && !strings.HasPrefix(p, ".published") && !pxe {
 		return "", fmt.Errorf("bad path %q", p)
 	}
 	return p, nil

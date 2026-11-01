@@ -330,10 +330,17 @@ func (m *Mirror) lock(ctx context.Context) (func(), error) {
 	}
 }
 
+// mirrored says whether a file of the backend is mirrored: all but
+// those of backend.PXEDir, which ump reads and writes in the backend
+// itself.
+func mirrored(path string) bool {
+	return !strings.HasPrefix(path, backend.PXEDir)
+}
+
 // Pull brings the mirror up to date with the backend: files whose
 // version changed are downloaded, files the backend no longer has are
 // removed (unless changed locally, which Push reports), new ones are
-// added. It returns what it did.
+// added; never those of backend.PXEDir. It returns what it did.
 func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 	unlock, err := m.lock(ctx)
 	if err != nil {
@@ -350,7 +357,7 @@ func (m *Mirror) Pull(ctx context.Context) (pulled, removed int, err error) {
 	}
 	remote := map[string]string{}
 	for _, e := range entries {
-		if backend.ValidPath(e.Path) {
+		if backend.ValidPath(e.Path) && mirrored(e.Path) {
 			remote[e.Path] = e.Version
 		}
 	}
@@ -427,7 +434,8 @@ type Change struct {
 
 // Push writes what changed in the mirror to the backend, each file over
 // the version it was pulled at; a file that changed on both sides is
-// reported as a conflict and left as it is, locally and remotely.
+// reported as a conflict and left as it is, locally and remotely; the
+// files of backend.PXEDir stay out.
 // disposable says whether a file may be overwritten whatever happened to
 // it meanwhile: the listing cache, which every listing rewrites and which
 // is always safe to lose.
@@ -456,12 +464,12 @@ func (m *Mirror) Push(ctx context.Context) ([]Change, error) {
 		rel, _ := filepath.Rel(m.Dir, path)
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel != "." && backend.Excluded(rel) {
+			if rel != "." && (backend.Excluded(rel) || !mirrored(rel+"/")) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if backend.Excluded(rel) {
+		if backend.Excluded(rel) || !mirrored(rel) {
 			return nil
 		}
 		data, err := os.ReadFile(path)

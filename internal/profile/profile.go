@@ -767,14 +767,17 @@ type Spec struct {
 	Profile  ProfileInfo `json:"profile"`
 }
 
-// NetworkSpec is Network with the default filled in, and the server's
-// addresses in its private networks, which the caller fills in (none:
-// absent): PrivateNetworks all of them, in order, and Private the first,
-// as an installer from before several networks reads it.
+// NetworkSpec is Network with the default filled in, and what the
+// caller fills in (none: absent): the server's addresses in its private
+// networks, PrivateNetworks all of them, in order, and Private the first,
+// as an installer from before several networks reads it; and Uplink, the
+// installed system's uplink where the provider knows it (ValidateUplink
+// checks it), which an installer from before it ignores.
 type NetworkSpec struct {
 	Rename          bool          `json:"rename"`
 	Private         *PrivateSpec  `json:"private,omitempty"`
 	PrivateNetworks []PrivateSpec `json:"private_networks,omitempty"`
+	Uplink          *UplinkSpec   `json:"uplink,omitempty"`
 }
 
 // PrivateSpec is a server's address in a private network.

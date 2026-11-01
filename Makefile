@@ -2,7 +2,7 @@
 #
 #   make              build ./ump for this machine
 #   make install      install ump into $(go env GOBIN), else $(go env GOPATH)/bin
-#   make check        gofmt, go vet and the tests (what CI runs)
+#   make check        gofmt, go vet, the tests and the script checks (what CI runs)
 #   make dist         cross-compile release binaries into dist/
 #   make release      check, dist, and publish the binaries and get.sh to the storage
 #   make help         list the targets
@@ -32,7 +32,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check dist notices release clean help images rescue-image rescue-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test dist notices release clean help images rescue-image rescue-test os-image upload
 
 all: build
 
@@ -57,9 +57,13 @@ fmt-check:
 
 scripts-check: ## syntax-check the shell scripts of the rescue image
 	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh; do bash -n "$$f" || exit 1; done
+	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
 	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh
 
-check: fmt-check vet test scripts-check ## gofmt, go vet, the tests and the script syntax checks
+network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
+	@images/test-network.sh
+
+check: fmt-check vet test scripts-check network-test ## gofmt, go vet, the tests, the script syntax checks and the network test
 
 dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SUMS and VERSION
 	@rm -rf dist && mkdir -p dist

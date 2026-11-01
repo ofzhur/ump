@@ -1,0 +1,87 @@
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    int01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      set-name: int01
+      dhcp4: false
+      optional: true
+    ext01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      set-name: ext01
+      dhcp4: false
+      addresses:
+        - "2001:db8::17/64"
+      routes:
+        - to: "::/0"
+          via: "fe80::1"
+          on-link: true
+      accept-ra: false
+      nameservers:
+        addresses: [2001:db8::53]
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "",
+  "gw4": "",
+  "ip6": "2001:db8::17/64",
+  "gw6": "fe80::1",
+  "dns": [
+    "2001:db8::53"
+  ],
+  "dhcp4": false,
+  "auto6": false
+}
+==> etc/systemd/network/10-ump-ext01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Link]
+Name=ext01
+==> etc/systemd/network/10-ump-int01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+Name=int01
+==> etc/systemd/network/20-ump-ext01.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+Address=2001:db8::17/64
+DNS=2001:db8::53
+IPv6AcceptRA=no
+
+[Route]
+Gateway=fe80::1
+GatewayOnLink=yes
+==> etc/systemd/network/20-ump-int01.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: the resolvers of the specification (network.uplink.dns); the
+# uplink's configuration sets the same. Replace both to use others.
+[Resolve]
+DNS=2001:db8::53
+==> etc/ump/install.network
+network=none
+network6=static
+dns=2001:db8::53
+==> plan
+ext01 (0c:c4:7a:aa:bb:11) IPv4 none, IPv6 static 2001:db8::17/64,fe80::1 (the specification's uplink); IPv6 on; DNS 2001:db8::53

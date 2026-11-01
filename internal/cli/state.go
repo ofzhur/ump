@@ -163,21 +163,35 @@ func (a *app) loadState(ctx context.Context, cfg *config.Config) (*state.Documen
 		}
 		a.doc = d
 	}
-	a.manualAccount(cfg, a.doc)
+	a.manual = a.doc.Manual
+	if len(a.doc.Manual) > 0 {
+		homeAccount(cfg, manual.AccountName, manual.TypeName)
+	}
 	return a.doc, nil
 }
 
-func (a *app) manualAccount(cfg *config.Config, d *state.Document) {
-	a.manual = d.Manual
-	if len(d.Manual) == 0 {
+// homeAccount adds the account of a home-listed provider type to the
+// configuration, unless an account of that name is there.
+func homeAccount(cfg *config.Config, name, typeName string) {
+	if _, ok := cfg.Accounts[name]; ok {
 		return
 	}
-	if _, ok := cfg.Accounts[manual.AccountName]; !ok {
-		if cfg.Accounts == nil {
-			cfg.Accounts = map[string]config.Account{}
-		}
-		cfg.Accounts[manual.AccountName] = config.Account{Type: manual.TypeName, Settings: map[string]config.Value{}}
+	if cfg.Accounts == nil {
+		cfg.Accounts = map[string]config.Account{}
 	}
+	cfg.Accounts[name] = config.Account{Type: typeName, Settings: map[string]config.Value{}}
+}
+
+// homeLists says that the home lists the server id of a home-listed
+// provider type: a manual server is listed by the state (ump server
+// add). A type it cannot tell for is taken as listed, so that nothing
+// of it goes.
+func homeLists(doc *state.Document, typeName, id string) bool {
+	if typeName != manual.TypeName {
+		return true
+	}
+	_, ok := doc.Manual[id]
+	return ok
 }
 
 // updateState changes the state document; the next loadState reads it

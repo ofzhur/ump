@@ -9,14 +9,21 @@
 # hostname, the interface names, sudo, the firewall, swap, a userdata
 # entry's effect, the install record and the message of the day; on
 # NixOS also a userdata module winning over a default, and a
-# configuration that nixos-rebuild still evaluates.
+# configuration that nixos-rebuild still evaluates. install.sh runs as
+# ump runs it, with --spec alone; with an uplink, or RECORD=1, also with
+# --record, as a PXE machine's runner does, and the record must hold the
+# new system's host keys.
 #
 # Usage: test-install.sh OS [arm64|amd64]   (OS: debian-13, ubuntu-26.04,
 #        nixos-25.11, archlinux, cachyos, ...; the architecture defaults to this machine's)
 # Needs the rescue image in images/rescue/out/<arch> and the image (or the
 # NixOS manifest) built. Environment: MEM (MB, default 2048), DISK (GB,
 # default 12), DISK2 (GB: a second disk, which the layouts span, as a
-# Linode's swap disk; default none), PORT (default 2252), TIMEOUT (s).
+# Linode's swap disk; default none), PORT (default 2252), TIMEOUT (s),
+# UPLINK (static or dhcp: the specification's uplink, network.uplink,
+# as a PXE machine's has it, checked on the new system; default none,
+# the uplink as the rescue system has it), RECORD (1: --record without
+# an uplink too).
 set -euo pipefail
 OS="${1:?usage: test-install.sh OS [arm64|amd64]}"
 ARCH="${2:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
@@ -30,6 +37,9 @@ archlinux*|cachyos*) family=arch; IMAGE="$HERE/arch/out/$OS/$ARCH" ;;
 esac
 MANIFEST="$IMAGE/manifest.json"
 MEM="${MEM:-2048}"
+UPLINK="${UPLINK:-}"
+RECORD="${RECORD:-0}"; [ -z "$UPLINK" ] || RECORD=1
+MAC=52:54:00:12:34:56
 DISK="${DISK:-12}"
 PORT="${PORT:-2252}"
 HTTP=$((PORT + 1))
@@ -79,7 +89,15 @@ if [ "$family" = nixos ]; then
 else
 	userdata="$(jq -n '[{name: "test", type: "bash", script: "#!/bin/bash\nset -e\necho merged > /etc/ump-userdata-test\n"}]')"
 fi
-jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --argjson userdata "$userdata" '{
+# the uplink of a PXE machine: QEMU's user network, by DHCP with its
+# resolver, or the same address static
+case "$UPLINK" in
+"") uplink=null ;;
+dhcp) uplink="$(jq -n --arg mac "$MAC" '{mac: $mac, ipv4: {mode: "dhcp"}, ipv6: {mode: "none"}, dns_from_dhcp: true}')" ;;
+static) uplink="$(jq -n --arg mac "$MAC" '{mac: $mac, ipv4: {mode: "static", address: "10.0.2.15/24", gateway: "10.0.2.2"}, ipv6: {mode: "none"}, dns: ["10.0.2.3"]}')" ;;
+*) echo "UPLINK is static or dhcp" >&2; exit 2 ;;
+esac
+jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --argjson userdata "$userdata" --argjson uplink "$uplink" '{
 	os: $os, hostname: "test.example.net", timezone: "Europe/Berlin", storage: $storage,
 	kernel: {mitigations: false, ipv6: false, extra: ""},
 	layout: {name: "lvm-linear", parts: [
@@ -93,7 +111,7 @@ jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --ar
 	users: [{name: "ump", sudo: true, groups: ["adm"], shell: "/bin/bash", keys: [$key]}],
 	userdata: $userdata,
 	firewall: {policy: "drop", allow: [{proto: "icmp"}, {proto: "tcp", port: "22"}]},
-	network: {rename: true}, profile: {name: "test"}}' > "$WORK/spec.json"
+	network: {rename: true}, profile: {name: "test"}} | if $uplink then .network.uplink = $uplink else . end' > "$WORK/spec.json"
 
 ssh_opts=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
 	-o ConnectTimeout=5 -o ServerAliveInterval=10 -p "$PORT")
@@ -112,7 +130,7 @@ if [ -n "${DISK2:-}" ]; then
 	truncate -s "${DISK2}G" "$WORK/disk2.img"
 	drives+=(-drive "file=$WORK/disk2.img,format=raw,if=virtio")
 fi
-net=(-netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device virtio-net-pci,netdev=n0)
+net=(-netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device "virtio-net-pci,netdev=n0,mac=$MAC")
 echo "==> booting the rescue image ($ARCH, ${MEM}M, UEFI)"
 "$qemu" "${machine[@]}" "${firmware[@]}" -m "$MEM" -smp 2 -nographic \
 	-kernel "$RESCUE/vmlinuz" -initrd "$RESCUE/initrd.zst" \
@@ -124,10 +142,17 @@ wait_ssh root
 ssh "${ssh_opts[@]}" root@127.0.0.1 '[ -d /sys/firmware/efi ] && echo "firmware: UEFI" || echo "firmware: BIOS"'
 scp -q -i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$PORT" \
 	"$ROOT/install/install.sh" "$WORK/spec.json" root@127.0.0.1:/tmp/
-echo "==> install.sh --spec ($OS)"
+# as ump runs it, or as a PXE machine's runner does (--record)
+args="--spec /tmp/spec.json"; [ "$RECORD" = 1 ] && args="$args --record /tmp/ump-record"
+echo "==> install.sh $args ($OS${UPLINK:+, uplink $UPLINK})"
 start=$(date +%s)
-ssh "${ssh_opts[@]}" root@127.0.0.1 'bash /tmp/install.sh --spec /tmp/spec.json' 2>&1 | tee "$WORK/install.log" | grep '^==>\|install.sh' || true
+ssh "${ssh_opts[@]}" root@127.0.0.1 "bash /tmp/install.sh $args" 2>&1 | tee "$WORK/install.log" | grep '^==>\|install.sh' || true
 grep -q "^==> installed: $OS" "$WORK/install.log" || { echo "the installation failed"; tail -n 30 "$WORK/install.log"; exit 1; }
+if [ "$RECORD" = 1 ]; then
+	mkdir -p "$WORK/record"
+	scp -q -i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$PORT" \
+		"root@127.0.0.1:/tmp/ump-record/*" "$WORK/record/"
+fi
 echo "==> installed in $(( $(date +%s) - start ))s; booting the disk"
 kill "$qemu_pid"; wait "$qemu_pid" 2>/dev/null || true
 "$qemu" "${machine[@]}" "${firmware[@]}" -m "$MEM" -smp 2 -nographic \
@@ -137,7 +162,7 @@ qemu_pid=$!
 cp /dev/null "$WORK/serial.log"; ln -sf "$WORK/serial-nixos.log" "$WORK/serial.log"
 wait_ssh ump
 echo "==> checking the new system"
-ssh "${ssh_opts[@]}" ump@127.0.0.1 "FAMILY=$family OS=$OS bash -s" <<'CHECK'
+ssh "${ssh_opts[@]}" ump@127.0.0.1 "FAMILY=$family OS=$OS UPLINK=$UPLINK RECORD_KEY='$(cat "$WORK"/record/ssh_host_ed25519_key.pub 2>/dev/null | awk '{print $2}')' bash -s" <<'CHECK'
 set -e
 . /etc/os-release; echo "os: $PRETTY_NAME   hostname: $(hostname -f 2>/dev/null || hostname)   kernel: $(uname -r)"
 echo "interfaces: $(ip -br link | awk "\$1 != \"lo\" {print \$1}" | paste -sd" " -)   address: $(ip -br -4 addr show scope global | awk "{print \$3}")"
@@ -146,6 +171,16 @@ sudo -n nft list ruleset | grep -q "policy drop" && echo "firewall: input policy
 [ "$(cat /etc/ump-userdata-test)" = merged ] && echo "userdata: the entry left its mark (/etc/ump-userdata-test)"
 [ "$(awk 'NR > 1' /proc/swaps | wc -l)" -gt 0 ] && echo "swap: $(awk 'NR > 1 {print $1}' /proc/swaps | paste -sd" " -)"
 grep -q "^os=$OS" /etc/ump/install && echo "install record: $(grep "^image_version=" /etc/ump/install)"
+[ -n "$RECORD_KEY" ] && grep -qF "$RECORD_KEY" /etc/ssh/ssh_host_ed25519_key.pub && echo "record (--record): the host key this system offers"
+if [ -n "$UPLINK" ]; then
+	grep -q "^network=$UPLINK$" /etc/ump/install && echo "uplink: $(grep '^network=\|^dns=' /etc/ump/install | paste -sd' ' -) in the install record"
+	if [ "$UPLINK" = dhcp ]; then
+		ip -4 -o addr show scope global | grep -q 'dynamic' && echo "uplink: the address by DHCP ($(ip -4 -o addr show scope global | awk '{print $4}'))"
+	else
+		ip -4 -o addr show scope global | grep -v 'dynamic' | grep -q '10.0.2.15/24' && echo "uplink: the address static (10.0.2.15/24)"
+	fi
+	[ "$(resolvectl dns | sed 's/^[^:]*://' | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd, -)" = 10.0.2.3 ] && echo "uplink: resolver 10.0.2.3 alone ($([ "$UPLINK" = dhcp ] && echo "from the lease" || echo "from the specification"))"
+fi
 ump-motd | grep -q "Unus Mundus Provisioner" && echo "message of the day: ump-motd shows the banner"
 ump-motd | grep "host  \|uptime" | sed "s/\x1b\[[0-9;]*m//g; s/^ */message of the day: /"
 if [ "$FAMILY" = nixos ]; then

@@ -1,0 +1,16 @@
+# A network boot from a PXE server (a boot config with a token, see
+# init): tell the server the rescue system is up, and what the machine is
+[Unit]
+Description=UMP rescue: report to the PXE server
+ConditionPathExists=/etc/ump/boot/token
+After=ump-rescue-setup.service systemd-networkd.service ssh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ump-pxe hello
+RemainAfterExit=yes
+TimeoutStartSec=15min
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

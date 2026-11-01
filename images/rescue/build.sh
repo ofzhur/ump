@@ -143,13 +143,20 @@ fi
 log "manifest"
 cd "$OUT"
 files=(vmlinuz initrd.zst)
-[ -f kexec ] && files+=(kexec)
+# the static kexec, and its source next to it (GPL-2.0)
+if [ -f kexec ]; then
+	files+=(kexec)
+	for f in kexec-tools-*.tar.xz; do [ -f "$f" ] && files+=("$f"); done
+fi
 sha256sum "${files[@]}" > SHA256SUMS
 {
 	printf '{\n'
 	printf '  "version": "%s",\n  "arch": "%s",\n  "suite": "%s",\n  "kernel": "%s",\n' "$VERSION" "$ARCH" "$SUITE" "$kver"
 	printf '  "built": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	printf '  "cmdline": "console=ttyS0,115200n8 console=tty0",\n'
+	# what the image does beyond kexec: a boot config in front of it
+	# (init, ump-rescue-setup), and the PXE units (ump-pxe)
+	printf '  "features": ["boot-config", "pxe-install"],\n'
 	# the smallest MemTotal the image boots with: the kernel holds the
 	# compressed initramfs while it unpacks it (twice its size), plus the
 	# kernel itself and room for systemd and the tools (see README.md)

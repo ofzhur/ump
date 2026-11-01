@@ -1,0 +1,15 @@
+# The unattended installation a PXE server armed for this boot
+# (ump.pxe.mode=install), once the server has the hello
+[Unit]
+Description=UMP rescue: the unattended installation armed on the PXE server
+ConditionPathExists=/etc/ump/boot/token
+Requires=ump-pxe-hello.service
+After=ump-pxe-hello.service
+
+[Service]
+Type=exec
+ExecStart=/usr/local/sbin/ump-pxe install
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
