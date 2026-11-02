@@ -4,7 +4,8 @@
 #   make install      install ump into $(go env GOBIN), else $(go env GOPATH)/bin
 #   make check        gofmt, go vet, the tests and the script checks (what CI runs)
 #   make dist         cross-compile release binaries into dist/
-#   make release      check, dist, and publish the binaries and get.sh to the storage
+#   make packages     the deb and rpm packages into dist/pkg/
+#   make release      check, dist, packages; publish them and get.sh to the storage, attach the packages to the GitHub release
 #   make help         list the targets
 #
 # VERSION is taken from `git describe` (tags v*) and compiled into the
@@ -17,6 +18,9 @@ VERSION    ?= $(shell git describe --tags --match 'v*' --dirty 2>/dev/null || ec
 BUILDFLAGS ?= -trimpath
 LDFLAGS    := -s -w -X $(MODULE)/internal/cli.Version=$(VERSION)
 PLATFORMS  ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+# the packages: their architectures, and nfpm, which builds them (go install into a temporary directory)
+PKG_ARCHS    ?= amd64 arm64
+NFPM_VERSION ?= v2.48.0
 
 export CGO_ENABLED := 0
 
@@ -32,7 +36,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test fuzz dist notices release clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
 
 all: build
 
@@ -49,16 +53,16 @@ vet: ## run go vet
 	go vet ./...
 
 fmt: ## format the sources with gofmt
-	gofmt -w cmd internal
+	gofmt -w cmd internal packaging
 
 fmt-check:
-	@out="$$(gofmt -l cmd internal)"; \
+	@out="$$(gofmt -l cmd internal packaging)"; \
 	if [ -n "$$out" ]; then echo "files need gofmt:"; echo "$$out"; exit 1; fi
 
-scripts-check: ## syntax-check the shell scripts of the rescue image
-	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh; do bash -n "$$f" || exit 1; done
+scripts-check: ## syntax-check the shell scripts of the rescue image, the installer and the packages
+	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh packaging/*.sh; do bash -n "$$f" || exit 1; done
 	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh
+	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh
 
 network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
 	@images/test-network.sh
@@ -88,8 +92,20 @@ dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SU
 notices: ## rewrite THIRD_PARTY_NOTICES from the Go modules compiled into ump
 	images/notices.sh THIRD_PARTY_NOTICES
 
-release: check dist ## check, dist, and publish the binaries (bin/) and get.sh to UPLOAD_TARGET (s3://, scp:// or file://)
-	images/upload.sh bin scripts
+packages: ## build the deb and rpm packages for PKG_ARCHS into dist/pkg/, with SHA256SUMS and VERSION (refuses a -dirty VERSION unless FORCE=1)
+	@VERSION='$(VERSION)' LDFLAGS='$(LDFLAGS)' ARCHS='$(PKG_ARCHS)' NFPM_VERSION='$(NFPM_VERSION)' packaging/build.sh
+
+package-test: ## install, upgrade and remove the packages in Debian, Ubuntu, Fedora and Rocky containers, verify the units, run the check unit under systemd
+	packaging/test.sh
+
+release: check dist packages ## check, dist, packages; publish the binaries (bin/), the packages (pkg/) and get.sh to UPLOAD_TARGET (s3://, scp:// or file://), then release-assets
+	images/upload.sh bin pkg scripts
+	@$(MAKE) --no-print-directory release-assets
+
+release-assets: ## attach dist/pkg/ to the GitHub release of VERSION (gh; DRY_RUN=1 says what it would do)
+	@if [ "$(DRY_RUN)" = 1 ]; then echo "would run: gh release upload $(VERSION) $(wildcard dist/pkg/*.deb dist/pkg/*.rpm) dist/pkg/SHA256SUMS --clobber"; \
+	elif gh release view '$(VERSION)' >/dev/null 2>&1; then gh release upload '$(VERSION)' dist/pkg/*.deb dist/pkg/*.rpm dist/pkg/SHA256SUMS --clobber; \
+	else echo "no GitHub release $(VERSION) yet: gh release create $(VERSION), then make release-assets"; fi
 
 clean: ## remove the binary and dist/
 	rm -rf $(BINARY) $(BINARY).exe dist
@@ -117,7 +133,7 @@ pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump px
 pxe-install-test: ## install a machine of TEST_ARCH unattended in QEMU from ump pxe serve, the base image of OS (default: ubuntu-26.04), and a second installation the disk guard refuses (FIRMWARE=bios on amd64)
 	images/test-pxe-install.sh $(TEST_ARCH)
 
-upload: ## publish everything built (images, binaries), the scripts and the profiles to UPLOAD_TARGET (s3://bucket, scp://host/path or file:///path)
+upload: ## publish everything built (images, binaries, packages), the scripts and the profiles to UPLOAD_TARGET (s3://bucket, scp://host/path or file:///path)
 	images/upload.sh
 
 images/rescue/out/%/manifest.json:

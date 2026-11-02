@@ -34,6 +34,11 @@ import (
 // -ldflags "-X github.com/ofzhur/ump/internal/cli.Version=v0.1.0".
 var Version = "dev"
 
+// Packaging is the package a binary was built for, deb or rpm (make
+// packages, -X github.com/ofzhur/ump/internal/cli.Packaging=deb); empty
+// for the binaries of get.sh and a build of your own.
+var Packaging = ""
+
 // Exit codes, see docs/cli.md.
 const (
 	exitOK          = 0
@@ -233,6 +238,12 @@ func (a *app) run(ctx context.Context, args []string) int {
 	root := a.newRootCmd()
 	root.SetArgs(args)
 	a.daemon = daemonCommand(args)
+	if a.daemon {
+		if err := pxeCredentials(); err != nil {
+			fmt.Fprintf(a.stderr, "ump: %v\n", err)
+			return exitGeneric
+		}
+	}
 	if err := a.resolveHome(ctx, offlineCommand(args)); err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 		return exitGeneric

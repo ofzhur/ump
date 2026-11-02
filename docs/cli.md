@@ -132,7 +132,8 @@ ump
 │   ├── serve        [--site <name>] [--http <addr>] [--url <url>] [--tftp <addr>] [--ipxe-dir <dir>] [--data <dir>] [--cache <dir>] [--poll <d>] [--install-timeout <d>] [--check]
 │   │                                                  the PXE server: chain mode, the rescue system, unattended installations, optional read-only TFTP of the iPXE binaries
 │   ├── status       [name|mac...] [--unknown] [--log <name>] [-o table|wide|json|yaml]   the servers of each site, the machines and their last boots
-│   └── disarm       <name>... [-o json|yaml]          take an armed network boot back
+│   ├── disarm       <name>... [-o json|yaml]          take an armed network boot back
+│   └── unit         [--check] [--exec <path>]         the server's systemd unit (or its check's), as the packages install it
 ├── completion
 └── version
 ```
@@ -983,12 +984,13 @@ rescue mail address otherwise; OVHcloud Public Cloud instances are
 rebooted into rescue mode by OVHcloud itself, with the instance's own
 keys and a returned password.
 
-## The PXE server: `ump pxe serve|status|disarm`
+## The PXE server: `ump pxe serve|status|disarm|unit`
 
 ```
 ump pxe serve [--site NAME] [--http ADDR] [--url URL] [--tftp ADDR] [--ipxe-dir DIR] [--data DIR] [--cache DIR] [--poll DURATION] [--install-timeout DURATION] [--check]
 ump pxe status [NAME|MAC...] [--unknown] [--log NAME] [-o table|wide|json|yaml]
 ump pxe disarm NAME... [-o json|yaml]
+ump pxe unit [--check] [--exec PATH]
 ```
 
 [PXE serving](pxe.md) describes the whole: sites, jump hosts, the DHCP
@@ -1048,6 +1050,14 @@ arm of an unattended installation goes under the server's lock, with
 the private addresses it reserved when it wrote nothing (no boot claimed
 it, or it failed), and with its outcome when it failed or did not
 report; the outcome of an installation whose arm is gone goes too.
+
+`unit` prints `ump-pxe@.service`, the server as a systemd service for
+the site its instance names, or with `--check` `ump-pxe-check@.service`,
+its check with the same settings: the units of the deb and rpm
+packages, for a hand install, with `--exec` naming where ump is
+(default `/usr/bin/ump`). Under systemd the server also takes the
+backend's secrets from credentials of their names ([as a
+service](pxe.md#as-a-service)).
 
 ## `ump config`
 

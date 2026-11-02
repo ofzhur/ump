@@ -45,13 +45,14 @@ it (ump server rescue) or standing in mode rescue, its disk to the
 others. ump hands out no addresses.
 
 ump pxe status shows what the PXE servers of each site see, ump pxe
-disarm takes an armed boot back.`,
+disarm takes an armed boot back, ump pxe unit prints the server's
+systemd unit.`,
 		Example: `  ump pxe serve --site fra1 --http 192.0.2.5:8067 --tftp 192.0.2.5:69
   ump pxe status                # the servers and the machines
   ump pxe status web-07         # one machine
   ump pxe disarm web-07`,
 	}
-	cmd.AddCommand(a.newPXEServeCmd(), a.newPXEStatusCmd(), a.newPXEDisarmCmd())
+	cmd.AddCommand(a.newPXEServeCmd(), a.newPXEStatusCmd(), a.newPXEDisarmCmd(), a.newPXEUnitCmd())
 	return cmd
 }
 
@@ -113,7 +114,9 @@ variables, else the home of the user it runs as) every --poll, and only
 the arms; it writes the outcomes of the arms it consumed or claimed, the
 end of the installations' logs and its status (ump pxe status). It
 reads nothing of pxe.yaml: a hand edit reaches it through ump config pxe
-apply.
+apply. Under systemd, credentials named like the credential variables
+($CREDENTIALS_DIRECTORY) win over them; ump pxe unit prints the
+service's unit.
 
 --http is where it listens (default :8067, every interface: on a host
 with public addresses, give the private network's), --url where the

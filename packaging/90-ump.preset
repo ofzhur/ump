@@ -1,0 +1,5 @@
+# The PXE server runs where it is enabled for a site, never by itself:
+# systemctl enable --now ump-pxe@SITE (docs/pxe.md). The globs match the
+# instances too, which a template's name alone does not.
+disable ump-pxe@*.service
+disable ump-pxe-check@*.service
