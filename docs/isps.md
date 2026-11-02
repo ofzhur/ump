@@ -299,8 +299,10 @@ on their private network. [PXE serving](pxe.md) describes it all.
   MACs are a label. It is listed from `pxe.yaml` and what the PXE
   servers report, never from the listing cache, and it leaves the state
   only by `ump config pxe delete` (or `edit`, which asks).
-- Status: `local`, `rescue` or `armed rescue`, from its mode in
-  `pxe.yaml` and its arm (`unknown` while the backend does not answer:
+- Status: `local`, `rescue`, `armed rescue`, `armed install`,
+  `installing`, `installed (unverified)`, `failed`, `install (done)`
+  and the like, from its mode in `pxe.yaml`, its arm and its outcome
+  (`unknown` while the backend does not answer:
   the machines are listed from `pxe.yaml` all the same, with a
   warning); the architecture and the product as its last rescue system
   reported them.
@@ -318,6 +320,9 @@ on their private network. [PXE serving](pxe.md) describes it all.
 - Reinstall goes through that rescue system; the new system gets the
   network of the machine's entry (`network`: static or DHCP, its
   resolvers), and ump waits for it at its configured address.
+  `--unattended` has the machine install by itself at its next boot,
+  and so does `mode: install` once ([unattended
+  installations](pxe.md#unattended-installations)).
 - A site's `jump` is the host SSH to its machines goes through, for ump
   and Ansible.
 - Power control, renaming and reverse DNS do not exist.

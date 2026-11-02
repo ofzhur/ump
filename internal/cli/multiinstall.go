@@ -108,6 +108,13 @@ files are still written). --dry-run brings every server into the rescue
 system and prints each installer's plan, side by side; nothing is
 written, nothing provisioned.
 
+--unattended installs every server as reinstall --unattended installs
+one (PXE machines): one question for all, all armed under their locks
+with their private addresses reserved together, the installations
+waited for side by side, each new system checked, then the records and
+one provisioning run; --no-wait returns once all are armed, and the
+next ump provision records them.
+
 A summary says per server what was installed, what failed and why, and
 what was provisioned; -o json|yaml prints that per server, with the
 run's result. Exit status 1 means an installation failed, 6 that the
@@ -139,6 +146,7 @@ docs/cli.md describes the plan file.`,
 	sub.Flags().BoolVar(&o.noProvision, "no-provision", false, "do not provision: no Ansible layout needed, no playbook runs")
 	hostsFlag(sub, &o.hosts, "an Ansible host pattern: provision the hosts it matches alone (default: the whole fleet)")
 	sub.Flags().StringArrayVar((*[]string)(&o.playbooks), "playbook", nil, "a playbook of playbooks/, without .yml: provision with those alone (repeatable, or comma-separated; default: every one)")
+	addUnattendedFlags(sub, &o.server)
 	return sub
 }
 
@@ -216,12 +224,23 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	if o.noProvision && (pattern != "" || len(named) > 0) {
 		return usageErrorf(cmd, "--hosts and --playbook narrow the provisioning, which --no-provision leaves out")
 	}
+	unattended, noWait := o.server.unattended, o.server.noWait
+	if err := checkUnattendedFlags(cmd, o.server, pattern, named); err != nil {
+		return err
+	}
 	entries, err := multiEntries(cmd, refs, o)
 	if err != nil {
 		return err
 	}
+	for i := range entries {
+		e := &entries[i]
+		e.o.unattended, e.o.noWait, e.o.armedFor = unattended, noWait, o.server.armedFor
+		if unattended && e.o.via != "" && e.o.via != "auto" {
+			return e.inPlan(usageErrorf(cmd, "via %s and --unattended: the machine boots its installation by itself", e.o.via))
+		}
+	}
 	ctx := cmd.Context()
-	repo, run, inv, unchecked, err := a.installRepo(ctx, o.noProvision, named, pattern)
+	repo, run, inv, unchecked, err := a.installRepo(ctx, o.noProvision || noWait, named, pattern)
 	if err != nil {
 		return err
 	}
@@ -271,7 +290,18 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "PRIVATE-IPV4", "GROUPS"}, rows, false); err != nil {
 		return err
 	}
+	voids := ""
+	for _, p := range plans {
+		if p.disks != nil {
+			fmt.Fprintf(a.stderr, "The installation on %s may erase %s.\n", p.m.Name, p.disks.Words)
+		}
+		voids += a.voids(p.armed, p.ref)
+	}
 	question := fmt.Sprintf("Install on these %s? Every disk of each is erased.", plural(len(plans), "server"))
+	if unattended {
+		question = fmt.Sprintf("Erase these %s at their next boot and install them unattended?", plural(len(plans), "server"))
+	}
+	question += voids
 	switch len(noRescue) {
 	case 0:
 	case 1:
@@ -279,8 +309,14 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	default:
 		question += " " + strings.Join(noRescue, ", ") + " have no rescue system to fall back on: a failed installation is yours to recover."
 	}
-	if !o.noProvision {
+	switch {
+	case noWait:
+		question += " The next ump provision records them and provisions them."
+	case !o.noProvision:
 		question += " Then ump provision runs " + run.String() + "."
+	}
+	if o.dryRun && unattended {
+		return a.multiDryUnattended(plans, format)
 	}
 	if o.dryRun {
 		question = fmt.Sprintf("Bring these %s into the rescue system and show their installation plans? (dry run: nothing is erased)", plural(len(plans), "server"))
@@ -291,7 +327,7 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	// every server's lock, then the private addresses, as reinstall takes
 	// its one: from here on no other ump reinstalls, rescues or changes
 	// the address of any of them; the installations let the locks go
-	unlocks, err := a.lockServers(ctx, plans)
+	unlocks, err := a.lockServers(ctx, plans, "multiinstall")
 	if err != nil {
 		return err
 	}
@@ -304,33 +340,61 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 			unlock()
 		}
 	}()
-	// the private addresses are the servers' from now on; those of the
-	// installations whose installer does not write the disks go back
-	if !o.dryRun {
-		if err := a.reservePrivate(ctx, plans); err != nil {
-			return err
+	// the unattended installations the question said go
+	if !o.dryRun && !unattended {
+		for _, p := range plans {
+			if err := a.voidArmed(ctx, p); err != nil {
+				a.releaseVoided(ctx, plans)
+				return fmt.Errorf("%s: %w", p.ref, err)
+			}
 		}
 	}
-
-	// the installations, side by side
-	parallel := o.parallel
-	if parallel <= 0 || parallel > len(plans) {
-		parallel = len(plans)
-	}
-	if !o.noProvision {
-		fmt.Fprintf(a.stderr, "Provisioning after the installations: %s.\n", run)
-	}
-	at := "all at once"
-	if parallel < len(plans) {
-		at = fmt.Sprintf("%d at a time", parallel)
-	}
-	if o.dryRun {
-		fmt.Fprintf(a.stderr, "Installation plans for %s, %s ...\n", plural(len(plans), "server"), at)
+	var outcomes []installOutcome
+	if unattended {
+		// all armed under their locks, then the locks go: the arms are
+		// the reservations, and the machines install by themselves
+		infos, errs := a.armAll(ctx, plans, a.armedUntil(o.server), !noWait)
+		for _, unlock := range unlocks {
+			unlock()
+		}
+		locked = false
+		if noWait {
+			return a.multiArmed(plans, infos, errs, format)
+		}
+		if !o.noProvision {
+			fmt.Fprintf(a.stderr, "Provisioning after the installations: %s.\n", run)
+		}
+		fmt.Fprintf(a.stderr, "Waiting for the installations of %s ...\n", plural(len(plans), "server"))
+		outcomes = a.unattendedAll(cmd, plans, infos, errs)
 	} else {
-		fmt.Fprintf(a.stderr, "Installing %s, %s ...\n", plural(len(plans), "server"), at)
+		// the private addresses are the servers' from now on; those of the
+		// installations whose installer does not write the disks go back
+		if !o.dryRun {
+			if err := a.reservePrivate(ctx, plans); err != nil {
+				return err
+			}
+		}
+
+		// the installations, side by side
+		parallel := o.parallel
+		if parallel <= 0 || parallel > len(plans) {
+			parallel = len(plans)
+		}
+		if !o.noProvision {
+			fmt.Fprintf(a.stderr, "Provisioning after the installations: %s.\n", run)
+		}
+		at := "all at once"
+		if parallel < len(plans) {
+			at = fmt.Sprintf("%d at a time", parallel)
+		}
+		if o.dryRun {
+			fmt.Fprintf(a.stderr, "Installation plans for %s, %s ...\n", plural(len(plans), "server"), at)
+		} else {
+			fmt.Fprintf(a.stderr, "Installing %s, %s ...\n", plural(len(plans), "server"), at)
+		}
+		outcomes = a.installAll(cmd, cfg, plans, unlocks, installRun{dryRun: o.dryRun}, parallel)
+		locked = false
 	}
-	outcomes := a.installAll(cmd, cfg, plans, unlocks, installRun{dryRun: o.dryRun}, parallel)
-	locked = false
 	defer func() {
 		for _, oc := range outcomes {
 			if oc.unlock != nil {
@@ -497,8 +561,9 @@ func recapOf(res *provisionResult, host string) (hostRecap, bool) {
 }
 
 // multiSummary prints the result as a table: per server whether it was
-// installed (dry-run for a plan alone) and provisioned (- where nothing
-// ran), and why not.
+// installed (dry-run for a plan alone, armed for an unattended
+// installation not waited for) and provisioned (- where nothing ran),
+// and why not.
 func (a *app) multiSummary(res multiResult, dryRun, provisioning bool) error {
 	rows := make([][]string, 0, len(res.Servers))
 	for _, s := range res.Servers {
@@ -506,6 +571,8 @@ func (a *app) multiSummary(res multiResult, dryRun, provisioning bool) error {
 		switch {
 		case s.Installed:
 			installed = "yes"
+		case s.Armed != "":
+			installed = "armed"
 		case dryRun && s.Reason == "":
 			installed = "dry-run"
 		}
@@ -587,6 +654,17 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 		if err := checkInstall(ctx, m, prov); err != nil {
 			return nil, nil, e.inPlan(err)
 		}
+		// an installation armed for the server is disarmed once the run
+		// has its lock, but for one that a boot claimed and installs
+		if p.ui, p.armed, err = unattendedOf(ctx, m, prov); err != nil {
+			return nil, nil, e.inPlan(err)
+		}
+		if e.o.unattended && p.ui == nil {
+			return nil, nil, e.inPlan(withExit(exitUsage, fmt.Errorf("--unattended: provider type %s has no unattended installations, so %s cannot have one", m.Provider, m.Ref())))
+		}
+		if err := a.beingInstalled(m, p.armed); err != nil {
+			return nil, nil, e.inPlan(err)
+		}
 		plans = append(plans, p)
 	}
 	doc, err := a.loadState(ctx, cfg)
@@ -609,6 +687,11 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 		}
 		if err := a.resolveInstall(ctx, cmd, cfg, doc, p, e.o, e.f); err != nil {
 			return nil, nil, e.fail(err)
+		}
+		if e.o.unattended {
+			if p.disks, err = p.ui.InstallDisks(ctx, p.m, p.spec.Disks); err != nil {
+				return nil, nil, e.fail(withExit(exitUsage, err))
+			}
 		}
 		key := p.storage + " " + p.spec.OS
 		bad, ok := archs[key]
@@ -786,13 +869,14 @@ func (a *app) installOne(cmd *cobra.Command, p *installPlan, r installRun, unloc
 	return oc
 }
 
-// lockServers takes the locks of the planned servers, in order, and
-// returns their releases; one it cannot take lets go of those it took
-// and stops the run (exit status 3 when another ump holds it).
-func (a *app) lockServers(ctx context.Context, plans []*installPlan) ([]func(), error) {
+// lockServers takes the locks of the planned servers for an operation
+// (what), in order, and returns their releases; one it cannot take lets
+// go of those it took and stops the run (exit status 3 when another ump
+// holds it).
+func (a *app) lockServers(ctx context.Context, plans []*installPlan, what string) ([]func(), error) {
 	unlocks := make([]func(), 0, len(plans))
 	for _, p := range plans {
-		unlock, err := a.lockServer(ctx, p.m, "multiinstall")
+		unlock, err := a.lockServer(ctx, p.m, what)
 		if err != nil {
 			for _, u := range unlocks {
 				u()

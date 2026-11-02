@@ -613,6 +613,10 @@ func TestPXERescueWithServer(t *testing.T) {
 	if err := srv.Fetch(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// it runs once its status is there
+	if err := srv.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
 	hs := httptest.NewServer(srv.Handler())
 	defer hs.Close()
 	get := func(url string) []byte {

@@ -22,7 +22,8 @@ files in a storage (`-short` skips it).
 Images are built in a privileged Debian container (`make rescue-image`,
 `make os-image`; Docker or Podman) and the rescue image boots in QEMU
 with `make rescue-test`, over the network from `ump pxe serve` with
-`make pxe-test`. See [the rescue image](images/rescue/README.md)
+`make pxe-test`, and installs a system from there by itself with `make
+pxe-install-test`. See [the rescue image](images/rescue/README.md)
 and [the base images](images/base/README.md).
 
 Anything that erases disks is tested on a machine you can afford to

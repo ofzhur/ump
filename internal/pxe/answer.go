@@ -23,21 +23,20 @@ type Journal interface {
 
 // Answer is what a known machine gets at /ipxe: standing is its mode in
 // site.json, a and o its arm and outcome (nil: none), j the server's
-// journal (nil: empty). An arm boots once: a rescue until its boot was
-// served (an outcome of it), an installation until its outcome; a
-// machine whose installation is being written gets the bare rescue
-// until the deadline. Otherwise the standing mode: the rescue system,
-// or the disk (local, also for a standing install, which an arm
+// journal of the arms it consumed or claimed (nil: empty). A machine
+// whose installation is being written gets the bare rescue until the
+// deadline, whatever its arm. An arm boots once: a rescue until its
+// boot was served (an outcome of it), an installation until it was
+// claimed (its outcome); neither boots again from a server that
+// consumed or claimed it. Otherwise the standing mode: the rescue
+// system, or the disk (local, also for a standing install, which an arm
 // carries).
 func Answer(standing string, a *Arm, o *Outcome, j Journal, now time.Time) string {
-	if a != nil && (j == nil || !j.Done(a.ID)) {
-		mine := o != nil && o.Arm == a.ID
-		switch {
-		case mine && o.Phase == PhaseWriting && now.Before(o.Deadline):
-			return AnswerRescueBare
-		case !mine && !a.Expired(now):
-			return a.Mode
-		}
+	if o != nil && o.Phase == PhaseWriting && now.Before(o.Deadline) {
+		return AnswerRescueBare
+	}
+	if a != nil && (o == nil || o.Arm != a.ID) && !a.Expired(now) && (j == nil || !j.Done(a.ID)) {
+		return a.Mode
 	}
 	if standing == ModeRescue {
 		return ModeRescue

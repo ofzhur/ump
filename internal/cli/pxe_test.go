@@ -92,7 +92,7 @@ func TestConfigPXE(t *testing.T) {
 		{[]string{"db-01"}, 2, "--mac is needed without a terminal: ump config pxe create db-01 --mac MAC"},
 		{[]string{"Db_01", "--mac", "0c:c4:7a:aa:bb:02"}, 2, `invalid name "Db_01"`},
 		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:01"}, 2, "nothing was saved: line 26: machines.db-01: mac: 0c:c4:7a:aa:bb:01 is web-07's already: a MAC boots one machine"},
-		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:02", "--mode", "install"}, 2, "machines.db-01: mode: install: unattended installations are not supported yet; local or rescue"},
+		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:02", "--mode", "install"}, 2, "machines.db-01: mode: install: ump records an installation once it reaches the new system, at a static network.ipv4 or at address"},
 		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:02", "--set", "network.ipv4.address=192.0.2.18"}, 2, `network.ipv4.address: "192.0.2.18" is not an IPv4 address with its prefix length`},
 		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:02", "--set", "vlan=40"}, 2, "machines.db-01: vlan is no key of a machine"},
 		{[]string{"db-01", "--mac", "0c:c4:7a:aa:bb:02", "--set", "novalue"}, 2, `--set needs KEY=VALUE, got "novalue"`},
@@ -276,7 +276,7 @@ func TestConfigPXEEdit(t *testing.T) {
 		return os.WriteFile(path, []byte(strings.Replace(string(data), "mode: rescue", "mode: install", 1)), 0o600)
 	}
 	_, errOut, code = e.run("", false, "config", "pxe", "edit", "web-07")
-	if code != 2 || !strings.Contains(errOut, "unattended installations are not supported yet") || !strings.Contains(errOut, "nothing was saved; your edit is in ") || readPXE(t) != before {
+	if code != 2 || !strings.Contains(errOut, "mode: install: ump records an installation once it reaches the new system") || !strings.Contains(errOut, "nothing was saved; your edit is in ") || readPXE(t) != before {
 		t.Errorf("an invalid edit: code %d, %q", code, errOut)
 	}
 	// with a pending arm the MACs stay; other changes go through

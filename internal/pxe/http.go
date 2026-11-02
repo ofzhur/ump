@@ -22,13 +22,17 @@ import (
 )
 
 // Handler is the server's HTTP side: boot.ipxe, a machine's script, its
-// boot's kernel and initrd, and the rescue system's hello.
+// boot's kernel and initrd, the rescue system's hello, and an
+// installation's specification, log and report (install.go).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /boot.ipxe", s.bootScript)
 	mux.HandleFunc("GET /ipxe", s.machineScript)
 	mux.HandleFunc("GET /b/{boot}/{file}", s.bootFile)
 	mux.HandleFunc("POST /api/v1/hello", s.hello)
+	mux.HandleFunc("GET /api/v1/spec", s.spec)
+	mux.HandleFunc("POST /api/v1/log", s.logPart)
+	mux.HandleFunc("POST /api/v1/report", s.report)
 	if s.Debugf == nil {
 		return mux
 	}
@@ -123,7 +127,9 @@ func (s *Server) machineScript(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		return // iPXE asks with GET; a HEAD boots nothing
 	}
-	text, line := s.answer(c, s.base(r), s.now())
+	now := s.now()
+	recheck := s.recheck(r.Context(), c.MAC, now)
+	text, line := s.answer(c, s.base(r), now, recheck)
 	if line != "" {
 		s.logf("%s", line)
 	}
@@ -160,8 +166,9 @@ func describe(c Client) string {
 // answer is the script of a machine's request, and the line that logs
 // it ("" for none): from site.json, its arm and outcome and the journal
 // (Answer), turned into the disk by what stands in the way (Refusal, the
-// rescue image, the standing rescue's cap).
-func (s *Server) answer(c Client, base string, now time.Time) (string, string) {
+// rescue image, the standing rescue's cap, for an armed installation
+// what it needs and recheck, the error of reading its arm again).
+func (s *Server) answer(c Client, base string, now time.Time, recheck error) (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.url = base
@@ -184,14 +191,14 @@ func (s *Server) answer(c Client, base string, now time.Time) (string, string) {
 		}
 		return ExitScript("ump: "+c.MAC+" is no machine of site "+s.Site, false), line
 	}
-	a, o := s.arms[m.Name], s.outcomes[m.Name]
+	a, o := s.arms[m.Name], s.outcome(m.Name)
 	mode := Answer(m.Mode, a, o, s.consumed, now)
-	armed := a != nil && !s.consumed.Done(a.ID) && (o == nil || o.Arm != a.ID) && !a.Expired(now)
+	armed := a != nil && mode == a.Mode && !s.consumed.Done(a.ID) && (o == nil || o.Arm != a.ID) && !a.Expired(now)
 	arch := c.Arch()
 	reason := ""
 	switch mode {
 	case ModeLocal:
-	case ModeRescue, AnswerRescueBare:
+	case ModeRescue, AnswerRescueBare, ModeInstall:
 		need := 0
 		if r := s.rescues[arch]; r != nil {
 			need = r.Manifest.MemoryMB
@@ -209,11 +216,21 @@ func (s *Server) answer(c Client, base string, now time.Time) (string, string) {
 		if reason == "" && mode == ModeRescue && !armed && s.capped(m.Name, now) {
 			reason = "the rescue system does not come up: " + strconv.Itoa(rescueCap) + " boots without a hello within 30 minutes (NIC driver or firmware? see the console)"
 		}
+		if reason == "" && mode == ModeInstall {
+			if recheck != nil {
+				reason = fmt.Sprintf("the arm could not be read again (%v), and an armed installation boots only then", recheck)
+			} else if reason = s.noInstall(m, a, arch); reason == "" && a.Firmware != "" && c.Firmware() != "" && a.Firmware != c.Firmware() {
+				reason = fmt.Sprintf("the installation is armed for %s, and the machine boots with %s", a.Firmware, c.Firmware())
+			}
+		}
 	default:
 		reason = s.unserved(mode)
 	}
 	armID := ""
-	if armed || mode == AnswerRescueBare {
+	switch {
+	case mode == AnswerRescueBare:
+		armID = o.Arm
+	case armed:
 		armID = a.ID
 	}
 	sn := s.see(c, m.Name, now)
@@ -235,17 +252,25 @@ func (s *Server) answer(c Client, base string, now time.Time) (string, string) {
 		return ExitScript("ump: "+m.Name+": local", false), line + "local"
 	}
 
-	// the rescue system: a boot of its own, with the version of now
+	// the rescue system: a boot of its own, with the version of now; an
+	// armed boot has the arm's keys too, and so has the bare rescue of an
+	// installation that is being written
 	b := &boot{ID: randomID(), Machine: m.Name, MAC: c.MAC, Arch: arch, Mode: mode, Version: s.rescues[arch].ID, Created: now, rescue: s.rescues[arch]}
 	cfg := BootConfig{Hostname: m.Hostname, BootMAC: c.MAC, DNS: "dhcp", Time: now, Keys: m.Keys}
-	if mode == ModeRescue {
+	if armed || mode == AnswerRescueBare && a != nil && a.ID == o.Arm {
+		cfg.Keys = unique(append(slices.Clone(m.Keys), a.Keys...))
+	}
+	if mode == ModeRescue || mode == ModeInstall {
 		token := randomID()
 		b.Token = tokenHash(token)
 		cfg.URL, cfg.Boot, cfg.Token = base, b.ID, token
 		if armed {
 			b.Arm = a.ID
-			cfg.Keys = unique(append(slices.Clone(m.Keys), a.Keys...))
 		}
+	}
+	if mode == ModeInstall {
+		cfg.Install = true
+		s.attempts[a.ID]++
 	}
 	b.cpio = cfg.Cpio()
 	s.addBoot(b)
@@ -253,15 +278,19 @@ func (s *Server) answer(c Client, base string, now time.Time) (string, string) {
 	sn.Signals = s.signals(c.MAC, m.Name, now)
 	s.saveJournal()
 	s.signal()
+	shown := ModeRescue
 	switch {
+	case mode == ModeInstall:
+		shown = ModeInstall
+		line += fmt.Sprintf("install (arm %s, boot %d of %d)", ShortID(a.ID), s.attempts[a.ID], installAttempts)
 	case mode == AnswerRescueBare:
-		line += "rescue without a token (its installation is being written, arm " + ShortID(a.ID) + ")"
+		line += "rescue without a token (its installation is being written, arm " + ShortID(o.Arm) + ")"
 	case armed:
 		line += "rescue (arm " + ShortID(a.ID) + ")"
 	default:
 		line += "rescue"
 	}
-	return KernelScript(m.Name, ModeRescue, base, b.ID, KernelArgs(m.Console, arch)), line
+	return KernelScript(m.Name, shown, base, b.ID, KernelArgs(m.Console, arch)), line
 }
 
 // see is the machine's entry in the status, updated with the request.
@@ -372,33 +401,37 @@ func BootOrder(h *Hello) string {
 	return fmt.Sprintf("the boot order starts with Boot%s%s, not with Boot%s, the network boot it came from", first, desc, current)
 }
 
-// addBoot keeps a new boot, and forgets the oldest beyond the bounds.
+// addBoot keeps a new boot, and forgets the oldest beyond the bounds;
+// an installation under way stays, since its parts and its report need
+// it.
 func (s *Server) addBoot(b *boot) {
 	s.boots[b.ID] = b
 	if b.Token != "" {
 		s.tokens[b.Token] = b
 	}
-	var mine, all []*boot
-	for _, o := range s.boots {
-		all = append(all, o)
-		if o.Machine == b.Machine {
-			mine = append(mine, o)
+	drop := func(n int, of func(*boot) bool) {
+		var l []*boot
+		for _, o := range s.boots {
+			if of(o) && !o.installing() {
+				l = append(l, o)
+			}
 		}
-	}
-	oldest := func(l []*boot) {
 		sort.Slice(l, func(i, j int) bool { return l[i].Created.Before(l[j].Created) })
-	}
-	if len(mine) > bootsPerMachine {
-		oldest(mine)
-		for _, o := range mine[:len(mine)-bootsPerMachine] {
+		for _, o := range l[:min(n, len(l))] {
 			s.dropBoot(o.ID)
 		}
+	}
+	mine := 0
+	for _, o := range s.boots {
+		if o.Machine == b.Machine {
+			mine++
+		}
+	}
+	if mine > bootsPerMachine {
+		drop(mine-bootsPerMachine, func(o *boot) bool { return o.Machine == b.Machine })
 	}
 	if len(s.boots) > maxBoots {
-		oldest(all)
-		for _, o := range all[:len(all)-maxBoots] {
-			s.dropBoot(o.ID)
-		}
+		drop(len(s.boots)-maxBoots, func(*boot) bool { return true })
 	}
 }
 
@@ -540,7 +573,7 @@ func (s *Server) served(b *boot, to string, n int64, took time.Duration) {
 	s.bg.Add(1)
 	go func() {
 		defer s.bg.Done()
-		if err := s.putConsumed(context.Background(), b.Machine, b.Arm, b.ID, now); err != nil {
+		if _, err := s.putConsumed(context.Background(), b.Machine, b.Arm, b.ID, now); err != nil {
 			s.logf("%s: the arm %s is consumed, and the backend did not take it (%v); the journal holds it until it does", b.Machine, ShortID(b.Arm), err)
 			return
 		}
@@ -602,6 +635,9 @@ func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	first := b.Hello.IsZero()
+	if first {
+		b.Addr = clientIP(r)
+	}
 	b.Hello = now
 	h.Boot, h.Arm, h.At = b.ID, b.Arm, now
 	sn := s.seen[b.MAC]
@@ -620,7 +656,10 @@ func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
 			at = "an unknown address"
 		}
 		arm := ""
-		if b.Arm != "" {
+		switch {
+		case b.Mode == ModeInstall:
+			arm = " for the installation (arm " + ShortID(b.Arm) + ")"
+		case b.Arm != "":
 			arm = " (arm " + ShortID(b.Arm) + ")"
 		}
 		s.logf("%s: rescue system up at %s%s", b.Machine, at, arm)

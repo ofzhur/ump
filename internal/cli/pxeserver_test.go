@@ -137,6 +137,7 @@ func TestPXEServeCheck(t *testing.T) {
 		{[]string{"--ipxe-dir", ipxe}, "--ipxe-dir names the files of the TFTP server: it needs --tftp"},
 		{[]string{"--url", "http://192.0.2.5:8067/pxe"}, `--url "http://192.0.2.5:8067/pxe" is not where machines reach the server`},
 		{[]string{"--poll", "10ms"}, "--poll 10ms: at least 1s"},
+		{[]string{"--install-timeout", "5m"}, "--install-timeout 5m0s: at least 10m"},
 		{[]string{"extra"}, "unknown command \"extra\""},
 	} {
 		if _, errOut, code := e.run("", false, append([]string{"pxe", "serve", "--check"}, c.args...)...); code != 2 || !strings.Contains(errOut, c.err) {
@@ -356,6 +357,39 @@ web-07: its disk does not boot: 5 network boots within 15 minutes
 	}
 }
 
+// TestPXEStatusLog: --log prints the log a server pushed, says how the
+// installation stands, and falls back to the end its report carried.
+func TestPXEStatusLog(t *testing.T) {
+	e := newTestEnv(t)
+	e.write("{}\n")
+	writePXE(t, "machines:\n  web-07:\n    mac: 0c:c4:7a:aa:bb:01\n")
+	ctx := context.Background()
+	store := pxeStoreOf()
+	o := &pxe.Outcome{Arm: "a7f3c2e1aaaabbbb", Phase: pxe.PhaseWriting, Daemon: "pxe1", Boot: "b1", At: e.now, Deadline: e.now.Add(2 * time.Hour)}
+	store.PutOutcome(ctx, pxe.DefaultSite, "web-07", o, "")
+	store.Files.Write(ctx, pxe.LogPath(pxe.DefaultSite, "web-07"), []byte{}, "")
+	out, errOut, code := e.run("", false, "pxe", "status", "--log", "web-07")
+	if code != 0 || out != "" || errOut != "The installation of web-07 (arm a7f3c2e1) is under way at default/pxe1 since 2026-10-12 09:00 UTC; it reports by 2026-10-12 11:00 UTC.\nIts log has no output yet.\n" {
+		t.Errorf("under way: code %d, %q %q", code, out, errOut)
+	}
+	// the report's end of it when the backend has no log
+	exit := 1
+	o.Phase, o.Exit, o.LogTail = pxe.PhaseFailed, &exit, "install.sh: no disk\n"
+	_, v, _ := store.Files.Read(ctx, pxe.OutcomePath(pxe.DefaultSite, "web-07"))
+	store.PutOutcome(ctx, pxe.DefaultSite, "web-07", o, v)
+	store.Files.Delete(ctx, pxe.LogPath(pxe.DefaultSite, "web-07"))
+	out, errOut, code = e.run("", false, "pxe", "status", "--log", "web-07")
+	if code != 0 || out != "install.sh: no disk\n" || !strings.Contains(errOut, "(arm a7f3c2e1, default/pxe1): failed at 2026-10-12 09:00 UTC, exit status 1.\nIts log is not in the backend;") {
+		t.Errorf("the report's end: code %d, %q %q", code, out, errOut)
+	}
+	// a machine a hand edit moved to another site: where its log is
+	writePXE(t, "sites:\n  fra1: {}\nmachines:\n  web-07:\n    site: fra1\n    mac: 0c:c4:7a:aa:bb:01\n")
+	store.Files.Write(ctx, pxe.LogPath(pxe.DefaultSite, "web-07"), []byte("==> partitioning\n"), "")
+	if out, _, code := e.run("", false, "pxe", "status", "--log", "web-07"); code != 0 || out != "==> partitioning\n" {
+		t.Errorf("moved: code %d, %q", code, out)
+	}
+}
+
 func TestPXEDisarm(t *testing.T) {
 	e := newTestEnv(t)
 	e.write("{}\n")
@@ -388,6 +422,17 @@ func TestPXEDisarm(t *testing.T) {
 	}
 	if a, _, _ := store.Arm(ctx, pxe.DefaultSite, "db-01"); a == nil {
 		t.Error("an installation that is being written was disarmed")
+	}
+	// one that installed and waits to be recorded keeps what ump records
+	store.UpdateOutcome(ctx, pxe.DefaultSite, "db-01", func(o *pxe.Outcome) (*pxe.Outcome, error) {
+		o.Phase = pxe.PhaseInstalled
+		return o, nil
+	})
+	if out, _, code := e.run("", false, "pxe", "disarm", "db-01"); code != 0 || out != "db-01 is installed (b0b0b0b0, at 2026-10-12 09:00 UTC) and waits to be recorded: the next ump provision records it, and its arm goes with it.\n" {
+		t.Errorf("installed: code %d, %q", code, out)
+	}
+	if a, _, _ := store.Arm(ctx, pxe.DefaultSite, "db-01"); a == nil {
+		t.Error("an installation that waits to be recorded was disarmed")
 	}
 	if _, errOut, code := e.run("", false, "pxe", "disarm", "nope"); code != 1 || !strings.Contains(errOut, `no machine "nope" in `) {
 		t.Errorf("nope: code %d, %q", code, errOut)

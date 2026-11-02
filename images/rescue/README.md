@@ -338,7 +338,8 @@ failing installer is reported (its output whole, in chunks) without a
 reboot, and one that succeeds (with the disks `seen`) is reported, and
 the machine reboots. It uses HVF on macOS
 and KVM on Linux where the architectures match, and plain emulation
-otherwise. `make pxe-test` boots the image from `ump pxe serve` itself
+otherwise. `make pxe-test` boots the image from `ump pxe serve` itself,
+and `make pxe-install-test` has it install a system unattended
 ([PXE serving](../../docs/pxe.md#testing)).
 
 ## Memory

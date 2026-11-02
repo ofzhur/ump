@@ -41,12 +41,14 @@ const (
 
 // The rhythm of a server: its status at most every statusEvery on a
 // change and every heartbeat without one, the rescue image's manifests
-// every fetchEvery, a read of the backend within loadTimeout, a chunk
-// of a download within sendTimeout.
+// every fetchEvery, the installation logs that grew every logEvery, a
+// read of the backend within loadTimeout, a chunk of a download within
+// sendTimeout.
 var (
 	statusEvery = 5 * time.Second
 	heartbeat   = time.Minute
 	fetchEvery  = time.Hour
+	logEvery    = 10 * time.Second
 	loadTimeout = 30 * time.Second
 	sendTimeout = 30 * time.Second
 )
@@ -59,9 +61,11 @@ const sendChunk = 1 << 20
 // holds for the site, read every Poll (site.json, the arms and the
 // outcomes), boots the rescue image of its Cache with a boot config in
 // front, takes the rescue system's hello, consumes an armed rescue once
-// its initrd was sent completely, and reports what it sees in its
-// status document. It reads nothing of pxe.yaml and writes nothing but
-// the site's outcomes and its own status. Open it before anything else.
+// its initrd was sent completely, hands an armed installation's
+// specification to one boot, which it claims first (install.go), and
+// reports what it sees in its status document. It reads nothing of
+// pxe.yaml and writes nothing but the site's outcomes, its installation
+// logs and its own status. Open it before anything else.
 type Server struct {
 	// Site is the site it serves, Name its name among the site's servers
 	// (the host's), Version ump's.
@@ -72,10 +76,15 @@ type Server struct {
 	// the address and port a request came to.
 	URL string
 	// Data is the directory of what outlives the process (journal.json:
-	// the arms it consumed, its boots); empty: nothing does.
+	// the arms it consumed or claimed, its boots; the specifications and
+	// logs of its installations); empty: nothing does, and it serves no
+	// installation.
 	Data string
-	// Poll is how often it reads the backend (default 10 s).
-	Poll time.Duration
+	// Poll is how often it reads the backend (default 10 s),
+	// InstallTimeout how long an installation may write from its claim
+	// to its report (default DefaultInstallTimeout).
+	Poll           time.Duration
+	InstallTimeout time.Duration
 	// Warnings go into its status as they are.
 	Warnings []string
 	// Logf logs an event, Debugf a detail (-v); Notify tells the service
@@ -106,6 +115,12 @@ type Server struct {
 	requests map[string][]time.Time // local answers, by MAC
 	logged   map[string]time.Time   // unknown MACs logged, by MAC
 	consumed consumedArms
+	attempts map[string]int    // boots of armed installations before a claim, by arm
+	claiming map[string]bool   // arms being claimed
+	reports  map[string]bool   // boots whose report is being written
+	pushed   map[string]int64  // how much of a boot's log the backend has
+	refused  map[string]string // the last refusal logged of a boot's report
+	logMu    sync.Mutex        // the installation logs' files
 
 	changed chan struct{}
 	fetch   chan struct{}
@@ -127,20 +142,43 @@ type boot struct {
 	Token   string    `json:"token,omitempty"`
 	Created time.Time `json:"created"`
 	// Served is when its initrd was sent completely, Hello when its
-	// rescue system said hello.
+	// rescue system said hello, from Addr.
 	Served time.Time `json:"served,omitzero"`
 	Hello  time.Time `json:"hello,omitzero"`
+	Addr   string    `json:"addr,omitempty"`
+	// An installation's: when it claimed the specification, the deadline
+	// of its writing, when its report was written, and how much of its
+	// output the server has (LogEnd, where the next part starts).
+	Claimed  time.Time `json:"claimed,omitzero"`
+	Deadline time.Time `json:"deadline,omitzero"`
+	Reported time.Time `json:"reported,omitzero"`
+	LogEnd   int64     `json:"log_end,omitempty"`
 
 	rescue *Rescue // nil after a restart: its files are not served again
 	cpio   []byte
 }
 
+// alive says whether the boot's token still counts: until its hello is
+// due, a while after its hello, and for an installation until its
+// report is long written (a report sent again) or, without one, long
+// after its deadline (a late report still counts).
 func (b *boot) alive(now time.Time) bool {
+	switch {
+	case !b.Reported.IsZero():
+		return now.Before(b.Reported.Add(reportKept))
+	case !b.Claimed.IsZero():
+		return now.Before(b.Deadline.Add(reportKept))
+	}
 	return now.Before(b.Created.Add(helloWithin)) || !b.Hello.IsZero() && now.Before(b.Hello.Add(bootKept))
 }
 
-// consumedArms are the arms a server consumed, by ID: its journal,
-// which holds while the backend does not take the outcome.
+// installing says whether the boot claimed an installation that did not
+// report yet: the bounds on boots never drop it.
+func (b *boot) installing() bool { return !b.Claimed.IsZero() && b.Reported.IsZero() }
+
+// consumedArms are the arms a server consumed or claimed, by ID: its
+// journal, which holds while the backend does not take the outcome, or
+// loses it.
 type consumedArms map[string]*consumedArm
 
 type consumedArm struct {
@@ -149,15 +187,19 @@ type consumedArm struct {
 	At      time.Time `json:"at"`
 	// Written says that the backend has the outcome too.
 	Written bool `json:"written,omitempty"`
+	// Outcome is an installation's outcome as the server wrote it last:
+	// its claim (writing), then its report's.
+	Outcome *Outcome `json:"outcome,omitempty"`
 }
 
-// Done says whether the arm was consumed here.
+// Done says whether the arm was consumed or claimed here.
 func (c consumedArms) Done(arm string) bool { return c[arm] != nil }
 
 // journalDoc is journal.json in the data directory.
 type journalDoc struct {
-	Consumed consumedArms `json:"consumed,omitempty"`
-	Boots    []*boot      `json:"boots,omitempty"`
+	Consumed consumedArms   `json:"consumed,omitempty"`
+	Boots    []*boot        `json:"boots,omitempty"`
+	Attempts map[string]int `json:"attempts,omitempty"`
 }
 
 func (s *Server) now() time.Time {
@@ -190,7 +232,8 @@ func (s *Server) Open(ctx context.Context) error {
 	s.rescues, s.fetchErr, s.learned = map[string]*Rescue{}, map[string]error{}, map[string]bool{}
 	s.boots, s.tokens = map[string]*boot{}, map[string]*boot{}
 	s.seen, s.unknown, s.requests, s.logged = map[string]*Seen{}, map[string]*Seen{}, map[string][]time.Time{}, map[string]time.Time{}
-	s.consumed = consumedArms{}
+	s.consumed, s.attempts = consumedArms{}, map[string]int{}
+	s.claiming, s.reports, s.pushed, s.refused = map[string]bool{}, map[string]bool{}, map[string]int64{}, map[string]string{}
 	s.changed, s.fetch = make(chan struct{}, 1), make(chan struct{}, 1)
 	if s.Data != "" {
 		if err := os.MkdirAll(s.Data, 0o700); err != nil {
@@ -212,6 +255,9 @@ func (s *Server) Open(ctx context.Context) error {
 			if c != nil {
 				s.consumed[id] = c
 			}
+		}
+		for id, n := range j.Attempts {
+			s.attempts[id] = n
 		}
 		for _, b := range j.Boots {
 			if b != nil && b.ID != "" && b.alive(now) {
@@ -312,6 +358,13 @@ func (s *Server) Load(ctx context.Context) error {
 	for p := range s.versions {
 		if _, ok := listed[p]; !ok {
 			s.drop(p, prefix)
+		}
+	}
+	// what the server wrote itself and did not read back is gone too
+	// when the backend lists it no more
+	for name := range s.outcomes {
+		if _, ok := listed[OutcomePath(s.Site, name)]; !ok {
+			delete(s.outcomes, name)
 		}
 	}
 	for _, p := range changed {
@@ -530,9 +583,10 @@ func (s *Server) Fetch(ctx context.Context) error {
 // status once more.
 func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); s.fetchLoop(ctx) }()
 	go func() { defer wg.Done(); s.statusLoop(ctx) }()
+	go func() { defer wg.Done(); s.logLoop(ctx) }()
 	poll := time.NewTicker(s.Poll)
 	defer poll.Stop()
 	s.notify()
@@ -542,6 +596,7 @@ func (s *Server) Run(ctx context.Context) {
 			wg.Wait()
 			s.bg.Wait()
 			fctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			s.pushLogs(fctx)
 			if err := s.Flush(fctx); err != nil {
 				s.logf("the last status: %v", err)
 			}
@@ -550,6 +605,7 @@ func (s *Server) Run(ctx context.Context) {
 		case <-poll.C:
 			if s.Load(ctx) == nil {
 				s.writeConsumed(ctx)
+				s.interrupt(ctx)
 			}
 			s.prune()
 			s.notify()
@@ -617,13 +673,14 @@ func (s *Server) notify() {
 	s.Notify("STATUS=" + st)
 }
 
-// prune forgets the boots that are over and the consumed arms long
-// written, once their boot is over (its hellos need them).
+// prune forgets the boots that are over, the consumed arms long
+// written, once their boot is over (its hellos need them), and the
+// attempts of armed installations whose arm is gone.
 func (s *Server) prune() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	n := len(s.boots) + len(s.consumed)
+	n := len(s.boots) + len(s.consumed) + len(s.attempts)
 	for id, b := range s.boots {
 		if !b.alive(now) {
 			s.dropBoot(id)
@@ -634,14 +691,34 @@ func (s *Server) prune() {
 			delete(s.consumed, id)
 		}
 	}
-	if len(s.boots)+len(s.consumed) != n {
+	if s.downErr == nil && !s.loaded.IsZero() {
+		armed := map[string]bool{}
+		for _, a := range s.arms {
+			armed[a.ID] = true
+		}
+		for id := range s.attempts {
+			if !armed[id] {
+				delete(s.attempts, id)
+			}
+		}
+	}
+	if len(s.boots)+len(s.consumed)+len(s.attempts) != n {
 		s.saveJournal()
 	}
 }
 
 func (s *Server) dropBoot(id string) {
-	if b := s.boots[id]; b != nil && b.Token != "" {
+	b := s.boots[id]
+	if b == nil {
+		return
+	}
+	if b.Token != "" {
 		delete(s.tokens, b.Token)
+	}
+	if !b.Claimed.IsZero() {
+		s.removeSpec(b)
+		delete(s.pushed, b.ID)
+		delete(s.refused, b.ID)
 	}
 	delete(s.boots, id)
 }
@@ -651,7 +728,7 @@ func (s *Server) saveJournal() {
 	if s.Data == "" {
 		return
 	}
-	j := journalDoc{Consumed: s.consumed}
+	j := journalDoc{Consumed: s.consumed, Attempts: s.attempts}
 	for _, b := range s.boots {
 		j.Boots = append(j.Boots, b)
 	}
@@ -669,7 +746,9 @@ func (s *Server) saveJournal() {
 }
 
 // writeConsumed tells the backend of the arms consumed while it did not
-// answer.
+// answer, and puts back the outcome of an arm consumed or claimed here
+// that the backend lost while the arm stands: such an arm never boots
+// again, at any server of the site.
 func (s *Server) writeConsumed(ctx context.Context) {
 	s.mu.Lock()
 	type todo struct {
@@ -678,14 +757,29 @@ func (s *Server) writeConsumed(ctx context.Context) {
 	}
 	var list []todo
 	for id, c := range s.consumed {
-		if !c.Written {
+		a, o := s.arms[c.Machine], s.outcomes[c.Machine]
+		lost := c.Written && a != nil && a.ID == id && (o == nil || o.Arm != id)
+		if !c.Written || lost {
 			list = append(list, todo{id, *c})
 		}
 	}
 	s.mu.Unlock()
 	for _, t := range list {
-		if err := s.putConsumed(ctx, t.c.Machine, t.arm, t.c.Boot, t.c.At); err != nil {
+		if t.c.Outcome != nil {
+			if err := s.restoreOutcome(ctx, t.c.Machine, t.c.Outcome); err != nil {
+				return
+			}
+			continue
+		}
+		wrote, err := s.putConsumed(ctx, t.c.Machine, t.arm, t.c.Boot, t.c.At)
+		if err != nil {
 			return
+		}
+		if t.c.Written {
+			if wrote {
+				s.logf("%s: the backend lost the outcome of the arm %s, which was consumed here: put back", t.c.Machine, ShortID(t.arm))
+			}
+			continue
 		}
 		s.mu.Lock()
 		if c := s.consumed[t.arm]; c != nil {
@@ -701,20 +795,21 @@ func (s *Server) writeConsumed(ctx context.Context) {
 var errOutcomeThere = errors.New("the outcome is there")
 
 // putConsumed writes the outcome of a consumed rescue arm, by a
-// compare-and-swap: one there already for the arm stays.
-func (s *Server) putConsumed(ctx context.Context, machine, arm, bootID string, at time.Time) error {
+// compare-and-swap: one there already for the arm stays, and wrote says
+// that there was none.
+func (s *Server) putConsumed(ctx context.Context, machine, arm, bootID string, at time.Time) (wrote bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, err := s.Store.UpdateOutcome(ctx, s.Site, machine, func(o *Outcome) (*Outcome, error) {
+	_, err = s.Store.UpdateOutcome(ctx, s.Site, machine, func(o *Outcome) (*Outcome, error) {
 		if o != nil && o.Arm == arm {
 			return nil, errOutcomeThere
 		}
-		return &Outcome{Arm: arm, Phase: PhaseBooted, Daemon: s.Name, Boot: bootID, At: at}, nil
+		return &Outcome{Arm: arm, Phase: PhaseBooted, Daemon: s.Name, Boot: bootID, At: at}, s.armStands(ctx, machine, arm)
 	})
-	if errors.Is(err, errOutcomeThere) {
-		return nil
+	if errors.Is(err, errOutcomeThere) || errors.Is(err, errArmGone) {
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 // --- the status ------------------------------------------------------------
@@ -760,7 +855,8 @@ func (s *Server) status(now time.Time) *Status {
 		st.Unknown[mac] = &c
 	}
 	for name, a := range s.arms {
-		if !a.Pending(s.outcomes[name], now) || s.consumed.Done(a.ID) {
+		o := s.outcome(name)
+		if !a.Pending(o, now) || o != nil && o.Arm == a.ID || s.consumed.Done(a.ID) {
 			continue
 		}
 		as := &ArmState{At: now}
@@ -803,7 +899,7 @@ func (s *Server) cannot(name string, a *Arm) string {
 	switch {
 	case m == nil:
 		return name + " is no machine of site.json of site " + s.Site
-	case a.Mode != ModeRescue:
+	case a.Mode != ModeRescue && a.Mode != ModeInstall:
 		return s.unserved(a.Mode)
 	}
 	arch := m.Arch
@@ -817,14 +913,14 @@ func (s *Server) cannot(name string, a *Arm) string {
 	if arch == "" {
 		arch = ArchAMD64
 	}
-	return s.noRescue(arch)
+	if why := s.noRescue(arch); why != "" || a.Mode != ModeInstall {
+		return why
+	}
+	return s.noInstall(m, a, arch)
 }
 
 // unserved says that the server does not serve an arm's mode.
 func (s *Server) unserved(mode string) string {
-	if mode == ModeInstall {
-		return "this PXE server serves no unattended installations (ump " + s.Version + ")"
-	}
 	return fmt.Sprintf("this PXE server knows no mode %q (ump %s)", mode, s.Version)
 }
 

@@ -21,6 +21,7 @@ $ ump config pxe create web-07 --mac 0c:c4:7a:aa:bb:01 --set address=192.0.2.17
 $ ump pxe serve --http 192.0.2.5:8067 --tftp 192.0.2.5:69       # on a host of the private network
 $ ump server rescue pxe/web-07                                  # arms a network boot; power-cycle the machine
 $ ump server reinstall pxe/web-07                               # the same, then the installation
+$ ump server reinstall pxe/web-07 --unattended                  # the machine installs by itself
 $ ump pxe status                                                # what the PXE servers see
 ```
 
@@ -85,7 +86,8 @@ the disk right after PXE IPv4.
 | `local` | `pxe.yaml` (the default) | its disk, at every boot |
 | `rescue` | `pxe.yaml` | UMP's rescue system at every boot, with UMP's key, `staging.keys` and its `rescue-keys` |
 | armed rescue | `ump server rescue`, `reinstall` | UMP's rescue system once, with the keys of the run too |
-| `install` | - | refused for now; unattended installations come in a later release |
+| `install` | `pxe.yaml`, a machine's | an unattended installation once, armed by `ump config pxe apply` with a yes; then its disk |
+| armed installation | `reinstall --unattended`, `multiinstall --unattended`, `apply` | UMP's rescue system once, which installs by itself; then its disk |
 
 An armed rescue boots once: it is consumed when its initrd was sent
 completely, so a rescue system that does not come up (a NIC without its
@@ -99,7 +101,138 @@ machine in `mode: rescue` (exit code 3): it would boot the rescue
 system again, not the new one.
 
 `ump server list` shows the status from the mode, the arm and what the
-servers report: `local`, `rescue`, `armed rescue`.
+servers report: `local`, `rescue`, `armed rescue`, `armed install`,
+`installing`, `installed (unverified)` (it waits for its record),
+`failed`, `interrupted`, `install (not armed)`, `install (done)`.
+
+## Unattended installations
+
+```console
+$ ump server reinstall pxe/web-07 --unattended            # arms, waits, checks, records, provisions
+$ ump server reinstall pxe/web-07 --unattended --no-wait  # arms; the next ump provision records it
+$ ump server multiinstall pxe/web-07 pxe/web-08 --unattended
+$ ump config pxe apply --yes                              # arms each machine with mode: install, once
+$ ump pxe status --log web-07                             # its output, as it comes
+```
+
+An unattended installation is a network boot of UMP's rescue system
+that installs by itself, without ump's SSH session. ump renders the
+specification on your machine as `reinstall` renders it (profile,
+layout, users, keys, private addresses, the uplink of `pxe.yaml`),
+shows it with the disks it may erase, and asks once. Then, under the
+server's lock, it reserves the private addresses and arms it:
+`.pxe/<site>/arm/NAME.json` holds the specification and what ump needs
+to record the installation. What runs is what was confirmed.
+
+The disks it may erase, which the rescue system's disk guard checks
+before it touches one; another set of disks refuses the installation,
+which then writes nothing:
+
+| Rule | When | Erased |
+|---|---|---|
+| pinned | `--disks` (`disks:` in `pxe.yaml`) by stable names: under `/dev/disk/by-id` (`nvme-eui.…`, `wwn-…`) or `serial:SERIAL` | those disks |
+| seen | else, when a network boot of the machine reported its disks, each with a WWN or a serial number | exactly the disks that boot reported |
+| blank | else | every disk, when none has a partition or a signature |
+
+`reinstall` then reboots the running system over SSH when it lets UMP
+in and a PXE server took the arm, else says to power-cycle the machine,
+and follows the installation for up to an hour (the configured `wait`
+when longer): its boots, the claim, the installer's output. Once it
+reported success, ump checks the new system at the machine's configured
+address, through the site's jump host, as its administrator with UMP's
+key and the host keys the installation reported pinned (one that
+reported none is not recorded); only then does it record the
+installation in the state and the host files, put those host keys into
+`~/.ssh/known_hosts` in place of the old system's, remove its arm and
+outcome, and provision, as `reinstall` does. `multiinstall
+--unattended` arms each of its servers so, their private addresses
+reserved together, waits for them side by side and provisions them in
+one run. `--no-wait` arms for two hours (`--armed-for`) and returns;
+the next `ump provision` checks and records what installed before it
+runs.
+
+- A failed installation records nothing and gives the private
+  addresses back, as `reinstall` does after a failed installer. The
+  machine stays in the rescue system, with its outcome and log;
+  `reinstall` exits with 1. One that the disk guard or the installer
+  refused (exit status 2) wrote nothing. Each `ump provision` says so,
+  and `ump server rescue` refuses the machine, until `ump pxe disarm
+  NAME` removes its arm and outcome (the log stays) or another
+  installation takes its place.
+- An installation that no boot claimed is disarmed and gives its
+  addresses back: at the end of the wait (exit status 5), at the next
+  `ump provision` once its arm expired (`--no-wait`), and when `ump pxe
+  disarm` takes it back. One that a boot claimed goes on without ump,
+  and the next `ump provision` records it.
+- One that did not report by its deadline is `interrupted`, and nobody
+  records it: its disk may be written, and its addresses stay. `ump pxe
+  disarm NAME` clears it.
+- Another installation of the machine (`reinstall`, `--unattended`
+  again) takes the place of an armed one, or of one that installed and
+  waits to be recorded, which its question says; what that arm reserved
+  goes back when the new one writes nothing. Under the server's lock it
+  reads the machine's installation again: one that a boot claimed, or
+  that came after the question, refuses it (exit status 3). One armed
+  or claimed refuses `ump server set` of its private addresses too, and
+  one that waits to be recorded `ump server rescue`. A recorded
+  installation leaves no arm behind.
+- `--dry-run` says what it would arm, and arms nothing.
+
+**Standing installations.** A machine with `mode: install` is armed by
+`ump config pxe apply`, which every `ump config pxe` verb ends with,
+when ump has no installation of it and it has neither an arm nor an
+outcome: its values (`profile`, `layout`, `group`, `disks`, ...)
+rendered as reinstall's flags and checked as reinstall checks them
+(against the infrastructure repository too, when there is one), listed
+with the disks it may erase, and armed after one question (`apply
+--yes`; without a terminal nothing is armed, exit status 3), without
+expiry, all under their servers' locks, their private addresses
+reserved together. The next `ump provision` after it installed records
+it, and from then on the machine boots its disk: `install (done)`. A
+failed one is not armed again by itself: `reinstall --unattended` arms
+it again, and so does the next `apply` once `ump pxe disarm` cleared
+it, with its question. Such a machine needs an address ump reaches it
+at: a static `network.ipv4`, or `address`.
+
+At a PXE server of the machine's site, an armed installation goes to
+one boot, and the server writes what came of it, the outcome:
+
+1. Each network boot of the machine is a boot of its own into UMP's
+   rescue system, three at most per server; the server reads the arm
+   and its outcome again first, and boots its disk when the backend
+   does not answer within 2 seconds.
+2. The rescue system says hello and asks for the specification. The
+   server claims the arm first: it writes the outcome, `writing` until
+   a deadline (`--install-timeout`, 2 hours), by a compare-and-swap,
+   reads the arm again, and answers once the backend has both; an arm
+   disarmed meanwhile takes the claim back, and the boot gets nothing.
+   A boot that asks again gets the same answer; any other boot, at any
+   server of the site, gets nothing and writes nothing.
+3. The rescue system checks the firmware and the disks, and installs.
+   Its output goes to the server as it comes: `ump pxe status --log
+   NAME`.
+4. Its report makes the outcome `installed` or `failed`, and only then
+   does the rescue system reboot, into a system that installed. From
+   then on the machine boots its disk. After a failure it stays in the
+   rescue system, with UMP's key, the arm's keys and the reason on the
+   console.
+
+A machine that boots again while its installation writes gets the
+rescue system without a token: never a second installation, never the
+half-written disk. An installation that has not reported by its
+deadline is `interrupted`, written by any server of the site, and the
+machine boots its disk; a late report still counts. While the backend
+does not answer, a server boots no armed installation and takes no
+claim or report (the rescue system asks again), and keeps the log; its
+`--data` carries the installations under way across a restart. A
+server puts back the outcome of an arm it consumed or claimed that the
+backend lost while the arm stands, so that it never boots twice.
+
+What keeps a server from an installation is in its status, and the
+machine boots its disk: a rescue image without the feature
+`pxe-install`, an arm without a specification or a disk rule, another
+firmware than `pxe.yaml` says or than the machine boots with, three
+boots without a claim, no `--data`.
 
 ## `pxe.yaml`
 
@@ -151,12 +284,12 @@ machines:
 |---|---|---|
 | `mac` | machine | one MAC or a list (`-`, `.` and bare hex are taken); the first is the uplink unless `network.uplink` says otherwise. Each MAC is one machine's |
 | `site` | machine | the site whose PXE servers serve it; required when `sites` exist, else `default` |
-| `mode` | all | `local` or `rescue` |
+| `mode` | all | `local` or `rescue`; `install` for a machine alone ([unattended installations](#unattended-installations)) |
 | `rescue-keys` | all | root's keys in its rescue system, besides UMP's and `staging.keys`: named keys, files, key lines (not `local` or `agent`, which would be another key for everyone who applies the file) |
 | `console` | all | the rescue kernel's serial console, such as `ttyS1,115200n8`; `none` for none. amd64 gets `ttyS0,115200n8` and the screen by default, arm64 none: its kernel takes the console from the firmware (SPCR), and a wrong one silences it |
 | `network` | all | the installed system's uplink ([below](#the-installed-systems-network)), merged per field |
 | `address` | machine | where ump reaches the installed system when its IPv4 is DHCP: the DHCP server's reservation |
-| `arch`, `firmware` | machine | `amd64` or `arm64`; `uefi` or `bios`. A machine that boots as another architecture gets its disk; the firmware is for the unattended installations to come |
+| `arch`, `firmware` | machine | `amd64` or `arm64`; `uefi` or `bios`. A machine that boots as another architecture gets its disk; an unattended installation is armed for the firmware, else for the one its last boot had |
 | `hostname` | machine | the rescue system's and the installed system's hostname; default the name |
 | `jump` | `defaults`, site | the host SSH to the machines goes through ([below](#sites-and-jump-hosts)) |
 | `description` | site | one line |
@@ -167,9 +300,9 @@ A machine also takes reinstall's values under the names of its flags
 (`profile`, `layout`, `firewall`, `os`, `group`, `private-ip`, `disks`,
 ...), as a [multiinstall plan](cli.md#install-several-ump-server-multiinstall)
 does for one server; `ump config pxe list` shows the profile. They are
-checked and kept for the unattended installations to come; `ump server
-reinstall pxe/NAME` takes its flags, as for any server. `via` and
-`unattended` are no keys here.
+checked, and are what a standing installation installs (`mode:
+install`); `ump server reinstall pxe/NAME` takes its flags instead, as
+for any server. `via` and `unattended` are no keys here.
 
 Values of `defaults` come under every machine, a site's under its
 machines', and a machine's own win; a value replaces the one below it,
@@ -288,8 +421,9 @@ the backend's credential variables (`AWS_ACCESS_KEY_ID`, ...; see
 [the state backend](state.md#backends)), else the home of the user it
 runs as. It touches `.pxe/<site>/` there and nothing else of the home:
 it reads `site.json` and the arms, and writes the outcomes of the arms
-it took and its status. It reads no `pxe.yaml`, never pulls or pushes
-the mirror and never checks for updates.
+it took, the installations' logs and its status. It reads no
+`pxe.yaml`, never pulls or pushes the mirror and never checks for
+updates.
 
 ```console
 # export UMP_STATE=r2://0123456789abcdef0123456789abcdef/fleet-state/ump AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
@@ -319,9 +453,10 @@ the transfers under way finish before it stops.
 | `--url` | where the machines reach it, when that is not the address they asked (NAT, a container, a port forward) |
 | `--tftp` | serve the iPXE binaries read-only over TFTP on this address (`192.0.2.5:69`); port 69 needs root or `CAP_NET_BIND_SERVICE` |
 | `--ipxe-dir` | the iPXE binaries TFTP serves; default the distribution's ipxe package: `/usr/lib/ipxe` (Debian, Ubuntu), else `/usr/share/ipxe` (Fedora, RHEL, Arch) |
-| `--data` | what outlives a restart, its journal of arms and boots; default `$STATE_DIRECTORY`, else `~/.local/state/ump-pxe/SITE` |
+| `--data` | what outlives a restart, its journal of arms, boots and installations with their logs; default `$STATE_DIRECTORY`, else `~/.local/state/ump-pxe/SITE` |
 | `--cache` | the rescue image; default `$CACHE_DIRECTORY`, else `~/.cache/ump/pxe/SITE` |
 | `--poll` | how often it reads the backend; default `10s` |
+| `--install-timeout` | how long an unattended installation may write before it is `interrupted`; default `2h`, at least `10m` |
 | `--check` | read, fetch and verify the rescue image, bind the ports, and exit: 0 when it can serve |
 
 Every flag can also come from the environment, as `UMP_PXE_` and its
@@ -563,11 +698,20 @@ distributions' mirrors, DNS, NTP).
   rescue only from the boot that consumed the arm, so such a machine
   takes the arm from the real one, which then boots its disk. Keep the
   network to machines you trust.
+- A machine that claims a known MAC while an installation is armed can
+  take the specification: password hashes, key lines, userdata and
+  private addresses. The real machine's claim then fails, and it writes
+  nothing: a theft shows, it is not prevented. Keep secrets out of
+  userdata (an Ansible vault in the infrastructure repository does
+  them). A report counts only for the boot that claimed, and ump
+  records an installation only once it reaches the new system at its
+  configured address.
 - Addresses learned at boot never reach the inventory, `ump ssh` or
   `ump provision`; the rescue session that armed a boot connects at the
   reported address with the reported host keys pinned.
 - A MAC without a machine gets its disk.
-- The PXE server runs nothing a client sends: hellos are data.
+- The PXE server runs nothing a client sends: hellos, logs and reports
+  are data.
 
 ## Testing
 
@@ -582,3 +726,18 @@ image built (`make rescue-image`). UEFI has the firmware start the
 distribution's iPXE binary (Debian's package, downloaded and checked,
 where the host has none); `FIRMWARE=bios` boots amd64 with SeaBIOS and
 QEMU's own iPXE ROM. It runs before a release, not in `make check`.
+
+The unattended installations run in `make check` end to end: the CLI
+against the PXE server over HTTP, the rescue system's side played in
+Go. `make pxe-install-test` runs one in QEMU, as `make pxe-test` boots
+the machine, with a blank disk and a storage of its own (the rescue
+image, the base image of `OS`, default `ubuntu-26.04`, and `install/`
+of the tree): `ump server reinstall --unattended` arms it and waits;
+the rescue system claims the specification, installs and reports, the
+next boot gets the disk, and ump checks the new system through the
+site's jump host and records it. A second installation, armed for
+blank disks, reboots the new system over SSH and is refused by the
+disk guard: nothing is written or recorded, and the next boot is the
+first system again. `UPLINK=static` gives the machine a static address
+instead of a reservation. It needs the base image built (`make
+os-image`), and runs before a release too.

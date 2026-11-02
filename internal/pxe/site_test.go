@@ -89,6 +89,14 @@ func TestParseSiteRefuses(t *testing.T) {
 	if _, err := ParseSite([]byte(`{"site": "x"}`)); err == nil || !strings.Contains(err.Error(), "no format") {
 		t.Errorf("no format: %v", err)
 	}
+	// a name is a directory of the servers' data: no path
+	odd := *d
+	odd.Machines = append([]SiteMachine{}, d.Machines...)
+	odd.Machines[0].Name = "../web-07"
+	odd.Hash = odd.hash()
+	if _, err := ParseSite(odd.JSON()); err == nil || !strings.Contains(err.Error(), `has a machine named "../web-07"`) {
+		t.Errorf("a path as a name: %v", err)
+	}
 }
 
 func TestStore(t *testing.T) {

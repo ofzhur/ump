@@ -240,7 +240,8 @@ func TestValidate(t *testing.T) {
 		{"machines:\n  a:\n    mac: 01:00:5e:00:00:01\n", "line 3: machines.a: mac: 01:00:5e:00:00:01 is a multicast address, no interface's"},
 		{"machines:\n  a:\n    mac: [0c:c4:7a:aa:bb:01, 0C-C4-7A-AA-BB-01]\n", "line 3: machines.a: mac: 0c:c4:7a:aa:bb:01 is given twice"},
 		{m + "  b:\n    mac: 0cc47aaabb01\n", "line 5: machines.b: mac: 0c:c4:7a:aa:bb:01 is a's already: a MAC boots one machine"},
-		{m + "    mode: install\n", "line 4: machines.a: mode: install: unattended installations are not supported yet; local or rescue"},
+		{m + "    mode: install\n", "line 4: machines.a: mode: install: ump records an installation once it reaches the new system, at a static network.ipv4 or at address (the DHCP server's reservation); give one"},
+		{m + "    mode: install\n    address: 192.0.2.17\n    disks: [sda]\n", "line 6: machines.a: disks: sda is not a stable name; an unattended installation takes names under /dev/disk/by-id (nvme-eui..., wwn-...) or serial:SERIAL"},
 		{m + "    mode: on\n", `line 4: machines.a: mode: "on" is not local, rescue or install`},
 		{m + "    arch: x86_64\n", `line 4: machines.a: arch: "x86_64" is not amd64 or arm64`},
 		{m + "    firmware: efi\n", `line 4: machines.a: firmware: "efi" is not uefi or bios`},
@@ -294,7 +295,7 @@ func TestStableDisk(t *testing.T) {
 		"nvme-eui.0025388b91c0a1b2": true, "wwn-0x5000c500a1b2c3d4": true, "ata-ST4000NM0035_ZC1A2B3C": true, "serial:ZC1A2B3C": true,
 		"sda": false, "nvme0n1": false, "/dev/disk/by-id/wwn-0x5": false, "serial:": false,
 	} {
-		if stableDisk(d) != want {
+		if StableDisk(d) != want {
 			t.Errorf("%s: %v", d, !want)
 		}
 	}

@@ -21,10 +21,12 @@ import (
 	"github.com/ofzhur/ump/internal/backend"
 )
 
-// flaky is a local backend that can stop answering.
+// flaky is a local backend that can stop answering; onRead, when set,
+// runs before each read (another writer that comes in between).
 type flaky struct {
 	*backend.Local
-	down atomic.Bool
+	down   atomic.Bool
+	onRead atomic.Pointer[func(p string)]
 }
 
 var errDown = errors.New("connection refused")
@@ -32,6 +34,9 @@ var errDown = errors.New("connection refused")
 func (f *flaky) Read(ctx context.Context, p string) ([]byte, string, error) {
 	if f.down.Load() {
 		return nil, "", errDown
+	}
+	if fn := f.onRead.Load(); fn != nil {
+		(*fn)(p)
 	}
 	return f.Local.Read(ctx, p)
 }
@@ -125,6 +130,8 @@ func (f *fixture) open(data, cache string) *Server {
 	if err := s.Open(f.ctx); err != nil {
 		f.t.Fatal(err)
 	}
+	// what it writes in the background ends before its directories go
+	f.t.Cleanup(s.bg.Wait)
 	s.Load(f.ctx)
 	s.Fetch(f.ctx)
 	return s
@@ -537,11 +544,11 @@ func TestServerArmedRescue(t *testing.T) {
 	f.store.Disarm(f.ctx, DefaultSite, "web-07")
 	f.store.PutArm(f.ctx, DefaultSite, &Arm{ID: "c0c0c0c0dddddddd", Machine: "web-07", Mode: ModeInstall, Created: f.now}, "")
 	f.load()
-	if got := f.boot("0c:c4:7a:aa:bb:01", efi); !strings.Contains(got, "local: this PXE server serves no unattended installations (ump v0.8.0)") {
-		t.Errorf("an armed installation:\n%s", got)
+	if got := f.boot("0c:c4:7a:aa:bb:01", efi); !strings.Contains(got, "local: the arm holds no specification") {
+		t.Errorf("an armed installation without a specification:\n%s", got)
 	}
-	if as := f.status().Arms["c0c0c0c0dddddddd"]; as == nil || as.Ready || !strings.Contains(as.Cannot, "no unattended installations") {
-		t.Errorf("an armed installation in the status: %+v", as)
+	if as := f.status().Arms["c0c0c0c0dddddddd"]; as == nil || as.Ready || as.Cannot != "the arm holds no specification" {
+		t.Errorf("an armed installation without a specification in the status: %+v", as)
 	}
 	f.store.Disarm(f.ctx, DefaultSite, "web-07")
 	f.load()
@@ -633,6 +640,43 @@ func TestServerBackendDown(t *testing.T) {
 	}
 	if !f.srv.consumed[arm.ID].Written || !strings.Contains(f.log.String(), "the backend answers again") {
 		t.Errorf("not written: %+v\n%s", f.srv.consumed[arm.ID], f.log)
+	}
+}
+
+// TestServerLostOutcome: the outcome of a rescue arm consumed here that
+// the backend lost while the arm stands is put back, once.
+func TestServerLostOutcome(t *testing.T) {
+	f := newFixture(t, servedYAML)
+	arm := &Arm{ID: "a7f3c2e1aaaabbbb", Machine: "web-07", Mode: ModeRescue, Created: f.now, Until: f.now.Add(time.Hour)}
+	f.store.PutArm(f.ctx, DefaultSite, arm, "")
+	f.load()
+	id := bootID(t, f.boot("0c:c4:7a:aa:bb:01", efi))
+	f.get("GET", "/b/"+id+"/initrd")
+	f.load()
+	f.srv.writeConsumed(f.ctx)
+	if strings.Contains(f.log.String(), "lost") {
+		t.Errorf("an outcome there is put back:\n%s", f.log)
+	}
+	f.files.Delete(f.ctx, OutcomePath(DefaultSite, "web-07"))
+	f.load()
+	f.srv.writeConsumed(f.ctx)
+	if o, _, _ := f.store.Outcome(f.ctx, DefaultSite, "web-07"); o == nil || o.Arm != arm.ID || o.Phase != PhaseBooted || o.Boot != id {
+		t.Errorf("outcome: %+v", o)
+	}
+	if !strings.Contains(f.log.String(), "web-07: the backend lost the outcome of the arm a7f3c2e1, which was consumed here: put back") {
+		t.Errorf("the log:\n%s", f.log)
+	}
+	if got := f.boot("0c:c4:7a:aa:bb:01", efi); !strings.Contains(got, "web-07: local\n") {
+		t.Errorf("after:\n%s", got)
+	}
+	// removed with its arm, the arm first: not put back, though the
+	// server read the outcome gone before it read the arm gone
+	f.files.Delete(f.ctx, OutcomePath(DefaultSite, "web-07"))
+	f.load()
+	f.store.Disarm(f.ctx, DefaultSite, "web-07")
+	f.srv.writeConsumed(f.ctx)
+	if o, _, _ := f.store.Outcome(f.ctx, DefaultSite, "web-07"); o != nil {
+		t.Errorf("a settled outcome put back: %+v", o)
 	}
 }
 

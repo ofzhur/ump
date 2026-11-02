@@ -1,8 +1,10 @@
 package pxe
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -72,6 +74,69 @@ type DiskRule struct {
 	Rule  string   `json:"rule"`
 	Names []string `json:"names,omitempty"`
 	IDs   []string `json:"ids,omitempty"`
+}
+
+// The rules of a DiskRule.
+const (
+	DisksPinned = "pinned"
+	DisksSeen   = "seen"
+	DisksBlank  = "blank"
+)
+
+// Check says what is wrong with the rule; nil when nothing is.
+func (d *DiskRule) Check() error {
+	switch {
+	case d == nil:
+		return errors.New("no disk rule")
+	case d.Rule == DisksPinned && len(d.Names) == 0:
+		return errors.New("the disk rule pinned names no disk")
+	case d.Rule == DisksSeen && len(d.IDs) == 0:
+		return errors.New("the disk rule seen records no disk")
+	case d.Rule != DisksPinned && d.Rule != DisksSeen && d.Rule != DisksBlank:
+		return fmt.Errorf("the disk rule %q is not pinned, seen or blank", d.Rule)
+	}
+	return nil
+}
+
+// SpecHash is the hash an arm carries of its specification: the
+// SHA-256 of its compact JSON, so that indenting changes nothing.
+func SpecHash(spec json.RawMessage) (string, error) {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, spec); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// Installation is what an armed installation hands its boot (the
+// rescue system's ump-pxe install, at /api/v1/spec): the arm's
+// specification, the firmware the machine must boot with, and the
+// disks it may erase; an error says why the arm cannot install.
+func (a *Arm) Installation(firmware string) (*SpecAnswer, error) {
+	var obj map[string]json.RawMessage
+	if len(a.Spec) == 0 || json.Unmarshal(a.Spec, &obj) != nil {
+		return nil, errors.New("the arm holds no specification")
+	}
+	if a.SpecHash != "" {
+		if h, err := SpecHash(a.Spec); err != nil || h != a.SpecHash {
+			return nil, errors.New("the arm's specification does not match its hash")
+		}
+	}
+	if err := a.Disks.Check(); err != nil {
+		return nil, fmt.Errorf("the arm: %w", err)
+	}
+	if a.Firmware != "" {
+		firmware = a.Firmware
+	}
+	return &SpecAnswer{Spec: a.Spec, Firmware: firmware, Disks: a.Disks}, nil
+}
+
+// SpecAnswer is the answer at /api/v1/spec.
+type SpecAnswer struct {
+	Spec     json.RawMessage `json:"spec"`
+	Firmware string          `json:"firmware,omitempty"`
+	Disks    *DiskRule       `json:"disks"`
 }
 
 // NewArmID is a new arm's ID: 16 hex digits, random.
@@ -415,7 +480,9 @@ func (s Store) PutStatus(ctx context.Context, st *Status) error {
 }
 
 // Forget removes what the site holds of a machine: its arm, outcome and
-// log.
+// log, the arm first. Whoever removes an arm and its outcome removes the
+// arm first: a server puts back the outcome of an arm it consumed or
+// claimed while that arm stands, so that it never boots twice.
 func (s Store) Forget(ctx context.Context, site, name string) error {
 	for _, p := range []string{ArmPath(site, name), OutcomePath(site, name), LogPath(site, name)} {
 		if err := s.Files.Delete(ctx, p); err != nil {

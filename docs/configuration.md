@@ -29,7 +29,7 @@ network through `ump config pxe`, and the rest is optional.
 │   └── userdata.yaml        the named userdata
 ├── keys.yaml                the named public keys (ump config key add)
 ├── pxe.yaml                 the machines ump boots over the network, and their sites (ump config pxe)
-├── .pxe/<site>/             what the PXE servers of a site serve and report: site.json, arms, outcomes, status (in a shared backend it stays there, never mirrored)
+├── .pxe/<site>/             what the PXE servers of a site serve and report: site.json, arms, outcomes, status, installation logs (in a shared backend it stays there, never mirrored)
 ├── state.yaml               what ump knows about servers beyond the providers: profile, price, attributes, manual servers, installations, private addresses
 ├── cache/                   the listing cache (cache_ttl, ump server list --diff, --cached)
 ├── secrets/                 the secret files the account wizard writes (mode 0600)

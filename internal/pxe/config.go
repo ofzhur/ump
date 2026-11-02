@@ -718,10 +718,10 @@ func validJump(s string) bool {
 	return true
 }
 
-// stableDisk says whether a disk name stays the same across boots: a
+// StableDisk says whether a disk name stays the same across boots: a
 // name under /dev/disk/by-id (nvme-eui..., wwn-..., ata-...), which the
 // kernel's names (sda, nvme0n1) are not, or serial:SERIAL.
-func stableDisk(d string) bool {
+func StableDisk(d string) bool {
 	if s, ok := strings.CutPrefix(d, "serial:"); ok {
 		return s != ""
 	}
@@ -800,12 +800,11 @@ func (c *Config) Validate() error {
 			return c.at(path+"/hostname", "%q is not a hostname", *e.Hostname)
 		}
 		m := c.Machine(name)
-		if m.Mode == ModeInstall {
-			// the arming of installations comes with unattended installs
-			return c.at(path+"/mode", "install: unattended installations are not supported yet; local or rescue")
+		if m.Mode == ModeInstall && m.Network.IPv4.Mode != profile.UplinkStatic && m.Network.IPv6.Mode != profile.UplinkStatic && e.Address == "" {
+			return c.at(path+"/mode", "install: ump records an installation once it reaches the new system, at a static network.ipv4 or at address (the DHCP server's reservation); give one")
 		}
 		for _, d := range e.Disks {
-			if m.Mode == ModeInstall && !stableDisk(d) {
+			if m.Mode == ModeInstall && !StableDisk(d) {
 				return c.at(path+"/disks", "%s is not a stable name; an unattended installation takes names under /dev/disk/by-id (nvme-eui..., wwn-...) or serial:SERIAL", d)
 			}
 		}

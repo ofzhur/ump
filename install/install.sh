@@ -44,6 +44,10 @@
 #                    of the machine it runs on)
 #   --dry-run        print the plan and stop before touching a disk
 set -Eeuo pipefail
+# the new system's files as a root shell over SSH makes them, whatever
+# umask the caller has (a PXE machine's runner has 077: /etc/ump would
+# be root's alone)
+umask 022
 
 spec_file=""
 storage="${UMP_STORAGE:-}"

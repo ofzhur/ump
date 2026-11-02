@@ -107,6 +107,11 @@ func ParseSite(data []byte) (*SiteDoc, error) {
 	case d.Hash != d.hash():
 		return nil, fmt.Errorf("site.json of site %s was changed by hand (its hash does not match); ump config pxe apply renders it again", d.Site)
 	}
+	for _, m := range d.Machines {
+		if !validHostname(m.Name) {
+			return nil, fmt.Errorf("site.json of site %s has a machine named %q, which is no name of pxe.yaml", d.Site, m.Name)
+		}
+	}
 	return &d, nil
 }
 

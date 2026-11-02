@@ -5,7 +5,8 @@
 // backend), and their rescue system is a network boot ump arms: the
 // machine boots UMP's rescue system at its next boot, a power cycle by
 // the operator or a reboot over SSH, and reports in to the PXE server,
-// where ump waits for it.
+// where ump waits for it. An unattended installation is such a boot
+// too, which installs the specification of its arm by itself.
 package pxe
 
 import (
@@ -397,7 +398,9 @@ func (p *Provider) RescueEnabled(ctx context.Context, m provider.Machine) (bool,
 // EnableRescue arms a boot of UMP's rescue system with the keys, for as
 // long as the caller waits (24 hours with NoReboot), and waits a while
 // for a PXE server of the machine's site to take it. The note says
-// whether one did. The machine boots it at its next boot.
+// whether one did. The machine boots it at its next boot. An armed
+// installation stays, and so does one whose outcome waits for ump
+// (unsettled).
 func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
 	pm, err := p.lookup(m)
 	if err != nil {
@@ -416,6 +419,9 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 		if old.Pending(o, now) {
 			return nil, fmt.Errorf("%s has an armed %s (%s, by %s); disarm it first (ump pxe disarm %s)", pm.Name, old.Mode, netboot.ShortID(old.ID), old.By, pm.Name)
 		}
+		if err := unsettled(pm, old, o); err != nil {
+			return nil, err
+		}
 	}
 	window := opts.Wait
 	if opts.NoReboot || window <= 0 {
@@ -431,21 +437,28 @@ func (p *Provider) EnableRescue(ctx context.Context, m provider.Machine, opts pr
 	until := a.Until
 	info := &provider.RescueInfo{User: "root", Arm: a.ID, Until: &until}
 	if opts.NoReboot {
-		info.Note = p.servers(ctx, pm, a.ID, 0)
+		info.Note = p.servers(ctx, pm, a.ID, 0, "the rescue system")
 	} else {
-		info.Note = p.servers(ctx, pm, a.ID, p.home.readyWait())
+		info.Note = p.servers(ctx, pm, a.ID, p.home.readyWait(), "the rescue system")
 	}
 	return info, nil
 }
 
 // servers says whether a PXE server of the machine's site can serve
-// the arm, waiting up to wait for one that runs to take it.
-func (p *Provider) servers(ctx context.Context, pm *netboot.Machine, arm string, wait time.Duration) string {
+// the arm, which boots what, waiting up to wait for one that runs to
+// take it.
+func (p *Provider) servers(ctx context.Context, pm *netboot.Machine, arm string, wait time.Duration, what string) string {
+	note, _ := p.ready(ctx, pm, arm, wait, what)
+	return note
+}
+
+// ready is servers' note, and whether a server took the arm.
+func (p *Provider) ready(ctx context.Context, pm *netboot.Machine, arm string, wait time.Duration, what string) (string, bool) {
 	start := time.Now()
 	for {
 		sn, err := p.home.Store.Load(ctx, pm.Site)
 		if err != nil {
-			return fmt.Sprintf("the PXE servers of site %s could not be asked: %v", pm.Site, err)
+			return fmt.Sprintf("the PXE servers of site %s could not be asked: %v", pm.Site, err), false
 		}
 		now := p.home.now()
 		var running, cannot []string
@@ -459,7 +472,7 @@ func (p *Provider) servers(ctx context.Context, pm *netboot.Machine, arm string,
 			}
 			running = append(running, st.Daemon)
 			if as := st.Arms[arm]; as != nil && as.Ready || taken(st, pm, arm) {
-				return fmt.Sprintf("PXE server %s of site %s is ready to boot it", st.Daemon, pm.Site)
+				return fmt.Sprintf("PXE server %s of site %s is ready to boot it", st.Daemon, pm.Site), true
 			} else if as != nil && as.Cannot != "" {
 				cannot = append(cannot, st.Daemon+": "+as.Cannot)
 			}
@@ -469,20 +482,20 @@ func (p *Provider) servers(ctx context.Context, pm *netboot.Machine, arm string,
 			if !heard.IsZero() {
 				since = "last heard " + now.Sub(heard).Round(time.Second).String() + " ago"
 			}
-			return fmt.Sprintf("no PXE server of site %s runs (%s); one must, for the machine to boot the rescue system (ump pxe serve --site %s)", pm.Site, since, pm.Site)
+			return fmt.Sprintf("no PXE server of site %s runs (%s); one must, for the machine to boot %s (ump pxe serve --site %s)", pm.Site, since, what, pm.Site), false
 		}
 		switch {
 		case wait == 0:
-			return fmt.Sprintf("PXE server %s of site %s takes the arm at its next poll", strings.Join(running, ", "), pm.Site)
+			return fmt.Sprintf("PXE server %s of site %s takes the arm at its next poll", strings.Join(running, ", "), pm.Site), false
 		case time.Since(start) >= wait:
 			if len(cannot) > 0 {
-				return fmt.Sprintf("the PXE servers of site %s cannot boot it yet: %s", pm.Site, strings.Join(cannot, "; "))
+				return fmt.Sprintf("the PXE servers of site %s cannot boot it yet: %s", pm.Site, strings.Join(cannot, "; ")), false
 			}
-			return fmt.Sprintf("no PXE server of site %s has taken the arm yet (running: %s); see ump pxe status %s", pm.Site, strings.Join(running, ", "), pm.Name)
+			return fmt.Sprintf("no PXE server of site %s has taken the arm yet (running: %s); see ump pxe status %s", pm.Site, strings.Join(running, ", "), pm.Name), false
 		}
 		select {
 		case <-ctx.Done():
-			return ""
+			return "", false
 		case <-time.After(p.home.poll()):
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/pxe/tftp"
 )
@@ -74,7 +76,7 @@ func daemonCommand(args []string) bool {
 // pxeServeFlags are the flags of ump pxe serve; each has an environment
 // variable, UMP_PXE_ and its name (UMP_PXE_SITE, UMP_PXE_IPXE_DIR), which
 // the flag wins over.
-var pxeServeFlags = []string{"site", "http", "url", "tftp", "ipxe-dir", "data", "cache", "poll"}
+var pxeServeFlags = []string{"site", "http", "url", "tftp", "ipxe-dir", "data", "cache", "poll", "install-timeout"}
 
 func pxeServeEnv(flag string) string {
 	return "UMP_PXE_" + strings.ToUpper(strings.ReplaceAll(flag, "-", "_"))
@@ -82,14 +84,14 @@ func pxeServeEnv(flag string) string {
 
 type pxeServeOptions struct {
 	site, http, url, tftp, ipxeDir, data, cache string
-	poll                                        time.Duration
+	poll, installTimeout                        time.Duration
 	check                                       bool
 }
 
 func (a *app) newPXEServeCmd() *cobra.Command {
 	var o pxeServeOptions
 	cmd := &cobra.Command{
-		Use:   "serve [--site SITE] [--http ADDR] [--url URL] [--tftp ADDR] [--ipxe-dir DIR] [--data DIR] [--cache DIR] [--poll DURATION] [--check]",
+		Use:   "serve [--site SITE] [--http ADDR] [--url URL] [--tftp ADDR] [--ipxe-dir DIR] [--data DIR] [--cache DIR] [--poll DURATION] [--install-timeout DURATION] [--check]",
 		Short: "Serve the machines of a site over the network: the PXE server",
 		Long: `Serve the machines of a site over the network, in chain mode: the
 site's DHCP server points the firmware at an iPXE binary (from its own
@@ -100,14 +102,18 @@ or UMP's rescue system: kernel and initrd over HTTP, verified against
 the rescue image's manifest and cached, with a boot config in front
 (hostname, root's keys, DHCP on the interface it booted from). An armed
 rescue boots once: it is consumed when its initrd was sent completely.
-Every failure ends in the disk.
+An armed installation is handed to one boot of the machine, whose
+rescue system installs it unattended: the server claims the arm first,
+keeps the installation's log and writes its result; from then on the
+machine boots its disk. Every failure ends in the disk.
 
 The server reads the backend of the home (UMP_STATE and the credential
 variables, else the home of the user it runs as) every --poll, and only
 .pxe/<site>/ there: site.json, which ump config pxe apply renders, and
-the arms; it writes the outcomes of the arms it consumed and its status
-(ump pxe status). It reads nothing of pxe.yaml: a hand edit reaches it
-through ump config pxe apply.
+the arms; it writes the outcomes of the arms it consumed or claimed, the
+end of the installations' logs and its status (ump pxe status). It
+reads nothing of pxe.yaml: a hand edit reaches it through ump config pxe
+apply.
 
 --http is where it listens (default :8067, every interface: on a host
 with public addresses, give the private network's), --url where the
@@ -116,10 +122,12 @@ container). --tftp ADDR serves the iPXE binaries read-only over TFTP
 (port 69 needs root or CAP_NET_BIND_SERVICE): those of --ipxe-dir, by
 default of the distribution's ipxe package (/usr/lib/ipxe on Debian and
 Ubuntu, /usr/share/ipxe on Fedora, RHEL and Arch). --data keeps what
-outlives a restart (default $STATE_DIRECTORY, else
-~/.local/state/ump-pxe/SITE), --cache the rescue image (default
-$CACHE_DIRECTORY, else ~/.cache/ump/pxe/SITE). Each flag can come from
-UMP_PXE_ and its name in upper case (UMP_PXE_SITE, UMP_PXE_IPXE_DIR).
+outlives a restart, the installations under way with their logs too
+(default $STATE_DIRECTORY, else ~/.local/state/ump-pxe/SITE), --cache
+the rescue image (default $CACHE_DIRECTORY, else ~/.cache/ump/pxe/SITE).
+--install-timeout is how long an installation may write before it
+counts as interrupted (default 2h). Each flag can come from UMP_PXE_ and
+its name in upper case (UMP_PXE_SITE, UMP_PXE_IPXE_DIR).
 
 --check reads site.json, fetches and verifies the rescue image, binds the
 ports and exits: 0 when the server can serve. SIGTERM or Ctrl-C stops
@@ -143,6 +151,8 @@ the server after the transfers under way.`,
 				return usageErrorf(cmd, "--ipxe-dir names the files of the TFTP server: it needs --tftp")
 			case o.poll < time.Second:
 				return usageErrorf(cmd, "--poll %s: at least 1s", o.poll)
+			case o.installTimeout < 10*time.Minute:
+				return usageErrorf(cmd, "--install-timeout %s: at least 10m", o.installTimeout)
 			}
 			if o.url != "" {
 				u, err := url.Parse(o.url)
@@ -164,6 +174,7 @@ the server after the transfers under way.`,
 	f.StringVar(&o.data, "data", "", "the directory of what outlives a restart (default $STATE_DIRECTORY, else ~/.local/state/ump-pxe/SITE)")
 	f.StringVar(&o.cache, "cache", "", "the directory of the rescue image (default $CACHE_DIRECTORY, else ~/.cache/ump/pxe/SITE)")
 	f.DurationVar(&o.poll, "poll", 10*time.Second, "how often it reads the backend")
+	f.DurationVar(&o.installTimeout, "install-timeout", pxe.DefaultInstallTimeout, "how long an installation may write before it counts as interrupted")
 	f.BoolVar(&o.check, "check", false, "read, fetch, verify and bind, then exit")
 	return cmd
 }
@@ -305,7 +316,7 @@ func (a *app) pxeServe(cmd *cobra.Command, o pxeServeOptions) error {
 		where = a.home.Backend.String()
 	}
 	s := &pxe.Server{Site: o.site, Name: pxeName(), Version: Version, Store: store,
-		Cache: &pxe.Cache{Dir: cache, Client: a.httpClient}, URL: o.url, Data: data, Poll: o.poll,
+		Cache: &pxe.Cache{Dir: cache, Client: a.httpClient}, URL: o.url, Data: data, Poll: o.poll, InstallTimeout: o.installTimeout,
 		Logf: logf, Debugf: debugf, Notify: sdNotify}
 	logf("ump %s, server %s, the backend %s", Version, s.Name, where)
 	if err := s.Open(ctx); err != nil {
@@ -800,26 +811,167 @@ func (a *app) printPXEUnknown(rows []pxeUnknownRow, noHeaders bool) error {
 	return writeTable(a.stdout, []string{"MAC", "SITE", "SEEN", "BY", "ADDRESS", "BOOT"}, table, noHeaders)
 }
 
-// pxeLog prints the end of a machine's installation log, as a server
-// of its site pushed it.
+// pxeLog prints a machine's installation log as the server of the
+// installation pushed it (the end of it, every few seconds while it
+// runs), else the end of it its report carried; where it comes from,
+// and how the installation stands, goes to stderr.
 func (a *app) pxeLog(cmd *cobra.Command, c *pxe.Config, name string) error {
+	ctx := cmd.Context()
 	name = strings.TrimPrefix(name, pxe.TypeName+"/")
-	m := c.Machine(name)
-	if m == nil {
-		return a.pxeSet(cmd.Context()).missing(name)
-	}
-	data, version, err := a.pxeStore().Files.Read(cmd.Context(), pxe.LogPath(m.Site, name))
+	store := a.pxeStore()
+	// the machine's site, or the one that holds its log since a hand
+	// edit moved it or took it out
+	sites, err := store.Holding(ctx, name)
 	if err != nil {
 		return err
 	}
-	if version == "" {
-		return fmt.Errorf("no installation log of %s: none of its installations reported one yet", name)
+	if m := c.Machine(name); m != nil {
+		sites = append([]string{m.Site}, slices.DeleteFunc(sites, func(s string) bool { return s == m.Site })...)
+	} else if len(sites) == 0 {
+		return a.pxeSet(ctx).missing(name)
 	}
-	_, err = a.stdout.Write(data)
-	return err
+	for _, site := range sites {
+		data, version, err := store.Files.Read(ctx, pxe.LogPath(site, name))
+		if err != nil {
+			return err
+		}
+		o, _, err := store.Outcome(ctx, site, name)
+		if err != nil {
+			return err
+		}
+		if o == nil || o.Phase == pxe.PhaseBooted {
+			o = nil
+		}
+		switch {
+		case o != nil && o.Phase == pxe.PhaseWriting && a.now().Before(o.Deadline):
+			fmt.Fprintf(a.stderr, "The installation of %s (arm %s) is under way at %s/%s since %s; it reports by %s.\n", name, pxe.ShortID(o.Arm), site, o.Daemon, a.fmtTime(o.At), a.fmtTime(o.Deadline))
+		case o != nil && o.Exit != nil:
+			fmt.Fprintf(a.stderr, "The installation of %s (arm %s, %s/%s): %s at %s, exit status %d.\n", name, pxe.ShortID(o.Arm), site, o.Daemon, o.Phase, a.fmtTime(o.At), *o.Exit)
+		case o != nil:
+			fmt.Fprintf(a.stderr, "The installation of %s (arm %s, %s/%s): %s at %s.\n", name, pxe.ShortID(o.Arm), site, o.Daemon, o.Phase, a.fmtTime(o.At))
+		}
+		switch {
+		case len(data) > 0:
+			_, err = a.stdout.Write(data)
+			return err
+		case o != nil && o.LogTail != "":
+			fmt.Fprintf(a.stderr, "Its log is not in the backend; the end of it, as its report carried it:\n")
+			_, err = io.WriteString(a.stdout, o.LogTail)
+			return err
+		case version != "" || o != nil:
+			fmt.Fprintf(a.stderr, "Its log has no output yet.\n")
+			return nil
+		}
+	}
+	return fmt.Errorf("no installation log of %s: none of its installations reported one yet", name)
 }
 
 // --- disarm ------------------------------------------------------------------
+
+// disarmAt takes back a machine's arm at a site (ump pxe disarm), and
+// says what it did when table; found says that there was an arm or an
+// outcome. The arm of an installation is read again and removed under
+// the server's lock, and its outcome is read again after it: a claim
+// that came between is being written (exit status 3), though its arm is
+// gone. An installation that wrote nothing gives the private addresses
+// its arm reserved back; one that ended goes with its outcome, and so
+// does the outcome of one whose arm is gone.
+func (a *app) disarmAt(ctx context.Context, store pxe.Store, site, name string, table bool) (*pxeDisarmed, bool, error) {
+	arm, _, err := store.Arm(ctx, site, name)
+	if err != nil {
+		return nil, false, err
+	}
+	m := provider.Machine{Provider: pxe.TypeName, ID: name, Name: name}
+	if arm != nil && arm.Mode == pxe.ModeInstall {
+		unlock, err := a.lockServer(ctx, m, "disarm")
+		if err != nil {
+			return nil, true, err
+		}
+		defer unlock()
+		if arm, _, err = store.Arm(ctx, site, name); err != nil {
+			return nil, true, err
+		}
+	}
+	o, _, err := store.Outcome(ctx, site, name)
+	if err != nil {
+		return nil, arm != nil, err
+	}
+	now := a.now()
+	writing := func(o *pxe.Outcome) error {
+		if o == nil || o.Phase != pxe.PhaseWriting || !now.Before(o.Deadline) || arm != nil && o.Arm != arm.ID {
+			return nil
+		}
+		return withExit(exitAborted, fmt.Errorf("%s is being installed (since %s, by %s/%s); it ends with its report or at %s", name, a.fmtTime(o.At), site, o.Daemon, a.fmtTime(o.Deadline)))
+	}
+	if err := writing(o); err != nil {
+		return nil, true, err
+	}
+	if arm == nil {
+		// what came of an installation whose arm is gone: nothing reads
+		// it any more
+		if o == nil || o.Phase == pxe.PhaseBooted {
+			return nil, false, nil
+		}
+		if err := store.Files.Delete(ctx, pxe.OutcomePath(site, name)); err != nil {
+			return nil, true, err
+		}
+		if table {
+			fmt.Fprintf(a.stdout, "Removed the outcome of %s (%s, %s), whose arm was gone.\n", name, pxe.ShortID(o.Arm), o.Phase)
+		}
+		return &pxeDisarmed{Name: name, Site: site, Arm: o.Arm}, true, nil
+	}
+	ours := o != nil && o.Arm == arm.ID
+	// what ump records of an installation is in its arm
+	if ours && o.Phase == pxe.PhaseInstalled {
+		if table {
+			fmt.Fprintf(a.stdout, "%s is installed (%s, at %s) and waits to be recorded: the next ump provision records it, and its arm goes with it.\n", name, pxe.ShortID(arm.ID), a.fmtTime(o.At))
+		}
+		return nil, true, nil
+	}
+	imp, err := parseImport(arm.Import)
+	if err != nil {
+		return nil, true, fmt.Errorf("%s: %w", m.Ref(), err)
+	}
+	if err := store.Disarm(ctx, site, name); err != nil {
+		return nil, true, err
+	}
+	d := &pxeDisarmed{Name: name, Site: site, Arm: arm.ID, Mode: arm.Mode, By: arm.By, Pending: arm.Pending(o, now)}
+	if arm.Mode == pxe.ModeInstall {
+		// a claim between the two reads goes on without its arm
+		if o, _, err = store.Outcome(ctx, site, name); err != nil {
+			return nil, true, err
+		}
+		if err := writing(o); err != nil {
+			return nil, true, err
+		}
+		ours = o != nil && o.Arm == arm.ID
+		if ours {
+			if err := store.Files.Delete(ctx, pxe.OutcomePath(site, name)); err != nil {
+				return nil, true, err
+			}
+		}
+		if imp != nil && (!ours || o.Phase == pxe.PhaseFailed) {
+			a.releasePrivate(ctx, []*installPlan{imp.planned(m)})
+		}
+	}
+	if table {
+		by := ""
+		if arm.By != "" {
+			by = ", by " + arm.By
+		}
+		switch {
+		case d.Pending:
+			fmt.Fprintf(a.stdout, "Disarmed %s: its armed %s (%s%s) does not boot.\n", name, arm.Mode, pxe.ShortID(arm.ID), by)
+		case ours && o.Phase == pxe.PhaseFailed:
+			fmt.Fprintf(a.stdout, "Removed the arm of %s (%s %s%s), which failed, and its outcome.\n", name, arm.Mode, pxe.ShortID(arm.ID), by)
+		case ours && arm.Mode == pxe.ModeInstall:
+			fmt.Fprintf(a.stdout, "Removed the arm of %s (%s %s%s), which did not report by its deadline, and its outcome.\n", name, arm.Mode, pxe.ShortID(arm.ID), by)
+		default:
+			fmt.Fprintf(a.stdout, "Removed the arm of %s (%s %s%s), which was over.\n", name, arm.Mode, pxe.ShortID(arm.ID), by)
+		}
+	}
+	return d, true, nil
+}
 
 // pxeDisarmed is a machine ump pxe disarm took the arm of.
 type pxeDisarmed struct {
@@ -840,8 +992,13 @@ func (a *app) newPXEDisarmCmd() *cobra.Command {
 does not boot (the machine gets its standing mode, as pxe.yaml has it).
 A machine without an arm is left as it is. An installation that is being
 written is not disarmed (exit status 3): it ends with its report or at
-its deadline. The PXE servers of the site take the change at their next
-poll.`,
+its deadline. One that installed keeps its arm, which holds what the
+next ump provision records. The arm of an unattended installation goes
+under the server's lock: one that no boot claimed, or that failed, gives
+the private addresses it reserved back, and one that failed or did not
+report goes with its outcome (its log stays). The outcome of an
+installation whose arm is gone goes too. The PXE servers of the site
+take the change at their next poll.`,
 		Example: `  ump pxe disarm web-07
   ump pxe disarm web-07 db-01 -o json`,
 		Args: usageArgs(cobra.MinimumNArgs(1)),
@@ -886,37 +1043,13 @@ poll.`,
 			for _, t := range targets {
 				found := false
 				for _, site := range t.sites {
-					arm, _, err := store.Arm(ctx, site, t.name)
+					d, there, err := a.disarmAt(ctx, store, site, t.name, format == formatTable)
 					if err != nil {
 						return err
 					}
-					if arm == nil {
-						continue
-					}
-					found = true
-					o, _, err := store.Outcome(ctx, site, t.name)
-					if err != nil {
-						return err
-					}
-					if o != nil && o.Arm == arm.ID && o.Phase == pxe.PhaseWriting && a.now().Before(o.Deadline) {
-						return withExit(exitAborted, fmt.Errorf("%s is being installed (since %s, by %s/%s); it ends with its report or at %s", t.name, a.fmtTime(o.At), site, o.Daemon, a.fmtTime(o.Deadline)))
-					}
-					if err := store.Disarm(ctx, site, t.name); err != nil {
-						return err
-					}
-					d := pxeDisarmed{Name: t.name, Site: site, Arm: arm.ID, Mode: arm.Mode, By: arm.By, Pending: arm.Pending(o, a.now())}
-					done = append(done, d)
-					if format != formatTable {
-						continue
-					}
-					by := ""
-					if arm.By != "" {
-						by = ", by " + arm.By
-					}
-					if d.Pending {
-						fmt.Fprintf(a.stdout, "Disarmed %s: its armed %s (%s%s) does not boot.\n", t.name, arm.Mode, pxe.ShortID(arm.ID), by)
-					} else {
-						fmt.Fprintf(a.stdout, "Removed the arm of %s (%s %s%s), which was over.\n", t.name, arm.Mode, pxe.ShortID(arm.ID), by)
+					found = found || there
+					if d != nil {
+						done = append(done, *d)
 					}
 				}
 				if !found && format == formatTable {

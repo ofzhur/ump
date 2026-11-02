@@ -270,7 +270,7 @@ func TestEnableRescue(t *testing.T) {
 	putStatus(t, h, func(st *netboot.Status) {
 		st.Arms[info.Arm] = &netboot.ArmState{Cannot: "no rescue image for amd64 yet: it is being fetched", At: now}
 	})
-	if note := p.servers(ctx, h.Config.Machine("web-07"), info.Arm, 20*time.Millisecond); note != "the PXE servers of site fra1 cannot boot it yet: pxe1: no rescue image for amd64 yet: it is being fetched" {
+	if note := p.servers(ctx, h.Config.Machine("web-07"), info.Arm, 20*time.Millisecond, "the rescue system"); note != "the PXE servers of site fra1 cannot boot it yet: pxe1: no rescue image for amd64 yet: it is being fetched" {
 		t.Errorf("cannot: %q", note)
 	}
 

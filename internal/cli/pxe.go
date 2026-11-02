@@ -15,8 +15,10 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ofzhur/ump/internal/backend"
+	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/profile"
+	"github.com/ofzhur/ump/internal/provider"
 	pxeprovider "github.com/ofzhur/ump/internal/provider/pxe"
 	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
@@ -75,8 +77,9 @@ func (a *app) newConfigPXECmd() *cobra.Command {
 		Short:   "The machines ump boots over the network (pxe.yaml), and their sites",
 		Long: `The machines ump boots over the network live in pxe.yaml in the home
 (` + config.AbbreviateHome(pxePath()) + `), one named entry each: its MACs,
-its site, how it boots when nothing is armed (mode: local, its disk, or
-rescue, UMP's rescue system at every boot), its installed system's
+its site, how it boots when nothing is armed (mode: local, its disk,
+rescue, UMP's rescue system at every boot, or install, an unattended
+installation of reinstall's values once), its installed system's
 network, and reinstall's values for it (profile, layout, group, ...).
 defaults come under every machine, and a site's values under its
 machines'. A site is a private network whose DHCP server points the
@@ -310,9 +313,9 @@ func (a *app) pxeApplyNow(cmd *cobra.Command) error {
 }
 
 func (a *app) newPXEApplyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "apply",
-		Short: "Check pxe.yaml and render what the PXE servers of each site serve",
+	cmd := &cobra.Command{
+		Use:   "apply [--yes]",
+		Short: "Check pxe.yaml, render what the PXE servers of each site serve, and arm the standing installations",
 		Long: `Check pxe.yaml and render site.json for each of its sites into the
 backend (.pxe/<site>/site.json), which the site's PXE servers serve: the
 machines, their standing mode and root's keys in their rescue system
@@ -321,12 +324,25 @@ in pxe.yaml is removed, so that its servers serve nothing. Then it waits
 up to 30 seconds for the running servers of a changed site to serve the
 new one, and names those that do not (exit status 5). Every other ump
 config pxe command ends with this; after a hand edit of pxe.yaml it is
-how the change reaches the servers.`,
+how the change reaches the servers.
+
+A machine with mode: install gets its unattended installation armed
+here, once: when ump has no installation of it, and it has neither an
+arm nor an outcome of one. Its values (profile, layout, group, disks,
+...) are rendered as ump server reinstall renders its flags, its private
+addresses reserved, and each such machine is listed with what it
+installs and which disks it may erase; one question covers them
+(apply --yes answers it; the other ump config pxe commands ask on a
+terminal, and without one nothing is armed, exit status 3). The arm
+stands until a boot claims it; the next ump provision records the
+installation once it reaches the new system.`,
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.pxeApplyNow(cmd)
 		},
 	}
+	cmd.Flags().Bool("yes", false, "arm the standing installations without asking")
+	return cmd
 }
 
 // pxeApply renders site.json for every site of pxe.yaml, removes that
@@ -376,7 +392,11 @@ func (a *app) pxeApply(cmd *cobra.Command, c *pxe.Config) error {
 		}
 		fmt.Fprintf(a.stdout, "Removed site %s, gone from pxe.yaml: its servers serve nothing now.\n", site)
 	}
-	return a.pxeWait(ctx, store, changed)
+	werr := a.pxeWait(ctx, store, changed)
+	if err := a.pxeArmStanding(cmd, cfg, c); err != nil {
+		return err
+	}
+	return werr
 }
 
 // warnPXEGone says which machines the state holds that pxe.yaml lacks,
@@ -788,17 +808,17 @@ func (a *app) newPXECreateCmd() *cobra.Command {
 	var macs, sets []string
 	var site, mode string
 	cmd := &cobra.Command{
-		Use:     "create NAME --mac MAC [--site SITE] [--mode local|rescue] [--set KEY=VALUE]...",
+		Use:     "create NAME --mac MAC [--site SITE] [--mode local|rescue|install] [--set KEY=VALUE]...",
 		Aliases: verbAliases("create"),
 		Short:   "Add a machine to pxe.yaml (in your editor on a terminal without --mac)",
 		Long: `Add a machine to pxe.yaml: NAME is the server's name (pxe/NAME) and,
 unless hostname says otherwise, its hostname; --mac the MACs it boots
 from (repeatable, the first is its uplink), --site its site (required
-when pxe.yaml has sites), --mode local or rescue. --set gives any other
-key as KEY=VALUE, the value in YAML and the key with dots for the
-network: --set network.ipv4.address=192.0.2.17/24 --set profile=web
---set group='[web, db]'. On a terminal without --mac, the new entry
-opens in your editor. The file is checked and applied.`,
+when pxe.yaml has sites), --mode local, rescue or install. --set gives
+any other key as KEY=VALUE, the value in YAML and the key with dots for
+the network: --set network.ipv4.address=192.0.2.17/24 --set
+profile=web --set group='[web, db]'. On a terminal without --mac, the
+new entry opens in your editor. The file is checked and applied.`,
 		Example: `  ump config pxe create web-07 --mac 0c:c4:7a:aa:bb:01 --site fra1 --set network.ipv4.address=192.0.2.17/24
   ump config pxe create db-01 --mac 0c:c4:7a:aa:bb:10 --mac 0c:c4:7a:aa:bb:11 --set address=192.0.2.30
   ump config pxe create lab-1          # in your editor`,
@@ -883,7 +903,7 @@ opens in your editor. The file is checked and applied.`,
 	}
 	cmd.Flags().StringArrayVar(&macs, "mac", nil, "a MAC the machine boots from (repeatable; the first is its uplink)")
 	cmd.Flags().StringVar(&site, "site", "", "its site (required when pxe.yaml has sites)")
-	cmd.Flags().StringVar(&mode, "mode", "", "local (its disk, the default) or rescue (UMP's rescue system at every boot)")
+	cmd.Flags().StringVar(&mode, "mode", "", "local (its disk, the default), rescue (UMP's rescue system at every boot) or install (an unattended installation once, armed by apply with a yes)")
 	cmd.Flags().StringArrayVar(&sets, "set", nil, "another key, KEY=VALUE in YAML (network.ipv4.address=192.0.2.17/24, profile=web; repeatable)")
 	return cmd
 }
@@ -1254,4 +1274,186 @@ machine whose installation is being written is refused.`,
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	return cmd
+}
+
+// pxeArmStanding arms the standing installations of pxe.yaml (mode:
+// install): of each machine that ump has no installation of, and that
+// has neither an arm nor an outcome of one, its values rendered as
+// reinstall renders its flags and checked as reinstall checks them,
+// with its private addresses; one question covers them, which apply's
+// --yes answers (and no other command's). They are armed under every
+// one's lock, the private addresses reserved together (armPlans). An
+// arm stands until a boot claims it, and the next ump provision records
+// the installation.
+func (a *app) pxeArmStanding(cmd *cobra.Command, cfg *config.Config, c *pxe.Config) error {
+	ctx := cmd.Context()
+	var want []*pxe.Machine
+	for _, pm := range c.Merged() {
+		if pm.Mode == pxe.ModeInstall {
+			want = append(want, pm)
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	doc, err := a.loadState(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	_, path, _ := a.loadConfig()
+	machines := map[string]provider.Machine{}
+	var prov provider.Provider
+	for _, r := range a.listAccounts(ctx, cfg, []string{pxeprovider.AccountName}, cache.Open(path), a.cachedListing(cfg)) {
+		if r.err != nil {
+			return r.err
+		}
+		prov = r.prov
+		for _, m := range r.machines {
+			machines[m.ID] = m
+		}
+	}
+	if doc, err = a.loadState(ctx, cfg); err != nil {
+		return err
+	}
+	var plans []*installPlan
+	for _, pm := range want {
+		m, ok := machines[pm.Name]
+		if !ok || doc.Servers[m.Ref()].Installed != nil {
+			continue
+		}
+		ui, st, err := unattendedOf(ctx, m, prov)
+		if err != nil {
+			return err
+		}
+		if ui == nil || st != nil {
+			continue
+		}
+		if on, err := prov.(provider.Rescue).RescueEnabled(ctx, m); err != nil || on {
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stderr, "ump: %s has an armed rescue; its installation is armed by the apply after it\n", pm.Name)
+			continue
+		}
+		p, err := a.pxePlanStanding(cmd, cfg, doc, m, prov, pm)
+		if err != nil {
+			return withExit(exitCodeFor(err), fmt.Errorf("machines.%s: %w; nothing is armed", pm.Name, err))
+		}
+		p.ui = ui
+		plans = append(plans, p)
+	}
+	if len(plans) == 0 {
+		return nil
+	}
+	if i, err := assignPlans(doc, plans); err != nil {
+		return withExit(exitUsage, fmt.Errorf("machines.%s: %w; nothing is armed", plans[i].m.ID, err))
+	}
+	if err := a.checkStandingHosts(ctx, cfg, doc, plans); err != nil {
+		return err
+	}
+	yes := false
+	if cmd.Name() == "apply" {
+		yes, _ = cmd.Flags().GetBool("yes")
+	}
+	var names []string
+	fmt.Fprintf(a.stderr, "Standing installations to arm (mode: install):\n")
+	for _, p := range plans {
+		names = append(names, p.m.ID)
+		fmt.Fprintf(a.stderr, "  %s: %s as %s; it may erase %s\n", p.m.ID, p.what(), p.hostname, p.disks.Words)
+	}
+	if !yes && a.resolverUI(cmd) == nil {
+		return withExit(exitAborted, fmt.Errorf("the installation of %s is not armed: that needs a yes, on a terminal or by ump config pxe apply --yes", strings.Join(names, ", ")))
+	}
+	question := fmt.Sprintf("Arm %s? Each machine is erased at its next boot and installs unattended; the next ump provision records it.", plural(len(plans), "installation"))
+	if err := a.confirm(cmd, yes, question); err != nil {
+		return err
+	}
+	unlocks, err := a.lockServers(ctx, plans, "apply")
+	if err != nil {
+		return withExit(exitCodeFor(err), fmt.Errorf("%w; ump config pxe apply arms them", err))
+	}
+	infos, errs := a.armPlans(ctx, plans, time.Time{}, false)
+	for _, unlock := range unlocks {
+		unlock()
+	}
+	var failed []string
+	var armed []provider.Machine
+	for i, p := range plans {
+		if errs[i] != nil {
+			fmt.Fprintf(a.stderr, "ump: the installation of %s is not armed: %v\n", p.m.ID, errs[i])
+			failed = append(failed, p.m.ID)
+			continue
+		}
+		armed = append(armed, p.m)
+		fmt.Fprintf(a.stdout, "Armed the installation of %s (%s): it installs at its next boot.\n", p.m.ID, pxe.ShortID(infos[i].ID))
+		if infos[i].Note != "" {
+			fmt.Fprintf(a.stdout, "Note: %s\n", infos[i].Note)
+		}
+	}
+	if len(armed) > 0 {
+		fmt.Fprintln(a.stdout, powerCycle(armed))
+	}
+	if len(failed) > 0 {
+		return withExit(exitAborted, fmt.Errorf("the installation of %s is not armed, see above; ump config pxe apply arms it", strings.Join(failed, ", ")))
+	}
+	return nil
+}
+
+// checkStandingHosts checks the hostnames and groups of standing
+// installations against the infrastructure repository, when there is
+// one, as reinstall --no-provision checks one: no host file of another
+// server, no group of the inventory or host of another server. The next
+// ump provision records them, and writes their host files.
+func (a *app) checkStandingHosts(ctx context.Context, cfg *config.Config, doc *state.Document, plans []*installPlan) error {
+	repo, _, inv, _, err := a.installRepo(ctx, true, nil, "")
+	if err != nil || repo == nil {
+		return err
+	}
+	gone := a.goneServer(ctx, cfg, doc)
+	for _, p := range plans {
+		files, err := repo.checkHost(ctx, gone, p.hostname, p.m.Ref(), p.inGroups(), "give it another hostname", "")
+		if err == nil {
+			err = inv.without(files.goneHosts()).check(p.hostname, p.m.Ref(), p.inGroups(), "give it another hostname", "")
+		}
+		if err != nil {
+			return withExit(exitCodeFor(err), fmt.Errorf("machines.%s: %w; nothing is armed", p.m.ID, err))
+		}
+	}
+	return nil
+}
+
+// pxePlanStanding is the planned installation of a machine with mode:
+// install: its values as reinstall's flags, resolved and checked as
+// reinstall checks them, but for the infrastructure repository
+// (checkStandingHosts).
+func (a *app) pxePlanStanding(cmd *cobra.Command, cfg *config.Config, doc *state.Document, m provider.Machine, prov provider.Provider, pm *pxe.Machine) (*installPlan, error) {
+	ctx := cmd.Context()
+	o := planOptions(pm.Plan)
+	f, err := checkServerFlags(cmd, o)
+	if err != nil {
+		return nil, err
+	}
+	p, err := newInstallPlan(m.Ref(), m, prov, o, f)
+	if err != nil {
+		return nil, err
+	}
+	if p.keys, p.keyPaths, p.keyPath, err = a.rescueKeys(cfg, o.keyFiles); err != nil {
+		return nil, err
+	}
+	if err := checkStateGroups(doc, p.hostname, m.Ref(), "give it another hostname"); err != nil {
+		return nil, err
+	}
+	if err := a.resolveInstall(ctx, cmd, cfg, doc, p, o, f); err != nil {
+		return nil, err
+	}
+	if m.Arch != "" {
+		if err := archRefusal(m, p.spec.OS, m.Arch, "as pxe.yaml or its boot says", a.osArchs(ctx, p.spec.OS, p.storage)); err != nil {
+			return nil, err
+		}
+	}
+	ui := prov.(provider.UnattendedInstaller)
+	if p.disks, err = ui.InstallDisks(ctx, m, p.spec.Disks); err != nil {
+		return nil, withExit(exitUsage, err)
+	}
+	return p, nil
 }

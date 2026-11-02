@@ -55,6 +55,13 @@ type installOptions struct {
 	// --private-ip (NETWORK=ADDRESS, or an address alone)
 	privateNetworks []string
 	privateIPs      []string
+
+	// unattended is --unattended: the machine installs by itself at its
+	// next boot (provider.UnattendedInstaller); noWait returns once it is
+	// armed, for armedFor
+	unattended bool
+	noWait     bool
+	armedFor   time.Duration
 }
 
 // serverFlags are the flags of reinstall that concern the installation
@@ -158,7 +165,27 @@ installer's plan and the playbooks without touching a disk or the
 inventory; --no-reboot leaves the server in the rescue system after the
 installation, recorded but not provisioned (ump provision --hosts
 HOSTNAME after the reboot). Asks for confirmation on a terminal;
-without one, --yes is required.`,
+without one, --yes is required.
+
+--unattended has the machine install by itself at its next boot,
+without UMP's SSH session (a PXE machine's network boot; docs/pxe.md):
+the installation is rendered and checked as above, the disks it may
+erase said (--disks by stable names under /dev/disk/by-id or
+serial:SERIAL, else those its last network boot reported, else blank
+ones alone), and once confirmed it is armed under the server's lock,
+with its private addresses. ump reboots the running system over SSH
+where it lets UMP in, else asks you to power-cycle the machine, follows
+the installation for up to an hour (the configured wait when longer),
+checks the new system at the server's own address as its administrator
+with UMP's key and the host keys it reported pinned, and only then
+records it and provisions. An installation armed for the server, or
+one that installed and waits to be recorded, is replaced by any
+reinstall of it, which its question says; one that a boot claimed
+refuses it (exit status 3), and so does one that came after the
+question. --no-wait returns once armed (--armed-for, 2h), and the next
+ump provision records it. A failed installation records nothing and
+gives the private addresses back; one that no boot claimed in time is
+disarmed and gives them back (exit status 5).`,
 		Example: `  ump server reinstall web-01 --dry-run
   ump server reinstall web-01 --group web
   ump server reinstall web-01 --profile web --group web,monitoring --yes
@@ -166,7 +193,9 @@ without one, --yes is required.`,
   ump server reinstall web-01 --user oleg:local --user deploy --userdata ubuntu,web
   ump server reinstall db-01 --private-ip 10.0.0.10
   ump server reinstall db-01 --private-network default,db --private-ip db=10.0.1.10
-  ump server reinstall lab-01 --no-provision --private-network none`,
+  ump server reinstall lab-01 --no-provision --private-network none
+  ump server reinstall pxe/web-07 --unattended
+  ump server reinstall pxe/web-07 --unattended --no-wait --disks nvme-eui.0025388b91c0a1b2`,
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.installServer(cmd, args[0], o)
@@ -180,6 +209,7 @@ without one, --yes is required.`,
 	sub.Flags().BoolVar(&o.noProvision, "no-provision", false, "do not provision: no Ansible layout needed, no playbook runs")
 	hostsFlag(sub, &o.hosts, "an Ansible host pattern: provision the hosts it matches alone (default: the whole fleet)")
 	sub.Flags().StringArrayVar((*[]string)(&o.playbooks), "playbook", nil, "a playbook of playbooks/, without .yml: provision with those alone (repeatable, or comma-separated; default: every one)")
+	addUnattendedFlags(sub, &o)
 	return sub
 }
 
@@ -200,6 +230,9 @@ type installResult struct {
 	Admin string `json:"admin,omitempty" yaml:"admin,omitempty"`
 	// System is what answered after the reboot.
 	System *installedSystem `json:"system,omitempty" yaml:"system,omitempty"`
+	// Armed is the unattended installation armed for the machine's next
+	// boot, which ump did not wait for (--no-wait).
+	Armed string `json:"armed,omitempty" yaml:"armed,omitempty"`
 	// written says that the installer wrote the disks, or may have (the
 	// connection ended while it ran): the private addresses are the new
 	// system's then
@@ -326,6 +359,15 @@ type installPlan struct {
 	before      []state.Private
 	// logins are the users tried on the running system
 	logins []string
+	// ui is the provider as an UnattendedInstaller (nil: it has no
+	// unattended installations), armed the server's as its question says
+	// it (nil: none), and disks the disks an unattended installation may
+	// erase; voided is what the arm of one that this one took the place
+	// of reserved, which reservePrivate takes over
+	ui     provider.UnattendedInstaller
+	armed  *provider.InstallState
+	disks  *provider.InstallDisks
+	voided *unattendedImport
 }
 
 // newInstallPlan starts the plan of an installation on m: the server
@@ -585,11 +627,15 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if o.noProvision && (pattern != "" || len(named) > 0) {
 		return usageErrorf(cmd, "--hosts and --playbook narrow the provisioning, which --no-provision leaves out")
 	}
+	if err := checkUnattendedFlags(cmd, o, pattern, named); err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	// provisioning needs the infrastructure repository, checked before
 	// anything else; --no-provision needs none, and puts the server into
-	// the inventory of the one there is when it can check the names there
-	repo, run, inv, unchecked, err := a.installRepo(ctx, o.noProvision, named, pattern)
+	// the inventory of the one there is when it can check the names there;
+	// --no-wait leaves the provisioning to the next ump provision
+	repo, run, inv, unchecked, err := a.installRepo(ctx, o.noProvision || o.noWait, named, pattern)
 	if err != nil {
 		return err
 	}
@@ -617,6 +663,18 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return err
 	}
 	if err := checkInstall(ctx, m, prov); err != nil {
+		return err
+	}
+	// an installation armed for the server is disarmed once this one has
+	// its lock, but for one that a boot claimed and installs
+	ui, armed, err := unattendedOf(ctx, m, prov)
+	if err != nil {
+		return err
+	}
+	if o.unattended && ui == nil {
+		return withExit(exitUsage, fmt.Errorf("--unattended: provider type %s has no unattended installations; without --unattended, ump installs %s through a rescue system", m.Provider, m.Ref()))
+	}
+	if err := a.beingInstalled(m, armed); err != nil {
 		return err
 	}
 	p.keys, p.keyPaths, p.keyPath = keys, keyPaths, keyPath
@@ -659,7 +717,12 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if _, err := assignPlans(doc, []*installPlan{p}); err != nil {
 		return err
 	}
-	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", p.what(), describeRef(m), hostname)
+	tail := installTail{repo: repo, run: run, unchecked: unchecked, format: format, noProvision: o.noProvision, noReboot: o.noReboot}
+	p.ui, p.armed = ui, armed
+	if o.unattended {
+		return a.reinstallUnattended(cmd, cfg, p, o, tail)
+	}
+	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", p.what(), describeRef(m), hostname) + a.voids(armed, "it")
 	if noRescueWarning(m, prov) != "" {
 		question += " There is no rescue system to fall back on: a failed installation is yours to recover."
 	}
@@ -685,10 +748,14 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return err
 	}
 	defer unlock()
-	// the private addresses are the server's from now on: no other
-	// installation gets them meanwhile; one whose installer did not write
-	// the disks gives them back, under the lock
+	// the unattended installation the question said goes; the private
+	// addresses are the server's from now on: no other installation gets
+	// them meanwhile; one whose installer did not write the disks gives
+	// them back, under the lock
 	if !o.dryRun {
+		if err := a.voidArmed(ctx, p); err != nil {
+			return err
+		}
 		if err := a.reservePrivate(ctx, []*installPlan{p}); err != nil {
 			return err
 		}
@@ -708,8 +775,31 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if o.dryRun {
 		return a.installReport(result, format)
 	}
-	recorded := a.recordInstallation(ctx, m, *record, p.groups)
-	if o.noReboot {
+	return a.finishInstall(ctx, cfg, p, *record, result, tail)
+}
+
+// installTail is how an installation ends after it completed: the
+// infrastructure repository and the run of the provisioning (repo nil:
+// none here, unchecked says why), the result's format, and whether it is
+// left unprovisioned (--no-provision) or in the rescue system
+// (--no-reboot).
+type installTail struct {
+	repo        *infraRepo
+	run         fleetRun
+	unchecked   string
+	format      outputFormat
+	noProvision bool
+	noReboot    bool
+}
+
+// finishInstall ends a completed installation as reinstall does: it
+// records it, with the groups, and provisions (or writes the host file
+// with --no-provision), then reports the result.
+func (a *app) finishInstall(ctx context.Context, cfg *config.Config, p *installPlan, record state.Install, result installResult, t installTail) error {
+	m, hostname, inGroups := p.m, p.hostname, p.inGroups()
+	repo, run, unchecked, format := t.repo, t.run, t.unchecked, t.format
+	recorded := a.recordInstallation(ctx, m, record, p.groups)
+	if t.noReboot {
 		if !recorded {
 			fmt.Fprintf(a.stderr, "Not provisioned: after the reboot, record it and run ump provision --hosts %s.\n", hostname)
 		} else {
@@ -719,14 +809,14 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	// the inventory comes from the record: without it, the old one
 	switch {
-	case !recorded && !o.noProvision:
+	case !recorded && !t.noProvision:
 		if err := a.installReport(result, format); err != nil {
 			return err
 		}
 		return withExit(exitProvision, fmt.Errorf("provisioning failed: %s is installed but not recorded, and the inventory comes from the record; record it and run ump provision --hosts %s", hostname, hostname))
 	case !recorded:
 		fmt.Fprintln(a.stderr, "Not provisioned (--no-provision), nor in the inventory as installed: the inventory comes from the record; record it.")
-	case !o.noProvision:
+	case !t.noProvision:
 		// the server is provisioned when its own line of the recap says so,
 		// whatever the run did on other hosts
 		res, err := a.provision(ctx, cfg, repo, run, "provision after reinstalling "+m.Name, []provider.Machine{m})
@@ -748,7 +838,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		}
 		fmt.Fprintf(a.stderr, "%s is provisioned. %s\n", hostname, res.summary())
 	case repo != nil:
-		err := a.addToInventory(ctx, cfg, repo, "reinstalling "+m.Name, []hostEntry{{hostname, inGroups, a.inventoryVars(cfg, m, *record, p.private)}})
+		err := a.addToInventory(ctx, cfg, repo, "reinstalling "+m.Name, []hostEntry{{hostname, inGroups, a.inventoryVars(cfg, m, record, p.private)}})
 		if err != nil {
 			if rerr := a.installReport(result, format); rerr != nil {
 				return rerr
@@ -959,7 +1049,9 @@ func (a *app) recordInstallation(ctx context.Context, m provider.Machine, record
 }
 
 // recordInstallations records installations as recordInstallation does
-// one, all in one change of the state.
+// one, all in one change of the state. A PXE machine recorded loses its
+// arm and its outcome (voidPXE): no unattended installation armed for
+// it erases what ump recorded.
 func (a *app) recordInstallations(ctx context.Context, records []serverRecord) bool {
 	err := a.updateState(ctx, func(d *state.Document) error {
 		for _, r := range records {
@@ -972,6 +1064,7 @@ func (a *app) recordInstallations(ctx context.Context, records []serverRecord) b
 		return nil
 	})
 	if err == nil {
+		a.voidPXE(ctx, records)
 		return true
 	}
 	entries := map[string]state.Server{}
