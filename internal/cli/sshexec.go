@@ -70,23 +70,31 @@ func withSSHOptions(argv []string, opts ...string) []string {
 	return append(out, argv[1:]...)
 }
 
-// sshArgs builds the ssh command line. identities are key files offered
-// in order; with identitiesOnly the agent's other keys are not, so that
-// they cannot exhaust the server's authentication attempts first. Rescue
-// and staging systems have a fresh host key every boot, so
-// insecureHostKey skips host key checks for them.
-func sshArgs(user, addr string, identities []string, identitiesOnly, insecureHostKey bool, command []string) []string {
+// sshArgs builds the ssh command line to addr by its route (sshRoute:
+// through its jump host). identities are key files offered in order;
+// with identitiesOnly the agent's other keys are not, so that they
+// cannot exhaust the server's authentication attempts first. Rescue and
+// staging systems have a fresh host key every boot, so insecureHostKey
+// skips host key checks for them, unless the route pins the keys the
+// system reported.
+func sshArgs(r sshRoute, user, addr string, identities []string, identitiesOnly, insecureHostKey bool, command []string) []string {
 	// Keepalives: a command that kexecs or reboots the machine ends the
 	// connection without a close, and the client must notice in seconds
 	// rather than wait for the TCP timeout.
 	argv := []string{"ssh", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
+	if r.jump != "" {
+		argv = append(argv, "-o", "ProxyJump="+r.jump)
+	}
 	for _, id := range identities {
 		argv = append(argv, "-i", id)
 	}
 	if identitiesOnly && len(identities) > 0 {
 		argv = append(argv, "-o", "IdentitiesOnly=yes")
 	}
-	if insecureHostKey {
+	switch {
+	case insecureHostKey && r.knownHosts != "":
+		argv = append(argv, "-o", "UserKnownHostsFile="+r.knownHosts, "-o", "StrictHostKeyChecking=yes", "-o", "LogLevel=ERROR")
+	case insecureHostKey:
 		argv = append(argv, "-o", "UserKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=no", "-o", "LogLevel=ERROR")
 	}
 	if user == "" {

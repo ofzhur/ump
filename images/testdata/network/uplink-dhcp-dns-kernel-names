@@ -1,0 +1,75 @@
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eno1:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      dhcp4: false
+      optional: true
+    eno2:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      dhcp4: true
+      dhcp-identifier: mac
+      dhcp4-overrides:
+        use-dns: false
+      accept-ra: true
+      ipv6-address-generation: eui64
+      nameservers:
+        addresses: [192.0.2.53, 2001:db8::53]
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "",
+  "gw4": "",
+  "ip6": "",
+  "gw6": "",
+  "dns": [
+    "192.0.2.53",
+    "2001:db8::53"
+  ],
+  "dhcp4": true,
+  "dhcp4_dns": false,
+  "auto6": true
+}
+==> etc/systemd/network/20-ump-eno1.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/network/20-ump-eno2.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+DHCP=ipv4
+DNS=192.0.2.53
+DNS=2001:db8::53
+IPv6AcceptRA=yes
+
+[DHCPv4]
+ClientIdentifier=mac
+UseDNS=no
+
+[IPv6AcceptRA]
+Token=eui64
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: the resolvers of the specification (network.uplink.dns); the
+# uplink's configuration sets the same. Replace both to use others.
+[Resolve]
+DNS=192.0.2.53 2001:db8::53
+==> etc/ump/install.network
+network=dhcp
+network6=auto
+dns=192.0.2.53,2001:db8::53
+==> plan
+eno2 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 auto (the specification's uplink); IPv6 on; DNS 192.0.2.53 2001:db8::53, not the lease's

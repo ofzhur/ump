@@ -20,10 +20,11 @@
 # NixOS manifest) built. Environment: MEM (MB, default 2048), DISK (GB,
 # default 12), DISK2 (GB: a second disk, which the layouts span, as a
 # Linode's swap disk; default none), PORT (default 2252), TIMEOUT (s),
-# UPLINK (static or dhcp: the specification's uplink, network.uplink,
-# as a PXE machine's has it, checked on the new system; default none,
-# the uplink as the rescue system has it), RECORD (1: --record without
-# an uplink too).
+# UPLINK (static, dhcp or dhcp-dns: the specification's uplink,
+# network.uplink, as a PXE machine's has it, checked on the new system;
+# dhcp-dns is DHCP with resolvers of its own instead of the lease's;
+# default none, the uplink as the rescue system has it), RECORD (1:
+# --record without an uplink too).
 set -euo pipefail
 OS="${1:?usage: test-install.sh OS [arm64|amd64]}"
 ARCH="${2:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
@@ -94,8 +95,9 @@ fi
 case "$UPLINK" in
 "") uplink=null ;;
 dhcp) uplink="$(jq -n --arg mac "$MAC" '{mac: $mac, ipv4: {mode: "dhcp"}, ipv6: {mode: "none"}, dns_from_dhcp: true}')" ;;
+dhcp-dns) uplink="$(jq -n --arg mac "$MAC" '{mac: $mac, ipv4: {mode: "dhcp"}, ipv6: {mode: "none"}, dns: ["192.0.2.53"]}')" ;;
 static) uplink="$(jq -n --arg mac "$MAC" '{mac: $mac, ipv4: {mode: "static", address: "10.0.2.15/24", gateway: "10.0.2.2"}, ipv6: {mode: "none"}, dns: ["10.0.2.3"]}')" ;;
-*) echo "UPLINK is static or dhcp" >&2; exit 2 ;;
+*) echo "UPLINK is static, dhcp or dhcp-dns" >&2; exit 2 ;;
 esac
 jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --argjson userdata "$userdata" --argjson uplink "$uplink" '{
 	os: $os, hostname: "test.example.net", timezone: "Europe/Berlin", storage: $storage,
@@ -164,32 +166,41 @@ wait_ssh ump
 echo "==> checking the new system"
 ssh "${ssh_opts[@]}" ump@127.0.0.1 "FAMILY=$family OS=$OS UPLINK=$UPLINK RECORD_KEY='$(cat "$WORK"/record/ssh_host_ed25519_key.pub 2>/dev/null | awk '{print $2}')' bash -s" <<'CHECK'
 set -e
+# ok WHAT COMMAND...: say so, or fail the run
+ok() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then echo "$what"; else echo "FAILED: $what"; exit 1; fi; }
 . /etc/os-release; echo "os: $PRETTY_NAME   hostname: $(hostname -f 2>/dev/null || hostname)   kernel: $(uname -r)"
 echo "interfaces: $(ip -br link | awk "\$1 != \"lo\" {print \$1}" | paste -sd" " -)   address: $(ip -br -4 addr show scope global | awk "{print \$3}")"
-sudo -n true && echo "sudo: without a password"
-sudo -n nft list ruleset | grep -q "policy drop" && echo "firewall: input policy drop"
-[ "$(cat /etc/ump-userdata-test)" = merged ] && echo "userdata: the entry left its mark (/etc/ump-userdata-test)"
-[ "$(awk 'NR > 1' /proc/swaps | wc -l)" -gt 0 ] && echo "swap: $(awk 'NR > 1 {print $1}' /proc/swaps | paste -sd" " -)"
-grep -q "^os=$OS" /etc/ump/install && echo "install record: $(grep "^image_version=" /etc/ump/install)"
-[ -n "$RECORD_KEY" ] && grep -qF "$RECORD_KEY" /etc/ssh/ssh_host_ed25519_key.pub && echo "record (--record): the host key this system offers"
-if [ -n "$UPLINK" ]; then
-	grep -q "^network=$UPLINK$" /etc/ump/install && echo "uplink: $(grep '^network=\|^dns=' /etc/ump/install | paste -sd' ' -) in the install record"
-	if [ "$UPLINK" = dhcp ]; then
-		ip -4 -o addr show scope global | grep -q 'dynamic' && echo "uplink: the address by DHCP ($(ip -4 -o addr show scope global | awk '{print $4}'))"
-	else
-		ip -4 -o addr show scope global | grep -v 'dynamic' | grep -q '10.0.2.15/24' && echo "uplink: the address static (10.0.2.15/24)"
-	fi
-	[ "$(resolvectl dns | sed 's/^[^:]*://' | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd, -)" = 10.0.2.3 ] && echo "uplink: resolver 10.0.2.3 alone ($([ "$UPLINK" = dhcp ] && echo "from the lease" || echo "from the specification"))"
+ok "sudo: without a password" sudo -n true
+ok "firewall: input policy drop" bash -c 'sudo -n nft list ruleset | grep -q "policy drop"'
+ok "userdata: the entry left its mark (/etc/ump-userdata-test)" [ "$(cat /etc/ump-userdata-test)" = merged ]
+ok "swap: $(awk 'NR > 1 {print $1}' /proc/swaps | paste -sd" " -)" [ "$(awk 'NR > 1' /proc/swaps | wc -l)" -gt 0 ]
+ok "install record: $(grep "^image_version=" /etc/ump/install)" grep -q "^os=$OS" /etc/ump/install
+if [ -n "$RECORD_KEY" ]; then
+	ok "record (--record): the host key this system offers" grep -qF "$RECORD_KEY" /etc/ssh/ssh_host_ed25519_key.pub
 fi
-ump-motd | grep -q "Unus Mundus Provisioner" && echo "message of the day: ump-motd shows the banner"
+if [ -n "$UPLINK" ]; then
+	ok "uplink: $(grep '^network=\|^dns=' /etc/ump/install | paste -sd' ' -) in the install record" grep -q "^network=${UPLINK%-dns}$" /etc/ump/install
+	if [ "$UPLINK" != static ]; then
+		ok "uplink: the address by DHCP ($(ip -4 -o addr show scope global | awk '{print $4}'))" bash -c "ip -4 -o addr show scope global | grep -q dynamic"
+	else
+		ok "uplink: the address static (10.0.2.15/24)" bash -c "ip -4 -o addr show scope global | grep -v dynamic | grep -q 10.0.2.15/24"
+	fi
+	resolvers="$(resolvectl dns | sed 's/^[^:]*://' | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd, -)"
+	case "$UPLINK" in
+	dhcp) ok "uplink: resolver 10.0.2.3 alone (from the lease)" [ "$resolvers" = 10.0.2.3 ] ;;
+	static) ok "uplink: resolver 10.0.2.3 alone (from the specification)" [ "$resolvers" = 10.0.2.3 ] ;;
+	dhcp-dns) ok "uplink: resolver 192.0.2.53 alone (from the specification, not the lease's 10.0.2.3; got $resolvers)" [ "$resolvers" = 192.0.2.53 ] ;;
+	esac
+fi
+ok "message of the day: ump-motd shows the banner" bash -c 'ump-motd | grep -q "Unus Mundus Provisioner"'
 ump-motd | grep "host  \|uptime" | sed "s/\x1b\[[0-9;]*m//g; s/^ */message of the day: /"
 if [ "$FAMILY" = nixos ]; then
-	hello >/dev/null && echo "userdata: package hello installed"
-	[ "$(readlink /etc/localtime | sed "s#.*/zoneinfo/##")" = UTC ] && echo "userdata: time zone UTC wins over the profile's Europe/Berlin"
-	sudo -n nixos-rebuild dry-build >/dev/null 2>&1 && echo "nixos-rebuild: the configuration evaluates on the machine"
+	ok "userdata: package hello installed" hello
+	ok "userdata: time zone UTC wins over the profile's Europe/Berlin" [ "$(readlink /etc/localtime | sed "s#.*/zoneinfo/##")" = UTC ]
+	ok "nixos-rebuild: the configuration evaluates on the machine" sudo -n nixos-rebuild dry-build
 else
-	[ "$(cat /etc/timezone 2>/dev/null)" = Europe/Berlin ] && echo "time zone: Europe/Berlin from the profile"
-	sudo -n grep -q "=== userdata test" /var/log/ump-userdata.log && echo "userdata: ran before the first boot (/var/log/ump-userdata.log)"
+	ok "time zone: Europe/Berlin from the profile" [ "$(cat /etc/timezone 2>/dev/null)" = Europe/Berlin ]
+	ok "userdata: ran before the first boot (/var/log/ump-userdata.log)" sudo -n grep -q "=== userdata test" /var/log/ump-userdata.log
 fi
 CHECK
 # the prompt UMP gives bash on every system

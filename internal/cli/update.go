@@ -48,7 +48,7 @@ func (a *app) updateHint(cmd *cobra.Command) {
 	case "version", "completion", "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 		return
 	}
-	if Version == "dev" || a.nested || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
+	if Version == "dev" || a.nested || a.daemon || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
 		return
 	}
 	cfg, _, err := a.loadConfig()

@@ -27,6 +27,7 @@ network:
   "gw6": "",
   "dns": [],
   "dhcp4": true,
+  "dhcp4_dns": true,
   "auto6": true
 }
 ==> etc/systemd/network/10-ump-ext01.link

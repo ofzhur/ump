@@ -35,6 +35,7 @@ network:
     "2001:db8::53"
   ],
   "dhcp4": false,
+  "dhcp4_dns": false,
   "auto6": false
 }
 ==> etc/systemd/network/10-ump-ext01.link

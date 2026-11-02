@@ -16,6 +16,7 @@ systems](oses.md).
 | [`linode`](#linode-linode) | Linode (Akamai Cloud Computing) | yes: rescue mode (Finnix), set up through Lish | goes through the provider's rescue system |
 | [`vultr`](#vultr-vultr) | Vultr instances and bare metal | no | Vultr reinstalls the machine with UMP's key |
 | [`manual`](#manual-servers-manual) | servers added by hand | no | stops: the server must let ump in beforehand |
+| [`pxe`](#pxe-machines-pxe) | machines booted over the network: your own hardware, an ISP's private network | yes: a network boot from the PXE server of its site | goes through the network boot: power-cycle the machine |
 
 ## Hetzner Robot (`hetzner-robot`)
 
@@ -285,3 +286,42 @@ system that does not boot is yours to recover, with a console or the
 provider's own means, and ump says so before erasing anything; `ump
 server rescue` makes the jump only with `--force`. See
 [inventory](inventory.md#servers-added-by-hand).
+
+## PXE machines (`pxe`)
+
+Not a provider either: the machines ump boots over the network itself,
+those of `pxe.yaml`, from a PXE server of their site (`ump pxe serve`)
+on their private network. [PXE serving](pxe.md) describes it all.
+
+- The account `pxe` appears by itself with the first machine of
+  `pxe.yaml` (`ump config pxe create`). A machine's ID and name are its
+  name in `pxe.yaml` (`pxe/web-07`), its location is its site, and its
+  MACs are a label. It is listed from `pxe.yaml` and what the PXE
+  servers report, never from the listing cache, and it leaves the state
+  only by `ump config pxe delete` (or `edit`, which asks).
+- Status: `local`, `rescue` or `armed rescue`, from its mode in
+  `pxe.yaml` and its arm (`unknown` while the backend does not answer:
+  the machines are listed from `pxe.yaml` all the same, with a
+  warning); the architecture and the product as its last rescue system
+  reported them.
+- Addresses: the configured ones alone, a static `network.ipv4` or
+  `address` (a DHCP server's reservation), never one learned at boot.
+  A machine without one is listed without an address and left out of
+  the inventory.
+- Rescue: a network boot of UMP's rescue system, armed for as long as
+  ump waits. ump reboots the running system over SSH when that lets UMP
+  in, else asks you to power-cycle the machine, waits for its rescue
+  system to report in to the PXE server and connects at the address it
+  reported, with its host keys pinned. `--no-image` changes nothing,
+  the rescue system being UMP's; `--no-reboot` and `--no-wait` arm the
+  boot for a day.
+- Reinstall goes through that rescue system; the new system gets the
+  network of the machine's entry (`network`: static or DHCP, its
+  resolvers), and ump waits for it at its configured address.
+- A site's `jump` is the host SSH to its machines goes through, for ump
+  and Ansible.
+- Power control, renaming and reverse DNS do not exist.
+- `ump server show` adds what `pxe.yaml` says (MACs, site, mode, jump
+  host, arm), the network as configured, what its last network boot
+  and rescue system reported (the answer, the product, the disks, the
+  signals).

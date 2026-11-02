@@ -17,6 +17,8 @@ network:
       set-name: ext01
       dhcp4: true
       dhcp-identifier: mac
+      dhcp4-overrides:
+        use-dns: false
       link-local: []
       nameservers:
         addresses: [192.0.2.53]
@@ -31,6 +33,7 @@ network:
     "192.0.2.53"
   ],
   "dhcp4": true,
+  "dhcp4_dns": false,
   "auto6": false
 }
 ==> etc/systemd/network/10-ump-ext01.link
@@ -60,6 +63,7 @@ IPv6AcceptRA=no
 
 [DHCPv4]
 ClientIdentifier=mac
+UseDNS=no
 ==> etc/systemd/network/20-ump-int01.network
 # written by UMP at installation: up, without addresses
 [Match]
@@ -80,4 +84,4 @@ network=dhcp
 network6=none
 dns=192.0.2.53
 ==> plan
-ext01 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 none (the specification's uplink); IPv6 off; DNS 192.0.2.53
+ext01 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 none (the specification's uplink); IPv6 off; DNS 192.0.2.53, not the lease's

@@ -24,6 +24,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -648,9 +649,13 @@ type hostFile struct {
 // its private networks, by network, with each network's CIDR, for the
 // roles that connect the hosts; ump_private_address, ump_private_network
 // and ump_private_cidr are those of its first network, as ump v0.5.0
-// gave the one.
+// gave the one. ansible_ssh_common_args takes a host behind a jump host
+// through it (ProxyJump), with ump's own choice for host keys
+// (ansibleSSHArgs), since a host's variable replaces what ansible.cfg
+// and ump's runs set.
 type hostVars struct {
 	AnsibleHost    string                 `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
+	AnsibleSSHArgs string                 `json:"ansible_ssh_common_args,omitempty" yaml:"ansible_ssh_common_args,omitempty"`
 	UMPAdmin       string                 `json:"ump_admin,omitempty" yaml:"ump_admin,omitempty"`
 	UMPName        string                 `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
 	UMPRef         string                 `json:"ump_ref,omitempty" yaml:"ump_ref,omitempty"`
@@ -693,6 +698,9 @@ func hostVarsFor(m provider.Machine, rec state.Install, admin string, private []
 		UMPName: m.Name, UMPRef: m.Ref(), UMPProvider: m.Provider, UMPAccount: m.Account,
 		UMPLocation: m.Location, UMPProduct: m.Product, UMPOS: rec.OS, UMPProfile: rec.Profile,
 		UMPAttributes: m.Attributes,
+	}
+	if m.Jump != "" {
+		v.AnsibleSSHArgs = "-o ProxyJump=" + m.Jump + " " + ansibleSSHArgs[0].value
 	}
 	if !rec.At.IsZero() {
 		v.UMPInstalledAt = rec.At.UTC().Format(time.RFC3339)
@@ -757,6 +765,9 @@ func (a *app) inventoryHosts(cfg *config.Config, doc *state.Document, ms []provi
 		}
 		host := inventoryHostname(m, *s.Installed)
 		switch {
+		case primaryAddress(m) == "" && m.Provider == pxe.TypeName:
+			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: pxe.yaml gives it no address (address: or a static network.ipv4), and ump takes none it was given at boot\n", describeRef(m))
+			continue
 		case primaryAddress(m) == "":
 			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: it has no public address\n", describeRef(m))
 			continue
@@ -991,7 +1002,7 @@ func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Doc
 			return false
 		}
 		if t, id, _ := strings.Cut(ref, "/"); provider.HomeListed(t) {
-			return !homeLists(doc, t, id)
+			return !a.homeLists(doc, t, id)
 		}
 		return a.checkGone(ctx, cfg, store, ref).gone
 	}

@@ -248,8 +248,11 @@ func writeDescription(w io.Writer, d provider.Details) {
 		{Key: "product", Label: "Product", Value: m.Product},
 		{Key: "ipv4", Label: "IPv4", Value: m.IPv4},
 		{Key: "ipv6", Label: "IPv6", Value: m.IPv6},
-		{Key: "labels", Label: "Labels", Value: m.Labels},
 	}
+	if m.Jump != "" {
+		top = append(top, provider.Item{Key: "jump", Label: "Jump", Value: m.Jump})
+	}
+	top = append(top, provider.Item{Key: "labels", Label: "Labels", Value: m.Labels})
 	writeItems(w, "", top)
 	for _, s := range d.Sections {
 		fmt.Fprintf(w, "\n%s:\n", s.Name)

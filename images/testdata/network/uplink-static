@@ -37,6 +37,7 @@ network:
     "192.0.2.54"
   ],
   "dhcp4": false,
+  "dhcp4_dns": false,
   "auto6": false
 }
 ==> etc/systemd/network/10-ump-ext01.link

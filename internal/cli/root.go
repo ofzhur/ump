@@ -26,6 +26,7 @@ import (
 	"github.com/ofzhur/ump/internal/home"
 	"github.com/ofzhur/ump/internal/provider"
 	_ "github.com/ofzhur/ump/internal/provider/all"
+	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -64,6 +65,13 @@ type app struct {
 	// manual holds the servers added by hand, from the state loaded
 	// last, for the manual provider type.
 	manual map[string]provider.ManualServer
+	// pxeConf is pxe.yaml as loadState read it last, for the pxe
+	// provider type (empty without one), and pxeErr why it is not valid.
+	pxeConf *pxe.Config
+	pxeErr  error
+	// routes say how ump reaches addresses over SSH, shared by the
+	// copies of the app that installations side by side run in.
+	routes *sshRoutes
 	// home is where this run's home is; store is the state document's
 	// store, opened once per run, and doc the document read last (nil
 	// after a change); pullFailed says the backend did not answer and
@@ -75,6 +83,9 @@ type app struct {
 	// nested says that an ump runs this one (UMP_PARENT): it leaves the
 	// mirror and the update check to that one.
 	nested bool
+	// daemon says that this run is the PXE server (daemonCommand): it
+	// reads the backend alone, no mirror, and checks for no update.
+	daemon bool
 	// dryRun says that the command changes nothing (--dry-run): a server
 	// gone from its provider is reported, not forgotten. goneDecided are
 	// the provider types whose gone servers this run decided on, once;
@@ -216,14 +227,19 @@ func (a *app) run(ctx context.Context, args []string) int {
 	if a.ansible == nil {
 		a.ansible = runAnsible
 	}
+	if a.routes == nil {
+		a.routes = &sshRoutes{}
+	}
 	root := a.newRootCmd()
 	root.SetArgs(args)
+	a.daemon = daemonCommand(args)
 	if err := a.resolveHome(ctx, offlineCommand(args)); err != nil {
 		fmt.Fprintf(a.stderr, "ump: %v\n", err)
 		return exitGeneric
 	}
 	err := root.ExecuteContext(ctx)
 	a.pushHome(context.Background())
+	a.routes.clean()
 	if err == nil {
 		return exitOK
 	}
@@ -286,6 +302,7 @@ licensed under the Apache License 2.0.`,
 	root.AddCommand(a.newProvisionCmd())
 	root.AddCommand(a.newSSHCmd())
 	root.AddCommand(a.newConfigCmd())
+	root.AddCommand(a.newPXECmd())
 	root.AddCommand(a.newVersionCmd())
 	rejectUnknownSubcommands(root)
 	return root
@@ -412,6 +429,7 @@ func (a *app) providerOptions() provider.Options {
 		HTTPClient: a.httpClient,
 		UserAgent:  "ump/" + Version,
 		Manual:     a.manual,
+		PXE:        a.pxeHome(),
 	}
 	if a.verbose {
 		opts.Logf = func(format string, args ...any) {

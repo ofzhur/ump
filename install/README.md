@@ -176,7 +176,7 @@ installer configures that instead of what the rescue system has:
 | `mac` | the uplink (`ext01`); without it, the interface the rescue system reaches the network through. An interface the machine lacks stops the installation |
 | `ipv4` | `static` with `address` (with its prefix length) and `gateway` (on-link; none: no default route), `dhcp` (with the MAC as the client identifier, as iPXE and the rescue system send it), or `none` |
 | `ipv6` | `static` likewise, `auto` (router advertisements, an EUI-64 address), or `none`; only when the profile keeps IPv6 |
-| `dns` | the resolvers, in netplan, networkd or NixOS and in resolved's configuration; without it 1.1.1.1 and 8.8.8.8 |
+| `dns` | the resolvers, in netplan, networkd or NixOS and in resolved's configuration; without it 1.1.1.1 and 8.8.8.8. With `ipv4` `dhcp` these alone: the lease's are ignored (netplan `dhcp4-overrides`, networkd `UseDNS=no`) |
 | `dns_from_dhcp` | `true`: the resolvers of the lease (or of router advertisements), none written |
 
 Without `network.uplink` the installer writes what it always has,

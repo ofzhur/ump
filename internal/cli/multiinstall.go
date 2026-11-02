@@ -584,6 +584,9 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 		if err != nil {
 			return nil, nil, e.inPlan(err)
 		}
+		if err := checkInstall(ctx, m, prov); err != nil {
+			return nil, nil, e.inPlan(err)
+		}
 		plans = append(plans, p)
 	}
 	doc, err := a.loadState(ctx, cfg)

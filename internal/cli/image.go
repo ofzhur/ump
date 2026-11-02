@@ -98,7 +98,7 @@ func batchOptions(connectTimeout time.Duration) []string {
 // probeHost logs in as user and asks who answers. ok is false when SSH did
 // not let us in: no route, no SSH, or no key the machine accepts.
 func (a *app) probeHost(ctx context.Context, user, addr string, identities []string, identitiesOnly bool) (p hostProbe, ok bool) {
-	argv := withSSHOptions(sshArgs(user, addr, identities, identitiesOnly, true, []string{probeCommand}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(a.sshTo(user, addr, identities, identitiesOnly, true, []string{probeCommand}), batchOptions(10*time.Second)...)
 	var out, errb bytes.Buffer
 	code, err := a.sshExec(ctx, argv, nil, &out, &errb)
 	if err != nil || code != 0 {
@@ -162,7 +162,7 @@ func (a *app) setupUMPKey(ctx context.Context, m provider.Machine, user, addr st
 	line := strings.TrimSpace(umpKey.Data)
 	script := "umask 077; mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && " +
 		"{ grep -qxF " + shellJoin([]string{line}) + " ~/.ssh/authorized_keys || printf '%s\n' " + shellJoin([]string{line}) + " >> ~/.ssh/authorized_keys; }"
-	argv := withSSHOptions(sshArgs(user, addr, identities, false, true, []string{script}), batchOptions(15*time.Second)...)
+	argv := withSSHOptions(a.sshTo(user, addr, identities, false, true, []string{script}), batchOptions(15*time.Second)...)
 	var out, errb bytes.Buffer
 	if code, err := a.sshExec(ctx, argv, nil, &out, &errb); err != nil || code != 0 {
 		fmt.Fprintf(a.stderr, "UMP's key does not open %s@%s, and adding it failed (%s); going on with your key.\n", user, m.Name, nonEmpty(strings.TrimSpace(errb.String()), fmt.Sprintf("exit %d", code)))
@@ -236,7 +236,7 @@ func (d *dropLines) emit(line []byte) {
 // returns once the script reported the jump; the connection then drops
 // with the old kernel. The script's output goes to stderr as it comes.
 func (a *app) enterImage(ctx context.Context, user, addr string, identities []string, identitiesOnly bool, url, hostname string, keys []provider.PublicKey) error {
-	argv := withSSHOptions(sshArgs(user, addr, identities, identitiesOnly, true, []string{entryCommand(url, hostname, keys, user != "root")}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(a.sshTo(user, addr, identities, identitiesOnly, true, []string{entryCommand(url, hostname, keys, user != "root")}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
 	shown := &dropLines{w: a.stderr, prefixes: jumpNoise}
 	w := io.MultiWriter(shown, &buf)
@@ -266,7 +266,7 @@ func (a *app) enterImage(ctx context.Context, user, addr string, identities []st
 // imageVersion asks the machine for the version of the UMP rescue system
 // it runs, with UMP's key; anything else answering, or nothing, is false.
 func (a *app) imageVersion(ctx context.Context, addr, keyPath string) (string, bool) {
-	argv := withSSHOptions(sshArgs("root", addr, []string{keyPath}, true, true, []string{"cat /etc/ump-rescue-version"}), batchOptions(5*time.Second)...)
+	argv := withSSHOptions(a.sshTo("root", addr, []string{keyPath}, true, true, []string{"cat /etc/ump-rescue-version"}), batchOptions(5*time.Second)...)
 	var out bytes.Buffer
 	code, err := a.sshExec(ctx, argv, nil, &out, io.Discard)
 	v := strings.TrimSpace(out.String())
@@ -432,13 +432,17 @@ type imageEntry struct {
 	via string
 	// info is the provider's rescue system, when it was the way in.
 	info *provider.RescueInfo
+	// system is where the installed system answers when that is not
+	// addr: the machine's own address, where the rescue system of a
+	// network boot answers at one it was given at boot.
+	system string
 }
 
 // enableProviderRescue arms the provider's rescue system with the keys,
 // resets the server into it unless noReboot, and prints what the provider
 // gave (password, host keys, notes) to out.
 func (a *app) enableProviderRescue(ctx context.Context, m provider.Machine, rs provider.Rescue, pw provider.Power, keys []provider.PublicKey, keyPath string, keyPaths []string, out io.Writer, noReboot bool) (info *provider.RescueInfo, user string, rebooted, wasUp bool, err error) {
-	wasUp = !noReboot && a.probe(ctx, m.IPv4)
+	wasUp = !noReboot && a.answers(ctx, m.IPv4)
 	info, err = rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys, Identity: keyPath, NoReboot: noReboot})
 	if err != nil {
 		return nil, "", false, false, fmt.Errorf("account %s: %w", m.Account, err)
@@ -552,6 +556,20 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if !hasRescue {
 		return nil, fmt.Errorf("account %s: provider type %s has no rescue system", m.Account, m.Provider)
 	}
+	out := a.stdout
+	if o.quiet {
+		out = a.stderr
+	}
+	if rw, ok := prov.(provider.RescueWaiter); ok {
+		if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system over the network, at its next boot?", describeRef(m))); err != nil {
+			return nil, err
+		}
+		users := o.users
+		if len(users) == 0 {
+			users = []string{"root", defaultAdmin}
+		}
+		return a.waitedRescue(ctx, m, rs, rw, keys, keyPath, keyPaths, out, users, o.via == "provider")
+	}
 	pw, canReboot := prov.(provider.Power)
 	if !canReboot {
 		return nil, fmt.Errorf("account %s: provider type %s cannot reboot; use ump server rescue --no-reboot and reboot the server yourself", m.Account, m.Provider)
@@ -564,10 +582,6 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	}
 	if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))); err != nil {
 		return nil, err
-	}
-	out := a.stdout
-	if o.quiet {
-		out = a.stderr
 	}
 	info, user, _, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPath, keyPaths, out, false)
 	if err != nil {
@@ -582,7 +596,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	// the provider's rescue system is only the first hop
 	p, ok := a.probeHost(ctx, user, info.Address, []string{keyPath}, true)
 	if !ok {
-		manual := shellJoin(sshArgs(user, info.Address, []string{keyPath}, true, true, nil))
+		manual := shellJoin(a.sshShown(user, info.Address, []string{keyPath}, true, true, nil))
 		return nil, withExit(exitUnreachable, fmt.Errorf("the rescue system of %s did not accept UMP's key; connect by hand (%s) and run: curl -fsSL %s/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u %s", m.Name, manual, imageURL, imageURL))
 	}
 	if p.version != "" {
@@ -598,4 +612,90 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		return nil, err
 	}
 	return &imageEntry{addr: info.Address, user: "root", version: version, via: "provider", info: info}, nil
+}
+
+// waitedRescue is the provider's way for a provider whose rescue system
+// says when it is up (provider.RescueWaiter: a network boot of UMP's
+// rescue system). The boot is armed with the keys; the machine is
+// rebooted over SSH when its running system lets UMP in (sshReboot, as
+// the first of users that can), else the operator is told to; then ump
+// waits for the rescue system to report in. ump reaches it at the
+// address it reported, for this run, with the host keys it reported
+// pinned and through the machine's jump host; the installed system
+// answers at the machine's own address.
+func (a *app) waitedRescue(ctx context.Context, m provider.Machine, rs provider.Rescue, rw provider.RescueWaiter, keys []provider.PublicKey, keyPath string, keyPaths []string, out io.Writer, users []string, sshReboot bool) (*imageEntry, error) {
+	limit := a.waitLimit(imageWaitTimeout)
+	fmt.Fprintf(a.stderr, "Arming a network boot of UMP's rescue system for %s ...\n", describeRef(m))
+	// the arm lasts as long as the wait, and the reboot before it
+	info, err := rs.EnableRescue(ctx, m, provider.RescueOptions{Keys: keys, Identity: keyPath, Wait: limit + time.Minute})
+	if err != nil {
+		return nil, fmt.Errorf("account %s: %w", m.Account, err)
+	}
+	fmt.Fprintf(out, "Rescue system armed for %s; it boots at the next boot.\n", describeRef(m))
+	fmt.Fprintf(out, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
+	if info.Note != "" {
+		fmt.Fprintf(out, "Note: %s\n", info.Note)
+	}
+	if !sshReboot || !a.rebootOverSSH(ctx, m, users, keyPath) {
+		fmt.Fprintf(a.stderr, "Power-cycle %s now (or reset it): it boots UMP's rescue system at its next boot.\n", m.Name)
+	}
+	fmt.Fprintf(a.stderr, "Waiting for the rescue system of %s to report in (up to %s) ...\n", m.Name, fmtWait(limit))
+	start := time.Now()
+	wctx, cancel := context.WithTimeout(ctx, limit)
+	addr, hostKeys, err := rw.WaitRescue(wctx, m, info, a.stderr)
+	cancel()
+	switch {
+	case err == nil:
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, withExit(exitUnreachable, fmt.Errorf("account %s: %w; a slow machine may need a longer wait (wait: 30m in config.yaml, or UMP_WAIT=30m)", m.Account, err))
+	default:
+		return nil, fmt.Errorf("account %s: %w", m.Account, err)
+	}
+	r := sshRoute{jump: m.Jump}
+	if len(hostKeys) > 0 {
+		if r.knownHosts, err = a.pinHostKeys(addr, hostKeys); err != nil {
+			return nil, err
+		}
+	}
+	a.setRoute(addr, r)
+	p, ok := a.probeHost(ctx, "root", addr, []string{keyPath}, true)
+	if !ok || p.version == "" {
+		through := ""
+		if m.Jump != "" {
+			through = " (through " + m.Jump + ")"
+		}
+		return nil, withExit(exitUnreachable, fmt.Errorf("the rescue system of %s reported in at %s, but does not let UMP in there as root with UMP's key%s", m.Name, addr, through))
+	}
+	fmt.Fprintf(a.stderr, "The rescue system of %s is up at %s after %s (ump-rescue %s); its host keys are pinned for this run.\n", m.Name, addr, time.Since(start).Round(time.Second), p.version)
+	return &imageEntry{addr: addr, user: "root", version: p.version, via: "provider", info: info, system: primaryAddress(m)}, nil
+}
+
+// rebootOverSSH reboots the running system of m over SSH as the first of
+// users that is root or has sudo there, and says whether it did.
+func (a *app) rebootOverSSH(ctx context.Context, m provider.Machine, users []string, keyPath string) bool {
+	addr := primaryAddress(m)
+	if addr == "" {
+		return false
+	}
+	fmt.Fprintf(a.stderr, "Checking root access to %s over SSH, for the reboot ...", addr)
+	identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
+	user, p, ok, _ := a.probeAdmin(ctx, users, addr, identities, false)
+	if !ok {
+		fmt.Fprintf(a.stderr, " no (tried %s).\n", strings.Join(users, ", "))
+		return false
+	}
+	command := "systemctl reboot"
+	if !p.root {
+		command = "sudo -n " + command
+	}
+	argv := withSSHOptions(a.sshTo(user, addr, identities, false, true, []string{command}), batchOptions(10*time.Second)...)
+	code, err := a.sshExec(ctx, argv, nil, io.Discard, io.Discard)
+	if err != nil || code != 0 && code != 255 {
+		fmt.Fprintf(a.stderr, " yes, as %s, but the reboot failed (exit status %d).\n", user, code)
+		return false
+	}
+	fmt.Fprintf(a.stderr, " yes; rebooting it as %s.\n", user)
+	return true
 }

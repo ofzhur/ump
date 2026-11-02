@@ -687,7 +687,10 @@ without one, --yes is required.`,
 					addr = t.m.IPv6
 				}
 				var outb, errb bytes.Buffer
-				argv := withSSHOptions(sshArgs(t.admin, addr, []string{oldPath}, true, true, []string{swap}), batchOptions(10*time.Second)...)
+				// its own way, also where another server has its address
+				route := a.route(addr)
+				route.jump = t.m.Jump
+				argv := withSSHOptions(sshArgs(route, t.admin, addr, []string{oldPath}, true, true, []string{swap}), batchOptions(10*time.Second)...)
 				code, err := a.sshExec(ctx, argv, nil, &outb, &errb)
 				if err != nil || code != 0 {
 					kept++
@@ -703,7 +706,7 @@ without one, --yes is required.`,
 						noSudo = true
 					}
 				}
-				argv = withSSHOptions(sshArgs(t.admin, addr, []string{path}, true, true, []string{"id -u; echo rolled"}), batchOptions(10*time.Second)...)
+				argv = withSSHOptions(sshArgs(route, t.admin, addr, []string{path}, true, true, []string{"id -u; echo rolled"}), batchOptions(10*time.Second)...)
 				if code, err := a.sshExec(ctx, argv, nil, io.Discard, io.Discard); err != nil || code != 0 {
 					kept++
 					fmt.Fprintf(a.stdout, "  %s (%s): the new key was added, but does not open %s@%s; the old key may still be there\n", t.m.Name, addr, t.admin, addr)

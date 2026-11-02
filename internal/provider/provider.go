@@ -57,6 +57,11 @@ type Machine struct {
 	// IPv6 is the primary public IPv6 address or the assigned prefix
 	// (providers hand out a /64 more often than a single address).
 	IPv6 string `json:"ipv6,omitempty" yaml:"ipv6,omitempty"`
+	// Jump is the host SSH to the machine goes through, as ssh's
+	// ProxyJump takes it ([user@]host[:port], several separated by
+	// commas), for a machine on a private network (a PXE machine's
+	// site's); empty: ump reaches it directly.
+	Jump string `json:"jump,omitempty" yaml:"jump,omitempty"`
 	// Location is the datacenter, region or zone, lower-cased.
 	Location string `json:"location,omitempty" yaml:"location,omitempty"`
 	// Product is the server model or instance type.
@@ -229,6 +234,14 @@ type Partial interface {
 	Skipped() []string
 }
 
+// Warner is implemented by providers whose listing can go through
+// with less than they should know rather than fail (PXE: the machines
+// of pxe.yaml while the backend does not answer): Warnings says what
+// the last List lacked, a line each, none when nothing.
+type Warner interface {
+	Warnings() []string
+}
+
 // Field describes one configuration setting of a provider type. The wizard
 // prompts for fields in order; the config validator checks required ones.
 type Field struct {
@@ -268,6 +281,10 @@ type Options struct {
 	// Manual holds the servers of a manual account, by name (the manual
 	// provider type lists them; other types ignore it).
 	Manual map[string]ManualServer
+	// PXE is what the CLI read for the pxe provider type (a
+	// *pxe.Home of internal/provider/pxe: pxe.yaml and its sites'
+	// documents); other types ignore it.
+	PXE any
 }
 
 func (o Options) httpClient() *http.Client {

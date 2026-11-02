@@ -104,7 +104,8 @@ func (a *app) resolveOne(cmd *cobra.Command, ref string) (provider.Machine, prov
 }
 
 // resolveListed resolves a server reference against a listing of
-// listedMachines, as resolveOne does.
+// listedMachines, as resolveOne does, and makes ump reach the server its
+// own way (reach).
 func (a *app) resolveListed(cmd *cobra.Command, machines []provider.Machine, byAccount map[string]listResult, failed, total int, ref string) (provider.Machine, provider.Provider, error) {
 	m, err := a.resolveServer(a.resolverUI(cmd), machines, ref)
 	switch {
@@ -115,6 +116,9 @@ func (a *app) resolveListed(cmd *cobra.Command, machines []provider.Machine, byA
 		if errors.As(err, &nf) && failed > 0 {
 			return provider.Machine{}, nil, fmt.Errorf("%w (%d of %d accounts could not be listed)", err, failed, total)
 		}
+		return provider.Machine{}, nil, err
+	}
+	if err := a.reach(m); err != nil {
 		return provider.Machine{}, nil, err
 	}
 	return m, byAccount[m.Account].prov, nil
@@ -222,9 +226,10 @@ func sshAnswers(ctx context.Context, addr string) bool {
 	return true
 }
 
-// waitForSSH waits until the SSH port of addr answers. When it answered
-// before the action (wasUp), it first waits for it to stop answering, so
-// that a reboot is not mistaken for the old system still running.
+// waitForSSH waits until the SSH port of addr answers (through its jump
+// host when it has one). When it answered before the action (wasUp), it
+// first waits for it to stop answering, so that a reboot is not
+// mistaken for the old system still running.
 func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 	if addr == "" {
 		return errors.New("the server has no IPv4 address to wait for")
@@ -233,7 +238,7 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 	if wasUp {
 		fmt.Fprintf(a.stderr, "Waiting for SSH on %s to go down ...", addr)
 		deadline := start.Add(waitDownTime)
-		for a.probe(ctx, addr) {
+		for a.answers(ctx, addr) {
 			if time.Now().After(deadline) {
 				fmt.Fprintln(a.stderr, " still up; assuming it rebooted quickly.")
 				break
@@ -243,7 +248,7 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 				return err
 			}
 		}
-		if !a.probe(ctx, addr) {
+		if !a.answers(ctx, addr) {
 			fmt.Fprintf(a.stderr, " down after %s.\n", time.Since(start).Round(time.Second))
 		}
 	}
@@ -251,7 +256,7 @@ func (a *app) waitForSSH(ctx context.Context, addr string, wasUp bool) error {
 	fmt.Fprintf(a.stderr, "Waiting for SSH on %s (up to %s) ...", addr, fmtWait(limit))
 	deadline := time.Now().Add(limit)
 	tick := a.waitTicker(start)
-	for !a.probe(ctx, addr) {
+	for !a.answers(ctx, addr) {
 		if time.Now().After(deadline) {
 			fmt.Fprintln(a.stderr)
 			return withExit(exitUnreachable, fmt.Errorf("SSH on %s did not answer within %s; a slow provider may need a longer wait (wait: 30m in config.yaml, or UMP_WAIT=30m)", addr, fmtWait(limit)))

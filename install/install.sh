@@ -166,7 +166,9 @@ kernel_cmdline="kho=off"
 # net6 static, auto (router advertisements) or none, ip6 likewise; dns
 # the resolvers, empty when they come from DHCP, and dns_source says
 # whence: public (1.1.1.1 and 8.8.8.8, ump's default), spec or dhcp;
-# client_id is mac when DHCP identifies the machine by its MAC. The
+# client_id is mac when DHCP identifies the machine by its MAC, and
+# lease_dns no when the uplink takes its address from a DHCP lease but
+# not the lease's resolvers (the specification lists its own). The
 # interfaces are IF_MAC, IF_NAME and IF_KIND; uplink_spec is the
 # specification's uplink, empty without one.
 
@@ -213,6 +215,9 @@ net_from_spec() {
 	elif [ -z "$dns" ]; then
 		dns="1.1.1.1 8.8.8.8"; dns_source=public
 	fi
+	# resolvers of its own: those alone, not the lease's besides
+	lease_dns=yes
+	[ "$net4" != dhcp ] || [ "$dns_source" != spec ] || lease_dns=no
 }
 
 # net_from_machine: the uplink as the rescue system found it (ip4, ip6),
@@ -223,7 +228,7 @@ net_from_machine() {
 	[ -n "$ip4$ip6" ] || net4=dhcp
 	[ -z "$ip4" ] || net4=static
 	[ -z "$ip6" ] || net6=static
-	client_id=""; dns="1.1.1.1 8.8.8.8"; dns_source=public
+	client_id=""; dns="1.1.1.1 8.8.8.8"; dns_source=public; lease_dns=yes
 }
 
 # netplan_yaml: /etc/netplan/10-ump.yaml (Ubuntu, Debian): every wired
@@ -253,6 +258,7 @@ netplan_yaml() {
 	if [ "$net4" = dhcp ]; then
 		echo "      dhcp4: true"
 		[ -z "$client_id" ] || echo "      dhcp-identifier: $client_id"
+		[ "$lease_dns" = yes ] || printf '      dhcp4-overrides:\n        use-dns: false\n'
 	else
 		echo "      dhcp4: false"
 	fi
@@ -318,6 +324,7 @@ networkd_files() {
 		if [ "$net4" = static ]; then case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac; fi
 		if [ "$ipv6" = true ] && [ "$net6" = static ]; then case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac; fi
 		[ -z "$client_id" ] || printf '\n[DHCPv4]\nClientIdentifier=%s\n' "$client_id"
+		[ "$lease_dns" = yes ] || printf 'UseDNS=no\n'
 		if [ "$ipv6" = true ] && [ "$net6" = auto ]; then printf '\n[IPv6AcceptRA]\nToken=eui64\n'; fi
 	} > "$nd/20-ump-$uplink.network"
 }
@@ -334,13 +341,15 @@ resolved_conf() {
 
 # nixos_net_facts: the uplink as facts.json has it for UMP's NixOS
 # module; with an uplink in the specification also dhcp4 (DHCP, which
-# then identifies the machine by its MAC) and auto6 (router
+# then identifies the machine by its MAC), dhcp4_dns (the lease's
+# resolvers, unless the specification lists its own) and auto6 (router
 # advertisements)
 nixos_net_facts() {
 	local more='{}'
 	if [ -n "$uplink_spec" ]; then
 		more="$(jq -n --argjson dhcp4 "$([ "$net4" = dhcp ] && echo true || echo false)" \
-			--argjson auto6 "$([ "$net6" = auto ] && echo true || echo false)" '{dhcp4: $dhcp4, auto6: $auto6}')"
+			--argjson dhcp4_dns "$([ "$net4" = dhcp ] && [ "$lease_dns" = yes ] && echo true || echo false)" \
+			--argjson auto6 "$([ "$net6" = auto ] && echo true || echo false)" '{dhcp4: $dhcp4, dhcp4_dns: $dhcp4_dns, auto6: $auto6}')"
 	fi
 	jq -n --arg uplink_mac "$mac" --arg ip4 "${ip4%%,*}" --arg gw4 "$(case "$ip4" in *,*) echo "${ip4#*,}" ;; esac)" \
 		--arg ip6 "${ip6%%,*}" --arg gw6 "$(case "$ip6" in *,*) echo "${ip6#*,}" ;; esac)" --arg dns "$dns" --argjson more "$more" \
@@ -353,7 +362,7 @@ net_plan() {
 	if [ -n "$uplink_spec" ]; then
 		addresses="IPv4 $net4${ip4:+ $ip4}$([ "$net4" != dhcp ] || echo " (client ID: MAC)"), IPv6 $net6${ip6:+ $ip6} (the specification's uplink)"
 	fi
-	echo "$uplink ($mac) $addresses; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS ${dns:-from DHCP}"
+	echo "$uplink ($mac) $addresses; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS ${dns:-from DHCP}$([ "$lease_dns" = yes ] || echo ", not the lease's")"
 }
 
 # net_record: the lines of /etc/ump/install that say how the

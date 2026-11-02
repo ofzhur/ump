@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -60,7 +59,7 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 	}
 	addr := primaryAddress(m)
 	if addr == "" {
-		return fmt.Errorf("%s has no public address", m.Ref())
+		return noAddress(m)
 	}
 	_, umpKey, err := a.stagingKey(cfg)
 	if err != nil {
@@ -80,7 +79,7 @@ func (a *app) sshServer(cmd *cobra.Command, ref, user string, staging bool, comm
 			user = a.profileAdmin(cfg, pinned)
 		}
 	}
-	argv := sshArgs(user, addr, identities, staging, staging, command)
+	argv := a.sshTo(user, addr, identities, staging, staging, command)
 	interactive := len(command) == 0
 	if interactive && (a.isTTY == nil || !a.isTTY()) {
 		return withExit(exitAborted, errors.New("an interactive session needs a terminal; give a command after --"))

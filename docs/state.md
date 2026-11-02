@@ -143,6 +143,12 @@ backend's copy is the one to keep unless you edited the mirror's by
 hand. When the backend does not answer, the command runs on the mirror
 as it is and says so; nothing is pushed until the backend is back.
 
+`.pxe/`, where the CLI and the PXE servers meet ([PXE
+serving](pxe.md)), is never mirrored: ump reads it from the backend when
+it lists the machines of `pxe.yaml` or arms a boot, so the servers'
+heartbeats cost a pull nothing. The PXE server, `ump pxe serve`, works
+on the backend alone and neither pulls nor pushes.
+
 Several ump processes on one machine, such as reinstalls of different
 servers side by side, share the mirror: a lock file in it
 (`.mirror.lock`) lets one pull or push at a time go ahead, and the

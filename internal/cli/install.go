@@ -68,7 +68,7 @@ func addServerFlags(sub *cobra.Command, o *installOptions) {
 	sub.Flags().StringVar(&o.layout, "layout", "", "the disk layout, by name from layouts.yaml (default: the profile's)")
 	sub.Flags().StringVar(&o.firewall, "firewall", "", "the firewall, by name from firewalls.yaml (default: the profile's)")
 	sub.Flags().StringVar(&o.os, "os", "", "the operating system image (default: the profile's)")
-	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name)")
+	sub.Flags().StringVar(&o.hostname, "hostname", "", "hostname of the new system (default: the server's name, a PXE machine's hostname in pxe.yaml)")
 	sub.Flags().StringArrayVar(&o.privateNetworks, "private-network", nil, "the private networks, by name from networks.yaml, in order, or none (repeatable, or comma-separated; default: the profile's)")
 	sub.Flags().StringArrayVar(&o.privateIPs, "private-ip", nil, "the server's address in a private network, NETWORK=ADDRESS, or ADDRESS alone in its only one (repeatable, or comma-separated; default: the one it has there, else the lowest free one)")
 	sub.Flags().StringVar(&o.storage, "storage", "", "base URL of the storage with the installer and the images (default: storage in the configuration)")
@@ -330,12 +330,15 @@ type installPlan struct {
 
 // newInstallPlan starts the plan of an installation on m: the server
 // needs an address, and the new system's hostname is --hostname, else
-// the server's name.
+// the provider's (provider.Hostnamer), else the server's name.
 func newInstallPlan(ref string, m provider.Machine, prov provider.Provider, o installOptions, f installFlags) (*installPlan, error) {
 	if m.IPv4 == "" && m.IPv6 == "" {
-		return nil, fmt.Errorf("%s has no public address", m.Ref())
+		return nil, noAddress(m)
 	}
 	hostname := o.hostname
+	if hn, ok := prov.(provider.Hostnamer); ok && hostname == "" {
+		hostname = rescueHostname(hn.Hostname(m))
+	}
 	if hostname == "" {
 		hostname = rescueHostname(m.Name)
 		if hostname == "" {
@@ -392,6 +395,11 @@ func assignPlans(doc *state.Document, plans []*installPlan) (int, error) {
 		if len(p.private) > 0 {
 			first := p.spec.Network.PrivateNetworks[0]
 			p.spec.Network.Private = &first
+		}
+		// an uplink of the provider's, now that the private networks are
+		// known, which it may not overlap
+		if err := p.spec.ValidateUplink(); err != nil {
+			return i, withExit(exitUsage, fmt.Errorf("%s: %w", p.m.Ref(), err))
 		}
 		if p.specJSON, err = p.spec.JSON(); err != nil {
 			return i, err
@@ -536,6 +544,12 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 	if p.privateIPs, err = f.private.addresses(names); err != nil {
 		return usageErrorf(cmd, "%v", err)
 	}
+	// the installed system's uplink, where the provider knows it
+	if u, ok := p.prov.(provider.Uplinker); ok {
+		if spec.Network.Uplink, err = u.Uplink(ctx, p.m); err != nil {
+			return fmt.Errorf("account %s: %w", p.m.Account, err)
+		}
+	}
 	spec.Hostname = p.hostname
 	spec.Storage = storage
 	if o.disks != "" {
@@ -600,6 +614,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	defer a.invalidateListing(m.Account)
 	p, err := newInstallPlan(ref, m, prov, o, f)
 	if err != nil {
+		return err
+	}
+	if err := checkInstall(ctx, m, prov); err != nil {
 		return err
 	}
 	p.keys, p.keyPaths, p.keyPath = keys, keyPaths, keyPath
@@ -752,6 +769,16 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	return a.installReport(result, format)
 }
 
+// checkInstall refuses an installation the provider says can never
+// start (provider.InstallChecker), before anything is asked or armed.
+func checkInstall(ctx context.Context, m provider.Machine, prov provider.Provider) error {
+	ic, ok := prov.(provider.InstallChecker)
+	if !ok {
+		return nil
+	}
+	return withExit(exitAborted, ic.CheckInstall(ctx, m))
+}
+
 // ownRecap says that the host is provisioned by its own line of a run's
 // recap: there is one, with nothing failed or unreachable.
 func ownRecap(res *provisionResult, host string) bool {
@@ -791,6 +818,14 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 		return result, nil, err
 	}
 	result.Via = entry.via
+	// where the installed system answers: where the rescue system did,
+	// or the machine's own address; the rescue system is reached at its
+	// own (staging) when that is another
+	system := nonEmpty(entry.system, entry.addr)
+	staging := "ump ssh " + ref + " --staging"
+	if system != entry.addr {
+		staging = shellJoin(a.sshShown(entry.user, entry.addr, []string{p.keyPath}, true, true, nil))
+	}
 
 	// the installer, from the storage, in the rescue system, with the
 	// specification on its stdin
@@ -808,7 +843,7 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	// the keys go into the rescue system too, so that it stays reachable
 	// with them while the installation runs
 	remote := ensureKeysCommand(p.keys) + "cat > /tmp/ump-install.json && " + fetchAndRun(installer, "/tmp/ump-install.sh", args)
-	argv := withSSHOptions(sshArgs(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(a.sshTo(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
 	var buf bytes.Buffer
 	w := io.MultiWriter(a.stderr, &buf)
 	code, err := a.sshExec(ctx, argv, bytes.NewReader(p.specJSON), w, w)
@@ -822,16 +857,16 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	result.written = !r.dryRun && (code == 0 || code == 255 && installerRan)
 	switch {
 	case code == 255:
-		return result, nil, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (ump ssh %s --staging)", entry.addr, ref))
+		return result, nil, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (%s)", entry.addr, staging))
 	case code != 0 && !installerRan && code != 1 && code != 2:
 		return result, nil, fmt.Errorf("%s could not fetch the installer from %s (exit status %d); the server must reach the storage", entry.addr, installer, code)
 	case code == 2:
 		return result, nil, fmt.Errorf("the installer refused the specification or the machine (exit status 2, see above); nothing was changed, %s stays in the UMP rescue system", m.Name)
 	case code != 0:
-		return result, nil, fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (ump ssh %s --staging)", m.Name, code, ref)
+		return result, nil, fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (%s)", m.Name, code, staging)
 	}
 	if r.dryRun {
-		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (ump ssh %s --staging).\n", m.Name, ref)
+		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (%s).\n", m.Name, staging)
 		return result, nil, nil
 	}
 
@@ -858,7 +893,7 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 		admin := spec.Admin()
 		record := installRecord(spec.OS, p.profile, spec.Layout.Name, p.hostname, admin, "", a.now())
 		result.InstalledAt, result.Admin = &record.At, admin
-		a.forgetReplacedHostKey(entry.addr)
+		a.forgetReplacedHostKey(system)
 		how := "a reboot"
 		if diskBoot {
 			how = "a reboot through the provider (ump server reboot " + ref + ")"
@@ -868,7 +903,7 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	}
 
 	fmt.Fprintf(a.stderr, "Rebooting %s into %s ...\n", m.Name, spec.OS)
-	reboot := withSSHOptions(sshArgs(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{"systemctl reboot"}), batchOptions(10*time.Second)...)
+	reboot := withSSHOptions(a.sshTo(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{"systemctl reboot"}), batchOptions(10*time.Second)...)
 	// a changed boot configuration takes effect with the provider's reboot
 	code, rerr := 0, error(nil)
 	if !diskBoot {
@@ -884,16 +919,18 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 		}
 	}
 	result.Rebooted = true
-	if err := a.waitForSSH(ctx, entry.addr, true); err != nil {
+	// the rescue system's host keys pinned there are not the new system's
+	a.unpin(entry.addr)
+	if err := a.waitForSSH(ctx, system, true); err != nil {
 		return result, nil, err
 	}
 	admin := spec.Admin()
-	sys, ok := a.installedSystem(ctx, entry.addr, p.keyPath, admin)
+	sys, ok := a.installedSystem(ctx, system, p.keyPath, admin)
 	if !ok {
-		return result, nil, withExit(exitUnreachable, fmt.Errorf("SSH answers on %s, but not as %s with UMP's key; the new system may not have booted, look at the server's console", entry.addr, admin))
+		return result, nil, withExit(exitUnreachable, fmt.Errorf("SSH answers on %s, but not as %s with UMP's key; the new system may not have booted, look at the server's console", system, admin))
 	}
 	result.System, result.Admin = sys, admin
-	a.forgetReplacedHostKey(entry.addr)
+	a.forgetReplacedHostKey(system)
 	// what was installed goes into the state, for the inventory
 	record := installRecord(spec.OS, p.profile, spec.Layout.Name, p.hostname, admin, sys.Details, a.now())
 	result.InstalledAt = &record.At
@@ -1272,7 +1309,7 @@ func (a *app) installReport(r installResult, format outputFormat) error {
 // now.
 func (a *app) installedSystem(ctx context.Context, addr, keyPath, user string) (*installedSystem, bool) {
 	const query = `sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'; findmnt -no SOURCE / ; cat /etc/ump/install 2>/dev/null | tr '\n' ' '`
-	argv := withSSHOptions(sshArgs(user, addr, []string{keyPath}, true, true, []string{query}), batchOptions(10*time.Second)...)
+	argv := withSSHOptions(a.sshTo(user, addr, []string{keyPath}, true, true, []string{query}), batchOptions(10*time.Second)...)
 	var out bytes.Buffer
 	code, err := a.sshExec(ctx, argv, nil, &out, io.Discard)
 	if err != nil || code != 0 {

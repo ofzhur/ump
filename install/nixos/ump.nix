@@ -42,10 +42,13 @@ let
   drop = (spec.firewall.policy or "accept") == "drop";
 
   # the uplink takes DHCP when the specification's uplink says so
-  # (dhcp4, identified by its MAC then), else when the machine had no
-  # address; router advertisements only when that uplink says so (auto6)
+  # (dhcp4, identified by its MAC then, with the lease's resolvers unless
+  # the specification lists its own: dhcp4_dns), else when the machine
+  # had no address; router advertisements only when that uplink says so
+  # (auto6)
   dhcp4 = facts.dhcp4 or (facts.ip4 == "" && facts.ip6 == "");
   dhcpByMac = facts.dhcp4 or false;
+  leaseDNS = facts.dhcp4_dns or true;
   auto6 = ipv6 && (facts.auto6 or false);
 in
 {
@@ -115,7 +118,7 @@ in
         };
         linkConfig.RequiredForOnline = if uplink then "routable" else "no";
       } // lib.optionalAttrs (uplink && dhcp4 && dhcpByMac) {
-        dhcpV4Config.ClientIdentifier = "mac";
+        dhcpV4Config = { ClientIdentifier = "mac"; } // lib.optionalAttrs (!leaseDNS) { UseDNS = false; };
       } // lib.optionalAttrs (uplink && auto6) {
         ipv6AcceptRAConfig.Token = "eui64";
       };

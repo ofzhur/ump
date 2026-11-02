@@ -5,8 +5,8 @@
 
 UMP is a command line tool that puts **the same operating system, in the
 same shape, on any server**: a dedicated server rented from a bare metal
-provider or a VM in a public cloud, from one profile that says what the
-machine should become.
+provider, a VM in a public cloud or a machine of your own booted over
+the network, from one profile that says what the machine should become.
 
 Every provider has its own API, its own rescue system, its own stock
 images and its own way of doing networking. UMP hides all of that behind
@@ -68,10 +68,14 @@ reinstalls them and sets their reverse DNS:
 | Linode (Akamai) | `linode` | cloud instances | yes: Linode's rescue mode, set up through its console |
 | Vultr | `vultr` | cloud instances and bare metal servers | no: Vultr reinstalls with UMP's key when needed |
 | by hand | `manual` | any machine with an address (`ump server add`) | no: ump must be able to log in |
+| network boot | `pxe` | your own machines on a private network (`pxe.yaml`) | yes: a network boot from `ump pxe serve` |
 
-Several accounts per provider are fine. [ISPs](docs/isps.md) says what
-each does in detail, [provider accounts](docs/providers.md) how to set
-them up.
+Several accounts per provider are fine. [ISPs](docs/isps.md) says
+what each does in detail, [provider accounts](docs/providers.md) how to
+set them up. Machines without a provider, your own or on an ISP's
+private network, boot UMP's rescue system over the network from `ump
+pxe serve`, the PXE server of their site, to which the site's DHCP
+server points them ([PXE serving](docs/pxe.md)).
 
 **Operating systems.** Server systems out of the box, the same on every
 machine, for amd64 and arm64, booting from UEFI and, on amd64, BIOS:
@@ -103,7 +107,7 @@ Consul, Vault, SSH), servers can also pull the repository themselves
 
 ## The objects
 
-Eight kinds of things are configured, all as YAML in `~/.config/ump/`,
+Nine kinds of things are configured, all as YAML in `~/.config/ump/`,
 each with its own `ump config` command (`list`, `get`, `create`,
 `edit`, `delete`; `create` and `add` ask their questions on a terminal;
 `edit NAME` opens that one entry in your editor, `edit` alone the whole
@@ -119,6 +123,7 @@ file):
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
 | [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, Debian, Arch Linux and CachyOS, a NixOS module for NixOS; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
+| [PXE machines](docs/pxe.md) | `ump config pxe` | the machines ump boots over the network: their MACs, sites and jump hosts, how they boot, their installed system's network |
 
 The first use downloads the published defaults: the profiles
 `ubuntu-26.04` (the default: Ubuntu 26.04 on every disk as one volume
@@ -178,7 +183,7 @@ own](images/rescue/README.md#your-own-storage).
 | [OS profiles](docs/profiles.md) | every field of a profile, the default profile, users, keys and the administrator, managing and using profiles |
 | [Disk layouts](docs/disk-layouts.md) | parts, sizes and rules, the published layouts, examples with md and LVM |
 | [Firewalls](docs/firewalls.md) | policy and allowed entries, forwarded ports of containers, the published firewalls |
-| [Private networks](docs/networks.md) | the networks, the default one, servers in several, addresses given automatically or by hand, kept and never shared; the inventory variables for a mesh per network; provider uplinks (vRack, vSwitch, VPC) |
+| [Private networks](docs/networks.md) | the networks, the default one, servers in several, addresses given automatically or by hand, kept and never shared; the inventory variables for a mesh per network; uplinks apart from them; provider uplinks (vRack, vSwitch, VPC) |
 | [Users](docs/users.md) | the fields of a user, the administrator and root, the published user, managing and using users |
 | [Userdata](docs/userdata.md) | what a new system gets on top of its profile: fields, how it runs, the published entries, managing and using them |
 | [Keys](docs/keys.md) | UMP's own key, the key references, named keys and how they reach a server |
@@ -189,6 +194,7 @@ own](images/rescue/README.md#your-own-storage).
 |---|---|
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (Ansible) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
+| [PXE serving](docs/pxe.md) | machines booted over the network on a private network: `pxe.yaml`, sites and jump hosts, `ump pxe serve`, the DHCP server's recipes (dnsmasq, ISC dhcpd, Kea), troubleshooting |
 | [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), what every system gets, how each is installed, NixOS configuration and userdata as modules |
 | [Benchmarks](docs/benchmarks.md) | the eight systems on one bare-metal server: installation times, tuning, CPU, memory, disk, network and HTTP results |
 | [Base images](images/base/README.md) | the Ubuntu and Debian systems UMP builds, what they hold and their defaults |
@@ -210,10 +216,12 @@ own](images/rescue/README.md#your-own-storage).
 
 ## Principles
 
-- **A CLI is enough.** No daemon, no database, no central state: one
-  static binary, a configuration directory, the provider APIs and the
-  machine itself. The provider APIs are the inventory; ump caches
-  listings only to show what changed.
+- **A CLI is enough.** No database, no central state: one static
+  binary, a configuration directory, the provider APIs and the machine
+  itself. The provider APIs are the inventory; ump caches listings only
+  to show what changed. The one daemon is optional: the PXE server,
+  which serves what the CLI armed, reports what it saw and decides
+  nothing.
 - **"Rescue → partition → unpack → configure → reboot" is universal.**
   Every provider can get a machine into some Linux with SSH. UMP uses
   that once, to get into its own rescue system, and from there the work

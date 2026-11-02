@@ -443,6 +443,7 @@ func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []str
 		}
 		results = append(results, r)
 	}
+	a.resolveJumps(cfg, doc, results)
 	return results, notes
 }
 
@@ -489,6 +490,8 @@ type listResult struct {
 	// credentials may not list (provider.Partial): the listing is not
 	// complete.
 	skipped []string
+	// warnings are what the listing lacked (provider.Warner).
+	warnings []string
 }
 
 // listOptions say how listAccounts lists.
@@ -510,8 +513,9 @@ func (a *app) cachedListing(cfg *config.Config) listOptions {
 // listAccounts queries the named accounts, all in parallel (each account
 // has its own credentials, and providers limit requests per credential),
 // serves fresh listings from the cache, records each listing the
-// providers returned in the store (when one is given), and forgets the
-// servers of the state that are gone from their providers (forgetGone).
+// providers returned in the store (when one is given), resolves the
+// machines' jump hosts (resolveJumps), and forgets the servers of the
+// state that are gone from their providers (forgetGone).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store, lo listOptions) []listResult {
 	// the state before the listings: what forgetGone may forget
 	doc, err := a.loadState(ctx, cfg)
@@ -537,9 +541,13 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(i, j int) bool { return results[i].account < results[j].account })
+	a.resolveJumps(cfg, doc, results)
 	for _, r := range results {
 		if r.cacheErr != nil {
 			fmt.Fprintf(a.stderr, "ump: %v\n", r.cacheErr)
+		}
+		for _, w := range r.warnings {
+			fmt.Fprintf(a.stderr, "ump: account %s: %s\n", r.account, w)
 		}
 		if a.verbose && !r.cachedAt.IsZero() {
 			fmt.Fprintf(a.stderr, "account %s: from the cache, listed %s ago\n", r.account, a.now().Sub(r.cachedAt).Round(time.Second))
@@ -814,6 +822,9 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 	r.machines = ms
 	if pa, ok := p.(provider.Partial); ok {
 		r.skipped = pa.Skipped()
+	}
+	if w, ok := p.(provider.Warner); ok {
+		r.warnings = w.Warnings()
 	}
 	if store != nil {
 		if _, _, err := store.Record(name, acct.Type, ms, a.now()); err != nil {

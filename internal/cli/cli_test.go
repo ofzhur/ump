@@ -788,6 +788,10 @@ func (e *testEnv) fakeRun(limit string, stdout io.Writer) int {
 // remote plays the machine at the other end of a non-interactive ssh run.
 func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	cmd := argv[len(argv)-1]
+	if slices.Contains(argv, "-W") {
+		// the SSH port through a jump host answers
+		return "SSH-2.0-OpenSSH_9.9\r\n", "", 0
+	}
 	inProviderRescue := fakePower.rescue["fake/1"]
 	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
 	switch {

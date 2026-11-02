@@ -32,7 +32,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test dist notices release clean help images rescue-image rescue-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test fuzz dist notices release clean help images rescue-image rescue-test pxe-test os-image upload
 
 all: build
 
@@ -64,6 +64,12 @@ network-test: ## render the network configuration of install.sh for every case a
 	@images/test-network.sh
 
 check: fmt-check vet test scripts-check network-test ## gofmt, go vet, the tests, the script syntax checks and the network test
+
+FUZZTIME ?= 10s
+
+fuzz: ## run each fuzz target for FUZZTIME (default 10s): the PXE server's TFTP packets and hellos
+	go test -run '^$$' -fuzz '^FuzzParse$$' -fuzztime $(FUZZTIME) ./internal/pxe/tftp
+	go test -run '^$$' -fuzz '^FuzzParseHello$$' -fuzztime $(FUZZTIME) ./internal/pxe
 
 dist: ## cross-compile into dist/ump-<os>-<arch> for $(PLATFORMS), with SHA256SUMS and VERSION
 	@rm -rf dist && mkdir -p dist
@@ -103,6 +109,9 @@ os-image: ## build the base image(s) (Ubuntu, Debian) of OS_LIST (default: ubunt
 
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(TEST_ARCH)
+
+pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump pxe serve: rescue by MAC, unknown MACs (FIRMWARE=bios on amd64)
+	images/test-pxe.sh $(TEST_ARCH)
 
 upload: ## publish everything built (images, binaries), the scripts and the profiles to UPLOAD_TARGET (s3://bucket, scp://host/path or file:///path)
 	images/upload.sh

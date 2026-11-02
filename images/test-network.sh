@@ -67,6 +67,7 @@ cases() {
 	spec uplink-static-ipv6 yes true '{"mac": "0c:c4:7a:aa:bb:11", "ipv4": {"mode": "static", "address": "192.0.2.17/24", "gateway": "192.0.2.1"}, "ipv6": {"mode": "static", "address": "2001:db8::17/64", "gateway": "fe80::1"}, "dns": ["192.0.2.53", "2001:db8::53"]}'
 	spec uplink-dhcp yes false '{"mac": "0c:c4:7a:aa:bb:11", "ipv4": {"mode": "dhcp"}, "ipv6": {"mode": "none"}, "dns_from_dhcp": true}'
 	spec uplink-dhcp-dns yes false '{"mac": "0C-C4-7A-AA-BB-11", "ipv4": {"mode": "dhcp"}, "dns": ["192.0.2.53"]}'
+	spec uplink-dhcp-dns-kernel-names no true '{"mac": "0c:c4:7a:aa:bb:11", "ipv4": {"mode": "dhcp"}, "ipv6": {"mode": "auto"}, "dns": ["192.0.2.53", "2001:db8::53"]}'
 	spec uplink-dhcp-public-dns no false '{"ipv4": {"mode": "dhcp"}, "ipv6": {"mode": "none"}}'
 	spec uplink-dhcp-auto yes true '{"mac": "0c:c4:7a:aa:bb:11", "ipv4": {"mode": "dhcp"}, "ipv6": {"mode": "auto"}, "dns_from_dhcp": true}'
 	spec uplink-dhcp-auto-kernel-off yes false '{"mac": "0c:c4:7a:aa:bb:11", "ipv4": {"mode": "dhcp"}, "ipv6": {"mode": "auto"}, "dns_from_dhcp": true}'

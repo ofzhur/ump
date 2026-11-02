@@ -30,6 +30,7 @@ network:
     "8.8.8.8"
   ],
   "dhcp4": true,
+  "dhcp4_dns": true,
   "auto6": false
 }
 ==> etc/systemd/network/20-ump-eno1.network

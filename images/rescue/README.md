@@ -8,7 +8,8 @@ installation steps run in the same environment everywhere: a Debian
 system with a generic kernel, the firmware of server NICs and storage
 controllers, and the tools the installer calls, running entirely from
 RAM with no disk mounted. The same image serves the `kexec` entry method
-on clouds without a rescue system, and later virtual media and PXE.
+on clouds without a rescue system, and machines booted over the
+network ([PXE serving](../../docs/pxe.md)); later virtual media.
 
 The image is one kernel plus one initramfs per architecture (amd64,
 arm64). The initramfs is small: a static busybox, the `loop`,
@@ -193,7 +194,7 @@ takes no output after the jump cannot stall the boot.
 
 ## Booting over the network
 
-A PXE server (`ump pxe serve`, to come) boots the image as it is, over
+A PXE server (`ump pxe serve`, [PXE serving](../../docs/pxe.md)) boots the image as it is, over
 HTTP, with a boot config in front of `initrd.zst`: an uncompressed newc
 cpio, padded to 512 bytes, which the kernel unpacks into the same
 initramfs. Its directory `/ump` holds
@@ -337,7 +338,8 @@ failing installer is reported (its output whole, in chunks) without a
 reboot, and one that succeeds (with the disks `seen`) is reported, and
 the machine reboots. It uses HVF on macOS
 and KVM on Linux where the architectures match, and plain emulation
-otherwise.
+otherwise. `make pxe-test` boots the image from `ump pxe serve` itself
+([PXE serving](../../docs/pxe.md#testing)).
 
 ## Memory
 
