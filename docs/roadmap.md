@@ -25,7 +25,10 @@ As of November 2026, ump does what the [README](../README.md) and the
   server of their site, behind the site's DHCP server (chain mode, BIOS
   and UEFI on amd64, UEFI on arm64), with an optional read-only TFTP
   server for the iPXE binaries; `ump server rescue` and `reinstall` as
-  at any provider, through a site's jump host for SSH and Ansible
+  at any provider, through a site's jump host for SSH and Ansible; the
+  server as a systemd service per site, disabled until enabled, from
+  the deb and rpm packages or written by hand with `ump pxe unit`, and
+  on a host of the fleet through the collection's role `ump_pxe`
   ([PXE serving](pxe.md)).
 - **Installation:** `ump server reinstall` from profiles, with named and
   inline disk layouts (partitions, md, LVM with striping, mirroring and
@@ -55,7 +58,8 @@ As of November 2026, ump does what the [README](../README.md) and the
   its provider, in the state and the inventory
   (`ump_private_networks`) ([private networks](networks.md)).
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
-  Windows on the storage, `make release`.
+  Windows on the storage, deb and rpm packages there and with the
+  GitHub releases, `make release`.
 
 ## Next
 
@@ -67,12 +71,10 @@ As of November 2026, ump does what the [README](../README.md) and the
 - **PXE serving, the rest.** Unattended installations
   (`reinstall --unattended`, a machine's standing `mode: install`
   applied with a yes), the PXE server handing out the confirmed
-  specification once and reporting its outcome; packages (deb, rpm)
-  with a systemd unit, and a role in the collection that runs the PXE
-  server on a host of the fleet; power control (Wake-on-LAN, then
-  Redfish and IPMI); ump's own iPXE builds where a distribution's fails;
-  VLANs and bonds for the installed system; adopting machines the PXE
-  servers saw without an entry.
+  specification once and reporting its outcome; power control
+  (Wake-on-LAN, then Redfish and IPMI); ump's own iPXE builds where a
+  distribution's fails; VLANs and bonds for the installed system;
+  adopting machines the PXE servers saw without an entry.
 - **Provider uplinks.** The providers' private networks (OVHcloud
   vRack, Hetzner vSwitch and Cloud Networks, Vultr, Linode and
   DigitalOcean VPCs) as uplinks of the private network, so that servers

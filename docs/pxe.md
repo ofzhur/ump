@@ -305,12 +305,11 @@ pxe: fra1: web-07: the arm 8a92e77a is consumed
 pxe: fra1: web-07: rescue system up at 192.0.2.17 (arm 8a92e77a)
 ```
 
-Packages with a systemd unit, and a role of the collection
-[ofzhur.ansible](https://github.com/ofzhur/ansible) that runs the
-server on a host of the fleet, come in a later release; until then it
-runs by hand, in a terminal multiplexer or under a unit of your own. It
-tells systemd when it is ready (`Type=notify`), and on SIGTERM it lets
-the transfers under way finish before it stops.
+On the PXE host it runs as a systemd service, `ump-pxe@SITE`, from the
+deb or rpm package or from units written by hand ([as a
+service](#as-a-service)); for a lab, in a terminal. It tells systemd
+when it is ready (`Type=notify`), and on SIGTERM it lets the transfers
+under way finish before it stops.
 
 | Flag | Meaning |
 |---|---|
@@ -349,6 +348,162 @@ that the answers come from the address the machines asked.
 `.pxe/<site>/`, but on R2 an API token is scoped to a bucket, not to a
 prefix, so its token reaches the whole home, and so does an SSH, HTTP
 or file backend. Treat the PXE host as a host that holds the home.
+
+### As a service
+
+The deb and rpm packages install ump as `/usr/bin/ump`, with two
+systemd units: `ump-pxe@.service`, the server of the site its instance
+names, and `ump-pxe-check@.service`, which runs its `--check` once with
+the same settings, user and sandbox. Both are disabled: nothing runs
+until you enable a site. The packages recommend the distribution's iPXE
+binaries for `--tftp` (Debian, Ubuntu: `ipxe`; Fedora, RHEL:
+`ipxe-bootimgs-x86` and `ipxe-bootimgs-aarch64`). They are on the
+storage, under `pkg/latest/` and `pkg/v/VERSION/` with their
+`SHA256SUMS`, and with every
+[release](https://github.com/ofzhur/ump/releases).
+
+```console
+# curl -fsSLO https://ump.zhurko.de/dl/pkg/latest/ump-amd64.deb && apt install ./ump-amd64.deb   # Debian, Ubuntu; ump-arm64.deb
+# dnf install https://ump.zhurko.de/dl/pkg/latest/ump-x86_64.rpm                                 # Fedora, RHEL; ump-aarch64.rpm
+# install -m 0600 /usr/share/ump/pxe.env.example /etc/ump/pxe/fra1.env && $EDITOR /etc/ump/pxe/fra1.env
+# systemctl start ump-pxe-check@fra1; journalctl -u ump-pxe-check@fra1 -b -o cat --no-pager
+# systemctl enable --now ump-pxe@fra1
+# journalctl -u ump-pxe@fra1 -f
+```
+
+`/etc/ump/pxe/SITE.env` holds a site's settings as environment
+variables: the backend (`UMP_STATE`), its secrets, and the flags as
+`UMP_PXE_` and their names; the site is the instance's name. systemd
+reads the file, the server never does: keep it root's alone (0600).
+
+```sh
+# /etc/ump/pxe/fra1.env
+UMP_STATE=r2://0123456789abcdef0123456789abcdef/fleet-state/ump
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+UMP_PXE_HTTP=192.0.2.5:8067
+UMP_PXE_TFTP=192.0.2.5:69
+```
+
+The server runs as a user systemd makes up for it (`DynamicUser=`),
+never as ump's administrator `ump`, with the capability to bind port 69
+alone, and writes nothing but its directories: `/var/lib/ump-pxe/SITE/`
+(`--data`) and `/var/cache/ump-pxe/SITE/` (`--cache`). The check has
+its own (`ump-pxe-check/SITE`), so it never takes the service's, and
+says "the address is in use" while the service runs.
+
+**The backend** of a service is one it reaches over the network with
+the secrets of its env file or credentials: S3, R2, HTTP, Consul or
+Vault. A `file://` or `ssh://` backend is for `ump pxe serve` run by
+hand as the user whose home it is: the service's user can read none of
+the files ump writes into a directory (0600, the user's), and has no
+SSH keys.
+
+**Credentials.** The backend's secrets (`AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `UMP_STATE_TOKEN`, `VAULT_TOKEN`,
+`CONSUL_HTTP_TOKEN`, `UMP_STATE_USER`, `UMP_STATE_PASSWORD`) can come
+as systemd credentials of those names instead, which win over the env
+file's; encrypted with the host's key or its TPM, they are no plain
+text on disk. `LoadCredential=` takes a plain file the same way.
+
+```console
+# systemd-creds encrypt --name=AWS_SECRET_ACCESS_KEY - /etc/ump/pxe/fra1.secret   # the secret on stdin, then Ctrl-D
+```
+
+```ini
+# systemctl edit ump-pxe@fra1, and the same for ump-pxe-check@fra1
+[Service]
+LoadCredentialEncrypted=AWS_SECRET_ACCESS_KEY:/etc/ump/pxe/fra1.secret
+```
+
+**Upgrades.** A newer package restarts the servers that run, each after
+the transfers under way (`TimeoutStopSec=90`); the journal in `--data`
+carries the arms a server took across the restart. A packaged ump's
+update hint names its package, not `get.sh`, which would put a second
+ump into `/usr/local/bin`. Removing the package stops and disables
+every site, and `apt purge` also removes `/var/lib/ump-pxe` and
+`/var/cache/ump-pxe`; `/etc/ump/pxe/` stays.
+
+**Without the packages**, on any host with systemd, ump comes from
+`get.sh` and the units from ump itself, which prints them as the
+packages have them, `--exec` naming where ump is:
+
+```console
+# curl -fsSL https://ump.zhurko.de/dl/get.sh | sh                                 # /usr/local/bin/ump
+# ump pxe unit --exec /usr/local/bin/ump > /etc/systemd/system/ump-pxe@.service
+# ump pxe unit --check --exec /usr/local/bin/ump > /etc/systemd/system/ump-pxe-check@.service
+# systemctl daemon-reload
+# install -d /etc/ump/pxe && install -m 0600 /dev/null /etc/ump/pxe/fra1.env && $EDITOR /etc/ump/pxe/fra1.env
+```
+
+Then the same steps: the check, `systemctl enable --now ump-pxe@fra1`,
+the journal. The iPXE binaries come from the distribution's ipxe
+package. To upgrade, run `get.sh` again and `systemctl restart
+'ump-pxe@*'`; write the units again when a release says they changed.
+
+This is `ump-pxe@.service`. The check's unit has the same lines but
+runs `ump pxe serve --site %i --check` once (`Type=oneshot`, no
+`Restart=`, no `[Install]`), in directories of its own.
+
+```ini
+# ump-pxe@.service: ump pxe serve, the PXE server of the site the
+# instance names (systemctl enable --now ump-pxe@fra1). Its settings are
+# in /etc/ump/pxe/SITE.env: UMP_STATE, the backend's secrets (or systemd
+# credentials of their names, docs/pxe.md), the UMP_PXE_ variables of the
+# flags. ump pxe unit prints this unit.
+[Unit]
+Description=UMP PXE server, site %i
+Documentation=https://github.com/ofzhur/ump/blob/main/docs/pxe.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/ump pxe serve --site %i
+EnvironmentFile=/etc/ump/pxe/%i.env
+DynamicUser=yes
+StateDirectory=ump-pxe/%i
+CacheDirectory=ump-pxe/%i
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+# TFTP on port 69 (--tftp); HTTP on 8067 needs nothing. No PrivateUsers=:
+# with it, the capability binds no port of the host's network.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
+```
+
+In the fleet, the role
+[ofzhur.ansible.ump_pxe](https://github.com/ofzhur/ansible/blob/main/roles/ump_pxe/README.md)
+does this on a host ump installed: it installs the package, writes the
+site's env file and credentials, enables `ump-pxe@SITE` and opens HTTP
+and TFTP on the private network alone (through the collection's
+firewall, on Ubuntu and Debian).
 
 ### `ump pxe status` and `disarm`
 

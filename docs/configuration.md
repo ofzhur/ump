@@ -40,6 +40,8 @@ network through `ump config pxe`, and the rest is optional.
 ~/.cache/ump/update-check.json  when this machine last asked the storage for a newer release, and what it said
 ~/.local/state/ump-pxe/SITE/    on a PXE host: the journal of ump pxe serve (--data)
 ~/.cache/ump/pxe/SITE/          on a PXE host: its cache of the rescue image (--cache)
+/etc/ump/pxe/SITE.env           on a PXE host, for the service ump-pxe@SITE: the backend, its secrets, the flags
+/var/lib/ump-pxe/SITE/          the service's journal, and /var/cache/ump-pxe/SITE/ its cache
 ```
 
 `$XDG_CONFIG_HOME/ump` and `$XDG_CACHE_HOME/ump` are used when those
@@ -102,7 +104,7 @@ backend](state.md).
 | `staging.image` | The base URL of the rescue image, when it is not `<storage>/rescue`. `ump server rescue --image` overrides it for one run. The PXE servers take the image from there, as `ump config pxe apply` rendered it. |
 | `wait` | How long ump waits for a machine to answer: after a reboot with `--wait`, for the UMP rescue system after the jump into it, and after a provider reinstalled a machine with UMP's key. A Go duration (`20m`, `1h`); default `15m`, which covers slow providers and large machines while a kexec usually answers within a minute. Every wait prints its limit and marks each minute waited (`Waiting for ... (up to 15m) .....1m.....`); `UMP_WAIT=30m` sets it for one run. A provider whose reinstall takes longer (a Vultr bare metal server) waits its own longer limit unless `wait` is set. |
 | `cache_ttl` | How long a server listing is served from the cache before the providers are asked again, by `ump server list` and every command that looks a server up. A Go duration (`1m`, `30s`); default `5m`; `0` asks the providers every time. A command that changes a server makes its account's listings ask the provider again; `--refresh` does for one listing, `UMP_CACHE_TTL=0` for one run. See [the listing cache](cli.md#the-listing-cache-and---diff). |
-| `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage (2 seconds at most; a failed check, offline, also waits a day) and says when a newer release is published, with the one-liner that installs it; completion, help and `version` never check; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks, nor does an ump that ump runs (`UMP_PARENT`, [state](state.md#how-the-mirror-works)). |
+| `updates` | `false` turns the daily release check off. Once a day, after a successful command, ump reads `bin/latest/VERSION` on the storage (the deb or rpm `pkg/latest/VERSION`; 2 seconds at most; a failed check, offline, also waits a day) and says when a newer release is published, with the one-liner that installs it (for the deb or rpm, its package's); completion, help and `version` never check; `UMP_NO_UPDATE_CHECK=1` skips the check for one run, and a development build never checks, nor does an ump that ump runs (`UMP_PARENT`, [state](state.md#how-the-mirror-works)). |
 
 Sections this version of ump does not know are kept when the file is
 saved. The file is written with mode 0600, atomically.
@@ -189,4 +191,6 @@ sites with their jump hosts; [PXE serving](pxe.md) describes it.
 `.pxe/<site>/`, what the PXE servers of each site serve; a hand edit
 reaches them after `ump config pxe apply`. The servers (`ump pxe
 serve`) read and write `.pxe/<site>/` alone, never `pxe.yaml`; their
-own directories are on the PXE host, `--data` and `--cache`.
+own directories are on the PXE host, `--data` and `--cache`, and a
+service's settings in `/etc/ump/pxe/SITE.env` ([as a
+service](pxe.md#as-a-service)).

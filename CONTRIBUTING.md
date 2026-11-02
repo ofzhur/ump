@@ -14,6 +14,8 @@ make build        # ./ump
 make check        # gofmt, go vet, the tests and the shell checks (bash 4 or later, jq): what CI runs
 make fuzz         # the fuzz targets of the PXE server's parsers, FUZZTIME (10s) each
 make dist         # the binaries for every platform, into dist/
+make packages     # the deb and rpm packages, into dist/pkg/ (VERSION=v1.2.3 for a tree without its tag)
+make package-test # install, upgrade and remove them in Debian, Ubuntu, Fedora and Rocky containers, the units under systemd
 ```
 
 The tests need no provider accounts: the providers' APIs are faked.

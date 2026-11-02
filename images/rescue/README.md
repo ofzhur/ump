@@ -107,6 +107,8 @@ image alone) and serve this below it:
 | `get.sh` | [the install script](../../install/get.sh) of ump itself: `curl -fsSL <storage>/get.sh \| sh` |
 | `bin/latest/ump-<os>-<arch>`, `SHA256SUMS`, `VERSION` | the ump binaries (`linux`, `darwin`, `windows`; `amd64`, `arm64`) of the latest release, which get.sh takes |
 | `bin/v/<version>/...` | the same per release (`UMP_VERSION=` of get.sh) |
+| `pkg/latest/ump-amd64.deb`, `ump-arm64.deb`, `ump-x86_64.rpm`, `ump-aarch64.rpm`, `SHA256SUMS`, `VERSION` | the deb and rpm packages of the latest release ([as a service](../../docs/pxe.md#as-a-service)), which a packaged ump's update hint names |
+| `pkg/v/<version>/...` | the same per release, under their own names (`ump_0.8.0_amd64.deb`, `ump-0.8.0-1.x86_64.rpm`) |
 | `rescue/kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
 | `rescue/<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
 | `rescue/<arch>/vmlinuz` | the rescue kernel |
@@ -123,9 +125,9 @@ image alone) and serve this below it:
 
 `<arch>` is `amd64` or `arm64`, `<os>` an image name such as
 `ubuntu-26.04` or `debian-13` (`os/index.json` lists them). `make upload`
-produces exactly this layout from the built images and binaries (`make
-release` builds and publishes the binaries alone, from a tagged
-commit), and
+produces exactly this layout from the built images, binaries and
+packages (`make release` builds and publishes the binaries and packages
+alone, from a tagged commit), and
 [`images/upload.sh`](../upload.sh) is a short script to adapt for a store
 that is not S3-compatible.
 

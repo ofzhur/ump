@@ -19,8 +19,17 @@ needed, else `~/.local/bin`); the script checks the binary against the
 published `SHA256SUMS`. `UMP_VERSION=v1.2.3` picks a release,
 `UMP_INSTALL_DIR` another directory. Windows users take
 `ump-windows-amd64.exe` from
-[`bin/latest/`](https://ump.zhurko.de/dl/bin/latest/SHA256SUMS). Or build it
-yourself with Go 1.26 or newer:
+[`bin/latest/`](https://ump.zhurko.de/dl/bin/latest/SHA256SUMS). On
+Debian, Ubuntu, Fedora or RHEL, the deb or rpm package installs it as
+`/usr/bin/ump` instead, updated through the package manager, with the
+PXE server's units, disabled ([PXE serving](pxe.md#as-a-service)):
+
+```console
+$ curl -fsSLO https://ump.zhurko.de/dl/pkg/latest/ump-amd64.deb && sudo apt install ./ump-amd64.deb   # or ump-arm64.deb
+$ sudo dnf install https://ump.zhurko.de/dl/pkg/latest/ump-x86_64.rpm                                 # or ump-aarch64.rpm
+```
+
+Or build it yourself with Go 1.26 or newer:
 
 ```console
 $ git clone git@github.com:ofzhur/ump.git && cd ump && make     # ./ump; make install puts it into your Go bin directory
