@@ -23,6 +23,8 @@ var Type = provider.Type{
 	Kind:         provider.KindMixed,
 	Description:  "servers added by hand (ump server add): no API, no rescue system; reached over SSH alone",
 	Capabilities: []provider.Capability{provider.CapInventory, provider.CapDescribe},
+	HomeListed:   true,
+	AddHint:      "ump server add NAME --ipv4 ADDRESS puts one into the inventory",
 	New: func(account string, settings map[string]string, opts provider.Options) (provider.Provider, error) {
 		return &Provider{account: account, servers: opts.Manual}, nil
 	},

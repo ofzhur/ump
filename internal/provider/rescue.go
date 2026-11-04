@@ -2,7 +2,10 @@ package provider
 
 import (
 	"context"
+	"io"
 	"time"
+
+	"github.com/ofzhur/ump/internal/profile"
 )
 
 // CapRescue is implemented by providers whose machines can boot a rescue
@@ -30,6 +33,10 @@ type RescueOptions struct {
 	// NoReboot asks to only arm the rescue system for the next boot; a
 	// provider whose rescue system starts with a reboot refuses it.
 	NoReboot bool
+	// Wait is how long the caller waits for the rescue system: a
+	// provider that arms a boot of it (PXE) arms it for that long; zero
+	// is the provider's default.
+	Wait time.Duration
 }
 
 // RescueInfo describes an enabled rescue system.
@@ -53,6 +60,11 @@ type RescueInfo struct {
 	// HostKeys are the fingerprints of the rescue system's SSH host keys
 	// when the provider reports them, for the operator to compare.
 	HostKeys []string `json:"host_keys,omitempty"`
+	// Arm is the network boot armed for the rescue system, which
+	// RescueWaiter.WaitRescue waits for (PXE).
+	Arm string `json:"arm,omitempty"`
+	// Until is when an armed boot expires (PXE).
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // Rescue is implemented by providers that can boot a machine into a
@@ -63,6 +75,35 @@ type Rescue interface {
 	RescueEnabled(ctx context.Context, m Machine) (bool, error)
 	EnableRescue(ctx context.Context, m Machine, opts RescueOptions) (*RescueInfo, error)
 	DisableRescue(ctx context.Context, m Machine) error
+}
+
+// RescueWaiter is implemented by providers whose rescue system says when
+// it is up (PXE: it reports in to the PXE server), so the caller waits
+// for that, not for an SSH port, and needs no Power: the machine
+// boots the rescue system at its next boot, which the caller asks for
+// over SSH or of the operator. WaitRescue returns where the rescue
+// system answers, for this session only (an address it was given at
+// boot), and its SSH host keys (type and key) to pin for the session;
+// it writes what it learns meanwhile to progress, a line each, and
+// ends with the context. When it gives up it disarms the boot.
+type RescueWaiter interface {
+	WaitRescue(ctx context.Context, m Machine, info *RescueInfo, progress io.Writer) (address string, hostKeys []string, err error)
+}
+
+// Uplinker is implemented by providers that know the uplink the
+// installed system configures (PXE: pxe.yaml's network of the machine),
+// which then goes into the installer's specification instead of what
+// the rescue system has.
+type Uplinker interface {
+	Uplink(ctx context.Context, m Machine) (*profile.UplinkSpec, error)
+}
+
+// Hostnamer is implemented by providers that know the hostname of a
+// machine's systems when it is not its name (PXE: pxe.yaml's
+// hostname, its rescue system's too), which an installation takes
+// unless told otherwise.
+type Hostnamer interface {
+	Hostname(m Machine) string
 }
 
 // StockInstall is the result of StockInstaller.InstallStock.
@@ -117,4 +158,12 @@ type KeylessRescue interface {
 // stands in the way.
 type Preflight interface {
 	Preflight(ctx context.Context, m Machine) ([]string, error)
+}
+
+// InstallChecker is implemented by providers whose settings can keep a
+// new system from ever starting (PXE: a machine that boots UMP's rescue
+// system at every boot). CheckInstall says why, nil when nothing does;
+// ump refuses the installation before it asks.
+type InstallChecker interface {
+	CheckInstall(ctx context.Context, m Machine) error
 }

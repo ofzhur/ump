@@ -382,13 +382,15 @@ func privateIPv4(ps []state.Private) string {
 // planned with, or an address another server has meanwhile, stops all of
 // them (exit status 2, nothing changed). A server that leaves a private
 // network leaves its address there at once. Each plan keeps what its
-// server had, for releasePrivate.
+// server had, for releasePrivate: what it had before the unattended
+// installation it took the place of reserved others (voided), which it
+// takes over. When it stops, the voided ones are given back.
 func (a *app) reservePrivate(ctx context.Context, plans []*installPlan) error {
 	refs := make([]string, len(plans))
 	for i, p := range plans {
 		refs[i] = p.m.Ref()
 	}
-	return a.updateState(ctx, func(d *state.Document) error {
+	err := a.updateState(ctx, func(d *state.Document) error {
 		for _, p := range plans {
 			if now := d.Servers[p.m.Ref()].Private; !slices.Equal(now, p.had) {
 				return withExit(exitUsage, fmt.Errorf("the private addresses of %s changed meanwhile, from %s to %s; nothing was changed, run it again", p.ref, describePrivate(p.had), describePrivate(now)))
@@ -401,14 +403,43 @@ func (a *app) reservePrivate(ctx context.Context, plans []*installPlan) error {
 		}
 		for _, p := range plans {
 			s := d.Servers[p.m.Ref()]
-			p.reserved = !slices.Equal(s.Private, p.private)
+			before := s.Private
+			if v := p.voided; v != nil && v.Reserved && slices.Equal(s.Private, v.Private) {
+				before = v.Before
+			}
+			p.reserved = !slices.Equal(before, p.private)
 			if p.reserved {
-				p.before, s.Private = s.Private, p.private
+				p.before = before
+			}
+			if !slices.Equal(s.Private, p.private) {
+				s.Private = p.private
 				d.Servers[p.m.Ref()] = s
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		a.releaseVoided(ctx, plans)
+		return err
+	}
+	for _, p := range plans {
+		p.voided = nil
+	}
+	return nil
+}
+
+// releaseVoided gives back what the arms of the unattended installations
+// that the plans took the place of reserved, where the plans did not
+// take it over; the caller holds the servers' locks.
+func (a *app) releaseVoided(ctx context.Context, plans []*installPlan) {
+	var back []*installPlan
+	for _, p := range plans {
+		if p.voided != nil {
+			back = append(back, p.voided.planned(p.m))
+			p.voided = nil
+		}
+	}
+	a.releasePrivate(ctx, back)
 }
 
 // releasePrivate gives the servers of installations whose installer did

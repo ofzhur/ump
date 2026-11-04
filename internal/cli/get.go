@@ -18,7 +18,6 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
-	"github.com/ofzhur/ump/internal/provider/manual"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -444,6 +443,7 @@ func (a *app) cachedListings(store *cache.Store, cfg *config.Config, names []str
 		}
 		results = append(results, r)
 	}
+	a.resolveJumps(cfg, doc, results)
 	return results, notes
 }
 
@@ -490,6 +490,8 @@ type listResult struct {
 	// credentials may not list (provider.Partial): the listing is not
 	// complete.
 	skipped []string
+	// warnings are what the listing lacked (provider.Warner).
+	warnings []string
 }
 
 // listOptions say how listAccounts lists.
@@ -511,8 +513,9 @@ func (a *app) cachedListing(cfg *config.Config) listOptions {
 // listAccounts queries the named accounts, all in parallel (each account
 // has its own credentials, and providers limit requests per credential),
 // serves fresh listings from the cache, records each listing the
-// providers returned in the store (when one is given), and forgets the
-// servers of the state that are gone from their providers (forgetGone).
+// providers returned in the store (when one is given), resolves the
+// machines' jump hosts (resolveJumps), and forgets the servers of the
+// state that are gone from their providers (forgetGone).
 func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []string, store *cache.Store, lo listOptions) []listResult {
 	// the state before the listings: what forgetGone may forget
 	doc, err := a.loadState(ctx, cfg)
@@ -538,9 +541,13 @@ func (a *app) listAccounts(ctx context.Context, cfg *config.Config, names []stri
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(i, j int) bool { return results[i].account < results[j].account })
+	a.resolveJumps(cfg, doc, results)
 	for _, r := range results {
 		if r.cacheErr != nil {
 			fmt.Fprintf(a.stderr, "ump: %v\n", r.cacheErr)
+		}
+		for _, w := range r.warnings {
+			fmt.Fprintf(a.stderr, "ump: account %s: %s\n", r.account, w)
 		}
 		if a.verbose && !r.cachedAt.IsZero() {
 			fmt.Fprintf(a.stderr, "account %s: from the cache, listed %s ago\n", r.account, a.now().Sub(r.cachedAt).Round(time.Second))
@@ -622,9 +629,9 @@ func (a *app) forgetGone(ctx context.Context, cfg *config.Config, was *state.Doc
 // leave out: those of a provider type every configured account of which
 // was listed from its provider in this run, completely (no error, no
 // kind of machines skipped, not served from the cache, not left out by
-// --account), none listing them; never a server added by hand, nor one
-// of a type in skip. decided are the provider types whose listings were
-// complete.
+// --account), none listing them; never a server of a type the home
+// lists (added by hand), nor one of a type in skip. decided are the
+// provider types whose listings were complete.
 func missingServers(cfg *config.Config, was *state.Document, results []listResult, skip map[string]bool) (missing, decided []string) {
 	byAccount := map[string]listResult{}
 	for _, r := range results {
@@ -634,7 +641,7 @@ func missingServers(cfg *config.Config, was *state.Document, results []listResul
 	listed := map[string]bool{}
 	for _, name := range cfg.AccountNames() {
 		t := cfg.Accounts[name].Type
-		if t == manual.TypeName || skip[t] {
+		if provider.HomeListed(t) || skip[t] {
 			continue
 		}
 		r, ok := byAccount[name]
@@ -685,7 +692,7 @@ func (a *app) checkGone(ctx context.Context, cfg *config.Config, store *cache.St
 	t, _, _ := strings.Cut(ref, "/")
 	for _, name := range cfg.AccountNames() {
 		acct := cfg.Accounts[name]
-		if store == nil || t == manual.TypeName || acct.Type != t {
+		if store == nil || provider.HomeListed(t) || acct.Type != t {
 			continue
 		}
 		m, ok := store.LastSeen(name, ref)
@@ -786,8 +793,10 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 		r.err = fmt.Errorf("account %s: provider type %s cannot list servers", name, acct.Type)
 		return r
 	}
-	// Servers added by hand are listed from the state, without an API.
-	if store != nil && acct.Type != manual.TypeName {
+	// Servers the home lists (added by hand) are listed from it, without
+	// an API: never from the cache.
+	cached := store != nil && !provider.HomeListed(acct.Type)
+	if cached {
 		if snap, err := store.Fresh(name, ttl, a.now()); err == nil && snap != nil {
 			r.machines, r.cachedAt = snap.Machines, snap.SeenAt
 			return r
@@ -801,7 +810,7 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 		}
 		// the last listing there is, rather than none: it says where the
 		// servers are, and the user is told how old it is
-		if store != nil && acct.Type != manual.TypeName {
+		if cached {
 			if snap, serr := store.Latest(name); serr == nil && snap != nil {
 				r.machines, r.cachedAt, r.stale = snap.Machines, snap.SeenAt, fmt.Errorf("account %s: %w", name, err)
 				return r
@@ -813,6 +822,9 @@ func (a *app) listAccount(ctx context.Context, name string, acct config.Account,
 	r.machines = ms
 	if pa, ok := p.(provider.Partial); ok {
 		r.skipped = pa.Skipped()
+	}
+	if w, ok := p.(provider.Warner); ok {
+		r.warnings = w.Warnings()
 	}
 	if store != nil {
 		if _, _, err := store.Record(name, acct.Type, ms, a.now()); err != nil {

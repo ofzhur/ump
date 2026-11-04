@@ -11,6 +11,7 @@ import (
 
 	prof "github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -102,9 +103,10 @@ to be no host's name: not the server's hostname, nor, run from the
 infrastructure repository, another host of its inventory, and an
 address to be in its network and no other server's; the addresses
 change under the server's lock (exit status 3 while an installation
-holds it). Nothing runs: the next ump provision puts the server into its
-groups, gives the host file the addresses and runs the plays on it;
-what the plays of a group it left did stays until a reinstall.`,
+holds it, or an unattended one is armed for it or writes). Nothing runs:
+the next ump provision puts the server into its groups, gives the host
+file the addresses and runs the plays on it; what the plays of a group
+it left did stays until a reinstall.`,
 		Example: `  ump server set web-01 --profile db
   ump server set web-01 --clear
   ump server set rack-07 --price 89 --currency EUR --period month
@@ -186,7 +188,7 @@ what the plays of a group it left did stays until a reinstall.`,
 			if err != nil {
 				return err
 			}
-			m, _, err := a.resolveOne(cmd, args[0])
+			m, prov, err := a.resolveOne(cmd, args[0])
 			if err != nil {
 				return err
 			}
@@ -229,6 +231,15 @@ what the plays of a group it left did stays until a reinstall.`,
 					return err
 				}
 				defer unlock()
+				// an unattended installation armed for it installs the
+				// addresses it reserved
+				_, armed, err := unattendedOf(cmd.Context(), m, prov)
+				if err != nil {
+					return err
+				}
+				if armed != nil && (armed.Pending || armed.Claimed(a.now())) {
+					return withExit(exitAborted, fmt.Errorf("%s has an unattended installation armed (%s, by %s), which installs the private addresses it has now; disarm it first (ump pxe disarm %s), or let it end", m.Ref(), pxe.ShortID(armed.ID), armed.By, m.ID))
+				}
 			}
 			var said []string
 			err = a.updateState(cmd.Context(), func(d *state.Document) error {

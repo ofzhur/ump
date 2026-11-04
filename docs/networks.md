@@ -190,6 +190,28 @@ mesh_peers: "{{ groups['common'] | map('extract', hostvars)
 `ump_private_address`, `ump_private_network` and `ump_private_cidr`
 are those of a host's first network, for roles written for one.
 
+## Uplinks and private networks
+
+A server's uplink is the interface it reaches its own network through,
+with the address that network gives it: a provider's public address,
+or on a [PXE site](pxe.md) the site's LAN, which the machine's
+`network` in `pxe.yaml` configures (a static address or DHCP, and its
+resolvers). A private network is ump's: an address per server, the
+same wherever the server runs, for the roles that connect the servers.
+The two stay apart. An uplink with a static address inside one of the
+server's private networks is refused before anything is touched, with
+exit status 2:
+
+```
+pxe/web-07: network.uplink: address 10.0.0.17/24 overlaps the private network default (10.0.0.0/24); the uplink needs a network of its own
+```
+
+The published `default` network is `10.0.0.0/24`, a common LAN: on a
+site that uses it, the machines' profiles name another private network
+(`network.private`, `--private-network`) or none. A DHCP uplink is not
+checked, as its lease is not known beforehand: keep the DHCP server's
+range out of the private networks.
+
 ## Provider uplinks
 
 Not implemented yet; notes for the topology to come.

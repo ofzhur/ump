@@ -15,8 +15,10 @@ echo "${UMP_VERSION:-dev}" > /etc/ump-rescue-version
 passwd -d root >/dev/null
 rm -f /etc/ssh/ssh_host_*
 
-# services: our setup first, then networkd, resolved, time and ssh
-systemctl enable ump-rescue-setup.service systemd-networkd.service systemd-resolved.service systemd-timesyncd.service ssh.service >/dev/null
+# services: our setup first, then networkd, resolved, time and ssh; the
+# units of a network boot, which do nothing without its boot config
+systemctl enable ump-rescue-setup.service systemd-networkd.service systemd-resolved.service systemd-timesyncd.service ssh.service \
+	ump-pxe-hello.service ump-pxe-install.service >/dev/null
 systemctl disable smartmontools.service smartd.service mdmonitor.service >/dev/null 2>&1 || true
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 

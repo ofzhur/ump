@@ -10,6 +10,7 @@ import (
 
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/provider/manual"
+	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -144,6 +145,16 @@ provider lists cannot be removed here: they are the provider's.`,
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	return cmd
+}
+
+// noAddress says that ump has no address to reach m at: a machine of
+// pxe.yaml has one only when its entry gives it (address: or a static
+// network.ipv4), never one it was given at boot.
+func noAddress(m provider.Machine) error {
+	if m.Provider == pxe.TypeName {
+		return fmt.Errorf("%s has no address ump reaches it at: give it address: (the DHCP server's reservation for it) or a static network.ipv4 in pxe.yaml (ump config pxe edit %s)", m.Ref(), m.ID)
+	}
+	return fmt.Errorf("%s has no public address", m.Ref())
 }
 
 // noRescueWarning is said before anything disruptive happens to a server

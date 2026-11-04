@@ -31,6 +31,16 @@ mount -t squashfs -o ro,loop /rootfs.squashfs /ro || fail "cannot mount rootfs.s
 mount -t overlay overlay -o lowerdir=/ro,upperdir=/rw/upper,workdir=/rw/work /newroot || fail "cannot mount the overlay"
 [ -x /newroot/sbin/init ] || fail "no /sbin/init in the system image"
 
+# A boot config: a cpio in front of the image (a PXE server puts it
+# there, the kernel unpacks both into this initramfs) brings /ump, the
+# words of a kernel command line (cmdline), root's authorized_keys and
+# the token of the boot. The system finds it at /etc/ump/boot, in RAM
+# like everything else; a boot goes on without it.
+if [ -d /ump ]; then
+	mkdir -p /newroot/etc/ump/boot && chmod 0700 /newroot/etc/ump/boot && cp -a /ump/. /newroot/etc/ump/boot/ \
+		|| echo "ump-rescue init: cannot copy the boot config (/ump); booting without it" > /dev/console
+fi
+
 for d in dev proc sys; do
 	mkdir -p "/newroot/$d"
 	mount --move "/$d" "/newroot/$d" || fail "cannot move /$d"

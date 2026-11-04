@@ -1,0 +1,79 @@
+install.sh: warning: network.uplink.ipv6 is auto, and the kernel's IPv6 is off (kernel.ipv6): no IPv6
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    int01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      set-name: int01
+      dhcp4: false
+      optional: true
+      link-local: []
+    ext01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      set-name: ext01
+      dhcp4: true
+      dhcp-identifier: mac
+      link-local: []
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "",
+  "gw4": "",
+  "ip6": "",
+  "gw6": "",
+  "dns": [],
+  "dhcp4": true,
+  "dhcp4_dns": true,
+  "auto6": false
+}
+==> etc/systemd/network/10-ump-ext01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Link]
+Name=ext01
+==> etc/systemd/network/10-ump-int01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+Name=int01
+==> etc/systemd/network/20-ump-ext01.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+
+[DHCPv4]
+ClientIdentifier=mac
+==> etc/systemd/network/20-ump-int01.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: no resolvers here: they come from the DHCP lease of the uplink
+# (network.uplink.dns_from_dhcp).
+[Resolve]
+==> etc/ump/install.network
+network=dhcp
+network6=none
+dns=dhcp
+==> plan
+ext01 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 none (the specification's uplink); IPv6 off; DNS from DHCP

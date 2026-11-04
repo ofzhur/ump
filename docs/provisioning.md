@@ -288,7 +288,11 @@ vars:
   network, each with the network's CIDR; `ump_private_address`,
   `ump_private_network` and `ump_private_cidr` are those of its first
   network. `ump_attributes` are your
-  [attributes](inventory.md#attributes). Variables without a value
+  [attributes](inventory.md#attributes). A host behind a jump host (a
+  PXE site's `jump`) has `ansible_ssh_common_args: -o
+  ProxyJump=JUMP -o StrictHostKeyChecking=accept-new`, which replaces
+  the common SSH arguments of `ansible.cfg` and of ump's runs for it
+  (below); `inventory/host_vars/` overrides it. Variables without a value
   (`ump_location`, `ump_product`, `ump_private_*` without a private
   network, ...) are left out.
 - The files come from the state and the providers' listings as they are

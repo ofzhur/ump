@@ -30,6 +30,7 @@ import (
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
+	"github.com/ofzhur/ump/internal/state"
 )
 
 func init() { provider.Register(fakeType) }
@@ -787,6 +788,10 @@ func (e *testEnv) fakeRun(limit string, stdout io.Writer) int {
 // remote plays the machine at the other end of a non-interactive ssh run.
 func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	cmd := argv[len(argv)-1]
+	if slices.Contains(argv, "-W") {
+		// the SSH port through a jump host answers
+		return "SSH-2.0-OpenSSH_9.9\r\n", "", 0
+	}
 	inProviderRescue := fakePower.rescue["fake/1"]
 	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
 	switch {
@@ -4186,6 +4191,85 @@ func TestManualServersWithoutAccounts(t *testing.T) {
 	resetFakePower()
 	if _, errOut, code := e.run("", false, "server", "reinstall", "rack-07", "--yes"); code != 0 || !strings.Contains(errOut, "rack-07 is up:") || !strings.Contains(e.hostFile("rack-07.yml"), "  ump_ref: manual/rack-07\n") {
 		t.Errorf("reinstall: code %d, %q", code, errOut)
+	}
+}
+
+// homeListedMachines are what the accounts of the fake type homelisted
+// list: servers the home lists, as manual's, under another type.
+var homeListedMachines []provider.Machine
+
+type homeListedProvider struct{ account string }
+
+func (h *homeListedProvider) Type() string    { return "homelisted" }
+func (h *homeListedProvider) Account() string { return h.account }
+func (h *homeListedProvider) Capabilities() []provider.Capability {
+	return []provider.Capability{provider.CapInventory}
+}
+func (h *homeListedProvider) List(ctx context.Context) ([]provider.Machine, error) {
+	return homeListedMachines, nil
+}
+
+func init() {
+	provider.Register(provider.Type{
+		Name: "homelisted", Kind: provider.KindBareMetal, Description: "Fake home-listed provider for tests",
+		Capabilities: []provider.Capability{provider.CapInventory},
+		HomeListed:   true, AddHint: "the home lists them",
+		New: func(account string, _ map[string]string, _ provider.Options) (provider.Provider, error) {
+			return &homeListedProvider{account: account}, nil
+		},
+	})
+}
+
+// TestHomeListedType: a provider type whose servers the home lists is
+// treated as manual is, whatever its name: no account to add, none in
+// the wizard or the accounts file, its listing never served from the
+// cache though recorded there, and none of its servers taken for gone
+// from a provider.
+func TestHomeListedType(t *testing.T) {
+	e := newTestEnv(t)
+	e.write(goneConfig)
+	ctx := context.Background()
+	if _, errOut, code := e.run("", false, "config", "isp", "add", "homelisted", "x"); code != 2 || !strings.Contains(errOut, "homelisted servers are not an account to add: the home lists them") {
+		t.Errorf("add: code %d, %q", code, errOut)
+	}
+	if out, _, _ := e.run("q\n", true, "config", "isp", "add"); !strings.Contains(out, "Fake provider for tests") || strings.Contains(out, "homelisted") {
+		t.Errorf("the wizard's types:\n%s", out)
+	}
+	if err := checkAccountsFile([]byte("accounts:\n  x:\n    type: homelisted\n")); err == nil || !strings.HasPrefix(err.Error(), `account x: unknown provider type "homelisted"`) {
+		t.Errorf("in the accounts file: %v", err)
+	}
+
+	cfg, err := config.Load(e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := config.Account{Type: "homelisted", Settings: map[string]config.Value{}}
+	cfg.Accounts["byhand"] = acct
+	store := cache.Open(e.cfgPath)
+	old := []provider.Machine{{Provider: "homelisted", Account: "byhand", ID: "rack-02", Name: "rack-02"}}
+	if _, _, err := store.Record("byhand", "homelisted", old, e.now); err != nil {
+		t.Fatal(err)
+	}
+	homeListedMachines = []provider.Machine{{Provider: "homelisted", Account: "byhand", ID: "rack-01", Name: "rack-01"}}
+	t.Cleanup(func() { homeListedMachines = nil })
+	a := &app{stderr: io.Discard, configFlag: e.cfgPath, now: func() time.Time { return e.now }}
+	r := a.listAccount(ctx, "byhand", acct, store, time.Hour)
+	if r.err != nil || !r.cachedAt.IsZero() || len(r.machines) != 1 || r.machines[0].ID != "rack-01" {
+		t.Errorf("listing: %+v", r)
+	}
+	if _, ok := store.LastSeen("byhand", "homelisted/rack-01"); !ok {
+		t.Error("the listing is not recorded")
+	}
+
+	doc, err := state.Parse([]byte("servers:\n  homelisted/rack-01: {note: listed}\n  homelisted/rack-02: {note: no longer}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gone, decided := missingServers(cfg, doc, []listResult{r}, nil); len(gone) != 0 || slices.Contains(decided, "homelisted") {
+		t.Errorf("missing: %v, decided %v", gone, decided)
+	}
+	if gone := a.goneServer(ctx, cfg, doc); gone("homelisted/rack-01") || gone("homelisted/rack-03") {
+		t.Error("a server of the type gone for its host file")
 	}
 }
 

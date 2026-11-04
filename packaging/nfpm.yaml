@@ -1,0 +1,102 @@
+# The packages of ump, deb and rpm, built by packaging/build.sh (make
+# packages) with nfpm: the binary, its completions, and the PXE server's
+# units, disabled. ARCH, VERSION, BINARY (ump built for the format) and
+# COMPLETIONS come from build.sh.
+name: ump
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Oleg Zhurko <oleg@zhurko.de>
+vendor: Oleg Zhurko
+homepage: https://ump.zhurko.de
+license: Apache-2.0
+description: |-
+  Unus Mundus Provisioner: one operating system, in the same shape, on any machine
+  ump puts the same operating system, in the same shape, on any machine:
+  dedicated servers, cloud VMs and boxes in your own rack, from one
+  profile. The package also holds ump-pxe@.service, the PXE server of a
+  site as a systemd service, disabled until enabled for a site.
+
+# the iPXE binaries the PXE server's TFTP serves, for every architecture
+overrides:
+  deb:
+    recommends: [ipxe]
+  rpm:
+    recommends: [ipxe-bootimgs-x86, ipxe-bootimgs-aarch64]
+
+# the rpm's build host, the same from every builder (else its hostname)
+rpm:
+  buildhost: ump.zhurko.de
+
+contents:
+  - src: ${BINARY}
+    expand: true
+    dst: /usr/bin/ump
+    file_info: {mode: 0755}
+  - src: packaging/ump-pxe@.service
+    dst: /usr/lib/systemd/system/ump-pxe@.service
+    file_info: {mode: 0644}
+  - src: packaging/ump-pxe-check@.service
+    dst: /usr/lib/systemd/system/ump-pxe-check@.service
+    file_info: {mode: 0644}
+  - src: packaging/90-ump.preset
+    dst: /usr/lib/systemd/system-preset/90-ump.preset
+    file_info: {mode: 0644}
+  - src: packaging/pxe.env.example
+    dst: /usr/share/ump/pxe.env.example
+    file_info: {mode: 0644}
+  - dst: /etc/ump/pxe
+    type: dir
+    file_info: {mode: 0755}
+  - src: ${COMPLETIONS}/ump.bash
+    expand: true
+    dst: /usr/share/bash-completion/completions/ump
+    file_info: {mode: 0644}
+  - src: ${COMPLETIONS}/ump.fish
+    expand: true
+    dst: /usr/share/fish/vendor_completions.d/ump.fish
+    file_info: {mode: 0644}
+  - src: ${COMPLETIONS}/_ump
+    expand: true
+    dst: /usr/share/zsh/vendor-completions/_ump
+    packager: deb
+    file_info: {mode: 0644}
+  - src: ${COMPLETIONS}/_ump
+    expand: true
+    dst: /usr/share/zsh/site-functions/_ump
+    packager: rpm
+    file_info: {mode: 0644}
+  - src: LICENSE
+    dst: /usr/share/doc/ump/LICENSE
+    packager: deb
+    file_info: {mode: 0644}
+  - src: NOTICE
+    dst: /usr/share/doc/ump/NOTICE
+    packager: deb
+    file_info: {mode: 0644}
+  - src: THIRD_PARTY_NOTICES
+    dst: /usr/share/doc/ump/THIRD_PARTY_NOTICES
+    packager: deb
+    file_info: {mode: 0644}
+  - src: LICENSE
+    dst: /usr/share/licenses/ump/LICENSE
+    type: license
+    packager: rpm
+    file_info: {mode: 0644}
+  - src: NOTICE
+    dst: /usr/share/licenses/ump/NOTICE
+    type: license
+    packager: rpm
+    file_info: {mode: 0644}
+  - src: THIRD_PARTY_NOTICES
+    dst: /usr/share/licenses/ump/THIRD_PARTY_NOTICES
+    type: license
+    packager: rpm
+    file_info: {mode: 0644}
+
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh

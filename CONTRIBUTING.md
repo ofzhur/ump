@@ -11,8 +11,11 @@ ump is one Go binary; `go.mod` names the Go version (with
 
 ```sh
 make build        # ./ump
-make check        # gofmt, go vet, the tests and the shell syntax checks: what CI runs
+make check        # gofmt, go vet, the tests and the shell checks (bash 4 or later, jq): what CI runs
+make fuzz         # the fuzz targets of the PXE server's parsers, FUZZTIME (10s) each
 make dist         # the binaries for every platform, into dist/
+make packages     # the deb and rpm packages, into dist/pkg/ (VERSION=v1.2.3 for a tree without its tag)
+make package-test # install, upgrade and remove them in Debian, Ubuntu, Fedora and Rocky containers, the units under systemd
 ```
 
 The tests need no provider accounts: the providers' APIs are faked.
@@ -20,7 +23,9 @@ Where Docker answers, one test runs MinIO in a container for the host
 files in a storage (`-short` skips it).
 Images are built in a privileged Debian container (`make rescue-image`,
 `make os-image`; Docker or Podman) and the rescue image boots in QEMU
-with `make rescue-test`. See [the rescue image](images/rescue/README.md)
+with `make rescue-test`, over the network from `ump pxe serve` with
+`make pxe-test`, and installs a system from there by itself with `make
+pxe-install-test`. See [the rescue image](images/rescue/README.md)
 and [the base images](images/base/README.md).
 
 Anything that erases disks is tested on a machine you can afford to

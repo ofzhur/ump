@@ -192,6 +192,15 @@ the credentials of [ofzhur_storage] in ansible.cfg; none when ump is
 the inventory), and runs the playbooks, logging in to every host as its
 administrator (ump_admin) with UMP's key only.
 
+Before the run, the unattended installations that ended since (PXE
+machines, docs/pxe.md) are recorded: each that installed once its new
+system answers at the server's own address as its administrator with
+UMP's key and the host keys it reported pinned, and the run includes
+it; each that failed gives its private addresses back, and so does each
+whose arm expired before a boot claimed it, disarmed. What cannot be
+recorded yet is said, and the next run tries again; so is each that
+failed or did not report, which ump pxe disarm NAME clears.
+
 Exit status 6 names the hosts that failed or were unreachable: fix that
 and run ump provision --hosts with them. Without --hosts, asks for
 confirmation on a terminal (the whole fleet); without one, --yes is
@@ -301,6 +310,9 @@ func (a *app) provisionFleet(cmd *cobra.Command, o provisionOptions, extra []str
 			return err
 		}
 	}
+	// the unattended installations that ended are recorded first, so that
+	// the run includes them
+	a.settleInstalls(cmd, cfg)
 	run := fleetRun{playbooks: playbooks, narrowed: len(named) > 0, pattern: pattern, extra: extra}
 	res, err := a.provision(ctx, cfg, repo, run, "provision", nil)
 	if res != nil && format != "" {

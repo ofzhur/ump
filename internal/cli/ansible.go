@@ -24,7 +24,7 @@ import (
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
-	"github.com/ofzhur/ump/internal/provider/manual"
+	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -649,9 +649,13 @@ type hostFile struct {
 // its private networks, by network, with each network's CIDR, for the
 // roles that connect the hosts; ump_private_address, ump_private_network
 // and ump_private_cidr are those of its first network, as ump v0.5.0
-// gave the one.
+// gave the one. ansible_ssh_common_args takes a host behind a jump host
+// through it (ProxyJump), with ump's own choice for host keys
+// (ansibleSSHArgs), since a host's variable replaces what ansible.cfg
+// and ump's runs set.
 type hostVars struct {
 	AnsibleHost    string                 `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
+	AnsibleSSHArgs string                 `json:"ansible_ssh_common_args,omitempty" yaml:"ansible_ssh_common_args,omitempty"`
 	UMPAdmin       string                 `json:"ump_admin,omitempty" yaml:"ump_admin,omitempty"`
 	UMPName        string                 `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
 	UMPRef         string                 `json:"ump_ref,omitempty" yaml:"ump_ref,omitempty"`
@@ -694,6 +698,9 @@ func hostVarsFor(m provider.Machine, rec state.Install, admin string, private []
 		UMPName: m.Name, UMPRef: m.Ref(), UMPProvider: m.Provider, UMPAccount: m.Account,
 		UMPLocation: m.Location, UMPProduct: m.Product, UMPOS: rec.OS, UMPProfile: rec.Profile,
 		UMPAttributes: m.Attributes,
+	}
+	if m.Jump != "" {
+		v.AnsibleSSHArgs = "-o ProxyJump=" + m.Jump + " " + ansibleSSHArgs[0].value
 	}
 	if !rec.At.IsZero() {
 		v.UMPInstalledAt = rec.At.UTC().Format(time.RFC3339)
@@ -758,6 +765,9 @@ func (a *app) inventoryHosts(cfg *config.Config, doc *state.Document, ms []provi
 		}
 		host := inventoryHostname(m, *s.Installed)
 		switch {
+		case primaryAddress(m) == "" && m.Provider == pxe.TypeName:
+			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: pxe.yaml gives it no address (address: or a static network.ipv4), and ump takes none it was given at boot\n", describeRef(m))
+			continue
 		case primaryAddress(m) == "":
 			fmt.Fprintf(a.stderr, "ump: %s is left out of the inventory: it has no public address\n", describeRef(m))
 			continue
@@ -974,10 +984,11 @@ func (h *hostFiles) goneHosts() map[string]string {
 
 // goneServer says which servers are gone, for the host files (forget):
 // one the state (doc) no longer has, and that its provider no longer has
-// either (checkGone), or added by hand and removed (ump server remove).
-// A server taken out of the state while its provider still has it is
-// not gone, and when the state is the mirror as it was (its pull failed),
-// no server is: the mirror may lack servers installed meanwhile.
+// either (checkGone), or one of a type the home lists that the home no
+// longer lists (homeLists: ump server remove). A server taken out of the
+// state while its provider still has it is not gone, and when the state
+// is the mirror as it was (its pull failed), no server is: the mirror
+// may lack servers installed meanwhile.
 func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Document) func(ref string) bool {
 	if doc == nil || a.pullFailed {
 		return nil
@@ -987,11 +998,11 @@ func (a *app) goneServer(ctx context.Context, cfg *config.Config, doc *state.Doc
 		store = cache.Open(path)
 	}
 	return func(ref string) bool {
-		if inState(doc, ref) {
+		if _, ok := doc.Servers[ref]; ok {
 			return false
 		}
-		if t, _, _ := strings.Cut(ref, "/"); t == manual.TypeName {
-			return true
+		if t, id, _ := strings.Cut(ref, "/"); provider.HomeListed(t) {
+			return !a.homeLists(doc, t, id)
 		}
 		return a.checkGone(ctx, cfg, store, ref).gone
 	}
@@ -1003,17 +1014,6 @@ func umpWrote(name string, data []byte) bool {
 	hostname, ok := strings.CutSuffix(name, ".yml")
 	line, _, _ := strings.Cut(string(data), "\n")
 	return ok && strings.HasPrefix(line, "# "+hostname+": written by ump (")
-}
-
-// inState says that the state has the server ref (provider/id): an
-// entry of servers, or a server added by hand.
-func inState(doc *state.Document, ref string) bool {
-	if _, ok := doc.Servers[ref]; ok {
-		return true
-	}
-	t, id, _ := strings.Cut(ref, "/")
-	_, ok := doc.Manual[id]
-	return t == manual.TypeName && ok
 }
 
 // removeGone removes the host files forget took out that no write

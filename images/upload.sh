@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Publish what ump fetches onto machines to the storage: the rescue
 # images and their entry script, the installer, the operating system
-# images, the profiles, and the ump binaries with the script that
-# installs them. The storage is any place that then serves plain GET
-# requests for the layout below (see images/rescue/README.md); this
-# script writes it to one of three kinds of target:
+# images, the profiles, the ump binaries with the script that installs
+# them, and the packages. The storage is any place that then serves
+# plain GET requests for the layout below (see images/rescue/README.md);
+# this script writes it to one of three kinds of target:
 #
 #   UPLOAD_TARGET=s3://bucket[/prefix]          an S3 bucket, or an S3-compatible
 #                                               store with S3_ENDPOINT=https://...
@@ -21,8 +21,10 @@
 #   get.sh                                 curl -fsSL <storage>/get.sh | sh
 #   bin/latest/ump-<os>-<arch>, SHA256SUMS, VERSION
 #   bin/v/<version>/...                    (kept; UMP_VERSION= of get.sh)
+#   pkg/latest/ump-amd64.deb, ump-arm64.deb, ump-x86_64.rpm, ump-aarch64.rpm, SHA256SUMS, VERSION
+#   pkg/v/<version>/ump_<v>_amd64.deb, ump-<v>-1.x86_64.rpm, ..., SHA256SUMS   (kept)
 #   rescue/kexec-into-rescue.sh
-#   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, ...
+#   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, kexec-tools-<version>.tar.xz, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh, install/nixos/ump.nix, install/motd.sh, install/bashrc.sh
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/networks.yaml, profiles/users.yaml, profiles/userdata.yaml
@@ -34,7 +36,7 @@
 # the target side. Per image, manifest.json is uploaded last, so a reader
 # never sees a manifest that points to files which are not there yet.
 #
-# Usage: upload.sh [rescue|os|index|bin|scripts|profiles]...  (os: OS_LIST="a b" limits it to those images)
+# Usage: upload.sh [rescue|os|index|bin|pkg|scripts|profiles]...  (os: OS_LIST="a b" limits it to those images)
 #  (default: everything that is built;
 #        index alone rewrites os/index.json from what the target holds)
 #
@@ -48,7 +50,7 @@ DRY_RUN="${DRY_RUN:-0}"
 TARGET="${UPLOAD_TARGET:-}"
 
 what=("$@")
-[ ${#what[@]} -gt 0 ] || what=(rescue os bin scripts profiles)
+[ ${#what[@]} -gt 0 ] || what=(rescue os bin pkg scripts profiles)
 [ -n "$TARGET" ] || { echo "upload.sh: set UPLOAD_TARGET to s3://bucket[/prefix], scp://[user@]host/path or file:///path (see the comment at the top)" >&2; exit 2; }
 
 # --- the target kinds -----------------------------------------------------
@@ -97,6 +99,8 @@ content_type() {
 	*.json) echo application/json ;;
 	*.txt|*.sh|SHA256SUMS|VERSION|THIRD_PARTY_NOTICES) echo text/plain ;;
 	*.yaml|*.yml) echo application/yaml ;;
+	*.deb) echo application/vnd.debian.binary-package ;;
+	*.rpm) echo application/x-rpm ;;
 	*) echo application/octet-stream ;;
 	esac
 }
@@ -174,13 +178,19 @@ list_dirs() { # list_dirs PREFIX: the directory names right below it
 # <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the rescue
 # image has no name level: rescue/<arch>/)
 publish_image() {
-	local d="$1" k="$2" name="$3" arch version base files f
+	local d="$1" k="$2" name="$3" arch version base files f src
 	arch="$(basename "$d")"
 	version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 	[ -n "$version" ] || { echo "upload.sh: no version in $d/manifest.json" >&2; exit 2; }
 	base="$k${name:+/$name}"
 	files=()
 	for f in vmlinuz initrd.zst kexec rootfs.tar.zst SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
+	# the static kexec (GPL-2.0) goes out with its source, or not at all
+	if [ -f "$d/kexec" ]; then
+		src="$(cd "$d" && ls kexec-tools-*.tar.xz 2>/dev/null | head -n 1 || true)"
+		[ -n "$src" ] || { echo "upload.sh: $d/kexec without its source (kexec-tools-*.tar.xz); build the image again" >&2; exit 2; }
+		files+=("$src")
+	fi
 	echo "==> uploading $base $arch, version $version, to $TARGET"
 	for f in "${files[@]}"; do put "$d/$f" "$base/v/$version/$arch/$f"; done
 	put "$d/manifest.json" "$base/v/$version/$arch/manifest.json"
@@ -238,6 +248,36 @@ for w in "${what[@]}"; do
 		for f in "$dist"/ump-* "$dist/SHA256SUMS" "$dist/VERSION" "$dist/THIRD_PARTY_NOTICES"; do copy "bin/v/$version/$(basename "$f")" "bin/latest/$(basename "$f")"; done
 		built=1
 		;;
+	pkg)
+		pkg="$HERE/../dist/pkg"
+		[ -f "$pkg/VERSION" ] || { [ "${#what[@]}" -gt 1 ] && continue; echo "upload.sh: no dist/pkg/VERSION; run make packages first" >&2; exit 2; }
+		version="$(cat "$pkg/VERSION")"
+		case "$version" in
+		dev|*-dirty) [ "${FORCE:-0}" = 1 ] || { echo "upload.sh: the packages are $version (no tag, or uncommitted changes); tag a release (git tag v1.2.3) or FORCE=1" >&2; exit 2; } ;;
+		esac
+		echo "==> uploading the packages, version $version, to $TARGET"
+		# pkg/latest/ has them under names without the version, and their
+		# SHA256SUMS
+		sums="$(mktemp)" latest=()
+		for f in "$pkg"/*.deb "$pkg"/*.rpm; do
+			[ -f "$f" ] || continue
+			n="$(basename "$f")"
+			case "$n" in
+			*.deb) s="ump-${n##*_}" ;;                         # ump_0.8.0_amd64.deb: ump-amd64.deb
+			*.rpm) s="${n%.rpm}"; s="ump-${s##*.}.rpm" ;;      # ump-0.8.0-1.x86_64.rpm: ump-x86_64.rpm
+			esac
+			put "$f" "pkg/v/$version/$n"
+			grep " $n\$" "$pkg/SHA256SUMS" | sed "s| $n\$| $s|" >> "$sums"
+			latest+=("$n:$s")
+		done
+		put "$pkg/SHA256SUMS" "pkg/v/$version/SHA256SUMS"
+		put "$pkg/VERSION" "pkg/v/$version/VERSION"
+		for l in "${latest[@]}"; do copy "pkg/v/$version/${l%%:*}" "pkg/latest/${l#*:}"; done
+		put "$sums" pkg/latest/SHA256SUMS
+		copy "pkg/v/$version/VERSION" pkg/latest/VERSION
+		rm -f "$sums"
+		built=1
+		;;
 	scripts)
 		echo "==> uploading the scripts to $TARGET"
 		put "$HERE/rescue/kexec-into-rescue.sh" rescue/kexec-into-rescue.sh
@@ -253,8 +293,8 @@ for w in "${what[@]}"; do
 		for f in "$HERE"/../profiles/*.yaml; do put "$f" "profiles/$(basename "$f")"; done
 		built=1
 		;;
-	*) echo "upload.sh: unknown item $w (rescue, os, index, bin, scripts, profiles)" >&2; exit 2 ;;
+	*) echo "upload.sh: unknown item $w (rescue, os, index, bin, pkg, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
-[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist)" >&2; exit 2; }
+[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist, make packages)" >&2; exit 2; }
 echo "==> done: the URL that serves $TARGET is the storage (ump's storage setting)"

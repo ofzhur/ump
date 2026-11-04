@@ -15,16 +15,20 @@
 #                   profile's userdata as NixOS modules, and runs
 #                   nixos-install from the image's channel
 #
-# Usage: install.sh --spec FILE [--dry-run] [--force]
+# Usage: install.sh --spec FILE [--record DIR] [--dry-run] [--force]
 #        install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
-#                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--dry-run] [--force]
+#                   [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--record DIR] [--dry-run] [--force]
 #
 #   --spec FILE      the specification (JSON): os, hostname, timezone, storage,
 #                    kernel, layout, disks, users, userdata, firewall, network
 #                    (rename: false keeps the kernel's interface names;
 #                    private_networks: the server's addresses in its private
 #                    networks, private the first, recorded in /etc/ump/install,
-#                    configured nowhere yet)
+#                    configured nowhere yet; uplink: the uplink's interface by
+#                    MAC, its IPv4 and IPv6 and its resolvers, where the
+#                    provider knows them, else what the rescue system has)
+#   --record DIR     copy /etc/ump/install and the SSH host keys (public) of
+#                    the new system into DIR at the end
 #   without --spec   the lvm-linear layout with root alone; the flags are:
 #   --storage URL    base URL of the storage, which serves os/<os>/<arch>/
 #                    manifest.json and rootfs.tar.zst (or UMP_STORAGE)
@@ -40,6 +44,10 @@
 #                    of the machine it runs on)
 #   --dry-run        print the plan and stop before touching a disk
 set -Eeuo pipefail
+# the new system's files as a root shell over SSH makes them, whatever
+# umask the caller has (a PXE machine's runner has 077: /etc/ump would
+# be root's alone)
+umask 022
 
 spec_file=""
 storage="${UMP_STORAGE:-}"
@@ -52,9 +60,11 @@ mitigations=0
 timezone="UTC"
 force=0
 dry=0
+record=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--spec) spec_file="$2"; shift 2 ;;
+	--record) record="$2"; shift 2 ;;
 	--storage) storage="$2"; shift 2 ;;
 	--hostname) hostname="$2"; shift 2 ;;
 	--os) os="$2"; shift 2 ;;
@@ -151,6 +161,220 @@ kernel_cmdline="kho=off"
 [ "$mitigations" = true ] || kernel_cmdline="$kernel_cmdline mitigations=off"
 [ "$ipv6" = true ] || kernel_cmdline="$kernel_cmdline ipv6.disable=1"
 [ -n "$kernel_extra" ] && kernel_cmdline="$kernel_cmdline $kernel_extra"
+
+# --- the network: the uplink, and the files that configure it ----------
+
+# Functions only, which images/test-network.sh runs on machines of its
+# own. The uplink is the interface with the MAC mac and the name uplink;
+# net4 is static, dhcp or none, ip4 ADDRESS/PREFIX[,GATEWAY] when static;
+# net6 static, auto (router advertisements) or none, ip6 likewise; dns
+# the resolvers, empty when they come from DHCP, and dns_source says
+# whence: public (1.1.1.1 and 8.8.8.8, ump's default), spec or dhcp;
+# client_id is mac when DHCP identifies the machine by its MAC, and
+# lease_dns no when the uplink takes its address from a DHCP lease but
+# not the lease's resolvers (the specification lists its own). The
+# interfaces are IF_MAC, IF_NAME and IF_KIND; uplink_spec is the
+# specification's uplink, empty without one.
+
+# net_from_spec JSON: the uplink of the specification (network.uplink,
+# which the provider gives where it knows the machine's network, as for
+# a PXE machine); without a mac there, mac stays as it is
+net_from_spec() {
+	local m gw
+	m="$(jq -r '.mac // empty' <<< "$1" | tr 'A-F-' 'a-f:')"
+	if [ -n "$m" ]; then
+		[[ "$m" =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]] || die "network.uplink.mac: $m is not a MAC address"
+		mac="$m"
+	fi
+	net4="$(jq -r '.ipv4.mode // "" | if . == "" then "none" else . end' <<< "$1")"
+	net6="$(jq -r '.ipv6.mode // "" | if . == "" then "none" else . end' <<< "$1")"
+	ip4=""; ip6=""
+	case "$net4" in
+	static)
+		ip4="$(jq -r '.ipv4.address // empty' <<< "$1")"; gw="$(jq -r '.ipv4.gateway // empty' <<< "$1")"
+		case "$ip4" in */*) ;; *) die "network.uplink.ipv4: a static address is ADDRESS/PREFIX, not \"$ip4\"" ;; esac
+		ip4="$ip4${gw:+,$gw}" ;;
+	dhcp|none) ;;
+	*) die "network.uplink.ipv4: mode $net4 is not static, dhcp or none" ;;
+	esac
+	case "$net6" in
+	static)
+		ip6="$(jq -r '.ipv6.address // empty' <<< "$1")"; gw="$(jq -r '.ipv6.gateway // empty' <<< "$1")"
+		case "$ip6" in */*) ;; *) die "network.uplink.ipv6: a static address is ADDRESS/PREFIX, not \"$ip6\"" ;; esac
+		ip6="$ip6${gw:+,$gw}" ;;
+	auto|none) ;;
+	*) die "network.uplink.ipv6: mode $net6 is not static, auto or none" ;;
+	esac
+	if [ "$net6" != none ] && [ "$ipv6" != true ]; then
+		warn "network.uplink.ipv6 is $net6, and the kernel's IPv6 is off (kernel.ipv6): no IPv6"
+		net6=none; ip6=""
+	fi
+	[ "$net4$net6" != nonenone ] || die "network.uplink has neither IPv4 nor IPv6; the new system would be unreachable"
+	client_id=""
+	[ "$net4" != dhcp ] || client_id=mac
+	dns="$(jq -r '.dns // [] | join(" ")' <<< "$1")"; dns_source=spec
+	if [ "$(jq -r '.dns_from_dhcp // false' <<< "$1")" = true ]; then
+		[ "$net4" = dhcp ] || [ "$net6" = auto ] || die "network.uplink.dns_from_dhcp: no lease to take resolvers from (ipv4 $net4, ipv6 $net6)"
+		dns=""; dns_source=dhcp
+	elif [ -z "$dns" ]; then
+		dns="1.1.1.1 8.8.8.8"; dns_source=public
+	fi
+	# resolvers of its own: those alone, not the lease's besides
+	lease_dns=yes
+	[ "$net4" != dhcp ] || [ "$dns_source" != spec ] || lease_dns=no
+}
+
+# net_from_machine: the uplink as the rescue system found it (ip4, ip6),
+# as ump has always configured it: static with the addresses found, DHCP
+# without any, and the public resolvers
+net_from_machine() {
+	net4=none; net6=none
+	[ -n "$ip4$ip6" ] || net4=dhcp
+	[ -z "$ip4" ] || net4=static
+	[ -z "$ip6" ] || net6=static
+	client_id=""; dns="1.1.1.1 8.8.8.8"; dns_source=public; lease_dns=yes
+}
+
+# netplan_yaml: /etc/netplan/10-ump.yaml (Ubuntu, Debian): every wired
+# interface by MAC, the uplink configured, the others up without
+# addresses
+netplan_yaml() {
+	local i a4="" g4="" a6="" g6="" keys=0
+	echo "# written by UMP at installation; netplan try / netplan apply after editing"
+	echo "network:"
+	echo "  version: 2"
+	echo "  renderer: networkd"
+	echo "  ethernets:"
+	for i in "${!IF_MAC[@]}"; do
+		[ "${IF_NAME[$i]}" = "$uplink" ] && continue
+		echo "    ${IF_NAME[$i]}:"
+		echo "      match:"
+		echo "        macaddress: \"${IF_MAC[$i]}\""
+		[ "$rename" = yes ] && echo "      set-name: ${IF_NAME[$i]}"
+		echo "      dhcp4: false"
+		echo "      optional: true"
+		[ "$ipv6" = true ] || echo "      link-local: []"
+	done
+	echo "    $uplink:"
+	echo "      match:"
+	echo "        macaddress: \"$mac\""
+	[ "$rename" = yes ] && echo "      set-name: $uplink"
+	if [ "$net4" = dhcp ]; then
+		echo "      dhcp4: true"
+		[ -z "$client_id" ] || echo "      dhcp-identifier: $client_id"
+		[ "$lease_dns" = yes ] || printf '      dhcp4-overrides:\n        use-dns: false\n'
+	else
+		echo "      dhcp4: false"
+	fi
+	if [ "$net4" = static ]; then a4="${ip4%%,*}"; case "$ip4" in *,*) g4="${ip4#*,}" ;; esac; fi
+	if [ "$ipv6" = true ] && [ "$net6" = static ]; then a6="${ip6%%,*}"; case "$ip6" in *,*) g6="${ip6#*,}" ;; esac; fi
+	# without an uplink in the specification a static uplink has both
+	# lists, empty or not, as it always had
+	[ -n "$uplink_spec" ] || [ "$net4" = dhcp ] || keys=1
+	if [ -n "$a4$a6" ] || [ "$keys" = 1 ]; then
+		echo "      addresses:"
+		[ -z "$a4" ] || echo "        - \"$a4\""
+		[ -z "$a6" ] || echo "        - \"$a6\""
+	fi
+	if [ -n "$g4$g6" ] || [ "$keys" = 1 ]; then
+		echo "      routes:"
+		[ -z "$g4" ] || printf '        - to: default\n          via: "%s"\n          on-link: true\n' "$g4"
+		[ -z "$g6" ] || printf '        - to: "::/0"\n          via: "%s"\n          on-link: true\n' "$g6"
+	fi
+	if [ "$ipv6" != true ]; then
+		echo "      link-local: []"
+	elif [ "$net6" = auto ]; then
+		echo "      accept-ra: true"
+		echo "      ipv6-address-generation: eui64"
+	else
+		echo "      accept-ra: false"
+	fi
+	if [ -n "$dns" ]; then
+		echo "      nameservers:"
+		echo "        addresses: [$(echo "$dns" | sed 's/ /, /g')]"
+	fi
+}
+
+# networkd_files DIR: the same for systemd-networkd itself (Arch), in DIR:
+# the names by MAC (.link), the others up without addresses, the uplink
+networkd_files() {
+	local nd="$1" i d
+	for i in "${!IF_MAC[@]}"; do
+		if [ "$rename" = yes ]; then
+			printf '# written by UMP at installation: the uniform name of this interface\n[Match]\nMACAddress=%s\n\n[Link]\nName=%s\n' \
+				"${IF_MAC[$i]}" "${IF_NAME[$i]}" > "$nd/10-ump-${IF_NAME[$i]}.link"
+		fi
+		[ "${IF_NAME[$i]}" = "$uplink" ] && continue
+		printf '# written by UMP at installation: up, without addresses\n[Match]\nMACAddress=%s\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nLinkLocalAddressing=no\n' \
+			"${IF_MAC[$i]}" > "$nd/20-ump-${IF_NAME[$i]}.network"
+	done
+	{
+		echo "# written by UMP at installation; networkctl reload after editing"
+		echo "[Match]"
+		echo "MACAddress=$mac"
+		echo
+		echo "[Network]"
+		[ "$net4" != dhcp ] || echo "DHCP=ipv4"
+		[ "$net4" != static ] || echo "Address=${ip4%%,*}"
+		[ "$ipv6" != true ] || [ "$net6" != static ] || echo "Address=${ip6%%,*}"
+		for d in $dns; do echo "DNS=$d"; done
+		if [ "$ipv6" != true ]; then
+			echo "LinkLocalAddressing=no"; echo "IPv6AcceptRA=no"
+		elif [ "$net6" = auto ]; then
+			echo "IPv6AcceptRA=yes"
+		else
+			echo "IPv6AcceptRA=no"
+		fi
+		if [ "$net4" = static ]; then case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac; fi
+		if [ "$ipv6" = true ] && [ "$net6" = static ]; then case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac; fi
+		[ -z "$client_id" ] || printf '\n[DHCPv4]\nClientIdentifier=%s\n' "$client_id"
+		[ "$lease_dns" = yes ] || printf 'UseDNS=no\n'
+		if [ "$ipv6" = true ] && [ "$net6" = auto ]; then printf '\n[IPv6AcceptRA]\nToken=eui64\n'; fi
+	} > "$nd/20-ump-$uplink.network"
+}
+
+# resolved_conf: the global resolvers of systemd-resolved
+# (/etc/systemd/resolved.conf.d/ump.conf), the same the uplink has
+resolved_conf() {
+	case "$dns_source" in
+	public) printf '# UMP: public resolvers, independent of the provider; the .network\n# file sets the same per interface. Replace both to use your own.\n[Resolve]\nDNS=%s\n' "$dns" ;;
+	spec) printf '# UMP: the resolvers of the specification (network.uplink.dns); the\n# uplink'"'"'s configuration sets the same. Replace both to use others.\n[Resolve]\nDNS=%s\n' "$dns" ;;
+	dhcp) printf '# UMP: no resolvers here: they come from the DHCP lease of the uplink\n# (network.uplink.dns_from_dhcp).\n[Resolve]\n' ;;
+	esac
+}
+
+# nixos_net_facts: the uplink as facts.json has it for UMP's NixOS
+# module; with an uplink in the specification also dhcp4 (DHCP, which
+# then identifies the machine by its MAC), dhcp4_dns (the lease's
+# resolvers, unless the specification lists its own) and auto6 (router
+# advertisements)
+nixos_net_facts() {
+	local more='{}'
+	if [ -n "$uplink_spec" ]; then
+		more="$(jq -n --argjson dhcp4 "$([ "$net4" = dhcp ] && echo true || echo false)" \
+			--argjson dhcp4_dns "$([ "$net4" = dhcp ] && [ "$lease_dns" = yes ] && echo true || echo false)" \
+			--argjson auto6 "$([ "$net6" = auto ] && echo true || echo false)" '{dhcp4: $dhcp4, dhcp4_dns: $dhcp4_dns, auto6: $auto6}')"
+	fi
+	jq -n --arg uplink_mac "$mac" --arg ip4 "${ip4%%,*}" --arg gw4 "$(case "$ip4" in *,*) echo "${ip4#*,}" ;; esac)" \
+		--arg ip6 "${ip6%%,*}" --arg gw6 "$(case "$ip6" in *,*) echo "${ip6#*,}" ;; esac)" --arg dns "$dns" --argjson more "$more" \
+		'{uplink_mac: $uplink_mac, ip4: $ip4, gw4: $gw4, ip6: $ip6, gw6: $gw6, dns: ($dns | split(" "))} + $more'
+}
+
+# net_plan: the uplink, as the plan shows it
+net_plan() {
+	local addresses="$ip4${ip6:+ $ip6}"
+	if [ -n "$uplink_spec" ]; then
+		addresses="IPv4 $net4${ip4:+ $ip4}$([ "$net4" != dhcp ] || echo " (client ID: MAC)"), IPv6 $net6${ip6:+ $ip6} (the specification's uplink)"
+	fi
+	echo "$uplink ($mac) $addresses; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS ${dns:-from DHCP}$([ "$lease_dns" = yes ] || echo ", not the lease's")"
+}
+
+# net_record: the lines of /etc/ump/install that say how the
+# specification's uplink is configured: network (IPv4) and network6 are
+# static, dhcp, auto or none, dns the resolvers or dhcp
+net_record() {
+	printf 'network=%s\nnetwork6=%s\ndns=%s\n' "$net4" "$net6" "$([ "$dns_source" = dhcp ] && echo dhcp || echo "${dns// /,}")"
+}
 
 # --- the disks ---------------------------------------------------------
 
@@ -303,8 +527,11 @@ done
 [ "$has_bios" = 1 ] || [ "$efi" = 1 ] || [ "$arch" != amd64 ] || die "this machine boots with BIOS and the layout has no bios part"
 jq -e '[.layout.parts[] | select(.mountpoint == "/")] | length == 1' >/dev/null <<< "$spec" || die "the layout must mount exactly one part at /"
 
-# the network: what the rescue system was given on its kernel command line
-# (ump rescue carries the running system's over), else what is configured
+# the network: the uplink of the specification where it has one (a PXE
+# machine's), else what the rescue system was given on its kernel command
+# line (ump rescue carries the running system's over), else what is
+# configured
+uplink_spec="$(jq -c '.network.uplink // empty' <<< "$spec")"
 cmdline="$(cat /proc/cmdline)"
 param() { for w in $cmdline; do case "$w" in "$1="*) printf '%s' "${w#*=}"; return 0 ;; esac; done; return 1; }
 mac="$(param ump.mac || true)"
@@ -324,17 +551,22 @@ if [ -z "$mac" ]; then
 		[ -n "$a" ] && ip6="$a${g:+,$g}"
 	fi
 fi
+if [ -n "$uplink_spec" ]; then
+	net_from_spec "$uplink_spec"
+else
+	net_from_machine
+fi
 [ -n "$mac" ] || die "no network interface with a default route; the new system would be unreachable"
-dns="1.1.1.1 8.8.8.8"
 
 # chroot_resolv FILE: the resolver for a chroot, the rescue system's own
 # (its systemd-resolved falls back to TCP where a firewall at the provider
-# lets no UDP answers in), else the public resolvers
+# lets no UDP answers in), else the uplink's static resolvers or the
+# public ones
 chroot_resolv() {
 	if grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
 		grep -E '^(nameserver|options|search) ' /etc/resolv.conf > "$1"
 	else
-		printf 'nameserver %s\n' $dns > "$1"
+		printf 'nameserver %s\n' ${dns:-1.1.1.1 8.8.8.8} > "$1"
 	fi
 }
 
@@ -371,6 +603,7 @@ done
 uplink=""
 for i in "${!IF_MAC[@]}"; do [ "${IF_MAC[$i]}" = "$mac" ] && uplink="${IF_NAME[$i]}"; done
 if [ -z "$uplink" ]; then
+	[ -z "$uplink_spec" ] || die "the uplink of the specification, $mac, is no interface of this machine (it has ${IF_MAC[*]:-none})"
 	# the uplink's MAC was given, but no such interface is up here: keep it
 	uplink=uplink; [ "$rename" = yes ] && uplink=ext01
 	IF_MAC=("$mac" "${IF_MAC[@]}"); IF_KIND=(ext "${IF_KIND[@]}"); IF_OLD=("?" "${IF_OLD[@]}"); IF_NAME=("$uplink" "${IF_NAME[@]}")
@@ -401,7 +634,7 @@ for k in "${!L_VG[@]}"; do
 	r="linear"; [ "${L_RAID[$k]}" != none ] && r="raid ${L_RAID[$k]}"
 	log "  ${L_VG[$k]}/${L_NAME[$k]}: ${L_SIZE[$k]} $r ${L_FS[$k]}${L_MOUNT[$k]:+ at ${L_MOUNT[$k]}}"
 done
-log "network: $uplink ($mac) $ip4${ip6:+ $ip6}; IPv6 $([ "$ipv6" = true ] && echo on || echo off); DNS $dns; hostname $hostname; time zone $timezone"
+log "network: $(net_plan); hostname $hostname; time zone $timezone"
 ifs=""
 for i in "${!IF_MAC[@]}"; do
 	was=""
@@ -929,76 +1162,22 @@ echo "$timezone" > "$TARGET/etc/timezone"
 
 if [ "$family" = arch ]; then
 # Arch: systemd-networkd itself, the same configuration as netplan writes
-# on Ubuntu and Debian: names by MAC (.link), the uplink static
-nd="$TARGET/etc/systemd/network"
-mkdir -p "$nd"
-for i in "${!IF_MAC[@]}"; do
-	if [ "$rename" = yes ]; then
-		printf '# written by UMP at installation: the uniform name of this interface\n[Match]\nMACAddress=%s\n\n[Link]\nName=%s\n' \
-			"${IF_MAC[$i]}" "${IF_NAME[$i]}" > "$nd/10-ump-${IF_NAME[$i]}.link"
-	fi
-	[ "${IF_NAME[$i]}" = "$uplink" ] && continue
-	printf '# written by UMP at installation: up, without addresses\n[Match]\nMACAddress=%s\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nLinkLocalAddressing=no\n' \
-		"${IF_MAC[$i]}" > "$nd/20-ump-${IF_NAME[$i]}.network"
-done
-{
-	echo "# written by UMP at installation; networkctl reload after editing"
-	echo "[Match]"
-	echo "MACAddress=$mac"
-	echo
-	echo "[Network]"
-	if [ -z "$ip4$ip6" ]; then
-		echo "DHCP=ipv4"
-	else
-		[ -n "$ip4" ] && echo "Address=${ip4%%,*}"
-		[ "$ipv6" = true ] && [ -n "$ip6" ] && echo "Address=${ip6%%,*}"
-	fi
-	for d in $dns; do echo "DNS=$d"; done
-	if [ "$ipv6" = true ]; then echo "IPv6AcceptRA=no"; else echo "LinkLocalAddressing=no"; echo "IPv6AcceptRA=no"; fi
-	case "$ip4" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip4#*,}" ;; esac
-	if [ "$ipv6" = true ]; then case "$ip6" in *,*) printf '\n[Route]\nGateway=%s\nGatewayOnLink=yes\n' "${ip6#*,}" ;; esac; fi
-} > "$nd/20-ump-$uplink.network"
+# on Ubuntu and Debian
+mkdir -p "$TARGET/etc/systemd/network"
+networkd_files "$TARGET/etc/systemd/network"
 ln -sf ../run/systemd/resolve/stub-resolv.conf "$TARGET/etc/resolv.conf"
 echo "LANG=C.UTF-8" > "$TARGET/etc/locale.conf"
 echo "KEYMAP=us" > "$TARGET/etc/vconsole.conf"
 else
 mkdir -p "$TARGET/etc/netplan"
-{
-	echo "# written by UMP at installation; netplan try / netplan apply after editing"
-	echo "network:"
-	echo "  version: 2"
-	echo "  renderer: networkd"
-	echo "  ethernets:"
-	for i in "${!IF_MAC[@]}"; do
-		[ "${IF_NAME[$i]}" = "$uplink" ] && continue
-		echo "    ${IF_NAME[$i]}:"
-		echo "      match:"
-		echo "        macaddress: \"${IF_MAC[$i]}\""
-		[ "$rename" = yes ] && echo "      set-name: ${IF_NAME[$i]}"
-		echo "      dhcp4: false"
-		echo "      optional: true"
-		[ "$ipv6" = true ] || echo "      link-local: []"
-	done
-	echo "    $uplink:"
-	echo "      match:"
-	echo "        macaddress: \"$mac\""
-	[ "$rename" = yes ] && echo "      set-name: $uplink"
-	if [ -z "$ip4$ip6" ]; then
-		echo "      dhcp4: true"
-	else
-		echo "      dhcp4: false"
-		echo "      addresses:"
-		[ -n "$ip4" ] && echo "        - \"${ip4%%,*}\""
-		[ "$ipv6" = true ] && [ -n "$ip6" ] && echo "        - \"${ip6%%,*}\""
-		echo "      routes:"
-		case "$ip4" in *,*) printf '        - to: default\n          via: "%s"\n          on-link: true\n' "${ip4#*,}" ;; esac
-		if [ "$ipv6" = true ]; then case "$ip6" in *,*) printf '        - to: "::/0"\n          via: "%s"\n          on-link: true\n' "${ip6#*,}" ;; esac; fi
-	fi
-	if [ "$ipv6" = true ]; then echo "      accept-ra: false"; else echo "      link-local: []"; fi
-	echo "      nameservers:"
-	echo "        addresses: [$(echo "$dns" | sed 's/ /, /g')]"
-} > "$TARGET/etc/netplan/10-ump.yaml"
+netplan_yaml > "$TARGET/etc/netplan/10-ump.yaml"
 chmod 600 "$TARGET/etc/netplan/10-ump.yaml"
+# the image's resolved configuration has the public resolvers; others
+# come from the specification's uplink
+if [ "$dns_source" != public ]; then
+	mkdir -p "$TARGET/etc/systemd/resolved.conf.d"
+	resolved_conf > "$TARGET/etc/systemd/resolved.conf.d/ump.conf"
+fi
 fi
 
 if [ "$family" = arch ]; then
@@ -1214,8 +1393,7 @@ KbdInteractiveAuthentication no
 SSHD
 	grep -q '^Include /etc/ssh/sshd_config.d/\*\.conf' "$TARGET/etc/ssh/sshd_config" \
 		|| sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' "$TARGET/etc/ssh/sshd_config"
-	printf '# UMP: public resolvers, independent of the provider; the .network\n# file sets the same per interface. Replace both to use your own.\n[Resolve]\nDNS=%s\n' "$dns" \
-		> "$TARGET/etc/systemd/resolved.conf.d/ump.conf"
+	resolved_conf > "$TARGET/etc/systemd/resolved.conf.d/ump.conf"
 	echo throughput-performance > "$TARGET/etc/tuned/active_profile"
 	echo manual > "$TARGET/etc/tuned/profile_mode"
 	# the boot menu: two seconds, no other systems searched
@@ -1348,16 +1526,13 @@ install_nixos() {
 	bios_disks="$(for x in "${disks[@]}"; do for i in "${!P_DISK[@]}"; do [ "${P_DISK[$i]}" = "$x" ] && [ "${P_FS[$i]}" = bios ] && { echo "$x"; break; }; done; done; true)"
 	lvm_raid=false; for k in "${!L_VG[@]}"; do [ "${L_RAID[$k]}" != none ] && lvm_raid=true; done
 	jq -n --arg os "$os" --arg state_version "$(jq -r .state_version <<< "$manifest")" \
-		--slurpfile interfaces "$TARGET/etc/nixos/ump/interfaces.json" --arg uplink_mac "$mac" \
-		--arg ip4 "${ip4%%,*}" --arg gw4 "$(case "$ip4" in *,*) echo "${ip4#*,}" ;; esac)" \
-		--arg ip6 "${ip6%%,*}" --arg gw6 "$(case "$ip6" in *,*) echo "${ip6#*,}" ;; esac)" \
-		--arg dns "$dns" --arg cmdline "$kernel_cmdline" --argjson rename "$([ "$rename" = yes ] && echo true || echo false)" \
+		--slurpfile interfaces "$TARGET/etc/nixos/ump/interfaces.json" --argjson net "$(nixos_net_facts)" \
+		--arg cmdline "$kernel_cmdline" --argjson rename "$([ "$rename" = yes ] && echo true || echo false)" \
 		--argjson efi "$([ "$has_efi" = 1 ] && echo true || echo false)" --arg bios "$bios_disks" \
 		--argjson md "$([ ${#M_LEVEL[@]} -gt 0 ] && echo true || echo false)" --arg mdadm_conf "$( [ ${#M_LEVEL[@]} -gt 0 ] && mdadm --detail --scan || true)" \
 		--arg swaps "$(for sw in "${SWAPS[@]:-}"; do [ -n "$sw" ] && blkid -s UUID -o value "$sw"; done)" \
 		--argjson lvm_raid "$lvm_raid" '{
-		os: $os, state_version: $state_version, rename: $rename, interfaces: $interfaces[0], uplink_mac: $uplink_mac,
-		ip4: $ip4, gw4: $gw4, ip6: $ip6, gw6: $gw6, dns: ($dns | split(" ")),
+		os: $os, state_version: $state_version, rename: $rename, interfaces: $interfaces[0]} + $net + {
 		kernel_params: ($cmdline | split(" ") | map(select(. != ""))),
 		efi: $efi, bios_disks: ($bios | split("\n") | map(select(. != ""))),
 		md: $md, mdadm_conf: $mdadm_conf, lvm_raid: $lvm_raid,
@@ -1433,7 +1608,28 @@ private=$private_list
 private_network=$private_network
 private_address=$private_address
 META
+[ -z "$uplink_spec" ] || net_record >> "$TARGET/etc/ump/install"
 chmod 644 "$TARGET/etc/ump/install"
+
+# the record for the caller (--record): the installation and the host
+# keys of the new system, read before it is unmounted
+if [ -n "$record" ]; then
+	# NixOS's sshd makes its host keys at the first boot; made now, they
+	# can be recorded, and the first connection can check them
+	if [ "$family" = nixos ]; then
+		mkdir -p "$TARGET/etc/ssh"
+		for t in ed25519 rsa; do
+			k="$TARGET/etc/ssh/ssh_host_${t}_key"
+			bits=(); [ "$t" = rsa ] && bits=(-b 4096)
+			[ -f "$k" ] || ssh-keygen -q -t "$t" "${bits[@]}" -N '' -C "root@$hostname" -f "$k" || warn "could not make the SSH host key $k"
+		done
+	fi
+	mkdir -p "$record"
+	rm -f "$record/install" "$record"/ssh_host_*_key.pub
+	cp "$TARGET/etc/ump/install" "$record/install"
+	cp "$TARGET"/etc/ssh/ssh_host_*_key.pub "$record/" 2>/dev/null || warn "the new system has no SSH host keys to record"
+	log "record: $record"
+fi
 
 sync
 cleanup

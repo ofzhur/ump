@@ -17,6 +17,7 @@ import (
 	"github.com/ofzhur/ump/internal/home"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/provider/manual"
+	pxeprovider "github.com/ofzhur/ump/internal/provider/pxe"
 	"github.com/ofzhur/ump/internal/state"
 )
 
@@ -60,7 +61,7 @@ const pullTimeout = 10 * time.Second
 // push, so it takes no lock of the mirror and writes nothing there but
 // the listing cache, which the parent's push carries along.
 func (a *app) resolveHome(ctx context.Context, offline bool) error {
-	a.doc, a.store, a.manual = nil, nil, nil
+	a.doc, a.store, a.manual, a.pxeConf, a.pxeErr = nil, nil, nil, nil, nil
 	parent := os.Getenv(parentEnv)
 	a.nested = parent != ""
 	resolve := func() (*home.Resolved, error) { return home.Resolve(a.sshRunner(), a.httpClient) }
@@ -73,7 +74,7 @@ func (a *app) resolveHome(ctx context.Context, offline bool) error {
 	}
 	a.home = h
 	config.SetHome(h.Dir)
-	if h.Backend == nil {
+	if h.Backend == nil || a.daemon {
 		return nil
 	}
 	if a.nested {
@@ -104,7 +105,7 @@ func (a *app) resolveHome(ctx context.Context, offline bool) error {
 // pushHome writes what a command changed in the mirror back to the
 // backend; conflicts are named and left for ump config state push.
 func (a *app) pushHome(ctx context.Context) {
-	if a.home == nil || a.home.Backend == nil || a.pullFailed || a.nested {
+	if a.home == nil || a.home.Backend == nil || a.pullFailed || a.nested || a.daemon {
 		return
 	}
 	m := &home.Mirror{Backend: a.home.Backend, Dir: a.home.Dir, Now: a.now}
@@ -154,7 +155,9 @@ func (a *app) stateStore() *state.Store {
 }
 
 // loadState reads the state document and makes the manual servers
-// known to the manual provider type, with the account that lists them.
+// known to the manual provider type, and the machines of pxe.yaml to
+// the pxe provider type, each with the account that lists them; that of
+// a pxe.yaml that is not valid lists nothing but why.
 func (a *app) loadState(ctx context.Context, cfg *config.Config) (*state.Document, error) {
 	if a.doc == nil {
 		d, _, err := a.stateStore().Read(ctx)
@@ -163,21 +166,43 @@ func (a *app) loadState(ctx context.Context, cfg *config.Config) (*state.Documen
 		}
 		a.doc = d
 	}
-	a.manualAccount(cfg, a.doc)
+	a.manual = a.doc.Manual
+	if len(a.doc.Manual) > 0 {
+		homeAccount(cfg, manual.AccountName, manual.TypeName)
+	}
+	a.pxeConf, a.pxeErr = loadPXE()
+	if a.pxeErr != nil || len(a.pxeConf.Names()) > 0 {
+		homeAccount(cfg, pxeprovider.AccountName, pxeprovider.TypeName)
+	}
 	return a.doc, nil
 }
 
-func (a *app) manualAccount(cfg *config.Config, d *state.Document) {
-	a.manual = d.Manual
-	if len(d.Manual) == 0 {
+// homeAccount adds the account of a home-listed provider type to the
+// configuration, unless an account of that name is there.
+func homeAccount(cfg *config.Config, name, typeName string) {
+	if _, ok := cfg.Accounts[name]; ok {
 		return
 	}
-	if _, ok := cfg.Accounts[manual.AccountName]; !ok {
-		if cfg.Accounts == nil {
-			cfg.Accounts = map[string]config.Account{}
-		}
-		cfg.Accounts[manual.AccountName] = config.Account{Type: manual.TypeName, Settings: map[string]config.Value{}}
+	if cfg.Accounts == nil {
+		cfg.Accounts = map[string]config.Account{}
 	}
+	cfg.Accounts[name] = config.Account{Type: typeName, Settings: map[string]config.Value{}}
+}
+
+// homeLists says that the home lists the server id of a home-listed
+// provider type: a manual server is listed by the state (ump server
+// add), a PXE machine by pxe.yaml as loadState read it. A type it
+// cannot tell for is taken as listed, and so is every PXE machine
+// while pxe.yaml is not valid or not read, so that nothing of it goes.
+func (a *app) homeLists(doc *state.Document, typeName, id string) bool {
+	switch typeName {
+	case manual.TypeName:
+		_, ok := doc.Manual[id]
+		return ok
+	case pxeprovider.TypeName:
+		return a.pxeErr != nil || a.pxeConf == nil || a.pxeConf.Machine(id) != nil
+	}
+	return true
 }
 
 // updateState changes the state document; the next loadState reads it

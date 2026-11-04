@@ -1,0 +1,92 @@
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    int01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      set-name: int01
+      dhcp4: false
+      optional: true
+    ext01:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      set-name: ext01
+      dhcp4: false
+      addresses:
+        - "203.0.113.10/26"
+        - "2001:db8::2/64"
+      routes:
+        - to: default
+          via: "203.0.113.1"
+          on-link: true
+        - to: "::/0"
+          via: "fe80::1"
+          on-link: true
+      accept-ra: false
+      nameservers:
+        addresses: [1.1.1.1, 8.8.8.8]
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "203.0.113.10/26",
+  "gw4": "203.0.113.1",
+  "ip6": "2001:db8::2/64",
+  "gw6": "fe80::1",
+  "dns": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ]
+}
+==> etc/systemd/network/10-ump-ext01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Link]
+Name=ext01
+==> etc/systemd/network/10-ump-int01.link
+# written by UMP at installation: the uniform name of this interface
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+Name=int01
+==> etc/systemd/network/20-ump-ext01.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+Address=203.0.113.10/26
+Address=2001:db8::2/64
+DNS=1.1.1.1
+DNS=8.8.8.8
+IPv6AcceptRA=no
+
+[Route]
+Gateway=203.0.113.1
+GatewayOnLink=yes
+
+[Route]
+Gateway=fe80::1
+GatewayOnLink=yes
+==> etc/systemd/network/20-ump-int01.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: public resolvers, independent of the provider; the .network
+# file sets the same per interface. Replace both to use your own.
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+==> plan
+ext01 (0c:c4:7a:aa:bb:11) 203.0.113.10/26,203.0.113.1 2001:db8::2/64,fe80::1; IPv6 on; DNS 1.1.1.1 8.8.8.8

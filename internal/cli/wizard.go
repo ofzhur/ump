@@ -14,7 +14,6 @@ import (
 
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/provider"
-	"github.com/ofzhur/ump/internal/provider/manual"
 )
 
 // prompter implements provider.Prompter on the app's stdin and stdout.
@@ -271,7 +270,7 @@ func (a *app) runWizard(cmd *cobra.Command) error {
 
 	var types []provider.Type
 	for _, t := range provider.Types() {
-		if t.Name != manual.TypeName { // manual servers come with ump server add
+		if !t.HomeListed { // their servers come otherwise (AddHint)
 			types = append(types, t)
 		}
 	}

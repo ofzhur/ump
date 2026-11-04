@@ -1,0 +1,70 @@
+==> etc/netplan/10-ump.yaml
+# written by UMP at installation; netplan try / netplan apply after editing
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eno1:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:10"
+      dhcp4: false
+      optional: true
+      link-local: []
+    eno2:
+      match:
+        macaddress: "0c:c4:7a:aa:bb:11"
+      dhcp4: true
+      dhcp-identifier: mac
+      link-local: []
+      nameservers:
+        addresses: [1.1.1.1, 8.8.8.8]
+==> etc/nixos/ump/facts.network.json
+{
+  "uplink_mac": "0c:c4:7a:aa:bb:11",
+  "ip4": "",
+  "gw4": "",
+  "ip6": "",
+  "gw6": "",
+  "dns": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ],
+  "dhcp4": true,
+  "dhcp4_dns": true,
+  "auto6": false
+}
+==> etc/systemd/network/20-ump-eno1.network
+# written by UMP at installation: up, without addresses
+[Match]
+MACAddress=0c:c4:7a:aa:bb:10
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+==> etc/systemd/network/20-ump-eno2.network
+# written by UMP at installation; networkctl reload after editing
+[Match]
+MACAddress=0c:c4:7a:aa:bb:11
+
+[Network]
+DHCP=ipv4
+DNS=1.1.1.1
+DNS=8.8.8.8
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+
+[DHCPv4]
+ClientIdentifier=mac
+==> etc/systemd/resolved.conf.d/ump.conf
+# UMP: public resolvers, independent of the provider; the .network
+# file sets the same per interface. Replace both to use your own.
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+==> etc/ump/install.network
+network=dhcp
+network6=none
+dns=1.1.1.1,8.8.8.8
+==> plan
+eno2 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 none (the specification's uplink); IPv6 off; DNS 1.1.1.1 8.8.8.8

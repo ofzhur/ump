@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build a static kexec binary, so that a provider rescue system without
-# kexec-tools can still kexec into the UMP rescue image. Output: $OUT/kexec.
+# kexec-tools can still kexec into the UMP rescue image. Output: $OUT/kexec,
+# and next to it its source as kernel.org publishes it (kexec-tools is
+# GPL-2.0), $OUT/kexec-tools-<version>.tar.xz, which goes out with it.
 # Another architecture than the build host's is cross-compiled
 # (crossbuild-essential-<arch> and the multiarch zlib/lzma dev packages).
 set -euo pipefail
@@ -12,8 +14,8 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT"
 cd "$WORK"
 url="https://www.kernel.org/pub/linux/utils/kernel/kexec/kexec-tools-$KEXEC_VERSION.tar.xz"
-curl -fsSL -o kexec-tools.tar.xz "$url"
-tar -xf kexec-tools.tar.xz
+curl -fsSL -o "kexec-tools-$KEXEC_VERSION.tar.xz" "$url"
+tar -xf "kexec-tools-$KEXEC_VERSION.tar.xz"
 cd "kexec-tools-$KEXEC_VERSION"
 configure_opts=()
 strip_bin=strip
@@ -30,4 +32,6 @@ fi
 make -s -j"$(nproc)"
 "$strip_bin" build/sbin/kexec
 cp build/sbin/kexec "$OUT/kexec"
-echo "kexec-tools $KEXEC_VERSION, static, for $ARCH: $OUT/kexec"
+rm -f "$OUT"/kexec-tools-*.tar.xz
+cp "$WORK/kexec-tools-$KEXEC_VERSION.tar.xz" "$OUT/"
+echo "kexec-tools $KEXEC_VERSION, static, for $ARCH: $OUT/kexec, its source $OUT/kexec-tools-$KEXEC_VERSION.tar.xz"

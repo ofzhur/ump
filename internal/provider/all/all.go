@@ -12,6 +12,7 @@ import (
 	"github.com/ofzhur/ump/internal/provider/linode"
 	"github.com/ofzhur/ump/internal/provider/manual"
 	"github.com/ofzhur/ump/internal/provider/ovh"
+	"github.com/ofzhur/ump/internal/provider/pxe"
 	"github.com/ofzhur/ump/internal/provider/vultr"
 )
 
@@ -23,4 +24,5 @@ func init() {
 	provider.Register(digitalocean.Type)
 	provider.Register(vultr.Type)
 	provider.Register(manual.Type)
+	provider.Register(pxe.Type)
 }

@@ -4,8 +4,8 @@
 #   spec.json       the resolved profile (users and keys, kernel switches,
 #                   time zone, firewall, interface naming)
 #   facts.json      what the installer found on the machine (interfaces and
-#                   their MAC addresses, the uplink's addresses, the boot
-#                   disks, md arrays)
+#                   their MAC addresses, the uplink's addresses or what the
+#                   specification says of it, the boot disks, md arrays)
 #   nftables.conf   the firewall ruleset, the same UMP writes on Ubuntu
 #   motd.sh         the message of the day, the same script as on Ubuntu
 #   bashrc.sh       the shell setup (prompt, aliases), the same as on Ubuntu
@@ -40,6 +40,16 @@ let
 
   ipv6 = spec.kernel.ipv6 or false;
   drop = (spec.firewall.policy or "accept") == "drop";
+
+  # the uplink takes DHCP when the specification's uplink says so
+  # (dhcp4, identified by its MAC then, with the lease's resolvers unless
+  # the specification lists its own: dhcp4_dns), else when the machine
+  # had no address; router advertisements only when that uplink says so
+  # (auto6)
+  dhcp4 = facts.dhcp4 or (facts.ip4 == "" && facts.ip6 == "");
+  dhcpByMac = facts.dhcp4 or false;
+  leaseDNS = facts.dhcp4_dns or true;
+  auto6 = ipv6 && (facts.auto6 or false);
 in
 {
   # --- the machine ---------------------------------------------------------
@@ -77,8 +87,9 @@ in
   boot.initrd.kernelModules = lib.optionals facts.lvm_raid [ "dm-raid" "raid0" "raid1" "raid10" "raid456" ];
 
   # --- the network: the interfaces by MAC address, renamed to ext01, int01,
-  # ... unless the profile keeps the kernel's names; the uplink with the
-  # addresses the machine had, the others without ----------------------------
+  # ... unless the profile keeps the kernel's names; the uplink as the
+  # specification says or with the addresses the machine had, the others
+  # without -------------------------------------------------------------------
 
   networking.useDHCP = false;
   networking.useNetworkd = true;
@@ -100,12 +111,16 @@ in
         routes = lib.optionals uplink (lib.optional (facts.gw4 != "") { Gateway = facts.gw4; GatewayOnLink = true; }
           ++ lib.optional (ipv6 && facts.gw6 != "") { Gateway = facts.gw6; GatewayOnLink = true; });
         dns = lib.optionals uplink facts.dns;
-        DHCP = if uplink && facts.ip4 == "" && facts.ip6 == "" then "ipv4" else "no";
+        DHCP = if uplink && dhcp4 then "ipv4" else "no";
         networkConfig = {
           LinkLocalAddressing = if ipv6 then "ipv6" else "no";
-          IPv6AcceptRA = false;
+          IPv6AcceptRA = uplink && auto6;
         };
         linkConfig.RequiredForOnline = if uplink then "routable" else "no";
+      } // lib.optionalAttrs (uplink && dhcp4 && dhcpByMac) {
+        dhcpV4Config = { ClientIdentifier = "mac"; } // lib.optionalAttrs (!leaseDNS) { UseDNS = false; };
+      } // lib.optionalAttrs (uplink && auto6) {
+        ipv6AcceptRAConfig.Token = "eui64";
       };
     }) facts.interfaces);
 

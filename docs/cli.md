@@ -36,8 +36,8 @@ ump
 │   │                                                  what changed since the last listing; the cached listing;
 │   │                                                  the Ansible inventory of the servers ump installed
 │   ├── show (v, view) <ref>... [-o text|json|yaml]    everything the provider knows about a server
-│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--private-network <list>|none]... [--private-ip [<network>=]<addr>]... [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
-│   ├── multiinstall (parallel-install) <ref>... | --plan <file> [reinstall's flags of a server] [--parallel <n>] [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+│   ├── reinstall (install) <ref> [--profile <name|file>] [--layout <name>] [--firewall <name>] [--os <name>] [--hostname <name>] [--private-network <list>|none]... [--private-ip [<network>=]<addr>]... [--user <name>[:<key>,...]]... [--userdata <list>]... [--ssh-key <ref>]... [--set <field>=<value>]... [--ipv6] [--mitigations] [--disks <list>] [--timezone <zone>] [--storage <url>] [--group <list>]... [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--via auto|direct|provider] [--unattended [--no-wait [--armed-for <d>]]] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+│   ├── multiinstall (parallel-install) <ref>... | --plan <file> [reinstall's flags of a server] [--parallel <n>] [--hosts <pattern>] [--playbook <list>]... [--no-provision] [--unattended [--no-wait [--armed-for <d>]]] [--dry-run] [--yes] [-o json|yaml]
 │   │                                                  several servers at once, each as reinstall does, then one provisioning run
 │   ├── rescue       <ref> [--image <url>] [--via auto|direct|provider] [--no-image] [--ssh-key <ref>]... [--no-reboot] [--no-wait] [--no-connect] [--force] [--yes] [-- command]
 │   ├── unrescue     <ref> [--reboot] [--wait] [--yes]
@@ -55,7 +55,7 @@ ump
 │   │                                                  a server by hand, without a provider API (account "manual")
 │   └── remove (rm, d) <name> [--yes]                  forget a server added by hand
 ├── provision        [--hosts <pattern>] [--playbook <list>]... [--yes] [-o json|yaml] [-- ansible-args]
-│                                                      the playbooks of the infrastructure repository on the fleet
+│                                                      the playbooks of the infrastructure repository on the fleet, after recording the unattended installations that ended
 ├── ssh              <ref> [--user <name>] [--staging] [-- command]
 ├── config (c, cfg)                                    each entity prints its help when called bare
 │   ├── isp (i, provider, account)                     the accounts
@@ -104,6 +104,13 @@ ump
 │   │   ├── create   (c, new, add) [<name>] [--from <name>]   copy one into the file and open it in your editor; asks on a terminal
 │   │   ├── edit     (e) [<name>]                      that entry alone in your editor, or all of userdata.yaml; checked afterwards
 │   │   └── delete   (d, rm, remove) <name> [--yes]
+│   ├── pxe (px)                                       the machines ump boots over the network (pxe.yaml), and their sites
+│   │   ├── list     (ls, l) [-o wide|json|yaml]       the machines, with site, MAC, status, profile, address and when a PXE server saw them
+│   │   ├── get      (g, show) <name> [--merged]       print one, or with the values of defaults and of its site
+│   │   ├── create   (c, new, add) <name> --mac <mac> [--site <s>] [--mode local|rescue|install] [--set <k>=<v>]   add one; in your editor on a terminal without --mac
+│   │   ├── edit     (e) [<name>]                      that machine alone in your editor, or all of pxe.yaml; checked and applied afterwards
+│   │   ├── delete   (d, rm, remove) <name> [--yes]    from pxe.yaml, the state and its site
+│   │   └── apply    [--yes]                           check pxe.yaml, render what the PXE servers of each site serve, arm the standing installations
 │   ├── state (st)                                     the state backend: the local directory, or one shared by a team
 │   │   ├── view     (v, show)                         which backend, the mirror, what the state holds
 │   │   ├── setup    (configure, edit)                 the wizard on a terminal: pick a backend, migrate the state there
@@ -121,6 +128,12 @@ ump
 │       ├── edit     (e) [<name>]                      that key alone in your editor, or all of keys.yaml; checked afterwards
 │       ├── remove   (rm, d, delete) <name>
 │       └── roll     [--no-servers] [--drop-old] [--yes]  a new key pair for UMP; every server ump installed gets it and loses the old one
+├── pxe                                                the PXE server of a site, and what the PXE servers see
+│   ├── serve        [--site <name>] [--http <addr>] [--url <url>] [--tftp <addr>] [--ipxe-dir <dir>] [--data <dir>] [--cache <dir>] [--poll <d>] [--install-timeout <d>] [--check]
+│   │                                                  the PXE server: chain mode, the rescue system, unattended installations, optional read-only TFTP of the iPXE binaries
+│   ├── status       [name|mac...] [--unknown] [--log <name>] [-o table|wide|json|yaml]   the servers of each site, the machines and their last boots
+│   ├── disarm       <name>... [-o json|yaml]          take an armed network boot back
+│   └── unit         [--check] [--exec <path>]         the server's systemd unit (or its check's), as the packages install it
 ├── completion
 └── version
 ```
@@ -478,6 +491,20 @@ that crashes reboots by itself after 30 seconds, into the system on the
 disk. [Troubleshooting](troubleshooting.md) says how to find out what
 went wrong without a console.
 
+A machine of [`pxe.yaml`](#ump-config-pxe), `pxe/NAME`, has a network
+boot of UMP's rescue system for step 3. ump arms it for the wait and
+waits up to 30 seconds for a PXE server of the machine's site to take
+the arm (the note says whether one did), reboots the running system
+over SSH where it lets UMP in (`--via provider`), else asks you to
+power-cycle the machine, and waits for the rescue system to report in
+to the PXE server. It connects at the address the rescue system
+reported, which serves this run only, with the host keys it reported
+pinned for the run. When the wait ends without that, the arm goes
+(exit code 5). `--no-image` changes nothing, as the rescue system is
+UMP's; `--no-reboot` and `--no-wait` arm the boot for a day and leave
+the reboot to you. `unrescue` disarms it; a machine whose mode is
+`rescue` boots it at every boot until `pxe.yaml` says `local`.
+
 `unrescue` disables the provider's rescue system so that the next boot
 is from disk, and with `--reboot` resets the server now. The UMP rescue
 system itself runs from RAM, so a reset leaves it; whether that boots
@@ -489,6 +516,7 @@ their boot option until `unrescue`.
 
 ```
 ump server reinstall REF [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--via auto|direct|provider] [--dry-run] [--no-reboot] [--yes] [-o json|yaml]
+ump server reinstall REF --unattended [--no-wait [--armed-for DURATION]] [reinstall's other flags but --via and --no-reboot]
 ```
 
 Puts an operating system on the server's disks from a [UMP base
@@ -547,7 +575,8 @@ disk a physical volume of one volume group, with root as one linear
 volume over all of it; `lvm-striped`, `lvm-raid1` and `lvm-example` are
 the other published [layouts](disk-layouts.md), and a profile can carry
 its own (`--disks` limits the disks). The new system gets the server's
-name as hostname (`--hostname` for another; it must be a valid one), the
+name as hostname (a PXE machine its `hostname` in `pxe.yaml`;
+`--hostname` for another; it must be a valid one), the
 address, gateway and interface of the rescue system (which `rescue`
 carried over from the running system), uniform interface names (`ext01`,
 `int01`, ...; see [the profiles](profiles.md#interface-names)), resolvers
@@ -662,11 +691,46 @@ Providers that keep their rescue system as the boot option (OVHcloud)
 have it disabled before the reboot. Asks for confirmation on a
 terminal; without one, `--yes` is required.
 
+On a machine of `pxe.yaml`, the new system configures the network the
+machine's entry gives (`network`: a static address or DHCP, its DNS),
+not the one the rescue system has, and that may not overlap the
+server's private networks (exit code 2). ump waits for the new system
+at the machine's own address, the static one or `address:` (a DHCP
+server's reservation), never one learned at boot, so a machine with
+neither is refused.
+
+`--unattended` has the machine install by itself, at its next boot,
+without ump's SSH session ([unattended
+installations](pxe.md#unattended-installations); PXE machines alone,
+exit status 2 for others): ump renders and checks the installation as
+above, says which disks it may erase (`--disks` by stable names, else
+those its last network boot reported, else blank ones alone), asks once
+(`Erase pxe/web-07 (web-07, 192.0.2.17) at its next boot and install
+... unattended as web-07?`), and arms it under the server's lock with
+the private addresses reserved. Then it reboots the running system over
+SSH when that lets UMP in, else says to power-cycle the machine, follows
+the installation for up to an hour (the configured `wait` when longer),
+checks the new system at the machine's own address with the host keys
+the installation reported pinned (one that reported none is not
+recorded), and only then records it, puts those keys into
+`~/.ssh/known_hosts` and provisions, as above. `--no-wait` returns once
+armed (for two hours, `--armed-for`), and the next `ump provision`
+records it; `--dry-run` arms nothing. An installation armed for the
+machine, or one that installed and waits to be recorded, is replaced by
+any reinstall of it, which its question says; one that a boot claimed
+and writes refuses it (exit status 3), and so does one that came after
+the question. A failed or refused installation records nothing and
+gives the private addresses back (exit status 1); one that no boot
+claimed within the wait is disarmed and gives them back (exit status
+5), one that a boot claimed goes on (exit status 5, `ump pxe status
+--log NAME` follows it). `-o json` says `"via": "unattended"`, and with
+`--no-wait` the arm (`armed`).
+
 ## Install several: `ump server multiinstall`
 
 ```
-ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
-ump server multiinstall --plan FILE [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--dry-run] [--yes] [-o json|yaml]
+ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--unattended [--no-wait [--armed-for DURATION]]] [--dry-run] [--yes] [-o json|yaml]
+ump server multiinstall --plan FILE [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--unattended [--no-wait [--armed-for DURATION]]] [--dry-run] [--yes] [-o json|yaml]
 ```
 
 Installs several servers at once (alias `parallel-install`), each the
@@ -784,10 +848,22 @@ installations; those that completed are recorded, and the next `ump
 provision` includes them; those not started give their private addresses
 back and let their locks go.
 
+`--unattended` installs every server as `reinstall --unattended` does
+one: the table, each server's disks and one question, then all armed
+under their locks (which go once they are armed), their private
+addresses reserved together, as they were planned, the installations
+waited for side by side and each new system checked, then the records
+and the one run of `ump provision`. A plan's `via` other than `auto` is refused
+with it, and so is a server whose provider has no unattended
+installations; `--parallel` changes nothing, the machines install by
+themselves. `--no-wait` returns once all are armed (`armed` in the
+summary; the next `ump provision` records them).
+
 The summary on stdout says per server whether it was installed (`dry-run`
-for a plan alone) and provisioned (`-` where nothing ran for it), and why
-not; `-o json` prints `servers`, each the result of `reinstall -o json`
-with `installed` and `reason`, and `provision`, the result of the run.
+for a plan alone, `armed` for an installation not waited for) and
+provisioned (`-` where nothing ran for it), and why not; `-o json`
+prints `servers`, each the result of `reinstall -o json` with
+`installed` and `reason`, and `provision`, the result of the run.
 Exit status 1 means an installation failed, 6 that the provisioning did
 not complete (on any host, named as by `ump provision`), 2 or 3 that it
 could not run (`--hosts` matching nothing once the host files were
@@ -824,6 +900,18 @@ failed or were unreachable. Without `--hosts` it asks on a terminal (the
 whole fleet); without one, `--yes` is required. See
 [provisioning](provisioning.md).
 
+Before the run, ump records the [unattended
+installations](pxe.md#unattended-installations) that ended since: each
+that installed, once SSH at the machine's own address answers as its
+administrator with UMP's key and the host keys the installation
+reported pinned (its arm and outcome go then, and the run includes it),
+each that failed giving its private addresses back, each whose arm
+expired before a boot claimed it disarmed, giving them back too. What
+it cannot record yet (the new system does not answer, another ump holds
+the server's lock) it says, and the next run tries again; so it says
+each that failed or did not report, which `ump pxe disarm NAME` clears.
+None of it stops the run.
+
 ## `ump server set`, `add` and `remove`
 
 ```
@@ -854,8 +942,9 @@ gives it that address in one of its networks, those of
 `--private-network` or else those it has. The addresses are checked as
 for `reinstall`, within the state's read-modify-write (exit status 2,
 naming the server that has one), under the server's lock (exit status 3
-while an installation holds it); nothing runs, the next `ump provision`
-writes the host file with them.
+while an installation holds it, or an unattended one is armed for it or
+writes); nothing runs, the next `ump provision` writes the host file
+with them.
 
 `add` puts a server no provider lists into the [state](state.md#the-state-document)
 (`manual:`), listed by the account `manual` of provider type `manual`;
@@ -880,6 +969,13 @@ UMP's key alone and without host key checks, because those systems have
 a fresh host key every boot (a rescue system seen through a known address
 needs `--staging` for that reason).
 
+A machine behind a jump host, a PXE site's `jump`, is reached through it
+as ssh's `ProxyJump`, by ump's own SSH (`ump ssh`, the rescue system,
+reinstall and its check of the new system) and by Ansible (the host's
+`ansible_ssh_common_args`). ssh offers the jump host the keys of your
+own SSH setup, the agent's, `~/.ssh/id_*` and `~/.ssh/config`, not
+UMP's key.
+
 Provider differences: Hetzner Robot takes the fingerprints of keys
 registered at the account and issues a password only without keys;
 Hetzner Cloud takes project keys and always issues a password; OVHcloud
@@ -887,6 +983,81 @@ dedicated servers take one rescue SSH key and mail the password to the
 rescue mail address otherwise; OVHcloud Public Cloud instances are
 rebooted into rescue mode by OVHcloud itself, with the instance's own
 keys and a returned password.
+
+## The PXE server: `ump pxe serve|status|disarm|unit`
+
+```
+ump pxe serve [--site NAME] [--http ADDR] [--url URL] [--tftp ADDR] [--ipxe-dir DIR] [--data DIR] [--cache DIR] [--poll DURATION] [--install-timeout DURATION] [--check]
+ump pxe status [NAME|MAC...] [--unknown] [--log NAME] [-o table|wide|json|yaml]
+ump pxe disarm NAME... [-o json|yaml]
+ump pxe unit [--check] [--exec PATH]
+```
+
+[PXE serving](pxe.md) describes the whole: sites, jump hosts, the DHCP
+server's recipes, troubleshooting.
+
+`serve` is the PXE server of a site of [`pxe.yaml`](#ump-config-pxe), a
+private network whose DHCP server hands out the addresses and points
+the machines' firmware at an iPXE binary and iPXE at
+`http://HOST:8067/boot.ipxe`: chain mode, with no DHCP in ump. A machine
+gets its disk (iPXE exits to the next boot entry) or UMP's rescue
+system, its kernel and initrd over HTTP from the rescue image of
+`staging.image`, verified against its manifest and cached, with a boot
+config in front: the hostname, root's keys, DHCP on the interface it
+booted from. An armed rescue boots once and is consumed when its initrd
+was sent completely; a standing `mode: rescue` whose rescue system
+said no hello after three boots in 30 minutes gets the disk for the
+rest of them. An armed installation goes to one boot of the machine,
+which claims it ([unattended installations](pxe.md#unattended-installations));
+from its outcome on the machine boots its disk. Every failure ends in
+the disk.
+
+The server reads `.pxe/<site>/` in the backend of the home every
+`--poll` (10 s; `UMP_STATE` and the credential variables, else the home
+of the user it runs as) and nothing else of it, not `pxe.yaml`:
+`site.json`, which `ump config pxe apply` renders, and the arms. It
+writes the outcomes of the arms it consumed or claimed, the end of each
+installation's log and its status; its journal in `--data` holds the
+arms, boots and installations it has while the backend does not answer,
+and across a restart, with the installations' logs (the last five per
+machine). `--install-timeout` (2h) is how long an installation may
+write before it counts as interrupted. `--http` is where it listens
+(`:8067`; on a host with public addresses, give the private network's),
+`--url` where the machines reach it when that is not the address they
+asked. `--tftp` serves the iPXE binaries read-only over TFTP on an
+address of its own (RFC 1350 with `blksize`, `tsize` and `timeout`;
+port 69 needs root or `CAP_NET_BIND_SERVICE`) from `--ipxe-dir`, by
+default the distribution's ipxe package: `/usr/lib/ipxe` (Debian,
+Ubuntu) or `/usr/share/ipxe` (Fedora, RHEL, Arch). Every flag can come
+from the environment as `UMP_PXE_` and its name (`UMP_PXE_SITE`,
+`UMP_PXE_IPXE_DIR`). `--check` reads, fetches, verifies and binds, then
+exits; SIGTERM stops the server after the transfers under way. It logs
+one line per event to stderr, `-v` every request.
+
+`status` shows the servers of each site (whether they run and serve the
+`site.json` in the backend, what they warn of) and the machines: their
+status, what they got at their last network boot and why the disk when
+their arm or mode says otherwise, the address iPXE had and (`-o wide`)
+their rescue system's from its hello. Learned addresses are never where
+ump connects but for an armed boot. `--unknown` lists the MACs without a
+machine a server saw (sites with `unknown: local`), `--log NAME` a
+machine's installation log as its server pushed it (the last megabyte,
+every ten seconds while it runs), else the end its report carried, and
+how the installation stands on stderr. `disarm` removes a machine's arm;
+an installation that is being written stays (exit code 3), and one that
+installed keeps its arm until the next `ump provision` records it. The
+arm of an unattended installation goes under the server's lock, with
+the private addresses it reserved when it wrote nothing (no boot claimed
+it, or it failed), and with its outcome when it failed or did not
+report; the outcome of an installation whose arm is gone goes too.
+
+`unit` prints `ump-pxe@.service`, the server as a systemd service for
+the site its instance names, or with `--check` `ump-pxe-check@.service`,
+its check with the same settings: the units of the deb and rpm
+packages, for a hand install, with `--exec` naming where ump is
+(default `/usr/bin/ump`). Under systemd the server also takes the
+backend's secrets from credentials of their names ([as a
+service](pxe.md#as-a-service)).
 
 ## `ump config`
 
@@ -906,6 +1077,7 @@ ump config network     list|get|create|edit|delete
 ump config user        list|get|create|edit|delete
 ump config userdata    list|get|create|edit|delete
 ump config key         show|list|add|remove
+ump config pxe         list|get|create|edit|delete|apply
 ump config state       view|setup|set|migrate|clear|pull|push|test|locks|unlock
 ```
 
@@ -924,6 +1096,7 @@ their own, so `ump c o ls` is `ump config os list`:
 | `user` | `u` |
 | `userdata` | `ud` |
 | `key` | `k` |
+| `pxe` | `px` |
 | `state` | `st` |
 | `list` | `ls`, `l` |
 | `get NAME` | `g`, `show` |
@@ -1020,6 +1193,46 @@ every provider type. `view` shows the configuration with plaintext
 secrets redacted (references are shown as they are), `test` checks every
 account, `remove` deletes an account together with the secret files the
 wizard created for it.
+
+### `ump config pxe`
+
+The machines ump boots over the network ([PXE serving](pxe.md)), in
+`pxe.yaml` in the home:
+each with its MACs, its site, its standing mode (`local`, the disk,
+`rescue`, UMP's rescue system at every boot, or `install`, an
+unattended installation once), its installed system's network and
+reinstall's values for it, under `defaults` and its site's values. A
+site's `jump` is the host SSH to its machines goes through, ump's and
+Ansible's (ssh's `ProxyJump`): `[user@]host[:port]`, several
+separated by commas; a host that is an ump server's name stands for its
+administrator at its address, as `ump ssh` logs in there. The machines
+are the servers `pxe/NAME` of the account `pxe`, which comes by itself,
+listed from `pxe.yaml` (never from the listing cache) with what their
+PXE servers report: the status (`local`, `rescue`, `armed rescue`,
+...), the architecture and the product. Only a configured address (a
+static `network.ipv4` or `address:`) is theirs; one without is left out
+of the inventory. A machine a hand edit took out of `pxe.yaml` stays in
+the state until `delete`, which `apply` says.
+`list` shows each with its status and when a PXE server of its site saw
+it, `get NAME [--merged]` prints one as written or with what it gets
+from above, `create NAME --mac MAC [--site S] [--mode M] [--set
+KEY=VALUE]` adds one (in your editor on a terminal without `--mac`),
+`edit [NAME] [--yes]` opens one or the whole file, saved once valid (a
+machine taken out of it leaves the fleet as with `delete`, asked
+first), `delete NAME` removes it, also one already gone from the file,
+with its state entry and what its site holds of it. Each of them ends
+with `apply`, which checks the file and renders `site.json`, what the
+PXE servers of each site serve, into the backend (`.pxe/<site>/`); a
+hand edit of `pxe.yaml` reaches no server before it. `apply` also arms
+the installation of each machine with `mode: install` that ump has no
+installation of and that has no arm or outcome, after listing them with
+the disks they may erase and one question (`apply --yes` answers it;
+the other verbs ask on a terminal, and without one nothing is armed,
+exit code 3); the next `ump provision` records it. An invalid
+`pxe.yaml` is exit code 2, a change of the site or MACs of a machine
+whose boot is armed exit code 3 (in every save and `apply`; `ump pxe
+disarm` first), servers that do not take the new `site.json` within 30
+seconds exit code 5.
 
 ### `ump config state`
 

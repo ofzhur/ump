@@ -1,0 +1,3 @@
+install.sh: warning: network.uplink.ipv6 is auto, and the kernel's IPv6 is off (kernel.ipv6): no IPv6
+install.sh: network.uplink has neither IPv4 nor IPv6; the new system would be unreachable
+(exit status 1)

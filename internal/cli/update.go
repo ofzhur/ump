@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,10 @@ import (
 // The scripts, images and profiles ump uses come from the storage at
 // every use, so publishing them needs no new binary. The binary itself
 // is what goes stale: once a day, after a successful command, ump reads
-// bin/latest/VERSION from the storage and says when a newer release is
-// there. The local profile copies are refreshed by ump config os update.
+// bin/latest/VERSION from the storage (a packaged ump pkg/latest/VERSION,
+// of the packages it names) and says when a newer release is there, and
+// how to update: get.sh, or the package of a packaged ump.
+// The local profile copies are refreshed by ump config os update.
 
 // updateCheckInterval is how often the storage is asked.
 const updateCheckInterval = 24 * time.Hour
@@ -48,7 +51,7 @@ func (a *app) updateHint(cmd *cobra.Command) {
 	case "version", "completion", "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 		return
 	}
-	if Version == "dev" || a.nested || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
+	if Version == "dev" || a.nested || a.daemon || os.Getenv("UMP_NO_UPDATE_CHECK") != "" {
 		return
 	}
 	cfg, _, err := a.loadConfig()
@@ -70,7 +73,7 @@ func (a *app) updateHint(cmd *cobra.Command) {
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Second}
 	}
-	latest, err := fetchVersion(ctx, client, cfg.StorageURL()+"/bin/latest/VERSION")
+	latest, err := fetchVersion(ctx, client, cfg.StorageURL()+latestVersionPath())
 	// a failed check counts too: offline, or with a storage without
 	// binaries, the next try is a day later, not at the next command
 	state.Checked = a.now()
@@ -85,8 +88,34 @@ func (a *app) updateHint(cmd *cobra.Command) {
 		return // no noise
 	}
 	if newerVersion(latest, Version) {
-		fmt.Fprintf(a.stderr, "ump %s is available (this is %s): curl -fsSL %s/get.sh | sh\n", latest, Version, cfg.StorageURL())
+		fmt.Fprintf(a.stderr, "ump %s is available (this is %s): %s\n", latest, Version, updateCommand(cfg.StorageURL()))
 	}
+}
+
+// latestVersionPath is where the storage says the latest release of
+// what updates this binary: the packages' own VERSION for a packaged
+// one, which upload.sh writes after them, so that the hint never names a
+// package that is not there yet or not newer.
+func latestVersionPath() string {
+	if Packaging != "" {
+		return "/pkg/latest/VERSION"
+	}
+	return "/bin/latest/VERSION"
+}
+
+// updateCommand is what updates this binary: the package from the
+// storage, through the package manager, for a packaged one (get.sh would
+// put a second ump into /usr/local/bin), else get.sh.
+func updateCommand(storage string) string {
+	switch Packaging {
+	case "deb":
+		f := "ump-" + runtime.GOARCH + ".deb"
+		return fmt.Sprintf("curl -fsSLO %s/pkg/latest/%s && sudo apt install ./%s", storage, f, f)
+	case "rpm":
+		arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
+		return fmt.Sprintf("sudo dnf install %s/pkg/latest/ump-%s.rpm", storage, arch)
+	}
+	return fmt.Sprintf("curl -fsSL %s/get.sh | sh", storage)
 }
 
 func fetchVersion(ctx context.Context, client *http.Client, url string) (string, error) {

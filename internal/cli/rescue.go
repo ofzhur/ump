@@ -295,6 +295,10 @@ func (a *app) rescueServer(cmd *cobra.Command, ref string, command []string, o r
 		return err
 	}
 	defer unlock()
+	if _, ok := prov.(provider.RescueWaiter); ok {
+		// the provider's rescue system is UMP's: --no-image changes nothing
+		providerOnly = o.noReboot || o.noWait
+	}
 	if providerOnly {
 		return a.providerRescueOnly(cmd, m, prov, keys, keyPath, keyPaths, command, o, format)
 	}
@@ -316,6 +320,9 @@ func (a *app) providerRescueOnly(cmd *cobra.Command, m provider.Machine, prov pr
 	rs, ok := prov.(provider.Rescue)
 	if !ok {
 		return fmt.Errorf("account %s: provider type %s has no rescue system", m.Account, m.Provider)
+	}
+	if _, ok := prov.(provider.RescueWaiter); ok {
+		return a.armRescue(cmd, m, rs, keys, keyPath, keyPaths, o, format)
 	}
 	pw, canReboot := prov.(provider.Power)
 	if !o.noReboot && !canReboot {
@@ -339,7 +346,7 @@ func (a *app) providerRescueOnly(cmd *cobra.Command, m provider.Machine, prov pr
 	if err != nil {
 		return err
 	}
-	argv := sshArgs(user, info.Address, []string{keyPath}, true, true, command)
+	argv := a.sshShown(user, info.Address, []string{keyPath}, true, true, command)
 	if format != "" {
 		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Keys: keyPaths, SSH: shellJoin(argv)}, format)
 	}
@@ -356,19 +363,48 @@ func (a *app) providerRescueOnly(cmd *cobra.Command, m provider.Machine, prov pr
 	return a.connectRescue(cmd, m, user, info.Address, keyPath, keyPaths, command, o, format, "rescue system", nil, info)
 }
 
+// armRescue is the rescue command for a provider whose rescue system
+// is a network boot of UMP's (provider.RescueWaiter) with --no-reboot or
+// --no-wait: the boot is armed for a day, and the machine boots it at
+// its next boot, which is the operator's to bring about.
+func (a *app) armRescue(cmd *cobra.Command, m provider.Machine, rs provider.Rescue, keys []provider.PublicKey, keyPath string, keyPaths []string, o rescueOptions, format outputFormat) error {
+	if err := a.confirm(cmd, o.yes, fmt.Sprintf("Arm a network boot of UMP's rescue system for the next boot of %s?", describeRef(m))); err != nil {
+		return err
+	}
+	info, err := rs.EnableRescue(cmd.Context(), m, provider.RescueOptions{Keys: keys, Identity: keyPath, NoReboot: true})
+	if err != nil {
+		return fmt.Errorf("account %s: %w", m.Account, err)
+	}
+	if format != "" {
+		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Keys: keyPaths}, format)
+	}
+	until := ""
+	if info.Until != nil {
+		until = " (until " + a.fmtTime(*info.Until) + ")"
+	}
+	fmt.Fprintf(a.stdout, "Rescue system armed for %s%s; it boots at the next boot.\n", describeRef(m), until)
+	fmt.Fprintf(a.stdout, "SSH keys: %s\n", strings.Join(keyPaths, ", "))
+	if info.Note != "" {
+		fmt.Fprintf(a.stdout, "Note: %s\n", info.Note)
+	}
+	fmt.Fprintf(a.stdout, "Power-cycle %s (or reset it) to boot it; ump pxe status %s then says where its rescue system is up, and ump server unrescue %s disarms it.\n", m.Name, m.ID, m.Ref())
+	return nil
+}
+
 // connectRescue is the last step: the terminal is handed over to ssh, or
 // the command runs there, or the way to connect is printed (--no-connect,
 // no terminal, or an encoded result).
 func (a *app) connectRescue(cmd *cobra.Command, m provider.Machine, user, addr, keyPath string, keyPaths, command []string, o rescueOptions, format outputFormat, system string, img *imageInfo, info *provider.RescueInfo) error {
-	argv := sshArgs(user, addr, []string{keyPath}, true, true, command)
+	shown := a.sshShown(user, addr, []string{keyPath}, true, true, command)
 	if format != "" {
-		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Image: img, Keys: keyPaths, SSH: shellJoin(argv)}, format)
+		return printEncoded(a.stdout, rescueResult{Machine: m, Rescue: info, Image: img, Keys: keyPaths, SSH: shellJoin(shown)}, format)
 	}
 	interactive := len(command) == 0
 	if o.noConnect || (interactive && (a.isTTY == nil || !a.isTTY())) {
-		fmt.Fprintf(a.stdout, "Connect: %s\n", shellJoin(argv))
+		fmt.Fprintf(a.stdout, "Connect: %s\n", shellJoin(shown))
 		return nil
 	}
+	argv := a.sshTo(user, addr, []string{keyPath}, true, true, command)
 	if interactive {
 		fmt.Fprintf(a.stderr, "Connecting to the %s of %s as %s; exit the shell to return.\n", system, m.Name, user)
 	}

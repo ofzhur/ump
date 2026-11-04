@@ -29,6 +29,7 @@ hetzner-cloud   cloud        inventory, describe, rename, rdns, power, rescue   
 hetzner-robot   bare-metal   inventory, describe, rename, rdns, power, rescue      Hetzner dedicated servers (Robot web service)
 ovh             mixed        inventory, describe, rename, rdns, power, rescue      OVHcloud dedicated servers and Public Cloud instances
 manual          mixed        inventory, describe                                   servers added by hand (ump server add): no API, no rescue system; reached over SSH alone
+pxe             bare-metal   inventory, describe, rescue                           machines booted over the network (pxe.yaml, ump config pxe): UMP's rescue system from the PXE server of their site
 ```
 
 | Type | Lists | Credentials | Where to get them |
@@ -40,12 +41,16 @@ manual          mixed        inventory, describe                                
 | `linode` | the instances of one Linode (Akamai Cloud Computing) account | `token` | Cloud Manager → your profile → API Tokens → Create a Personal Access Token, with Linodes and IPs read/write and Images read only |
 | `vultr` | the cloud instances and bare metal servers of one Vultr account | `api_key` | customer portal → Account → API → Enable API; under Access Control, allow the addresses ump runs from (or all IPv4 and IPv6) |
 | `manual` | the servers added with `ump server add` | none | the account `manual` appears by itself with the first server added; see [manual servers](isps.md#manual-servers-manual) |
+| `pxe` | the machines of `pxe.yaml` | none | the account `pxe` appears by itself with the first machine (`ump config pxe create`); see [PXE serving](pxe.md) |
 
 `ump config isp types` prints the settings of every type below the table,
 with which are required and which are secret. The API types differ
 in the details, most of all in the way into a rescue system: see
 [ISPs](isps.md). The `manual` type has no API
-behind it and does what SSH allows.
+behind it and does what SSH allows; the `pxe` type has none either, and
+its rescue system is a network boot from the PXE server of the
+machine's site, `ump pxe serve` on its private network ([PXE
+serving](pxe.md)). Neither is added with `ump config isp add`.
 
 ## Adding an account
 

@@ -8,7 +8,8 @@ installation steps run in the same environment everywhere: a Debian
 system with a generic kernel, the firmware of server NICs and storage
 controllers, and the tools the installer calls, running entirely from
 RAM with no disk mounted. The same image serves the `kexec` entry method
-on clouds without a rescue system, and later virtual media and PXE.
+on clouds without a rescue system, and machines booted over the
+network ([PXE serving](../../docs/pxe.md)); later virtual media.
 
 The image is one kernel plus one initramfs per architecture (amd64,
 arm64). The initramfs is small: a static busybox, the `loop`,
@@ -46,7 +47,8 @@ The result is in `images/rescue/out/<arch>/`:
 | `vmlinuz` | Debian's generic kernel (`linux-image-<arch>`): a bzImage on amd64, a gzip-compressed Image on arm64 |
 | `initrd.zst` | the whole system as a zstd-compressed cpio archive |
 | `kexec` | a static `kexec` (kexec-tools), for rescue systems without one |
-| `manifest.json` | version, kernel, SHA-256 and size of each file; uploaded last |
+| `kexec-tools-<version>.tar.xz` | the source that `kexec` is built from (GPL-2.0), as kernel.org publishes it; [`build-kexec.sh`](build-kexec.sh) builds it |
+| `manifest.json` | version, kernel, what the image can do beyond kexec (`features`), SHA-256 and size of each file; uploaded last |
 | `SHA256SUMS` | the same for `sha256sum -c` |
 | `packages.txt` | every package and version in the image |
 
@@ -105,11 +107,14 @@ image alone) and serve this below it:
 | `get.sh` | [the install script](../../install/get.sh) of ump itself: `curl -fsSL <storage>/get.sh \| sh` |
 | `bin/latest/ump-<os>-<arch>`, `SHA256SUMS`, `VERSION` | the ump binaries (`linux`, `darwin`, `windows`; `amd64`, `arm64`) of the latest release, which get.sh takes |
 | `bin/v/<version>/...` | the same per release (`UMP_VERSION=` of get.sh) |
+| `pkg/latest/ump-amd64.deb`, `ump-arm64.deb`, `ump-x86_64.rpm`, `ump-aarch64.rpm`, `SHA256SUMS`, `VERSION` | the deb and rpm packages of the latest release ([as a service](../../docs/pxe.md#as-a-service)), which a packaged ump's update hint names |
+| `pkg/v/<version>/...` | the same per release, under their own names (`ump_0.8.0_amd64.deb`, `ump-0.8.0-1.x86_64.rpm`) |
 | `rescue/kexec-into-rescue.sh` | the entry script, as in this directory; ump has the server fetch and run it |
 | `rescue/<arch>/manifest.json` | fetched first: version, kernel, and the SHA-256 and size of the files below |
 | `rescue/<arch>/vmlinuz` | the rescue kernel |
 | `rescue/<arch>/initrd.zst` | the rescue system: a zstd-compressed initramfs with `init` and the system as a squashfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
+| `rescue/<arch>/kexec-tools-<version>.tar.xz` | its source (GPL-2.0), published with it; nothing fetches it |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
 | `profiles/ubuntu-26.04.yaml`, `profiles/ubuntu-24.04.yaml`, `profiles/ubuntu-22.04.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml`, `profiles/networks.yaml`, `profiles/users.yaml` | the published [profile](../../docs/profiles.md), [layouts](../../docs/disk-layouts.md), [firewalls](../../docs/firewalls.md) and [private networks](../../docs/networks.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/index.json` | `{"images": ["ubuntu-22.04", ...]}`: the images the storage has, which the profile wizard offers (optional; the known names are tried without it) |
@@ -120,9 +125,9 @@ image alone) and serve this below it:
 
 `<arch>` is `amd64` or `arm64`, `<os>` an image name such as
 `ubuntu-26.04` or `debian-13` (`os/index.json` lists them). `make upload`
-produces exactly this layout from the built images and binaries (`make
-release` builds and publishes the binaries alone, from a tagged
-commit), and
+produces exactly this layout from the built images, binaries and
+packages (`make release` builds and publishes the binaries and packages
+alone, from a tagged commit), and
 [`images/upload.sh`](../upload.sh) is a short script to adapt for a store
 that is not S3-compatible.
 
@@ -173,16 +178,83 @@ before networkd and sshd and reads the kernel command line:
 | `ump.mac=aa:bb:cc:dd:ee:ff` | the interface to configure (or `ump.iface=NAME`) |
 | `ump.ip=203.0.113.10/26,203.0.113.1` | IPv4 address with prefix, and the gateway (on-link, so `/32` setups work) |
 | `ump.ip6=2001:db8::2/64,fe80::1` | IPv6 address with prefix, and the gateway |
-| `ump.dns=10.0.0.53,10.0.0.54` | resolvers; without it 1.1.1.1 and 8.8.8.8, also for DHCP interfaces (the lease's resolvers are ignored) |
+| `ump.dns=10.0.0.53,10.0.0.54` | resolvers; without it 1.1.1.1 and 8.8.8.8, also for DHCP interfaces (the lease's resolvers are ignored); `dhcp` for the lease's alone |
+| `ump.boot-mac=aa:bb:cc:dd:ee:ff` | DHCP on that interface alone, the one a network boot came from, with the MAC as the client identifier (as iPXE sends it); the other Ethernet interfaces come up without addresses and are not waited for |
+| `ump.time=1793613600` | the clock, in seconds since 1970, when it is more than 5 minutes off: a new board's clock is often years behind, and TLS fails then |
 
-Without `ump.ip` and `ump.ip6`, every Ethernet interface uses DHCP and
-router advertisements, which is what cloud VMs need. SSH host keys are
+Without `ump.ip`, `ump.ip6` and `ump.boot-mac`, every Ethernet interface
+uses DHCP and router advertisements, which is what cloud VMs need.
+A [boot config](#booting-over-the-network) in front of the image comes
+first: its words win over the kernel command line's, and its
+`authorized_keys` over `ump.authorized_keys`. SSH host keys are
 generated at every boot. `console=ttyS0,115200n8` (or the provider's
 serial console) gives a root shell on the out-of-band console. When the
 provider's rescue system names no console, the entry script passes
 `console=ttyS0,115200n8 console=tty0`: the kernel's messages go to both,
 and programs write to the screen, the last one, so a serial port that
 takes no output after the jump cannot stall the boot.
+
+## Booting over the network
+
+A PXE server (`ump pxe serve`, [PXE serving](../../docs/pxe.md)) boots the image as it is, over
+HTTP, with a boot config in front of `initrd.zst`: an uncompressed newc
+cpio, padded to 512 bytes, which the kernel unpacks into the same
+initramfs. Its directory `/ump` holds
+
+| File | What |
+|---|---|
+| `cmdline` | words of a kernel command line: the parameters above, and `ump.pxe=URL` (the server), `ump.pxe.boot=ID` (this boot), `ump.pxe.mode=install` (an installation is armed) |
+| `authorized_keys` | root's keys, which would not fit on the kernel command line |
+| `token` | the token of this boot (0600) |
+
+[`init`](init) copies it to `/etc/ump/boot` (0700, in RAM), and the
+kernel command line needs nothing of UMP. With a token and `ump.pxe`,
+two units talk to the server, each request with `Authorization: Bearer
+TOKEN` ([`ump-pxe`](overlay/usr/local/sbin/ump-pxe)); without them they
+do nothing:
+
+- `ump-pxe-hello.service` waits for an address on the boot NIC (not
+  for `network-online`) and posts the machine to `URL/api/v1/hello`:
+  addresses and MACs, the SSH host keys (for pinning), DMI, the disks
+  (`lsblk`, with serial numbers and WWNs), memory, the firmware (`uefi`
+  or `bios`), `efibootmgr -v` and, where there is a BMC, `ipmitool lan
+  print`. Its `guard_disks` are the disks the disk guard counts, in
+  install.sh's order, each with its ID: `{"path": "/dev/sda", "id":
+  "wwn:0x5000c500a1b2c3d4"}` (`wwn:WWN`, else `serial:SERIAL`, else
+  `null`). It tries for 10 minutes.
+- `ump-pxe-install.service` runs after the hello with
+  `ump.pxe.mode=install`. It claims the specification once (`GET
+  URL/api/v1/spec`: `{"spec": ..., "firmware": "uefi", "disks": {"rule":
+  ...}}`; asked again with the same token, the server gives the same
+  answer until the boot's report, so a lost answer costs nothing; 409
+  means another boot claimed it, or this one reported it, and it stops),
+  checks the firmware and the disk guard, fetches `install.sh` from the
+  specification's storage (6 tries, 5 seconds apart), runs it with
+  `--record`, posts its output as it comes (`URL/api/v1/log?offset=N`, at
+  most 1 MB a request; a part sent again, at an offset the server has,
+  changes nothing and never shortens the log) and the result
+  (`URL/api/v1/report`: exit status, the record, the new system's host
+  keys, the end of the log) until the server answers 200. It reboots
+  only then, and only when the installation succeeded; otherwise the
+  machine stays in the rescue system, with the reason on the console
+  and in the message of the day.
+
+The disk guard lets the installation erase one of three sets, and
+nothing else; it hands install.sh exactly those disks:
+
+| Rule | Disks |
+|---|---|
+| `pinned` | `names`: each a name under `/dev/disk/by-id` (`nvme-eui.…`, `wwn-…`) or `serial:SERIAL`, one whole disk of this machine |
+| `seen` | `ids`: exactly the IDs of a hello's `guard_disks`, taken verbatim; two disks with one ID, or an ID twice, refuse |
+| `blank` | every disk, none with a partition or a signature (`wipefs`) |
+
+A refusal (a missing or changed disk, a disk that is not blank or
+cannot be probed, the wrong firmware, no installer) is reported with
+exit status 2: nothing was written.
+
+`manifest.json` names the image's `features`: `boot-config` (the boot
+config and the parameters above) and `pxe-install` (the units), which a
+server checks before it boots an image.
 
 ## Entering it by hand
 
@@ -256,9 +328,21 @@ guest it runs `kexec-into-rescue.sh` against an HTTP server on the host,
 which downloads and verifies the image, reads the DHCP configuration,
 kexecs with it carried over as static configuration, and checks that
 the new system came up with that address, gateway and DNS, the same
-key and a new boot ID (`KEXEC_TEST=0` skips this). It uses HVF on macOS
+key and a new boot ID (`KEXEC_TEST=0` skips this). Last, a network boot
+(`PXE_TEST=0` skips it): the image with a boot config in front, nothing
+of UMP on the kernel command line, two NICs, the clock in 2020, and a
+stand-in PXE server on the host. It checks the hostname and key from the
+boot config, DHCP on the boot NIC alone with the lease's resolvers, the
+clock, the hello, and the installation runner against six
+specifications: a missing pinned disk, a disk with a file system for
+`blank` and the other firmware are refused, a second claim stops, a
+failing installer is reported (its output whole, in chunks) without a
+reboot, and one that succeeds (with the disks `seen`) is reported, and
+the machine reboots. It uses HVF on macOS
 and KVM on Linux where the architectures match, and plain emulation
-otherwise.
+otherwise. `make pxe-test` boots the image from `ump pxe serve` itself,
+and `make pxe-install-test` has it install a system unattended
+([PXE serving](../../docs/pxe.md#testing)).
 
 ## Memory
 
@@ -323,8 +407,8 @@ stopped the load (the running system stays as it is then).
 
 ## Limitations and next steps
 
-- One static network configuration on one interface; bonds and VLANs
-  come with the network model of the installer.
+- One static network configuration on one interface, or DHCP on the
+  boot NIC; bonds and VLANs come with the network model of the installer.
 - The image is built from Debian trixie's packages at build time and
   not reproducible bit for bit; the manifest pins what was built.
 - Secure Boot is not considered: `kexec` into an unsigned kernel needs

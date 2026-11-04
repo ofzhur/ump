@@ -2,7 +2,7 @@
 
 ## Where it stands
 
-As of October 2026, ump does what the [README](../README.md) and the
+As of November 2026, ump does what the [README](../README.md) and the
 [quickstart](quickstart.md) describe:
 
 - **Providers:** Hetzner Robot, Hetzner Cloud and OVHcloud (dedicated
@@ -19,6 +19,25 @@ As of October 2026, ump does what the [README](../README.md) and the
 - **The rescue system:** UMP's own rescue image for amd64 and arm64,
   entered by `kexec` from a running system that lets UMP in as root or
   from the provider's rescue system; `ump server rescue` and `unrescue`.
+- **Network boot:** machines without a provider, your own or on an
+  ISP's private network, in `pxe.yaml` (`ump config pxe`), booted into
+  UMP's rescue system over the network by `ump pxe serve`, the PXE
+  server of their site, behind the site's DHCP server (chain mode, BIOS
+  and UEFI on amd64, UEFI on arm64), with an optional read-only TFTP
+  server for the iPXE binaries; `ump server rescue` and `reinstall` as
+  at any provider, through a site's jump host for SSH and Ansible; the
+  server as a systemd service per site, disabled until enabled, from
+  the deb and rpm packages or written by hand with `ump pxe unit`, and
+  on a host of the fleet through the collection's role `ump_pxe`
+  ([PXE serving](pxe.md)).
+- **Unattended installations:** `reinstall --unattended` and
+  `multiinstall --unattended` of PXE machines, and a standing `mode:
+  install` armed by `ump config pxe apply` with a yes: the
+  specification confirmed on your machine and handed to one boot, the
+  disks it may erase pinned, seen at a boot or blank, and the
+  installation recorded only once ump reached the new system with its
+  reported host keys pinned (the waiting reinstall, else the next `ump
+  provision`).
 - **Installation:** `ump server reinstall` from profiles, with named and
   inline disk layouts (partitions, md, LVM with striping, mirroring and
   parity), users and keys, userdata scripts, nftables firewalls that also hold
@@ -47,7 +66,8 @@ As of October 2026, ump does what the [README](../README.md) and the
   its provider, in the state and the inventory
   (`ump_private_networks`) ([private networks](networks.md)).
 - **Distribution:** `get.sh` and the binaries for Linux, macOS and
-  Windows on the storage, `make release`.
+  Windows on the storage, deb and rpm packages there and with the
+  GitHub releases, `make release`.
 
 ## Next
 
@@ -56,6 +76,10 @@ As of October 2026, ump does what the [README](../README.md) and the
   inventory's `ump_private_networks`, with the interfaces configured on
   the servers and isolation by group within a network ([mesh
   roles](networks.md#mesh-roles)).
+- **PXE serving, the rest.** Power control (Wake-on-LAN, then Redfish
+  and IPMI); ump's own iPXE builds where a distribution's fails; VLANs
+  and bonds for the installed system; adopting machines the PXE servers
+  saw without an entry.
 - **Provider uplinks.** The providers' private networks (OVHcloud
   vRack, Hetzner vSwitch and Cloud Networks, Vultr, Linode and
   DigitalOcean VPCs) as uplinks of the private network, so that servers
@@ -83,8 +107,8 @@ As of October 2026, ump does what the [README](../README.md) and the
   servers with a parallel limit and a per-server progress view.
 - **More providers.** Scaleway bare metal (rescue), clouds without a
   rescue system such as AWS and GCP (the direct way from a stock image),
-  own hardware through Redfish virtual media or PXE, and a static list of
-  SSH hosts as the universal fallback. The provider interface is in
+  own hardware through Redfish virtual media (PXE is there), and a
+  static list of SSH hosts as the universal fallback. The provider interface is in
   place; see [adding a provider type](providers.md#adding-a-provider-type).
 - **Cloud instances.** Creating and destroying instances for providers
   that have them, for convenience; Terraform remains the usual way.
