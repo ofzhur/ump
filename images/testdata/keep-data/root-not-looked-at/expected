@@ -1,6 +1,6 @@
-refused: no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root (ext4) could not be looked at (it cannot be mounted read-only); /dev/mapper/vg0-data (xfs) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal, and run again)
+refused: no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root (ext4) could not be looked at (it cannot be mounted read-only); /dev/mapper/vg0-data (xfs) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal: mount DEVICE /mnt; umount /mnt; and run again)
 --- the plan (--plan)
 {
   "version": 1,
-  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root (ext4) could not be looked at (it cannot be mounted read-only); /dev/mapper/vg0-data (xfs) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal, and run again)"
+  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root (ext4) could not be looked at (it cannot be mounted read-only); /dev/mapper/vg0-data (xfs) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal: mount DEVICE /mnt; umount /mnt; and run again)"
 }

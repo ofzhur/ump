@@ -228,7 +228,7 @@ JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 NAMES=(); EXPECTED=()
 run() { # run NAME EXPECTED COMMAND...: the command's output for NAME, side by side with the others'
 	local name="$1"; NAMES+=("$1"); EXPECTED+=("$2"); shift 2
-	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 0.1; done
 	(
 		CALLS="$WORK/$name.calls"; PLAN_FILE="$WORK/$name.plan.json"
 		set +e

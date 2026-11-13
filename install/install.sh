@@ -48,7 +48,8 @@
 #                    started again), the new one is unpacked beside it; a
 #                    separate /boot is formatted all the same
 #   --format MOUNTPOINT  format this volume of the old fstab too and mount it
-#                    there again (repeatable; /var: the new /var)
+#                    there again, with the file system it had (ext4 for ext2
+#                    and ext3; repeatable; /var: the new /var)
 #   --plan FILE      keep-data: print the plan, write it to FILE as JSON and
 #                    stop; nothing is written to a disk (--dry-run: the same
 #                    without the file)
@@ -492,11 +493,13 @@ kd_unlook() {
 # kd_dirty DEV FSTYPE: true when the file system was not unmounted
 # cleanly: its journal or log holds what the look does not see
 kd_dirty() {
-	local r=false
+	local r=false out=""
+	# (what they print is taken whole or cut short, never searched in a
+	# pipeline, whose status a reader that has seen enough would spoil)
 	case "$2" in
-	ext*) if dumpe2fs -h "$1" 2>/dev/null | grep -q '^Filesystem features:.* needs_recovery'; then r=true; fi ;;
-	xfs) if command -v xfs_logprint >/dev/null && xfs_logprint -t "$1" 2>/dev/null | grep -q '<DIRTY>'; then r=true; fi ;;
-	btrfs) if [ "$(btrfs inspect-internal dump-super "$1" 2>/dev/null | awk '$1 == "log_root" {print $2}')" -gt 0 ] 2>/dev/null; then r=true; fi ;;
+	ext*) out="$(dumpe2fs -h "$1" 2>/dev/null | sed -n 's/^Filesystem features: *//p' || true)"; case " $out " in *" needs_recovery "*) r=true ;; esac ;;
+	xfs) if command -v xfs_logprint >/dev/null; then out="$(xfs_logprint -t "$1" 2>/dev/null | head -n 20 || true)"; case "$out" in *"<DIRTY>"*) r=true ;; esac; fi ;;
+	btrfs) out="$(btrfs inspect-internal dump-super "$1" 2>/dev/null | awk '$1 == "log_root" {print $2}' || true)"; case "$out" in ""|0) ;; *) r=true ;; esac ;;
 	esac
 	echo "$r"
 }
@@ -889,7 +892,7 @@ def plan:
 	| ([($f.fs // {}) | to_entries[] | select(.value.dirty == true and ((.value.roots // []) | length) == 0 and .value.broken != true) | .key]) as $unclean
 	| ((if ($broken | length) > 0 then "; \($broken | join(", ")) holds what an interrupted keep-data installation saved of the old system, and that is damaged: it is not read (--root \($broken[0]) installs onto it without the old system's other volumes, which stay as they are)" else "" end)
 	   + (if ($unseen | length) > 0 then "; \($unseen | map(. + " (" + (dev(.).fstype // "?") + ")") | join(", ")) could not be looked at (it cannot be mounted read-only)" else "" end)
-	   + (if ($unclean | length) > 0 then "; \($unclean | map(. + " (" + (dev(.).fstype // "?") + ")") | join(", ")) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal, and run again)" else "" end)) as $hints
+	   + (if ($unclean | length) > 0 then "; \($unclean | map(. + " (" + (dev(.).fstype // "?") + ")") | join(", ")) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal: mount DEVICE /mnt; umount /mnt; and run again)" else "" end)) as $hints
 
 	# --- the old root: the one old system, or the one --root names
 	| (if ($o.root // "") != "" then
@@ -1103,7 +1106,7 @@ def plan:
 			  elif $h.kn == true then refuse("--format \($mp): the old fstab names it by a kernel name (\($h.spec)), which may be another device here (\($h.device): \(what($h.device))): it is not formatted; name it by UUID= or LABEL= in the old /etc/fstab")
 			  elif samefs($h.device; $root.device) then refuse("--format \($mp): \($h.device) is the root's own file system\(if $subroot then ", of which \($mp) is a subvolume" else "" end): it cannot be formatted")
 			  elif users($h.device) > 1 then refuse("--format \($mp): \($h.device) is mounted elsewhere by the old fstab too (subvolumes): it cannot be formatted")
-			  elif (dev($h.device).fstype | (. == "ext4" or . == "xfs" or . == "btrfs" or . == "vfat")) | not then refuse("--format \($mp): \($h.device) holds \(dev($h.device).fstype); the installer makes ext4, xfs, btrfs and vfat")
+			  elif (dev($h.device).fstype | (extfs or . == "xfs" or . == "btrfs" or . == "vfat")) | not then refuse("--format \($mp): \($h.device) holds \(dev($h.device).fstype); the installer makes ext4 (of ext2 and ext3 too), xfs, btrfs and vfat")
 			  elif ([$devs[] | select(.fstype == "btrfs" and .uuid == dev($h.device).uuid)] | length) > 1 then refuse("--format \($mp): a btrfs over several devices cannot be made anew on one")
 			  elif isro($h.device) then refuse("--format \($mp): \($h.device) is read-only")
 			  elif dev($h.device).usb then refuse("--format \($mp): \($h.device) is on a USB or removable device")
@@ -1112,7 +1115,7 @@ def plan:
 		  end)) as $fmti
 	# a device the old system named as its kernel did is named by its UUID: the new kernel may name it otherwise;
 	# a volume made anew has no subvolumes
-	| ($E2 | map(if (.i as $i | $fmti | index($i)) != null then .action = "format" | .fs = dev(.device).fstype | del(.to) | .options = (.options | without_opt("subvol") | without_opt("subvolid")) else . end)
+	| ($E2 | map(if (.i as $i | $fmti | index($i)) != null then .action = "format" | .fs = (dev(.device).fstype | if extfs then "ext4" else . end) | del(.to) | .options = (.options | without_opt("subvol") | without_opt("subvolid")) else . end)
 		| map(if .device != null and .crypt == null and (.spec | kernelname) and ((dev(.device).uuid // "") != "") then .spec_new = "UUID=" + dev(.device).uuid else . end)) as $E3
 	# what an entry without a device needs of the old root: the source of a bind mount, the file of a loop
 	# mount, the directories of an overlay. Where they are now: on a kept volume, as before; on one that
@@ -1211,7 +1214,7 @@ def plan:
 	     elif $subroot then {device: $root.device, filesystem: "btrfs", mountpoint: "/", how: "subvolume", subvolume: $root.subvolume, size_mb: $rd.size_mb}
 	     else {device: $root.device, filesystem: $newfs, mountpoint: "/", how: "mkfs", was: $rd.fstype, uuid: $rd.uuid, label: ($rd.label // ""), size_mb: $rd.size_mb} end),
 	    (if $bootE != null then {device: $bootdev, filesystem: "ext4", mountpoint: "/boot", how: "mkfs", was: dev($bootdev).fstype, uuid: dev($bootdev).uuid, label: (dev($bootdev).label // ""), size_mb: dev($bootdev).size_mb} else empty end),
-	    ($E3[] | select(.action == "format") | {device: .device, filesystem: .fs, mountpoint: .mountpoint, how: "mkfs", was: .fs, uuid: dev(.device).uuid, label: (dev(.device).label // ""), size_mb: dev(.device).size_mb})]) as $format
+	    ($E3[] | select(.action == "format") | {device: .device, filesystem: .fs, mountpoint: .mountpoint, how: "mkfs", was: dev(.device).fstype, uuid: dev(.device).uuid, label: (dev(.device).label // ""), size_mb: dev(.device).size_mb})]) as $format
 	| ([(if $esp != null then {device: $esp.device, filesystem: "vfat", mountpoint: "/boot/efi", uuid: (dev($esp.device).uuid // ""),
 			note: ("the EFI system partition" + (if $esp.from != "fstab" then ", found by its partition type" elif $espE.mountpoint != "/boot/efi" then ", at \($espE.mountpoint) in the old system" else "" end)
 				+ ": not formatted, the new boot loader is added"
@@ -1320,7 +1323,7 @@ def plan:
 		($E3[] | select(.action == "unused" and .device == null) | "\(.spec) (\(.mountpoint), \(.type)) of the old fstab is not mounted by the new system, whose own \(.mountpoint) is on the root"),
 		($E3[] | select(.action == "text" and .to != null) | "\(.spec) (\(.mountpoint), \(.type)) of the old fstab is mounted at \(.to): the new system's own \(.mountpoint) is on the root"),
 		(if ($live | any(.type == "nfs" or .type == "nfs4" or .type == "cifs" or .type == "smb3")) then "network file systems are kept as the old fstab has them; nfs-common or cifs-utils is installed for them on Ubuntu and Debian" else empty end),
-		(if ($keeproot or $bootsmall) and $bootE == null and (($U.features // "") != "") and ($m.os | test("^(ubuntu-2[02]\\.|debian-1[012]$)")) then "the root file system has the ext4 features \($U.features), which the GRUB of \($m.os) cannot read, and /boot is on it: the new system may not boot" else empty end),
+		(if $keeproot and $bootE == null and (($U.features // "") != "") and ($m.os | test("^(ubuntu-2[02]\\.|debian-1[012]$)")) then "the root file system has the ext4 features \($U.features), which the GRUB of \($m.os) cannot read, and /boot is on it: the new system may not boot" else empty end),
 		($bios.left[] | "\(.) carries GRUB's boot code now and has no place for the new one (\(grubroom(.))): it is left as it is, and a BIOS that starts from it finds the old boot loader"),
 		(($f.lvs // [])[] | select(.active != "active") | "the logical volume \(.path) is not active here (\(.segtype)): what is on it is not seen")
 	  ]) as $warnings
@@ -1635,7 +1638,7 @@ kd_save_old() {
 	# the fstab as a second attempt reads it
 	while IFS=$'\x1f' read -r f k t; do
 		[ -n "$f" ] || continue
-		awk -v s="$f" -v m="$k" -v t="$t" '{x = $2; sub(/\/+$/, "", x)} $1 == s && (x == m || $2 == m) && !/^[ \t]*#/ {$1 = t} {print}' "$old/etc/fstab" > "$old/etc/fstab.new"
+		KD_S="$f" KD_M="$k" KD_T="$t" awk '{x = $2; sub(/\/+$/, "", x)} $1 == ENVIRON["KD_S"] && (x == ENVIRON["KD_M"] || $2 == ENVIRON["KD_M"]) && !/^[ \t]*#/ {$1 = ENVIRON["KD_T"]} {print}' "$old/etc/fstab" > "$old/etc/fstab.new"
 		mv "$old/etc/fstab.new" "$old/etc/fstab"
 	done < <(jq -r '.private.resolved[] | [.spec, .mountpoint, .to] | join("\u001f")' <<< "$kd_plan")
 	kd_public > "$old/plan.json"
@@ -1989,7 +1992,7 @@ kd_home_take() {
 # network, encrypted, a ZFS dataset) covers the home directories it made
 # on the root, and nobody would get in
 kd_keys_outside() {
-	local n name
+	local n name i
 	[ "$(jq -r .private.keys_outside <<< "$kd_plan")" = true ] || return 0
 	mkdir -p -m 755 "$TARGET/etc/ssh/authorized_keys" "$TARGET/etc/ssh/sshd_config.d"
 	n="$(jq '.users | length' <<< "$spec")"

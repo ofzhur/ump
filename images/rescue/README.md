@@ -168,8 +168,11 @@ activates its volume groups (thin pools need `thin-provisioning-tools`,
 in the image since 2026-11-13; with an older image the volumes of a
 thin pool are not there, and the plan says so), `btrfs` lists
 subvolumes, `cryptsetup` tries a key file on a LUKS container without
-opening it. ZFS members are known by their signature alone; the image
-has no ZFS.
+opening it; `dumpe2fs`, `xfs_logprint` and `btrfs inspect-internal`
+tell whether a file system was unmounted cleanly, `lsattr` which
+entries of a root cannot be moved aside, and `lsblk` (util-linux 2.38
+or later, for its `START` column) where partitions begin. ZFS members
+are known by their signature alone; the image has no ZFS.
 
 Root has no password. It logs in over SSH with the keys from the kernel
 command line only, and on the console (serial or local) without a
@@ -353,7 +356,9 @@ otherwise. `make pxe-test` boots the image from `ump pxe serve` itself,
 and `make pxe-install-test` has it install a system unattended
 ([PXE serving](../../docs/pxe.md#testing)); `make keep-data-test`
 reinstalls machines in it with their data kept
-([`images/test-keep-data.sh`](../test-keep-data.sh)).
+([`images/test-keep-data.sh`](../test-keep-data.sh)), after running
+the installer's looks and writes there on file systems in loop devices
+([`images/test-keep-loop.sh`](../test-keep-loop.sh)).
 
 ## Memory
 
