@@ -1,0 +1,6 @@
+refused: --format /home: /dev/vda2 is mounted elsewhere by the old fstab too (subvolumes): it cannot be formatted
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /home: /dev/vda2 is mounted elsewhere by the old fstab too (subvolumes): it cannot be formatted"
+}

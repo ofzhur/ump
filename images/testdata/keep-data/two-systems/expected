@@ -1,0 +1,24 @@
+refused: several old systems are on this machine: /dev/sda2 (Debian GNU/Linux 12 (bookworm)), /dev/sda3 (CentOS Linux 7 (Core)); --root DEVICE names the one to replace
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "several old systems are on this machine: /dev/sda2 (Debian GNU/Linux 12 (bookworm)), /dev/sda3 (CentOS Linux 7 (Core)); --root DEVICE names the one to replace",
+  "candidates": [
+    {
+      "device": "/dev/sda2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "one",
+      "resume": false,
+      "consistent": true
+    },
+    {
+      "device": "/dev/sda3",
+      "subvolume": "",
+      "system": "CentOS Linux 7 (Core)",
+      "hostname": "two",
+      "resume": false,
+      "consistent": true
+    }
+  ]
+}

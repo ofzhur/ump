@@ -1,0 +1,9 @@
+UUID=d7afa461-ad0d-5a32-a925-7c2126ebe2c3 / ext4 errors=remount-ro 0 1
+UUID=5A46-6FAB /boot/efi vfat umask=0077 0 1
+/dev/mapper/data /srv/data ext4 defaults 0 2
+/dev/mapper/vault /srv/vault xfs defaults 0 2
+/dev/mapper/usbkey /srv/usbkey ext4 defaults 0 2
+/dev/mapper/gone /srv/gone ext4 defaults 0 2
+/dev/mapper/stale /srv/stale ext4 defaults 0 2
+/dev/mapper/cswap none swap sw 0 0
+UUID=0f0f0f0f-1111-2222-3333-444444444444 /srv/inside ext4 defaults 0 2

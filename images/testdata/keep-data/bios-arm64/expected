@@ -1,0 +1,6 @@
+refused: this machine does not boot with UEFI: on arm64 the installer has no other way to make it bootable
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "this machine does not boot with UEFI: on arm64 the installer has no other way to make it bootable"
+}

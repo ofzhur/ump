@@ -1,0 +1,16 @@
+refused: an old system's files are on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "an old system's files are on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it",
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": false
+    }
+  ]
+}

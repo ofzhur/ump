@@ -146,9 +146,9 @@ instead of feeding an empty download to `bash`.
 
 [`packages.txt`](packages.txt) lists the packages: systemd, udev,
 networkd and resolved, OpenSSH, iproute2 and ethtool, the disk tools
-(`sgdisk`, `parted`, `mdadm`, `lvm2`, `cryptsetup`, `e2fsprogs`,
-`xfsprogs`, `btrfs-progs`, `dosfstools`, `wipefs`, `nvme-cli`,
-`smartmontools`), image tools (`squashfs-tools`, `zstd`, `tar`,
+(`sgdisk`, `parted`, `mdadm`, `lvm2` with `thin-provisioning-tools`,
+`cryptsetup`, `e2fsprogs`, `xfsprogs`, `btrfs-progs`, `dosfstools`,
+`wipefs`, `nvme-cli`, `smartmontools`), image tools (`squashfs-tools`, `zstd`, `tar`,
 `rsync`, `curl`), `kexec-tools`, `efibootmgr`, `ipmitool`, `dmidecode`,
 `lshw`, `jq`, `tmux`, and the firmware packages for NICs and storage
 controllers. [`finish.sh`](finish.sh) removes firmware for GPUs, Wi-Fi,
@@ -161,6 +161,15 @@ be a server NIC or storage driver (`igb` needs `dca`, `ixgbe`
 the image removed `dca`, and Intel I210 NICs (`igb`, Hetzner's AX
 servers) booted without network; [troubleshooting](../../docs/troubleshooting.md#case-study-hetzner-ax41-nvme-2026-10-16)
 tells how that was found without a console.
+
+The installer's [keep-data](../../install/README.md#keeping-the-data)
+finds an old system with these: `mdadm` assembles its arrays, `lvm2`
+activates its volume groups (thin pools need `thin-provisioning-tools`,
+in the image since 2026-11-13; with an older image the volumes of a
+thin pool are not there, and the plan says so), `btrfs` lists
+subvolumes, `cryptsetup` tries a key file on a LUKS container without
+opening it. ZFS members are known by their signature alone; the image
+has no ZFS.
 
 Root has no password. It logs in over SSH with the keys from the kernel
 command line only, and on the console (serial or local) without a
@@ -342,7 +351,9 @@ the machine reboots. It uses HVF on macOS
 and KVM on Linux where the architectures match, and plain emulation
 otherwise. `make pxe-test` boots the image from `ump pxe serve` itself,
 and `make pxe-install-test` has it install a system unattended
-([PXE serving](../../docs/pxe.md#testing)).
+([PXE serving](../../docs/pxe.md#testing)); `make keep-data-test`
+reinstalls machines in it with their data kept
+([`images/test-keep-data.sh`](../test-keep-data.sh)).
 
 ## Memory
 

@@ -1,0 +1,6 @@
+refused: no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace"
+}

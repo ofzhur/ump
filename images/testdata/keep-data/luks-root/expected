@@ -1,0 +1,6 @@
+refused: no old system is found (a file system with /etc/fstab and /etc/os-release), and /dev/sda3 is a LUKS container, not opened here: an encrypted root is not supported in this version
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release), and /dev/sda3 is a LUKS container, not opened here: an encrypted root is not supported in this version"
+}

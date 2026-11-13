@@ -1,0 +1,16 @@
+/dev/mapper/sys-root / ext4 noatime,errors=remount-ro 0 1
+/dev/mapper/sys-usr /usr ext4 defaults 0 2
+/dev/mapper/sys-var /var xfs defaults 0 2
+/dev/mapper/sys-docker /var/lib/docker xfs defaults,pquota 0 2
+/dev/mapper/sys-home /home ext4 defaults,usrquota 0 2
+/dev/mapper/sys-thin /srv/thin ext4 defaults 0 2
+/dev/mapper/sys-was_ext4 /srv/changed ext4 defaults 0 2
+/dev/mapper/sys-nothere /srv/nothere ext4 defaults 0 2
+LABEL=scratch /scratch ext4 defaults,nofail 0 2
+nas.example.net:/export/media /srv/media nfs4 ro,_netdev 0 0
+//files.example.net/share /srv/share cifs credentials=/root/.smb,password=hunter2,uid=1000 0 0
+/var/lib/docker/volumes /srv/volumes none bind 0 0
+/opt/old/app /srv/app none bind 0 0
+/srv/My\040Files /mnt/my\040files none bind 0 0
+tmpfs /run/shm tmpfs defaults 0 0
+/dev/sr0 /media/cdrom0 udf,iso9660 user,noauto 0 0

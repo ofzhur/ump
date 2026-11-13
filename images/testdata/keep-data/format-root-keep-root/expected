@@ -1,0 +1,6 @@
+refused: --format / and --keep-root contradict each other
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format / and --keep-root contradict each other"
+}

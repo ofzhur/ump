@@ -1,0 +1,4 @@
+/dev/mapper/sys-root|linear|active
+/dev/mapper/sys-thin|thin|active
+/dev/mapper/sys-pool|thin-pool|active
+/dev/mapper/sys-frozen|linear|

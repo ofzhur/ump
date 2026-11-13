@@ -1,0 +1,2 @@
+UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs defaults 0 0
+UUID=769B-CE7F /boot/efi vfat umask=0077 0 1

@@ -36,7 +36,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
 
 all: build
 
@@ -67,7 +67,10 @@ scripts-check: ## syntax-check the shell scripts of the rescue image, the instal
 network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
 	@images/test-network.sh
 
-check: fmt-check vet test scripts-check network-test ## gofmt, go vet, the tests, the script syntax checks and the network test
+keep-plan-test: ## make the keep-data plan of install.sh for every machine of images/testdata/keep-data and compare; check its guards (needs bash 4 or later and jq)
+	@images/test-keep-plan.sh
+
+check: fmt-check vet test scripts-check network-test keep-plan-test ## gofmt, go vet, the tests, the script syntax checks, the network test and the keep-data plan test
 
 FUZZTIME ?= 10s
 
@@ -132,6 +135,9 @@ pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump px
 
 pxe-install-test: ## install a machine of TEST_ARCH unattended in QEMU from ump pxe serve, the base image of OS (default: ubuntu-26.04), and a second installation the disk guard refuses (FIRMWARE=bios on amd64)
 	images/test-pxe-install.sh $(TEST_ARCH)
+
+keep-data-test: ## reinstall machines of TEST_ARCH with their data kept (install.sh --keep-data) in QEMU: LVM, md, LUKS, btrfs, ZFS, the refusals (OS, default ubuntu-26.04, over OLD_OS, default debian-13)
+	images/test-keep-data.sh $(TEST_ARCH)
 
 upload: ## publish everything built (images, binaries, packages), the scripts and the profiles to UPLOAD_TARGET (s3://bucket, scp://host/path or file:///path)
 	images/upload.sh

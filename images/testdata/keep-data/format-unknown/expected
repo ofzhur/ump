@@ -1,0 +1,6 @@
+refused: --format /srv/nothing: the old fstab has no such mountpoint
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /srv/nothing: the old fstab has no such mountpoint"
+}

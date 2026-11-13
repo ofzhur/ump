@@ -1,0 +1,8 @@
+the plan's root: done; called: mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed /dev/mapper/vg0-root
+a device the plan does not name: refused (install.sh: keep-data: /dev/mapper/vg0-data is not in the confirmed plan: not formatted); called: nothing
+a device the plan does not name, by another name of the plan's: refused (install.sh: keep-data: /dev/vda is not in the confirmed plan: not formatted); called: nothing
+the plan's /boot, which changed since the plan: refused (install.sh: keep-data: /dev/vda2 is not what the confirmed plan saw (UUID 2222 then, changed now): not formatted); called: nothing
+the plan's root as a physical volume: refused (install.sh: keep-data: /dev/mapper/vg0-root as lvm: not a file system keep-data makes); called: nothing
+the plan's root as swap: refused (install.sh: keep-data: /dev/mapper/vg0-root as swap: not a file system keep-data makes); called: nothing
+anything, with a plan that formats nothing: refused (install.sh: keep-data: /dev/mapper/vg0-root is not in the confirmed plan: not formatted); called: nothing
+without --keep-data, as ever: done; called: mkfs.xfs -f -q -L data /dev/mapper/vg0-data

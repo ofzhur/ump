@@ -1,0 +1,6 @@
+256 5 @
+257 5 @home
+258 5 @snapshots
+259 258 @snapshots/1/snapshot
+260 258 @snapshots/2/snapshot
+261 256 @/var/lib/machines

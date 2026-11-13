@@ -1,0 +1,6 @@
+refused: the old root is the btrfs subvolume root of /dev/vda2, which its fstab does not name (the default subvolume): a layout this installer does not read with certainty
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root is the btrfs subvolume root of /dev/vda2, which its fstab does not name (the default subvolume): a layout this installer does not read with certainty"
+}

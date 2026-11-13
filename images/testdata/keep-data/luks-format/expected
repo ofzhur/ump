@@ -1,0 +1,6 @@
+refused: --format /srv/data: it is encrypted, and the installer opens no encrypted volume
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /srv/data: it is encrypted, and the installer opens no encrypted volume"
+}

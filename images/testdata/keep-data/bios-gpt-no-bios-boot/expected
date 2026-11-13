@@ -1,0 +1,6 @@
+refused: this machine boots with BIOS, and /dev/sda has a GPT without a BIOS boot partition (or no partition table): GRUB has no place there, and keep-data changes no partition table
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "this machine boots with BIOS, and /dev/sda has a GPT without a BIOS boot partition (or no partition table): GRUB has no place there, and keep-data changes no partition table"
+}

@@ -1,0 +1,96 @@
+keep-data: the old system on /dev/sda2 (--root); UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/sda2  ext4  /  (40G)
+KEEP (as they are, mounted where they were)
+  /dev/sda1  vfat  /boot/efi  (the EFI system partition, found by its partition type: not formatted, the new boot loader is added)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/sda3  ext4  40G
+  /dev/sdb1  ext4  100G  backup
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  /dev/sda2 holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-sda2  /  ext4  defaults,errors=remount-ro  0 1
+UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "/dev/sda2",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "",
+    "hostname": "",
+    "fstab_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "root": {
+    "device": "/dev/sda2",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "size_mb": 40960,
+    "by": "option"
+  },
+  "candidates": [],
+  "boot": {
+    "esp": "/dev/sda1",
+    "boot": "",
+    "bios_disks": [],
+    "disk": "/dev/sda",
+    "disks": [
+      "/dev/sda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/sda2",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
+      "size_mb": 40960
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/sda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
+    }
+  ],
+  "aside": [],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/sda3",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 40960,
+      "note": ""
+    },
+    {
+      "device": "/dev/sdb1",
+      "filesystem": "ext4",
+      "label": "backup",
+      "size_mb": 102400,
+      "note": ""
+    }
+  ],
+  "dropped": [],
+  "lost": [],
+  "packages": [],
+  "warnings": [
+    "/dev/sda2 holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system"
+  ],
+  "entries": [],
+  "hash": "e8cfa348db881336cf955eea44733e5df1618d1014f71176fe35f234277dcef5"
+}

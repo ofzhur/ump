@@ -1,0 +1,6 @@
+refused: the old root /dev/mapper/sda3_crypt is encrypted (LUKS): an encrypted root is not supported in this version
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root /dev/mapper/sda3_crypt is encrypted (LUKS): an encrypted root is not supported in this version"
+}

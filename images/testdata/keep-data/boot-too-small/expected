@@ -1,0 +1,6 @@
+refused: the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least)"
+}

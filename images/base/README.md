@@ -69,6 +69,13 @@ and friends from `sysstat`, `atop`, `iotop`, `lsof`, `strace`, `ltrace`,
 `ipcalc`, `whois`, `tree`), `bash` with completion, and `vim`,
 `tmux`, `htop`, `git`, `jq` and the usual shell tools. No cloud-init, no
 snaps, no recommends. The full list is in `packages.txt` of a build.
+What only some machines need is not in the image: the installer adds
+it from the distribution's archive on the machines that do, `nftables`
+for a firewall where the image lacks it, and for an installation that
+[keeps the data](../../install/README.md#keeping-the-data) `cryptsetup`
+(a crypttab with entries), `thin-provisioning-tools` (thin volumes),
+`nfs-common` and `cifs-utils` (network file systems in the old fstab)
+and, on Ubuntu, `zfsutils-linux` (ZFS pools on the disks).
 
 ## Defaults
 

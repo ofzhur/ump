@@ -1,0 +1,130 @@
+keep-data: the old system CentOS Linux 7 (Core) (two) on /dev/sda3 (--root); UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/sda3  ext4  /  (40G)
+KEEP (as they are, mounted where they were)
+  /dev/sda1  vfat  /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/sda2  ext4  40G  (holds another old system)
+  /dev/sdb1  ext4  100G  backup
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  /dev/sda2 (Debian GNU/Linux 12 (bookworm)) holds an operating system's files too: left as it is
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-sda3  /  ext4  defaults,errors=remount-ro  0 1
+UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "/dev/sda3",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "CentOS Linux 7 (Core)",
+    "hostname": "two",
+    "fstab_sha256": "02706d77bea3b9804360108eb011e0f1432814c5f380b9aeb6209d888774ead6"
+  },
+  "root": {
+    "device": "/dev/sda3",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "size_mb": 40960,
+    "by": "option"
+  },
+  "candidates": [
+    {
+      "device": "/dev/sda2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "one",
+      "resume": false,
+      "consistent": true
+    },
+    {
+      "device": "/dev/sda3",
+      "subvolume": "",
+      "system": "CentOS Linux 7 (Core)",
+      "hostname": "two",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/sda1",
+    "boot": "",
+    "bios_disks": [],
+    "disk": "/dev/sda",
+    "disks": [
+      "/dev/sda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/sda3",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "e24ca7db-f88d-50a2-beb0-f73f17be22ee",
+      "size_mb": 40960
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/sda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    }
+  ],
+  "aside": [],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/sda2",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 40960,
+      "note": "holds another old system"
+    },
+    {
+      "device": "/dev/sdb1",
+      "filesystem": "ext4",
+      "label": "backup",
+      "size_mb": 102400,
+      "note": ""
+    }
+  ],
+  "dropped": [],
+  "lost": [],
+  "packages": [],
+  "warnings": [
+    "/dev/sda2 (Debian GNU/Linux 12 (bookworm)) holds an operating system's files too: left as it is"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=e24ca7db-f88d-50a2-beb0-f73f17be22ee",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/sda3",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=3E86-EC85",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/sda1",
+      "action": "esp"
+    }
+  ],
+  "hash": "f044b7e47fa4649a6b40b7c41a5e6ea031dd48b35e43de2e6b1a4b3a5dd0997a"
+}

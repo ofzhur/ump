@@ -11,7 +11,9 @@ specification from a [profile](../docs/profiles.md), fetches the
 installer from the storage and runs it there with the specification on
 its stdin; it can be run by hand just the same, with a specification
 file or with the flags alone (which give the `lvm-linear` layout with
-root and the keys of a file).
+root and the keys of a file). With `--keep-data` it erases no disk: it
+replaces the old system and leaves its data, see [Keeping the
+data](#keeping-the-data).
 
 ## What it does
 
@@ -123,6 +125,8 @@ root and the keys of a file).
 
 ```
 install.sh --spec FILE [--record DIR] [--dry-run] [--force]
+install.sh --spec FILE --keep-data [--root DEVICE] [--keep-root] [--format MOUNTPOINT]...
+           (--dry-run | --plan FILE | --confirm HASH) [--record DIR]
 install.sh --storage URL --hostname NAME [--os ubuntu-26.04] [--disks /dev/sda,/dev/sdb]
            [--keys FILE] [--ipv6] [--mitigations] [--timezone ZONE] [--record DIR] [--dry-run] [--force]
 ```
@@ -155,6 +159,153 @@ Exit status 0 means the machine is ready to reboot; 2 is a usage or
 environment problem (not the rescue system, a missing tool), 1 a failed
 step, with the reason on stderr. A failed installation leaves the
 machine in the rescue system, with whatever was mounted unmounted again.
+
+## Keeping the data
+
+`--keep-data` (or `keep_data` in the specification) is a second way to
+install: the old system is replaced, its data stays. No disk is wiped,
+no partition table, array or volume group is touched, and the layout of
+the specification is not applied. The steps 2, 4 and 5 above do not
+run; what runs instead:
+
+1. **Finds the old system**, reading only: arrays are assembled
+   read-only and volume groups activated, every ext4, xfs and btrfs file
+   system (on btrfs every subvolume) is mounted read-only without its
+   journal and looked at, its device read-only meanwhile, so that a file
+   system a reset left unclean is read as the disk has it and nothing
+   its driver would note reaches the disk (the plan says when the old
+   root is such). An old system is one that holds `/etc/fstab`
+   and `/etc/os-release` and whose fstab mounts that very file system
+   (and subvolume) at `/`: a copy of a root on a data volume, or a
+   snapshot, names another root and is none. Exactly one is the root;
+   with several, or none, `--root DEVICE` says which (a device, a
+   volume's path, `UUID=...`, `DEVICE:SUBVOLUME` on btrfs). LUKS
+   containers are not opened, and ZFS pools not imported.
+2. **Reads its `/etc/fstab`**, `/etc/crypttab`, `/etc/mdadm/mdadm.conf`
+   and `/etc/hostid`, finds the device of every entry (`UUID=`,
+   `LABEL=`, `PARTUUID=`, `PARTLABEL=`, `/dev/mapper/...`, `/dev/VG/LV`,
+   kernel names, an array by the name the old `mdadm.conf` gave it) and
+   decides:
+
+   | Entry of the old fstab | What becomes of it |
+   |---|---|
+   | `/` | formatted, with the file system the layout of the specification gives `/` (ext4, xfs or btrfs; else ext4). In a btrfs subvolume: the subvolume is deleted, with those inside it, and made anew; the rest of the file system stays. With `--keep-root` nothing is formatted: the old system moves into `/old-root-DATE` on the same file system (a subvolume is renamed `NAME-old-DATE`), and the new one is unpacked beside it |
+   | `/boot` | formatted (ext4), the new `/boot`; an EFI system partition mounted there is the ESP |
+   | `/boot/efi`, `/efi` | the ESP: not formatted, mounted at `/boot/efi`, the new boot loader added; a boot loader of the old system on it (a directory under `EFI` with a file that names the old root or `/boot`) is renamed `...-old-DATE`, so that the firmware's entry for it leads nowhere. Not in the fstab: the ESP is found by its partition type. Under BIOS it stays an entry like any other |
+   | `/usr` (and `/bin`, `/lib`, `/etc/...`) | left as it is, not mounted by the new system |
+   | `/var`, `/var/lib`, `/var/cache` | kept, mounted at `/var.old` (`/var/lib.old`, ...): the new system's own is on the root. `--format /var` formats it and makes it the new `/var` |
+   | swap | used as it is; a swap file went with the root |
+   | anything else: data volumes, `/home`, `/srv/...`, network file systems, bind mounts, tmpfs | kept: the same line in the new fstab, the mountpoint made. `--format MOUNTPOINT` formats a local one (ext4, xfs, btrfs, vfat: the type it had, its label kept) and mounts it there again |
+   | an entry whose device is not there, or holds another file system than the fstab says | dropped, with a warning |
+
+   Devices the old fstab does not name (other volume groups, unmounted
+   volumes, ZFS and LUKS members, other disks) are not touched and
+   listed as such.
+3. **Prints the plan** (FORMAT, KEEP, ASIDE, UNUSED, UNTOUCHED, LOST:
+   what the old root holds beyond the system itself, with sizes;
+   WARNINGS) and its hash. `--dry-run` stops here; `--plan FILE` also
+   writes the plan as JSON. A machine it will not do is refused here,
+   with status 2 and the reason: no old system or several, an encrypted
+   root (LUKS data volumes are kept), a ZFS root, a btrfs root it cannot
+   read with certainty (the default subvolume unnamed in the fstab, the
+   top of a file system other entries mount subvolumes of, several
+   devices), a root or `/boot` too small, no ESP on a UEFI machine, a GPT
+   without a BIOS boot partition on a BIOS one, disks in use, an fstab
+   field that names several devices, NixOS and Arch Linux as the new
+   system. When unsure, it refuses.
+4. **Writes only with `--confirm HASH`**, the hash of the plan that was
+   shown: the installer finds everything again, and when the plan it
+   makes now has another hash (a disk changed, another option), it
+   refuses. `format()` makes anew only a device the confirmed plan
+   names, and only while it holds the UUID the plan saw; the functions
+   that wipe and partition end at once in this mode.
+5. **Installs** as above (steps 6 to 12), with these differences: the
+   new `/etc/fstab` is the root, `/boot`, the ESP, swap, then the kept
+   entries in their old order with their old options (a device named as
+   the kernel did, `/dev/sdb1`, by its UUID); `/etc/crypttab` is the
+   old one's entries whose devices are there, with the key files that
+   were on the old root copied over (path, owner and mode kept; held in
+   memory meanwhile), and `nofail` in crypttab and fstab for a volume
+   that cannot be opened unattended (a passphrase, a key elsewhere, a
+   key file that does not open it); `cryptsetup` is installed for them,
+   `thin-provisioning-tools`, `nfs-common` and `cifs-utils` where kept
+   volumes need them, on Ubuntu `zfsutils-linux` when ZFS members are
+   there (with the old `/etc/hostid` and pool cache, so that the pools
+   import at boot; elsewhere they are left for the operator);
+   `mdadm.conf` names the arrays that are there and the initramfs is
+   rebuilt; a kept `/home` (or `/root`) is mounted for the users'
+   section, so that the profile's users and keys are on it: a home
+   directory that is there goes to the user of its name, who gets the
+   ID it belongs to when that is free (its files change owner
+   otherwise), the old `authorized_keys` saved beside the new; a user
+   without one gets an ID that no other home directory there belongs
+   to; under
+   BIOS GRUB goes onto every disk under `/boot` and every other disk
+   that carries GRUB's boot code. `/etc/ump/install` gets `keep_data=`,
+   `keep_root=`, `keep_plan=` (the hash), `old_system=`, `formatted=`,
+   `kept=` and `aside=` (`DEVICE:MOUNTPOINT` each), and the plan is
+   `/etc/ump/keep-data.json` (with `--record DIR` also `DIR/keep-data.json`).
+
+Exit status with `--keep-data`: 0 installed; 2 nothing was written (a
+refusal, or anything that failed before the first write; the line `==>
+keep-data: writing begins` marks it); 1 a failure after that: the old
+root is gone or moved, the data volumes are as they were. A second run
+then finds what the first saved of the old system's fstab on the new
+root (`/.ump-keep-data`, removed when an installation completes) and
+plans from it.
+
+In the specification:
+
+```json
+"keep_data": {"root": "/dev/vg0/root", "keep_root": false, "format": ["/var"], "confirm": "HASH"}
+```
+
+all four optional (`"keep_data": {}` is `--keep-data` alone); the flags
+add to it. `disks` must be empty. The plan as JSON (`--plan FILE`,
+`/etc/ump/keep-data.json`):
+
+| Key | What |
+|---|---|
+| `version`, `os`, `firmware`, `arch`, `options` | 1; the system to install; `uefi` or `bios`; the options as given (`root`, `keep_root`, `format`) |
+| `old` | the old system: `system` (its `PRETTY_NAME`), `hostname`, `fstab_sha256` |
+| `root` | `device`, `subvolume`, `filesystem` (the new one), `was`, `size_mb`, `by` (`detection` or `option`), `free_mb` where the file system stays |
+| `candidates` | every old system found: `device`, `subvolume`, `system`, `hostname`, `consistent` (its fstab mounts it at `/`), `resume` |
+| `boot` | `esp`, `boot` (a separate `/boot`), `bios_disks`, `disk`, `disks` |
+| `format` | what is made anew: `device`, `filesystem`, `mountpoint`, `how` (`mkfs`, or `subvolume` with `subvolume`), `was`, `uuid`, `size_mb` |
+| `keep` | `device` (null for an entry without one), `filesystem`, `mountpoint`, `note` |
+| `aside` | `device`, `filesystem`, `from`, `mountpoint` (with `DATE` for the time of the installation), `how` (`mounted`, `moved`, `renamed`) |
+| `unused`, `untouched` | `device`, `filesystem`, `mountpoint`; `device`, `filesystem`, `label`, `size_mb`, `note` |
+| `dropped`, `lost` | `spec`, `mountpoint`, `reason`; `path`, `mb` |
+| `packages`, `warnings` | package names; sentences |
+| `entries` | the old fstab, entry by entry, with `device` and `action` (`root`, `boot`, `esp`, `swap`, `keep`, `text`, `aside`, `format`, `unused`, `drop`); passwords in options masked |
+| `hash` | sha256 of the plan without `hash`, as `jq -cS` prints it |
+
+A refusal with `--plan FILE` writes `{"version": 1, "refused": "why"}`,
+with `candidates` when `--root` would decide.
+
+[`images/test-keep-plan.sh`](../images/test-keep-plan.sh) (`make
+keep-plan-test`, part of `make check`) makes the plan, the fstab and
+the crypttab for some fifty machines without a machine
+([`images/testdata/keep-data`](../images/testdata/keep-data): `lsblk`'s
+output, the old root's files) and compares, and checks the guards:
+`format()` with devices in and out of the plan, the whole-disk functions
+in keep mode, and that no command that erases stands outside them.
+[`images/test-keep-data.sh`](../images/test-keep-data.sh) (`make
+keep-data-test`) reinstalls machines in QEMU: an old system with LVM, a
+separate `/var` and a plain partition, switched off without a shutdown,
+then `--keep-root` and
+`--format`, a ZFS pool on Ubuntu, a root on md RAID1 with a LUKS volume
+and its key file, btrfs subvolumes, a second attempt after a failed
+one, and the refusals; around every run the kept devices are read whole
+and must not differ by a byte, around every plan and refusal the whole
+disks. `FIRMWARE=bios` (amd64) runs the first of them on a machine that
+boots with BIOS.
+
+Not in this version: an encrypted or ZFS root, NixOS, Arch Linux and
+CachyOS as the new system, a second ESP (the one found gets the boot
+loader; the others stay as they are, and the plan says so), opening
+LUKS volumes during the installation (a kept `/home` inside one does
+not get the profile's users).
 
 ## The uplink of the specification
 

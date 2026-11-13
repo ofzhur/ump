@@ -1,0 +1,6 @@
+refused: the old root /dev/mapper/vg0-root has 2100 MB free: too little for ubuntu-26.04 beside what stays (1614 MB unpacked and 1024 MB to spare are needed)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root /dev/mapper/vg0-root has 2100 MB free: too little for ubuntu-26.04 beside what stays (1614 MB unpacked and 1024 MB to spare are needed)"
+}

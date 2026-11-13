@@ -1,0 +1,6 @@
+{
+ "free_mb": 700,
+ "loaders": [
+  "EFI/systemd"
+ ]
+}

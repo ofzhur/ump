@@ -1,0 +1,2 @@
+wipe_disks in keep mode: refused (install.sh: keep-data: the disks are never wiped); called: nothing
+make_layout in keep mode: refused (install.sh: keep-data: no layout is made); called: nothing

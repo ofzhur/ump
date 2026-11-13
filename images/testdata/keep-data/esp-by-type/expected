@@ -1,0 +1,114 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) on /dev/sdb2; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/sdb2  ext4  /  (99G)
+KEEP (as they are, mounted where they were)
+  /dev/sdb1  vfat  /boot/efi  (the EFI system partition, found by its partition type: not formatted, the new boot loader is added)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/sda1  vfat  512M
+  /dev/sda2  ext4  99G
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  other EFI system partitions (/dev/sda1) are left as they are: a firmware that starts from one of them finds the old boot loader
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-sdb2  /  ext4  defaults,errors=remount-ro  0 1
+UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "",
+    "fstab_sha256": "3794d82be9aabfd33544e05a25eb516816ef3e5f8bf72ed77d5ee0c1158f65f0"
+  },
+  "root": {
+    "device": "/dev/sdb2",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "size_mb": 101376,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/sdb2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/sdb1",
+    "boot": "",
+    "bios_disks": [],
+    "disk": "/dev/sdb",
+    "disks": [
+      "/dev/sdb"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/sdb2",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "3829e1ed-8e3c-57a7-92d6-ab6ea8b3c4ad",
+      "size_mb": 101376
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/sdb1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
+    }
+  ],
+  "aside": [],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/sda1",
+      "filesystem": "vfat",
+      "label": "",
+      "size_mb": 512,
+      "note": ""
+    },
+    {
+      "device": "/dev/sda2",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 101376,
+      "note": ""
+    }
+  ],
+  "dropped": [],
+  "lost": [],
+  "packages": [],
+  "warnings": [
+    "other EFI system partitions (/dev/sda1) are left as they are: a firmware that starts from one of them finds the old boot loader"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=3829e1ed-8e3c-57a7-92d6-ab6ea8b3c4ad",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/sdb2",
+      "action": "root"
+    }
+  ],
+  "hash": "d4929ca557e559529e8c7fee0afa7981d0a500becce70c8595fc9bfe874e24f6"
+}

@@ -1,0 +1,3 @@
+UUID=c0656983-1a4a-5b40-aeb7-035fe1005302 / ext4 defaults 0 1
+UUID=3E86-EC85 /boot/efi vfat umask=0077 0 1
+LABEL=backup /backup ext4 defaults 0 2

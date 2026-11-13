@@ -1,0 +1,17 @@
+{
+ "size_mb": 101376,
+ "used_mb": 40000,
+ "free_mb": 60000,
+ "tree_mb": 9000,
+ "features": "",
+ "usage": [
+  {
+   "path": "/etc",
+   "kb": 6000
+  },
+  {
+   "path": "/var/lib/machines",
+   "kb": 900000
+  }
+ ]
+}

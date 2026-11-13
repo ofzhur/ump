@@ -1,0 +1,3 @@
+the commands that erase are in 4 functions (wipe_disks, make_layout, format, swap_on_target)
+	wipe_disks 	make_layout
+called where keep is 0 alone

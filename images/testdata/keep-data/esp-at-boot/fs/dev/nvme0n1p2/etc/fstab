@@ -1,0 +1,3 @@
+PARTUUID=d56172fb-46f3-5b9e-aafb-0894cc407dc1 / ext4 rw,relatime 0 1
+PARTUUID=57774d44-d260-5ce3-86e3-4670f66e6c2b /boot vfat rw,fmask=0077 0 2
+PARTUUID=4c95c570-480b-5530-b334-e88b141a9275 /home ext4 rw 0 2
