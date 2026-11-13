@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -56,6 +57,9 @@ type app struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+	// in reads stdin for the questions of the run (input); stdin itself
+	// stays what it is, for the programs ump hands it to.
+	in *bufio.Reader
 	// isTTY reports whether stdin is an interactive terminal.
 	isTTY func() bool
 	// stderrTTY reports whether stderr is a terminal (Ansible's colors).
@@ -77,6 +81,10 @@ type app struct {
 	// routes say how ump reaches addresses over SSH, shared by the
 	// copies of the app that installations side by side run in.
 	routes *sshRoutes
+	// manifests are the manifests of the storage's images this run
+	// fetched (manifest), which the checks before an installation read
+	// more than once.
+	manifests *manifests
 	// home is where this run's home is; store is the state document's
 	// store, opened once per run, and doc the document read last (nil
 	// after a change); pullFailed says the backend did not answer and
@@ -108,6 +116,11 @@ type app struct {
 	// probe reports whether SSH answers at an address; nil means a TCP
 	// connect to the SSH port.
 	probe func(ctx context.Context, addr string) bool
+	// refuses reports whether the machine at an address refuses the
+	// connection to its SSH port (it is up, its SSH server is not); nil
+	// means a TCP connect to the port, or with a probe given that none
+	// is known to.
+	refuses func(ctx context.Context, addr string) bool
 	// sshExec runs the local ssh client without a terminal, for what ump
 	// does on machines by itself; nil means the real one.
 	sshExec sshExecer
@@ -214,6 +227,11 @@ func (a *app) run(ctx context.Context, args []string) int {
 	if a.ssh == nil {
 		a.ssh = runSSH
 	}
+	if a.refuses == nil && a.probe == nil {
+		// a probe that was given (the tests') asks no machine, and neither
+		// does this then
+		a.refuses = sshRefuses
+	}
 	if a.probe == nil {
 		a.probe = sshAnswers
 	}
@@ -234,6 +252,9 @@ func (a *app) run(ctx context.Context, args []string) int {
 	}
 	if a.routes == nil {
 		a.routes = &sshRoutes{}
+	}
+	if a.manifests == nil {
+		a.manifests = &manifests{got: map[string][]byte{}}
 	}
 	root := a.newRootCmd()
 	root.SetArgs(args)

@@ -210,26 +210,26 @@ func TestForget(t *testing.T) {
 	}
 }
 
-// TestKeepData: the record of an installation that kept the data is
-// read and written with the layout's version as it is, and an
-// installation without it has no such key.
-func TestKeepData(t *testing.T) {
-	d, err := Parse([]byte("version: 3\nservers:\n  fake/1:\n    installed:\n      os: ubuntu-26.04\n      profile: db\n      layout: keep-data\n      keep_data:\n        root: /dev/mapper/vg0-root\n        keep_root: true\n        plan: 8911da13c974ed8c5d80e49b00519c87f95c8b0017f62b7beb2ef47db69c808b\n      at: 2026-11-13T10:12:00Z\n  fake/2:\n    installed:\n      os: ubuntu-26.04\n      profile: web\n      layout: lvm-linear\n      at: 2026-11-13T10:12:00Z\n"))
+// TestKeepDataLayout: an installation that kept the data is recorded
+// with the layout keep-data and nothing else: the record has the keys
+// it always had, which every ump reads.
+func TestKeepDataLayout(t *testing.T) {
+	d, err := Parse([]byte("version: 3\nservers:\n  fake/1:\n    installed:\n      os: ubuntu-26.04\n      profile: db\n      layout: keep-data\n      hostname: db-01\n      at: 2026-11-13T10:12:00Z\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := d.Servers["fake/1"].Installed.KeepData
-	if k == nil || k.Root != "/dev/mapper/vg0-root" || !k.KeepRoot || len(k.Plan) != 64 || d.Servers["fake/2"].Installed.KeepData != nil {
-		t.Errorf("keep_data: %+v", k)
+	if in := d.Servers["fake/1"].Installed; in == nil || in.Layout != "keep-data" {
+		t.Errorf("installed: %+v", in)
 	}
 	out, err := d.Bytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := string(out); !strings.Contains(s, "version: 3\n") || strings.Count(s, "keep_data:") != 1 || !strings.Contains(s, "      keep_data:\n        root: /dev/mapper/vg0-root\n        keep_root: true\n        plan: 8911da13") {
+	if s := string(out); !strings.Contains(s, "version: 3\n") || !strings.Contains(s, "      profile: db\n      layout: keep-data\n      hostname: db-01\n      at: ") {
 		t.Errorf("written:\n%s", s)
 	}
-	if _, err := Parse([]byte("servers:\n  fake/1:\n    installed:\n      os: x\n      profile: y\n      keep_data:\n        rot: /dev/sda1\n      at: 2026-11-13T10:12:00Z\n")); err == nil || !strings.Contains(err.Error(), "field rot not found") {
-		t.Errorf("a key that is none: %v", err)
+	// no key of its own
+	if _, err := Parse([]byte("servers:\n  fake/1:\n    installed:\n      os: x\n      profile: y\n      layout: keep-data\n      keep_data:\n        root: /dev/sda1\n      at: 2026-11-13T10:12:00Z\n")); err == nil || !strings.Contains(err.Error(), "field keep_data not found") {
+		t.Errorf("a key of its own: %v", err)
 	}
 }

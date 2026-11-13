@@ -1372,9 +1372,9 @@ $ ump config firewall create mail --from default
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | generic error, including a failed installation (the server stays in the rescue system; with `--keep-data`: after the installer began to write, the data volumes untouched) |
+| 1 | generic error, including a failed installation (the server stays in the rescue system). With `--keep-data` the message says whether the installer began to write: after it did, the old root is gone or moved aside and the volumes the plan keeps hold their data; nothing was written when the installer could not be fetched, the plan run failed (an installer status other than 0 and 2), the plan file could not be read back, was a refusal, or had no hash or not the hash the installer printed, or the run that installs failed before the installer's line `==> keep-data: writing begins` |
 | 2 | usage or validation error |
-| 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes`; with `--keep-data` also a machine or plan the installer refused, or an installer that stopped before its first write: nothing was written |
+| 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes`; with `--keep-data` also a machine or plan the installer refused or an installer that stopped by itself before its first write (its status 2), and a plan `--yes` does not accept: nothing failed, nothing was written |
 | 4 | provider API error, or an account that could not be listed |
 | 5 | the server did not answer in time (rescue system, reboot, new system) |
 | 6 | provisioning failed: Ansible did not complete; the hosts that failed or were unreachable are named (after a reinstall, the server is installed and recorded) |

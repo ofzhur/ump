@@ -88,23 +88,7 @@ type Install struct {
 	Hostname     string            `yaml:"hostname,omitempty"`
 	Admin        string            `yaml:"admin,omitempty"`
 	Interfaces   map[string]string `yaml:"interfaces,omitempty"`
-	// KeepData is there for an installation that kept the data of the
-	// old system (ump server reinstall --keep-data; Layout is keep-data
-	// then). An ump from before it refuses a state that has one, as any
-	// key it does not know.
-	KeepData *KeepData `yaml:"keep_data,omitempty"`
-	At       time.Time `yaml:"at"`
-}
-
-// KeepData is what a keep-data installation replaced: the old root (the
-// device, with :SUBVOLUME on btrfs), whether the old system was moved
-// aside on it instead of formatted (--keep-root), and the hash of the
-// plan that was confirmed (the plan is /etc/ump/keep-data.json on the
-// server).
-type KeepData struct {
-	Root     string `yaml:"root"`
-	KeepRoot bool   `yaml:"keep_root,omitempty"`
-	Plan     string `yaml:"plan"`
+	At           time.Time         `yaml:"at"`
 }
 
 // Private is a server's address in a private network of networks.yaml,

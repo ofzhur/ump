@@ -358,3 +358,25 @@ func TestInlineTyposRefused(t *testing.T) {
 		t.Errorf("firewalls.yaml rule typo: %v", err)
 	}
 }
+
+// TestKeepDataLayoutNameIsTaken: no layout has the name a keep-data
+// installation is recorded with.
+func TestKeepDataLayoutNameIsTaken(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "profiles", "layouts.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layouts, err := ParseLayouts(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := layouts["lvm-linear"]
+	if err := l.Validate(); err != nil {
+		t.Fatalf("lvm-linear: %v", err)
+	}
+	// the same layout under the name: the name alone is refused
+	l.Name = KeepDataLayout
+	if err := l.Validate(); err == nil || err.Error() != "layout keep-data: the name is taken: it is what an installation that kept the data is recorded with (ump server reinstall --keep-data), which applies no layout; give the layout another name" {
+		t.Errorf("a layout named keep-data: %v", err)
+	}
+}

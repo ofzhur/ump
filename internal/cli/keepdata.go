@@ -25,8 +25,11 @@ import (
 // run says so.
 
 // keepLayout is the layout a keep-data installation is recorded and
-// shown with: none is applied.
-const keepLayout = "keep-data"
+// shown with: none is applied, and no layout has the name. It is all
+// the state says of such an installation, in a field every ump reads;
+// the old root and the plan's hash are on the server (/etc/ump/install,
+// /etc/ump/keep-data.json) and in the result of the run.
+const keepLayout = profile.KeepDataLayout
 
 // keepPlanFile is where the installer writes its plan in the rescue
 // system, as JSON; keepWriting is the line it prints before its first
@@ -38,7 +41,12 @@ const (
 
 // keepFirst is what the first question of a keep-data installation says
 // after what is installed where.
-const keepFirst = "Its data is kept: no disk is wiped. The running system goes down and the server boots the rescue system, where the installer finds the old system and plans what it formats and what it keeps; nothing is written to a disk until you confirm that plan."
+const keepFirst = "Its data is kept: no disk is wiped. The running system is shut down (not always cleanly: services that write to the volumes that are kept are best stopped first) and the server boots the rescue system, where the installer finds the old system and plans what it formats and what it keeps; nothing is written to a disk until you confirm that plan."
+
+// keepAskWait is how long the provider may take to say whether its
+// rescue system is still the boot option, for the line that says how
+// the old system starts again.
+const keepAskWait = 15 * time.Second
 
 // keepData is a keep-data installation: its options, and once the plan
 // run is done the server in the rescue system and the installer's plan.
@@ -78,7 +86,16 @@ type keepPlan struct {
 		Device    string `json:"device"`
 		Subvolume string `json:"subvolume"`
 		By        string `json:"by"`
+		// Known is false where --root names a device on which the
+		// installer found no old system it knows; a plan without the
+		// field is one of a root it knows.
+		Known *bool `json:"known"`
 	} `json:"root"`
+	// Resumed says that the plan goes on after an installation that
+	// failed, from what that one saved of the old system, and Shrunk
+	// that it keeps less than the first plan did.
+	Resumed    bool `json:"resumed"`
+	Shrunk     bool `json:"shrunk"`
 	Candidates []struct {
 		Device    string `json:"device"`
 		Subvolume string `json:"subvolume"`
@@ -120,10 +137,39 @@ func parseKeepPlan(data []byte) (*keepPlan, error) {
 	if err := json.Unmarshal(data, k); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(data, &k.doc); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&k.doc); err != nil {
 		return nil, err
 	}
+	k.doc = plainNumbers(k.doc)
 	return k, nil
+}
+
+// plainNumbers gives the numbers of a decoded JSON document
+// (json.Number) the types that are written as they were read: an
+// integer stays one, where a float64 of a million and more comes out
+// of the YAML encoder with an exponent (a volume's size in MB).
+func plainNumbers(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		for key, e := range v {
+			v[key] = plainNumbers(e)
+		}
+	case []any:
+		for i, e := range v {
+			v[i] = plainNumbers(e)
+		}
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return n
+		}
+		if f, err := v.Float64(); err == nil {
+			return f
+		}
+		return v.String()
+	}
+	return v
 }
 
 // checkKeepFlags checks --keep-data and its flags by themselves (exit
@@ -181,7 +227,7 @@ func (a *app) checkKeepOS(ctx context.Context, m provider.Machine, os, storage s
 		if family != "image" {
 			break
 		}
-		data, err := a.fetch(ctx, storage+"/os/"+os+"/"+arch+"/manifest.json")
+		data, err := a.manifest(ctx, storage, os, arch)
 		if err != nil {
 			continue
 		}
@@ -199,20 +245,24 @@ func (a *app) checkKeepOS(ctx context.Context, m provider.Machine, os, storage s
 }
 
 // keepNoWay is the refusal of a keep-data installation on a server ump
-// could reach only through its provider's stock installation (why says
-// what stands in the other ways): that erases the disks.
-func keepNoWay(addr, why string) error {
-	return fmt.Errorf("no root access to %s over SSH, and %s: the only other way in is the provider's reinstall with a stock Linux, which erases the disks that --keep-data keeps. ump keeps the data of such a server through its running system alone: let UMP in there as root or a sudo user (with UMP's key, ump config key show, or one of yours) and run this again. Nothing was changed", addr, why)
+// could reach only through its provider's stock installation (first
+// and why say what stands in the other ways): that erases the disks.
+func keepNoWay(first, why string) error {
+	return fmt.Errorf("%s, and %s: the only other way in is the provider's reinstall with a stock Linux, which erases the disks that --keep-data keeps. ump keeps the data of such a server through its running system alone: let UMP in there as root or a sudo user (with UMP's key, ump config key show, or one of yours) and run this again. Nothing was changed", first, why)
 }
 
 // planKeep makes the plan of a keep-data installation: it brings the
 // server into the UMP rescue system and runs the installer there in its
 // plan mode, which finds the old system reading only and writes nothing;
 // the plan is printed as the installer prints it, and read back as JSON
-// (p.keep.plan). A machine the installer refuses, and whatever else
-// keeps it from planning, is an error that says that nothing was
-// written and how the old system starts again (exit status 3 for a
-// refusal).
+// (p.keep.plan): the plan that is asked about is the one that was
+// shown, so a file with another hash than the installer printed is
+// refused. A machine the installer refuses, and whatever else keeps it
+// from planning, is an error that says that nothing was written and how
+// the old system starts again: exit status 3 for a refusal, where
+// nothing failed, 1 for what failed (the installer not fetched, a plan
+// run that ended badly, a plan file that cannot be read or used), 5 for
+// a connection that ended.
 func (a *app) planKeep(cmd *cobra.Command, p *installPlan, r installRun) (installResult, error) {
 	ctx := cmd.Context()
 	m := p.m
@@ -233,9 +283,9 @@ func (a *app) planKeep(cmd *cobra.Command, p *installPlan, r installRun) (instal
 	ran := installerRan(out)
 	switch {
 	case code == 255:
-		return result, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended while the installer planned, which writes nothing; the server is in the UMP rescue system, look there (%s)", e.addr, e.staging))
+		return result, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended while the installer planned, which writes nothing; the server is in the UMP rescue system, look there (%s); %s", e.addr, e.staging, lowerFirst(a.oldSystemBack(ctx, p))))
 	case code != 0 && !ran && code != 1 && code != 2:
-		return result, a.noInstaller(p, e, code)
+		return result, fmt.Errorf("%w. %s", a.noInstaller(p, e, code), a.keepUnwritten(ctx, p))
 	}
 	// the plan as JSON; a machine the installer refuses has one too, with
 	// the old systems it found
@@ -251,8 +301,12 @@ func (a *app) planKeep(cmd *cobra.Command, p *installPlan, r installRun) (instal
 		return result, fmt.Errorf("the installer's plan for %s failed (exit status %d, see above). %s", m.Name, code, a.keepUnwritten(ctx, p))
 	case perr != nil:
 		return result, fmt.Errorf("the installer's plan for %s could not be read back from the rescue system (%s): %w. %s", m.Name, keepPlanFile, perr, a.keepUnwritten(ctx, p))
-	case plan.Refused != "" || len(plan.Hash) != 64:
+	case plan.Refused != "":
+		return result, fmt.Errorf("the installer's plan for %s (%s) is a refusal, though the installer ended as after a plan: %s. %s", m.Name, keepPlanFile, plan.Refused, a.keepUnwritten(ctx, p))
+	case len(plan.Hash) != 64:
 		return result, fmt.Errorf("the installer's plan for %s (%s) has no hash to confirm. %s", m.Name, keepPlanFile, a.keepUnwritten(ctx, p))
+	case !strings.Contains(out, plan.Hash):
+		return result, fmt.Errorf("the plan read back from the rescue system of %s (%s, %s) is not the plan the installer printed above, and ump asks about no plan it did not show. %s", m.Name, keepPlanFile, shortHash(plan.Hash), a.keepUnwritten(ctx, p))
 	}
 	p.keep.plan = plan
 	result.KeepData = plan.doc
@@ -287,22 +341,42 @@ func (a *app) keepUnwritten(ctx context.Context, p *installPlan) string {
 // oldSystemBack says how the old system of a server in the rescue system
 // starts again while nothing was written: a reboot from disk (a reset:
 // the rescue system runs from memory and has no disk mounted), once the
-// provider's rescue system is disabled where it would boot again.
+// provider's rescue system is disabled where it would boot again. The
+// provider is asked whether it would, whatever became of the run (an
+// interrupt at the question has ended ctx), for a short while; when it
+// does not say, both commands are named. A server whose provider has no
+// power control reboots from within the rescue system, reached as the
+// run reached it.
 func (a *app) oldSystemBack(ctx context.Context, p *installPlan) string {
-	if rs, ok := p.prov.(provider.Rescue); ok {
-		if on, err := rs.RescueEnabled(ctx, p.m); err == nil && on {
-			return "ump server unrescue " + p.ref + " --reboot starts the old system again"
+	_, power := p.prov.(provider.Power)
+	reboot := "ump server reboot " + p.ref + " --hard"
+	if !power {
+		reboot = "ump ssh " + p.ref + " --staging -- systemctl reboot"
+		if p.keep != nil && p.keep.entry != nil {
+			reboot = p.keep.entry.stagingRun("systemctl reboot")
 		}
 	}
-	if _, ok := p.prov.(provider.Power); ok {
-		return "ump server reboot " + p.ref + " --hard starts the old system again"
+	if rs, ok := p.prov.(provider.Rescue); ok {
+		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepAskWait)
+		on, err := rs.RescueEnabled(actx, p.m)
+		cancel()
+		unrescue := "ump server unrescue " + p.ref + " --reboot"
+		switch {
+		case err != nil:
+			return fmt.Sprintf("%s starts the old system again where the provider's rescue system is still the boot option, %s where it is not (the provider did not say which: %v)", unrescue, reboot, err)
+		case on:
+			return unrescue + " starts the old system again"
+		}
 	}
-	return "A reboot starts the old system again (ump ssh " + p.ref + " --staging -- systemctl reboot)"
+	if power {
+		return reboot + " starts the old system again"
+	}
+	return "A reboot starts the old system again (" + reboot + ")"
 }
 
 // lowerFirst is s with its first letter in lower case.
 func lowerFirst(s string) string {
-	if s == "" || strings.HasPrefix(s, "ump ") {
+	if s == "" || strings.HasPrefix(s, "ump ") || strings.HasPrefix(s, "ssh ") {
 		return s
 	}
 	return strings.ToLower(s[:1]) + s[1:]
@@ -310,12 +384,26 @@ func lowerFirst(s string) string {
 
 // keepAccepted says whether --yes accepts the plan of a keep-data
 // installation: the installer found the one old system by itself, or
-// the operator named it with --root.
+// the operator named it with --root and the installer knows an old
+// system there; and a plan that goes on after a failed installation
+// keeps what the first plan kept. Any other plan is for a person to
+// read (exit status 3, nothing written). A plan without the fields that
+// say so (root.known, resumed and shrunk) is one of an installer that
+// has no such plans.
 func (p *installPlan) keepAccepted() error {
-	if plan := p.keep.plan; plan.Root.By != "detection" && p.keep.root == "" {
-		return withExit(exitAborted, fmt.Errorf("--yes accepts a keep-data plan whose old system the installer found by itself, or that --root names; the plan for %s has its root on %s by %s", p.m.Name, plan.root(), nonEmpty(plan.Root.By, "no word of the installer")))
+	plan := p.keep.plan
+	why := ""
+	switch {
+	case plan.Root.By != "detection" && p.keep.root == "":
+		why = fmt.Sprintf("--yes accepts a keep-data plan whose old system the installer found by itself, or that --root names; the plan for %s has its root on %s by %s", p.m.Name, plan.root(), nonEmpty(plan.Root.By, "no word of the installer"))
+	case plan.Root.Known != nil && !*plan.Root.Known:
+		why = fmt.Sprintf("--yes does not accept the keep-data plan for %s: --root names %s, where the installer found no old system it knows, so only the option says that this is the root to replace", p.m.Name, plan.root())
+	case plan.Resumed && plan.Shrunk:
+		why = fmt.Sprintf("--yes does not accept the keep-data plan for %s: it goes on after an installation that failed and keeps less than the first plan did", p.m.Name)
+	default:
+		return nil
 	}
-	return nil
+	return withExit(exitAborted, errors.New(why+"; run the command without --yes and read the plan"))
 }
 
 // confirmKeep is the second question of keep-data installations, about
@@ -362,11 +450,17 @@ func shortHash(hash string) string {
 
 // installKept runs the installer on a server whose keep-data plan was
 // confirmed, with the plan's hash: the installer finds everything again
-// and writes only when its plan is still that one. Its exit status says
-// whether it wrote: 2 is every end before the first write, 1 a failure
-// after it, when the old root is gone or moved aside and the data
-// volumes are as they were; a second run then plans from what the first
-// saved of the old system. result says whether the disks were written.
+// and writes only when its plan is still that one. It says that it
+// writes before its first write (keepWriting), and its exit status says
+// the same: 2 is every end before the first write, 1 a failure after
+// it, when the old root is gone or moved aside and the volumes the plan
+// keeps hold their data; a second run then plans from what the first
+// saved of the old system. The error is worded by whether the line
+// came: without it nothing was written, unless the connection took the
+// line with it. Exit status 3 is an installer that stopped by itself
+// before it wrote, 1 a failure, before the first write or after, 5 a
+// connection that ended. result says whether the disks were written, or
+// may have been.
 func (a *app) installKept(ctx context.Context, p *installPlan, r installRun, e *installEntry, result *installResult) error {
 	m := p.m
 	fmt.Fprintf(a.stderr, "Installing %s on %s as %s, as planned (%s) ...\n", p.what(), m.Name, p.hostname, shortHash(p.keep.plan.Hash))
@@ -378,21 +472,25 @@ func (a *app) installKept(ctx context.Context, p *installPlan, r installRun, e *
 		return err
 	}
 	ran, began := installerRan(out), strings.Contains(out, keepWriting)
-	result.written = code == 0 || began || code != 2 && ran
+	result.written = code == 0 || began || code == 255 && ran
 	again := "run the same command again: the installer finds what it saved of the old system's fstab on the new root, plans anew, and ump asks again"
 	switch {
 	case code == 0:
 		return nil
 	case code == 255 && began:
-		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation, after the installer began to write: the old root is gone or moved aside, the data volumes are untouched. The server is in the UMP rescue system, look there (%s); when the installer is not running any more, %s", e.addr, e.staging, again))
+		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation, after the installer began to write: the old root is gone or moved aside, the volumes the plan keeps hold their data. The server is in the UMP rescue system, look there (%s); when the installer is not running any more, %s", e.addr, e.staging, again))
+	case code == 255 && ran:
+		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation, before the installer said that it writes: nothing was written, unless that line went with the connection. The server is in the UMP rescue system, look there (%s); when the installer is not running any more, run the same command again: it plans anew, and ump asks again", e.addr, e.staging))
 	case code == 255:
-		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation, before the installer said that it writes; the server is in the UMP rescue system, look there (%s)", e.addr, e.staging))
-	case !ran && code != 1 && code != 2:
-		return a.noInstaller(p, e, code)
+		return withExit(exitUnreachable, fmt.Errorf("the connection to %s ended before the installer ran. %s", e.addr, a.keepUnwritten(ctx, p)))
+	case began:
+		return fmt.Errorf("the installation on %s failed after the installer began to write (exit status %d, see above): the old root is gone or moved aside, the volumes the plan keeps hold their data. The server stays in the UMP rescue system (%s); %s", m.Name, code, e.staging, again)
 	case code == 2:
 		return withExit(exitAborted, fmt.Errorf("the installer stopped before it wrote anything (exit status 2, see above). %s", a.keepUnwritten(ctx, p)))
+	case !ran && code != 1:
+		return fmt.Errorf("%w. %s", a.noInstaller(p, e, code), a.keepUnwritten(ctx, p))
 	}
-	return fmt.Errorf("the installation on %s failed after the installer began to write (exit status %d, see above): the old root is gone or moved aside, the data volumes are untouched. The server stays in the UMP rescue system (%s); %s", m.Name, code, e.staging, again)
+	return fmt.Errorf("the installation on %s failed before the installer began to write (exit status %d, see above). %s", m.Name, code, a.keepUnwritten(ctx, p))
 }
 
 // keepNames are the servers of the plans that keep their data, as named.

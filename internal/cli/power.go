@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -224,6 +225,22 @@ func sshAnswers(ctx context.Context, addr string) bool {
 	}
 	conn.Close()
 	return true
+}
+
+// sshRefuses reports whether the machine at addr is up without an SSH
+// server: it refuses the connection to its SSH port, which a kernel
+// that halted, or took its network down on the way, does not.
+func sshRefuses(ctx context.Context, addr string) bool {
+	if addr == "" {
+		return false
+	}
+	d := net.Dialer{Timeout: dialTimeout}
+	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(addr, strconv.Itoa(sshPort)))
+	if err != nil {
+		return errors.Is(err, syscall.ECONNREFUSED)
+	}
+	conn.Close()
+	return false
 }
 
 // waitForSSH waits until the SSH port of addr answers (through its jump

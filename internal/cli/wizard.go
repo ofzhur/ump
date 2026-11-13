@@ -38,12 +38,21 @@ func (a *app) newPrompterTo(ctx context.Context, out io.Writer) *prompter {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// one reader for all the questions of a run: what the reader of one
-	// question read ahead (an answer typed early, the lines of a script)
-	// is there for the next
-	in := bufio.NewReader(a.stdin)
-	a.stdin = in
-	return &prompter{ctx: ctx, in: in, out: out, readSecret: a.readSecret, saveTerm: a.saveTerm}
+	return &prompter{ctx: ctx, in: a.input(), out: out, readSecret: a.readSecret, saveTerm: a.saveTerm}
+}
+
+// input is the one reader of all the questions of a run: what the
+// reader of one question read ahead (an answer typed early, the lines of
+// a script) is there for the next. It reads a.stdin and never takes its
+// place: a program ump runs on the terminal (ansible-playbook) gets
+// a.stdin, the terminal's own file, which os/exec hands over as it is;
+// a reader in its place would reach the program through a pipe, and
+// ump would wait for a line from the terminal after the program ended.
+func (a *app) input() *bufio.Reader {
+	if a.in == nil {
+		a.in = bufio.NewReader(a.stdin)
+	}
+	return a.in
 }
 
 var (

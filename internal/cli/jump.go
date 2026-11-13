@@ -173,6 +173,17 @@ func (a *app) answers(ctx context.Context, addr string) bool {
 	return err == nil && code == 0 && strings.HasPrefix(out.String(), "SSH-")
 }
 
+// refused reports whether the machine at addr is up without an SSH
+// server: it refuses the connection to its SSH port (sshRefuses).
+// Through a jump host ump cannot tell a refusal from silence, and says
+// no.
+func (a *app) refused(ctx context.Context, addr string) bool {
+	if a.refuses == nil || addr == "" || a.route(addr).jump != "" {
+		return false
+	}
+	return a.refuses(ctx, addr)
+}
+
 // jumpProbe is the ssh command line that connects to the SSH port of
 // addr through the jump host and prints what answers there.
 func jumpProbe(jump, addr string) []string {
