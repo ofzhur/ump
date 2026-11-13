@@ -22,6 +22,10 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -170,5 +174,5 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "action": "drop"
     }
   ],
-  "hash": "c012a35e22e68cb5d9ab9d30c53ac72ff94e6ab0856413e8c360237e4aaf27fd"
+  "hash": "476a3ca5c58211f4dde0bfa08b39f19cb4bbe8ceaeab33c2b8a33d307f363b8d"
 }

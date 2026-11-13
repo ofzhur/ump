@@ -65,7 +65,10 @@ separate `/boot`) and mounts every other volume of the old `/etc/fstab`
 where it was, LVM, md, LUKS, btrfs subvolumes and ZFS pools included.
 The profile's layout then says one thing only, the file system of the
 new root (the one it gives `/`: ext4, xfs or btrfs), and `--layout` and
-`--disks` are refused. [Keeping the data](keep-data.md) has the rules.
+`--disks` are refused. Such an installation is recorded and listed with
+the layout `keep-data`, a name that is taken: `ump config disk-layout
+create keep-data` and a layout of that name in `layouts.yaml` are
+refused. [Keeping the data](keep-data.md) has the rules.
 
 ## Parts
 

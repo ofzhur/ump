@@ -101,7 +101,7 @@ func (e *testEnv) keepInstaller(addr, cmd string) (stdout, stderr string, code i
 	case planning && e.keepPlanExit != 0:
 		return out, "install.sh: line 1811: jq exited with status 5\n", e.keepPlanExit
 	case planning:
-		return out + "==> plan file: /tmp/ump-keep-data.json\n==> dry run: stopping here, no disk was touched\n", "", 0
+		return out + "==> plan file: /tmp/ump-keep-data.json\n==> the plan is made: stopping here, no disk was touched; --confirm with its hash installs it\n", "", 0
 	}
 	confirmed := ""
 	if _, after, ok := strings.Cut(cmd, " --confirm "); ok {
@@ -109,7 +109,7 @@ func (e *testEnv) keepInstaller(addr, cmd string) (stdout, stderr string, code i
 	}
 	switch {
 	case confirmed != hash:
-		return out, "install.sh: keep-data: refused: the plan (above, " + hash + ") is not the one that was confirmed (" + confirmed + "): the disks or the options changed since; look at it again and confirm it\n" + unwritten, 2
+		return out, "install.sh: keep-data: refused: the plan (above, " + hash + ") is not the one that was confirmed (" + confirmed + "): the disks, the options or the image on the storage changed since; look at it again and confirm it\n" + unwritten, 2
 	case e.keepExit == 2:
 		return out, "install.sh: the image's checksum is not the manifest's\n" + unwritten, 2
 	case e.keepExit != 0 && e.keepQuiet:
@@ -236,7 +236,7 @@ func TestKeepDataReinstall(t *testing.T) {
 		"==> keep-data: the old system Debian GNU/Linux 12 (bookworm) (old.example.net) on /dev/mapper/vg0-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned\n",
 		"==> FORMAT (what is on them is lost)\n==>   /dev/mapper/vg0-root  ext4   /  (10G)\n==>   /dev/vda2             ext4   /boot  (1G)\n==> KEEP (as they are, mounted where they were)\n",
 		"==> ASIDE (kept, under another name)\n==>   /dev/mapper/vg0-var   ext4   /var -> /var.old  (mounted)\n==> LOST (on the old root, beyond the system itself)\n",
-		"==> plan: " + hash + " (sha256; --confirm takes it)\n==> plan file: /tmp/ump-keep-data.json\n==> dry run: stopping here, no disk was touched\n" +
+		"==> plan: " + hash + " (sha256; --confirm takes it)\n==> plan file: /tmp/ump-keep-data.json\n==> the plan is made: stopping here, no disk was touched; --confirm with its hash installs it\n" +
 			"Install ubuntu-26.04 on web-01 as the plan above says (plan " + hash[:12] + ")? What it lists under FORMAT and LOST is lost. [y/N]: " +
 			"Installing " + what + " on web-01 as web-01, as planned (plan " + hash[:12] + ") ...\nProvisioning after the first boot: 00-base on the fleet.\n",
 		"==> keep-data: writing begins\n==> installed: ubuntu-26.04 2026.10.12",
@@ -649,7 +649,7 @@ func TestKeepDataMultiinstall(t *testing.T) {
 		"Install on these 2 servers? Every disk of each is erased, but for web-01 (keep-data): there the running system is shut down (not always cleanly: services that write to the volumes that are kept are best stopped first), the installer plans in the rescue system, and nothing is written to a disk until you confirm the plans; the other installations start after that. [y/N]: ",
 		"Keep-data plans for web-01, all at once ...\n",
 		"[web-01] ==> FORMAT (what is on them is lost)\n",
-		"[web-01] ==> dry run: stopping here, no disk was touched\n",
+		"[web-01] ==> the plan is made: stopping here, no disk was touched; --confirm with its hash installs it\n",
 		"Install ubuntu-26.04 on web-01 as the plan above says (plan " + hash[:12] + ")? What it lists under FORMAT and LOST is lost. [y/N]: ",
 		"Installing 2 servers, all at once ...\n",
 	} {
@@ -856,6 +856,7 @@ func TestKeepDataYesReadsThePlan(t *testing.T) {
 	}{
 		{map[string]any{"root.known": false}, "ump: --yes does not accept the keep-data plan for web-01: --root names /dev/sda3, where the installer found no old system it knows, so only the option says that this is the root to replace; run the command without --yes and read the plan\n"},
 		{map[string]any{"resumed": true, "shrunk": true}, "ump: --yes does not accept the keep-data plan for web-01: it goes on after an installation that failed and keeps less than the first plan did; run the command without --yes and read the plan\n"},
+		{map[string]any{"shrunk": true}, "ump: --yes does not accept the keep-data plan for web-01: it goes on after an installation that failed and keeps less than the first plan did; run the command without --yes and read the plan\n"},
 	} {
 		e.keepPlanFile = keepPlanWith(t, "two-systems-root", c.set)
 		errOut, code := run(true, "--root", "/dev/sda3")
@@ -880,13 +881,129 @@ func TestKeepDataYesReadsThePlan(t *testing.T) {
 		{"root.known": true},
 		{"resumed": true},
 		{"resumed": true, "shrunk": false},
-		{"resumed": false, "shrunk": true},
 		{"root.known": nil},
 	} {
 		e.keepPlanFile = keepPlanWith(t, "two-systems-root", set)
 		if errOut, code := run(true, "--root", "/dev/sda3"); code != 0 || len(e.keepRuns()) != 2 {
 			t.Errorf("%v with --yes: code %d, runs %q, %q", set, code, e.keepRuns(), errOut)
 		}
+	}
+}
+
+// TestKeepDataInstallerPlans: the plans the installer makes of the
+// machines of its own test that only a person can judge, read as it
+// writes them: the root that --root alone names (root.known false), the
+// second attempt that keeps less than the first plan did (resumed and
+// shrunk), and the second attempt that keeps it all, which --yes takes;
+// what the new system makes anew at every boot is shown, and carried in
+// the result; and another image on the storage between the plan and the
+// installation is another plan.
+func TestKeepDataInstallerPlans(t *testing.T) {
+	e := keepEnv(t)
+	run := func(args ...string) (string, string, int) {
+		resetFakePower()
+		e.installs = nil
+		return e.run("", false, append([]string{"server", "reinstall", "web-01", "--keep-data", "--no-provision", "--account", "one"}, args...)...)
+	}
+	for _, c := range []struct {
+		fixture string
+		args    []string
+		shown   string
+		want    string
+	}{
+		{"no-system-root", []string{"--root", "/dev/sda2", "--yes"},
+			"==>   /dev/sda2 holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system\n",
+			"ump: --yes does not accept the keep-data plan for web-01: --root names /dev/sda2, where the installer found no old system it knows, so only the option says that this is the root to replace; run the command without --yes and read the plan\n"},
+		{"resume-shrunk", []string{"--yes"},
+			"==>   this plan keeps less than the one the interrupted installation was confirmed with: /boot is not in it any more; what the old fstab named there is not found now. Look at it before you confirm\n",
+			"ump: --yes does not accept the keep-data plan for web-01: it goes on after an installation that failed and keeps less than the first plan did; run the command without --yes and read the plan\n"},
+	} {
+		e.keepCase = c.fixture
+		_, errOut, code := run(c.args...)
+		if code != exitAborted || !strings.Contains(errOut, c.shown) || !strings.HasSuffix(errOut, c.want) {
+			t.Errorf("%s: code %d, %q", c.fixture, code, errOut)
+		}
+		if runs := e.keepRuns(); len(runs) != 1 || strings.Contains(runs[0], "--confirm") || e.installed {
+			t.Errorf("%s: installer runs %q", c.fixture, runs)
+		}
+		if st := e.readState(); strings.Contains(st, "10.0.0.1") || strings.Contains(st, "installed") {
+			t.Errorf("%s: state %s", c.fixture, st)
+		}
+	}
+	// a second attempt that keeps what the first plan kept is --yes's to take
+	e.keepCase = "resume"
+	_, errOut, code := run("--yes")
+	if code != 0 || len(e.keepRuns()) != 2 || !strings.Contains(errOut, "on /dev/mapper/vg0-root, after an interrupted installation; UEFI firmware") {
+		t.Errorf("resume: code %d, runs %q, %q", code, e.keepRuns(), errOut)
+	}
+
+	// what the old crypttab makes anew at every boot: shown as the
+	// installer prints it, and in the result with the crypttab's entries,
+	// the image and the labels of what is formatted
+	e.keepCase = "crypttab-swap-labelled"
+	out, errOut, code := run("--dry-run", "--yes", "-o", "json")
+	if code != 0 || !strings.Contains(errOut, "==> MADE ANEW AT EVERY BOOT (crypttab: what is on them is overwritten each time the new system starts, as the old one did)\n==>   /dev/vda4             swap  none  (cswap: LABEL=cryptswap, swap,offset=2048,cipher=aes-xts-plain64,size=256)\n") ||
+		!strings.Contains(errOut, "==> the plan is made: stopping here, no disk was touched; --confirm with its hash installs it\nDry run done; nothing was written to the disks of web-01") {
+		t.Fatalf("made anew at every boot: code %d, %q", code, errOut)
+	}
+	var res struct {
+		KeepData struct {
+			Image struct {
+				Version string `json:"version"`
+				SHA256  string `json:"sha256"`
+			} `json:"image"`
+			Root struct {
+				UUID  string `json:"uuid"`
+				Known *bool  `json:"known"`
+			} `json:"root"`
+			Resumed  *bool `json:"resumed"`
+			Shrunk   *bool `json:"shrunk"`
+			Volatile []struct {
+				Device  string `json:"device"`
+				Name    string `json:"name"`
+				Source  string `json:"source"`
+				Options string `json:"options"`
+				How     string `json:"how"`
+			} `json:"volatile"`
+			Crypttab []struct {
+				Name   string `json:"name"`
+				Source string `json:"source"`
+			} `json:"crypttab"`
+			Format []struct {
+				Device string  `json:"device"`
+				Label  *string `json:"label"`
+			} `json:"format"`
+		} `json:"keep_data"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	k := res.KeepData
+	if k.Image.Version != "2026.10.12" || len(k.Image.SHA256) != 64 || k.Root.UUID == "" || k.Root.Known != nil || k.Resumed != nil || k.Shrunk != nil ||
+		len(k.Volatile) != 1 || k.Volatile[0].Device != "/dev/vda4" || k.Volatile[0].Name != "cswap" || k.Volatile[0].Source != "LABEL=cryptswap" || k.Volatile[0].How != "swap" || !strings.HasPrefix(k.Volatile[0].Options, "swap,offset=2048") ||
+		len(k.Crypttab) != 1 || k.Crypttab[0].Name != "cswap" || k.Crypttab[0].Source != "LABEL=cryptswap" ||
+		len(k.Format) != 2 || k.Format[0].Label == nil || k.Format[1].Label == nil {
+		t.Errorf("the result: %+v\n%s", k, out)
+	}
+	// and what a plan says of itself comes through as it is
+	e.keepCase = "resume-shrunk"
+	if out, _, code := run("--dry-run", "--yes", "-o", "yaml"); code != 0 || !strings.Contains(out, "\n  resumed: true\n") || !strings.Contains(out, "\n  shrunk: true\n") {
+		t.Errorf("resumed and shrunk, as YAML: code %d\n%s", code, out)
+	}
+	e.keepCase = "no-system-root"
+	if out, _, code := run("--root", "/dev/sda2", "--dry-run", "--yes", "-o", "yaml"); code != 0 || !strings.Contains(out, "\n    known: false\n") {
+		t.Errorf("root.known, as YAML: code %d\n%s", code, out)
+	}
+
+	// another image on the storage between the plan and the installation:
+	// the installer's plan has another hash, and it writes nothing
+	e.keepCase, e.keepDrift = "lvm", "lvm-other-image"
+	_, errOut, code = run("--yes")
+	e.keepDrift = ""
+	if code != exitAborted || keepHash(t, "lvm") == keepHash(t, "lvm-other-image") ||
+		!strings.Contains(errOut, "install.sh: keep-data: refused: the plan (above, "+keepHash(t, "lvm-other-image")+") is not the one that was confirmed ("+keepHash(t, "lvm")+"): the disks, the options or the image on the storage changed since") ||
+		!strings.Contains(errOut, "ump: the installer stopped before it wrote anything (exit status 2, see above). Nothing was written to the disks of web-01") {
+		t.Errorf("another image: code %d, %q", code, errOut)
 	}
 }
 
@@ -1226,8 +1343,14 @@ func TestKeepDataShutsDownFirst(t *testing.T) {
 	e = keepEnv(t)
 	e.directRoot = true
 	errOut, code = run(e, "--keep-data")
-	if code != 0 || len(e.halts) != 0 || len(fakePower.actions) != 0 || !strings.Contains(errOut, "Loading the UMP rescue image") {
+	if code != 0 || len(e.halts) != 0 || len(fakePower.actions) != 0 || !strings.Contains(errOut, "Loading the UMP rescue image from https://ump.zhurko.de/dl/rescue on web-01, without the provider's rescue system.\nThe running system of web-01 ends with the jump: its file systems are synced and remounted read-only before it, its services are not stopped.\n") {
 		t.Errorf("the direct way: code %d, halts %q, actions %v, %q", code, e.halts, fakePower.actions, errOut)
+	}
+	// which says nothing of the kind where every disk is erased anyway
+	e = keepEnv(t)
+	e.directRoot = true
+	if errOut, code = run(e); code != 0 || !strings.Contains(errOut, "Loading the UMP rescue image") || strings.Contains(errOut, "ends with the jump") {
+		t.Errorf("the direct way of an ordinary reinstall: code %d, %q", code, errOut)
 	}
 }
 

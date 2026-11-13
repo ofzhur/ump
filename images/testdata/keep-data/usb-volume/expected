@@ -38,6 +38,10 @@ LABEL=backup  /backup  ext4  defaults,nofail  0 2
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -282,5 +286,5 @@ LABEL=backup  /backup  ext4  defaults,nofail  0 2
       "action": "keep"
     }
   ],
-  "hash": "4dd3337a139174458ace1e84c3c330c3f63c0dc21dd7bdf8c2013d4a481fed78"
+  "hash": "54dd85e4f28511909cf7188e9d13e92a12d5dc991ce9e77dd0645271ea2d6302"
 }

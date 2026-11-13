@@ -36,6 +36,10 @@ cswap  LABEL=cryptswap  /dev/urandom  swap,offset=2048,cipher=aes-xts-plain64,si
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -232,5 +236,5 @@ cswap  LABEL=cryptswap  /dev/urandom  swap,offset=2048,cipher=aes-xts-plain64,si
       "action": "keep"
     }
   ],
-  "hash": "2ae8cd7dd40df486688303efee5818f4831e99d9734b44ac691833212659a09c"
+  "hash": "24cfc588baeb46c15bd80385eec21b3f697836b6c4b54cf9d4a6230349842234"
 }

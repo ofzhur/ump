@@ -768,8 +768,9 @@ kd_fact_mbr() { if dd if="$1" bs=512 count=1 status=none 2>/dev/null | grep -qa 
 # kd_fact_lvs: the logical volumes: PATH|SEGMENT TYPE|ACTIVE|VOLUME'S UUID per line
 kd_fact_lvs() { lvs --noheadings --separator '|' -o lv_dm_path,segtype,lv_active,lv_uuid 2>/dev/null | sed 's/^ *//' || true; }
 
-# The plan, from the facts: {machine: {efi, arch, os, unpacked_mb,
-# root_fs, final}, options: {root, keep_root, format}, lsblk, fs: {DEV:
+# The plan, from the facts: {machine: {efi, arch, os, image: {version,
+# sha256} (the image the manifest names), unpacked_mb, root_fs, final},
+# options: {root, keep_root, format}, lsblk, fs: {DEV:
 # what kd_fact_fs says}, roots: {"DEV<tab>SUBVOLUME": kd_fact_root's,
 # with fstab_sha256}, usage, esp: {DEV: kd_fact_esp's}, boot: {DEV:
 # kd_fact_boot's}, links: {PATH: device}, mbr: {DISK: grub}, lvs}. A
@@ -1328,7 +1329,8 @@ def plan:
 		(($f.lvs // [])[] | select(.active != "active") | "the logical volume \(.path) is not active here (\(.segtype)): what is on it is not seen")
 	  ]) as $warnings
 
-	| {version: 1, os: $m.os, firmware: (if $m.efi then "uefi" else "bios" end), arch: $m.arch,
+	# (the image is in the plan, and so in its hash: what is confirmed is this image on these disks)
+	| {version: 1, os: $m.os, image: ($m.image // {version: "", sha256: ""}), firmware: (if $m.efi then "uefi" else "bios" end), arch: $m.arch,
 	   options: {root: ($o.root // ""), keep_root: $keeproot, format: $fmt}}
 	  + (if $root.resume then {resumed: true} else {} end) + (if $shrunk then {shrunk: true} else {} end)
 	  + {old: {system: $root.system, hostname: $root.hostname, fstab_sha256: ($R.fstab_sha256 // "")},
@@ -1442,9 +1444,10 @@ kd_build() {
 		done < <({ jq -r '.[] | (.fstab // ""), (.crypttab // "")' <<< "$roots" | awk '$1 !~ /^#/ {print $1; print $2}'; printf '%s\n' "$keep_root_arg" "${keep_root_arg%:*}"; } | grep '^/dev/' | sort -u || true)
 		facts="$(printf '%s\n' "$lsblk" "$fs" "$roots" "$links" "$mbr" "$esp" "$usage" "$lvs" "$boot" | jq -c -s \
 			--argjson efi "$([ "$efi" = 1 ] && echo true || echo false)" --arg arch "$arch" --arg os "$os" --argjson final "$([ "$pass" = 2 ] && echo true || echo false)" \
+			--arg image_version "${image_version:-}" --arg image_sum "${want_sum:-}" \
 			--argjson unpacked "${unpacked_mb:-0}" --arg root_fs "$(kd_root_fs)" --arg root "$keep_root_arg" --argjson keep_root "$([ "$keep_root" = 1 ] && echo true || echo false)" \
 			--argjson format "$(printf '%s\n' "${keep_format[@]:-}" | jq -R -s -c 'split("\n") | map(select(. != ""))')" \
-			'{machine: {efi: $efi, arch: $arch, os: $os, unpacked_mb: $unpacked, root_fs: $root_fs, final: $final}, options: {root: $root, keep_root: $keep_root, format: $format},
+			'{machine: {efi: $efi, arch: $arch, os: $os, image: {version: $image_version, sha256: $image_sum}, unpacked_mb: $unpacked, root_fs: $root_fs, final: $final}, options: {root: $root, keep_root: $keep_root, format: $format},
 			  lsblk: .[0], fs: .[1], roots: .[2], links: .[3], mbr: .[4], esp: .[5], usage: .[6], lvs: .[7], boot: .[8]}')"
 		plan="$(kd_jq 'try plan catch (if type == "object" and has("refused") then . else error end)' <<< "$facts")"
 		if jq -e 'has("refused")' >/dev/null <<< "$plan"; then
@@ -1560,7 +1563,7 @@ kd_confirmed() {
 	local hash
 	hash="$(jq -r .hash <<< "$kd_plan")"
 	if [ "$confirm" != "$hash" ]; then
-		echo "install.sh: keep-data: refused: the plan (above, $hash) is not the one that was confirmed ($confirm): the disks or the options changed since; look at it again and confirm it" >&2
+		echo "install.sh: keep-data: refused: the plan (above, $hash) is not the one that was confirmed ($confirm): the disks, the options or the image on the storage changed since; look at it again and confirm it" >&2
 		echo "install.sh: keep-data: nothing was written to the disks" >&2
 		exit 2
 	fi

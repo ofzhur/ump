@@ -19,6 +19,10 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "bios",
   "arch": "amd64",
   "options": {
@@ -145,5 +149,5 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "action": "keep"
     }
   ],
-  "hash": "bb0b2f6bdca0dd35e2c768d2373dafa36c3a9e22e7b344334cde8c04bc04d41a"
+  "hash": "2b3d7dae7ffb5ff699112bcac81b43754c5aefb1e66ec4356cf259633e73412a"
 }

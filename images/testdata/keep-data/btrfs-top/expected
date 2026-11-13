@@ -15,6 +15,10 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -106,5 +110,5 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
       "action": "esp"
     }
   ],
-  "hash": "c254dc6fd4d06f44234da74b9df8d02bf5e2fd9e2d1881c92cfe75de94389a41"
+  "hash": "eeed09c790a04d7d064ec284ca0d45a5a687f08e8e5896299f8f6c6dd9f7eb08"
 }

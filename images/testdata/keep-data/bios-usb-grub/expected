@@ -30,6 +30,10 @@ proc  /proc  proc  defaults  0 0
 {
   "version": 1,
   "os": "debian-13",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "bios",
   "arch": "amd64",
   "options": {
@@ -203,5 +207,5 @@ proc  /proc  proc  defaults  0 0
       "action": "text"
     }
   ],
-  "hash": "e617b6255fe7d60c1c9db4e8dfddeb6fb5f65a7c22012d700b76833aff62a4ec"
+  "hash": "88133618257a42b56483361db8b67134475153d90aba34b8966c8f2d880ab4ee"
 }

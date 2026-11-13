@@ -105,7 +105,11 @@ As of November 2026, ump does what the [README](../README.md) and the
   partition.
 - **Keeping the data, the rest.** An encrypted root and a ZFS root;
   NixOS, Arch Linux and CachyOS as the new system; LUKS volumes opened
-  during the installation; unattended installations that keep the data.
+  during the installation; unattended installations that keep the
+  data; a shutdown of the running system before the kexec of the direct
+  way, which today syncs and remounts read-only and stops no service;
+  runs on real hardware, which the QEMU test's machines stand in for
+  so far ([what was tested](keep-data.md#tests)).
 - **Network.** IPv6 addresses from the provider's network information
   where the rescue system cannot see them; bonds and VLANs.
 - **A way into locked-out servers.** At DigitalOcean (and for servers

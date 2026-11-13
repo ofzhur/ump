@@ -254,13 +254,7 @@ reads the layouts up to its own and refuses a later one before anything
 else (`the state is version 3; this ump reads up to 2`); an ump from
 before that check (v0.4.7 and older) fails instead on a key it does not
 know, where there is one (`private_networks`, `stale_facts`), and else
-on the version. A key added within a layout is such a key for every
-ump older than it: `installed.keep_data`, there for a server installed
-with `ump server reinstall --keep-data` and nowhere else, makes ump
-v0.8.0 and older refuse the state (`field keep_data not found in type
-state.Install`) until they upgrade or the server is installed without
-it; a state without such a server reads as before.
-A state of an older layout loads as it is (the
+on the version. A state of an older layout loads as it is (the
 `private` of version 2 as the only entry of `private_networks`), and
 the next write gives it this ump's. So every machine that shares a
 state upgrades ump together: once one writes it, the others refuse it
@@ -273,25 +267,11 @@ disappears, and so does that of a server gone from its provider
 `/etc/ump/install` on the machine says (with `--no-reboot` when the
 installer finished, without the image version, kernel and interfaces),
 and shown by `ump server show`. An installation that [kept the
-data](keep-data.md) has `layout: keep-data` and, under `keep_data`,
-what it replaced: `root`, the old root (the device, `DEVICE:SUBVOLUME`
-on btrfs), `keep_root: true` where the old system was moved aside
-instead of formatted, and `plan`, the hash of the plan that was
-confirmed (the plan itself is `/etc/ump/keep-data.json` on the server):
-
-```yaml
-    installed:
-      os: ubuntu-26.04
-      profile: db
-      layout: keep-data
-      hostname: db-01
-      admin: ump
-      keep_data:
-        root: /dev/mapper/vg0-root
-        plan: 8911da13c974ed8c5d80e49b00519c87f95c8b0017f62b7beb2ef47db69c808b
-      at: 2026-11-13T10:12:00Z
-```
-
+data](keep-data.md) has `layout: keep-data`, the name no layout can
+have, and nothing else of its own: no key was added for it, and an ump
+from before `--keep-data` reads such a state as any other. The old
+root and the plan that was confirmed are on the server
+(`/etc/ump/install`, `/etc/ump/keep-data.json`).
 `groups` are the server's Ansible groups besides `common`
 ([provisioning](provisioning.md)): set by `ump server reinstall
 --group`, changed by `ump server set --group` and `--ungroup`; the

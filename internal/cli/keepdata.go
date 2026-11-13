@@ -93,7 +93,8 @@ type keepPlan struct {
 	} `json:"root"`
 	// Resumed says that the plan goes on after an installation that
 	// failed, from what that one saved of the old system, and Shrunk
-	// that it keeps less than the first plan did.
+	// that it keeps less than the first plan did (the installer says
+	// shrunk of a resumed plan alone).
 	Resumed    bool `json:"resumed"`
 	Shrunk     bool `json:"shrunk"`
 	Candidates []struct {
@@ -385,8 +386,8 @@ func lowerFirst(s string) string {
 // keepAccepted says whether --yes accepts the plan of a keep-data
 // installation: the installer found the one old system by itself, or
 // the operator named it with --root and the installer knows an old
-// system there; and a plan that goes on after a failed installation
-// keeps what the first plan kept. Any other plan is for a person to
+// system there; and no plan that keeps less than the first plan of a
+// failed installation did (shrunk). Any other plan is for a person to
 // read (exit status 3, nothing written). A plan without the fields that
 // say so (root.known, resumed and shrunk) is one of an installer that
 // has no such plans.
@@ -398,7 +399,7 @@ func (p *installPlan) keepAccepted() error {
 		why = fmt.Sprintf("--yes accepts a keep-data plan whose old system the installer found by itself, or that --root names; the plan for %s has its root on %s by %s", p.m.Name, plan.root(), nonEmpty(plan.Root.By, "no word of the installer"))
 	case plan.Root.Known != nil && !*plan.Root.Known:
 		why = fmt.Sprintf("--yes does not accept the keep-data plan for %s: --root names %s, where the installer found no old system it knows, so only the option says that this is the root to replace", p.m.Name, plan.root())
-	case plan.Resumed && plan.Shrunk:
+	case plan.Shrunk:
 		why = fmt.Sprintf("--yes does not accept the keep-data plan for %s: it goes on after an installation that failed and keeps less than the first plan did", p.m.Name)
 	default:
 		return nil

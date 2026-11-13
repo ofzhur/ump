@@ -25,6 +25,10 @@ UUID=dddddddd-0000-4000-8000-000000000003  /var/cache.old  ext4  defaults  0 2
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -184,5 +188,5 @@ UUID=dddddddd-0000-4000-8000-000000000003  /var/cache.old  ext4  defaults  0 2
       "action": "aside"
     }
   ],
-  "hash": "7233ebfb6e4b9fbaf1749ffb91fa72ce155bb3444f12e018b30f7fdaa6c36f6a"
+  "hash": "3f43d021513ec879b263503e1e5bd1a99f2aaca55d18de9778740c1729d1cb0a"
 }

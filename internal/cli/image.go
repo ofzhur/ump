@@ -424,7 +424,8 @@ type entryOptions struct {
 	// one, and where it would be the only one the refusal says so; and
 	// the running system, which has the volumes that are kept mounted,
 	// is shut down over SSH before a provider resets the server, where
-	// it lets UMP in (shutDownFirst).
+	// it lets UMP in (shutDownFirst); on the direct way, which is a jump
+	// and no shutdown, a line says what becomes of it.
 	keepData bool
 }
 
@@ -535,6 +536,11 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 				return nil, err
 			}
 			fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s, without the provider's rescue system.\n", imageURL, m.Name)
+			if o.keepData {
+				// the jump is no shutdown, and the volumes that are kept are
+				// mounted there
+				fmt.Fprintf(a.stderr, "The running system of %s ends with the jump: its file systems are synced and remounted read-only before it, its services are not stopped.\n", m.Name)
+			}
 			if err := a.enterImage(ctx, user, addr, identities, false, imageURL, hostname, keys); err != nil {
 				return nil, err
 			}

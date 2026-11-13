@@ -36,6 +36,10 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -257,5 +261,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "54125b4e68c4c486a3ae99868dc8a1abbb046259220da5a74a5552b8f00f64f7"
+  "hash": "a3b88e3999da09cb941ca09e6874e4287d51d6ed91d62349892c8ecef28cdc5f"
 }

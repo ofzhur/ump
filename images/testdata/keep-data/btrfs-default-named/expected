@@ -24,6 +24,10 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -173,5 +177,5 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "action": "esp"
     }
   ],
-  "hash": "37a871051fb1de5d63cbd60cfd013ca12d83aa9b2cfd67d2eece17da73f71444"
+  "hash": "75b628807cb25a72777ac5835db6d48342c06baff3dfd1aa0b19b37aaaa6861a"
 }

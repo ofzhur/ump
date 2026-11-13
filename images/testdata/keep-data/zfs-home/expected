@@ -46,6 +46,10 @@ tank/home  /home  zfs  defaults,nofail  0 0
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -317,5 +321,5 @@ tank/home  /home  zfs  defaults,nofail  0 0
       "action": "text"
     }
   ],
-  "hash": "e842c2d73d511d381591eadd7d8984b0de8b3e9990b77a667652d8e1f89490f0"
+  "hash": "17e826b75fde3672fa48e2bb88a7ec3c233245b25ffb0916bdcbccfbe0be03c3"
 }

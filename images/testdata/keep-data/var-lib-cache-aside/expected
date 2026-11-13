@@ -31,6 +31,10 @@ LABEL=plain  /var/cache.old  ext4  defaults  0 2
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -223,5 +227,5 @@ LABEL=plain  /var/cache.old  ext4  defaults  0 2
       "action": "aside"
     }
   ],
-  "hash": "65c52acd9e69ef98ab8b06278bcbeb8ace4c3502bd916919593d03010b4592da"
+  "hash": "80f200c24d5c6dd57a03bddd0c9b042e571bf7328eb68f51bc62755a8af96f25"
 }

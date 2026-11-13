@@ -20,9 +20,11 @@
 #                        PARTUUID,PARTLABEL,PARTTYPE,PARTN,PTTYPE,MOUNTPOINTS,RO,RM,TRAN,START
 #                        (fields that are null, false or empty left out)
 #   case                 the machine and the options, as shell: efi (1, 0), arch,
-#                        os, unpacked_mb, root_fs (the layout's), keep_root_arg
-#                        (--root), keep_root (1: --keep-root), keep_format
-#                        (--format, an array)
+#                        os, image_version and want_sum (the image's version and
+#                        checksum, as its manifest names them), unpacked_mb,
+#                        root_fs (the layout's), keep_root_arg (--root),
+#                        keep_root (1: --keep-root), keep_format (--format, an
+#                        array)
 #   fs/dev/NAME/         the files of the file system on /dev/NAME that matter
 #                        (etc/fstab, etc/os-release, etc/crypttab, key files,
 #                        etc/hostid, lib/modules/VERSION/, ...); of a btrfs its
@@ -184,7 +186,7 @@ kd_fact_uuid() {
 # make_plan: the plan of $CASE into kd_plan; its status is kd_build's
 make_plan() {
 	local rc
-	efi=1; arch=arm64; os=ubuntu-26.04; unpacked_mb=1614; root_fs=ext4; keep_root_arg=""; keep_root=0; keep_format=()
+	efi=1; arch=arm64; os=ubuntu-26.04; image_version=2026.10.12; want_sum=6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1; unpacked_mb=1614; root_fs=ext4; keep_root_arg=""; keep_root=0; keep_format=()
 	. "$CASE/case"
 	spec="$(jq -n -c --arg fs "$root_fs" '{layout: {parts: [{type: "lvm", vg: "vg0", name: "root", size: "rest", filesystem: $fs, mountpoint: "/"}]}}')"
 	: > "$CALLS"

@@ -239,7 +239,9 @@ between ([keeping the data](../docs/keep-data.md)). The steps 2, 4 and
 3. **Prints the plan** (FORMAT with sizes and labels, KEEP, MADE ANEW
    AT EVERY BOOT, ASIDE, UNUSED, UNTOUCHED, LOST: what the old root
    holds beyond the system itself, with sizes; WARNINGS) and its hash.
-   `--dry-run` stops here; `--plan FILE` also writes the plan as JSON.
+   `--dry-run` stops here; `--plan FILE` also writes the plan as JSON
+   (its last line then: `==> the plan is made: stopping here, no disk
+   was touched; --confirm with its hash installs it`).
    A machine it will not do is refused here, with status 2, the reason
    and what to do about it: no old system or several, an encrypted root
    (LUKS data volumes are kept), a ZFS root, a root on a USB or
@@ -264,7 +266,8 @@ between ([keeping the data](../docs/keep-data.md)). The steps 2, 4 and
    NixOS and Arch Linux as the new system. When unsure, it refuses.
 4. **Writes only with `--confirm HASH`**, the hash of the plan that was
    shown: the installer finds everything again, and when the plan it
-   makes now has another hash (a disk changed, another option), it
+   makes now has another hash (a disk changed, another option, another
+   image on the storage: its version and checksum are in the plan), it
    refuses. `format()` makes anew only a device the confirmed plan
    names, once, and only while it holds the UUID the plan saw; the
    functions that wipe and partition end at once in this mode; a plan
@@ -326,12 +329,12 @@ between ([keeping the data](../docs/keep-data.md)). The steps 2, 4 and
 Exit status with `--keep-data`: 0 installed; 2 nothing was written (a
 refusal, or anything that failed before the first write; the line `==>
 keep-data: writing begins` marks it); 1 a failure after that: the old
-root is gone or moved, the data volumes are as they were. A second run
-then plans from what the first saved (`resumed` in the plan): the old
-fstab, with `/boot` and the other formatted volumes found by the UUIDs
-written down. With `--keep-root` a move that failed half-way is carried
-on into the same `/old-root-DATE`; when the old system was aside
-already, what the failed attempt unpacked goes into
+root is gone or moved, the volumes the plan keeps hold their data. A
+second run then plans from what the first saved (`resumed` in the
+plan): the old fstab, with `/boot` and the other formatted volumes
+found by the UUIDs written down. With `--keep-root` a move that failed
+half-way is carried on into the same `/old-root-DATE`; when the old
+system was aside already, what the failed attempt unpacked goes into
 `/failed-install-DATE` (a subvolume: `NAME-failed-DATE`), which can be
 removed. A second plan that keeps less than the first did says so
 (`shrunk`, with a warning that names what is missing), and one whose
@@ -351,7 +354,7 @@ add to it. `disks` must be empty. The plan as JSON (`--plan FILE`,
 
 | Key | What |
 |---|---|
-| `version`, `os`, `firmware`, `arch`, `options` | 1; the system to install; `uefi` or `bios`; the options as given (`root`, `keep_root`, `format`) |
+| `version`, `os`, `image`, `firmware`, `arch`, `options` | 1; the system to install; its image as the manifest names it (`version`, `sha256` of the root file system's archive); `uefi` or `bios`; the options as given (`root`, `keep_root`, `format`) |
 | `resumed`, `shrunk` | `true` (absent otherwise): a second attempt after an interrupted one, planned from what that saved; and one that keeps less than the plan the first was confirmed with |
 | `old` | the old system: `system` (its `PRETTY_NAME`), `hostname`, `fstab_sha256` |
 | `root` | `device`, `subvolume`, `filesystem` (the new one), `was`, `uuid`, `size_mb`, `by` (`detection` or `option`), `known` (`false`, absent otherwise: `--root` names a device with no old system on it), `free_mb` where the file system stays |

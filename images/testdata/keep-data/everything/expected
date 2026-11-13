@@ -54,6 +54,10 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -406,5 +410,5 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
       "action": "drop"
     }
   ],
-  "hash": "17fe792e41c042998efad76917c6f70886712c2292c0a226ebbab7cc006443c1"
+  "hash": "e19c468b46cb1335daaa285672b2b0cbaaa0fea8f4e2ba456263f9c665abe080"
 }

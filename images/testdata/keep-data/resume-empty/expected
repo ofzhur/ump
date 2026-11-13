@@ -22,6 +22,10 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -135,5 +139,5 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
     "this plan keeps less than the one the interrupted installation was confirmed with: /boot, swap, /data, /srv/plain, /tmp, /var.old are not in it any more; what the old fstab named there is not found now. Look at it before you confirm"
   ],
   "entries": [],
-  "hash": "6890e8951167a94817b3f02be6051d0ab6ea8540380a749e656641f72be6da8a"
+  "hash": "57c0cc6907fa47d8188a55fbffd0b7a05367a0eea29e36382e7d18df9baefe87"
 }

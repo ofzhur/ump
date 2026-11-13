@@ -32,6 +32,10 @@ LABEL=plain  /home/alice  ext4  defaults  0 2
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -223,5 +227,5 @@ LABEL=plain  /home/alice  ext4  defaults  0 2
       "action": "keep"
     }
   ],
-  "hash": "72a50e3ec356f5662a96f10dad70444c741b3f048c828e69aa643166cff5ef9c"
+  "hash": "2d3e05d7011bb4d5f2ab33173897c04abd65cbb225a09d68f70d3a8d07472eef"
 }

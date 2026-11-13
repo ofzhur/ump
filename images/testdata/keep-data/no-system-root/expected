@@ -18,6 +18,10 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -99,5 +103,5 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "/dev/sda2 holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system"
   ],
   "entries": [],
-  "hash": "2fe26c7fe1e881dbe25c871c8758009df66ef42b542cfe702d27743d30197742"
+  "hash": "ad4bb9aed36e5d73ffc313bd1842c1262ff7e4ca96c102c53cc121f7757f4451"
 }

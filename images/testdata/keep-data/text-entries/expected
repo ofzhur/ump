@@ -49,6 +49,10 @@ tank/legacy  /srv/legacy  zfs  defaults,nofail  0 0
 {
   "version": 1,
   "os": "debian-13",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -362,5 +366,5 @@ tank/legacy  /srv/legacy  zfs  defaults,nofail  0 0
       "action": "drop"
     }
   ],
-  "hash": "bf50482cde3bd834e77b90634ee6ecc2fc46a366c6095bd92019f97eac12477a"
+  "hash": "42ac5f7cfeaa3364a007743a493048ceb1eabb22421205d87564b5365de1da1a"
 }

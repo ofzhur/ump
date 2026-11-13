@@ -45,6 +45,10 @@ cswap  PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe  /dev/urandom  swap,cipher=
 {
   "version": 1,
   "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -295,5 +299,5 @@ cswap  PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe  /dev/urandom  swap,cipher=
       "action": "keep"
     }
   ],
-  "hash": "77fb8b31213a26a3dbc97bc4b35d0867a3dcd34cde14585f1a5ee97998c0e5d7"
+  "hash": "9e6062f7b3042a492d8dca9e7ac1c01ee86659dcc5bb7691ca25e7c3e5a5874d"
 }

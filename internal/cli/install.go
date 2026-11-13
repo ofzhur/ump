@@ -101,7 +101,7 @@ func addServerFlags(sub *cobra.Command, o *installOptions) {
 	o.groups.add(sub, "group", "a group of the new system besides common")
 	sub.Flags().BoolVar(&o.keepData, "keep-data", false, "replace the old system and keep its data: no disk is wiped, the layout is not applied; the installer's plan is shown and confirmed before anything is written")
 	sub.Flags().StringVar(&o.root, "root", "", "with --keep-data: the old root, where several old systems are found or none (a device, UUID=..., DEVICE:SUBVOLUME on btrfs)")
-	sub.Flags().BoolVar(&o.keepRoot, "keep-root", false, "with --keep-data: format nothing; the old system moves into /old-root-DATE on its file system")
+	sub.Flags().BoolVar(&o.keepRoot, "keep-root", false, "with --keep-data: do not format the root: the old system moves into /old-root-DATE on its file system (a separate /boot is formatted all the same)")
 	sub.Flags().StringArrayVar(&o.format, "format", nil, "with --keep-data: a mountpoint of the old fstab whose volume is formatted too and mounted there again (repeatable; /var: the new /var)")
 }
 
@@ -183,34 +183,35 @@ without one, --yes is required.
 
 --keep-data replaces the old system and keeps its data
 (docs/keep-data.md): no disk is wiped or partitioned, and the profile's
-layout is not applied. After the first question the server goes into
-the rescue system: the running system ends with a kexec from it, or,
-on the provider's way, is shut down over SSH before the provider
-resets the server where it lets UMP in, and reset as it runs where it
-does not; services that write to the volumes that are kept are best
-stopped before. There the installer finds the old system, reading
-only, and prints its plan: what it formats (the old root, a separate
-/boot), what it keeps and mounts where it was (every other volume of
-the old fstab; a separate /var at /var.old), what it leaves untouched,
-and what the old root loses. A second question is about that plan, and
-only then the installer writes, and only when the plan it makes then is
-the same. --root DEVICE names the old root where the installer finds
-several old systems or none; --keep-root formats nothing and moves the
-old system into /old-root-DATE on its file system; --format MOUNTPOINT
-formats one more volume of the old fstab (/var: the new /var). --yes
-answers both questions, the second for a plan whose old system the
-installer found by itself, or knows where --root names it, and that
-keeps what an earlier plan of a failed installation kept; --dry-run
-stops after the plan. Not with --layout, --disks or --unattended, and
-with the Ubuntu and Debian images alone (exit status 2). A plan that is
-declined and an installer that refuses write nothing, and ump says how
-the old system starts again (exit status 3); so does a plan or an
-installation that fails before the installer began to write (exit
-status 1). One that fails after it (exit status 1 too; the installer's
-line "keep-data: writing begins" tells them apart) leaves the old root
-gone or moved aside and the volumes the plan keeps with their data,
-and the same command again plans from what the installer saved of the
-old system. The state records the layout keep-data.
+layout is not applied. After the first question the server goes into the
+rescue system: the running system ends with a kexec from it (its file
+systems synced and remounted read-only, its services not stopped), or,
+with --via provider, is shut down over SSH before the provider resets
+the server where it lets UMP in, and reset as it runs where it does not;
+services that write to the volumes that are kept are best stopped
+before. There the installer finds the old system, reading only, and
+prints its plan: what it formats (the old root, a separate /boot), what
+it keeps and mounts where it was (every other volume of the old fstab; a
+separate /var at /var.old), what it leaves untouched, and what the old
+root loses. A second question is about that plan, and only then the
+installer writes, and only when the plan it makes then is the same.
+--root DEVICE names the old root where the installer finds several old
+systems or none; --keep-root formats nothing but a separate /boot and
+moves the old system into /old-root-DATE on its file system; --format
+MOUNTPOINT formats one more volume of the old fstab (/var: the new
+/var). --yes answers both questions, the second for a plan whose old
+system the installer found by itself, or knows where --root names it,
+and that keeps what an earlier plan of a failed installation kept;
+--dry-run stops after the plan. Not with --layout, --disks or
+--unattended, and with the Ubuntu and Debian images alone (exit status
+2). A plan that is declined and an installer that refuses write nothing,
+and ump says how the old system starts again (exit status 3); so does a
+plan or an installation that fails before the installer began to write
+(exit status 1). One that fails after it (exit status 1 too; the
+installer's line "keep-data: writing begins" tells them apart) leaves
+the old root gone or moved aside and the volumes the plan keeps with
+their data, and the same command again plans from what the installer
+saved of the old system. The state records the layout keep-data.
 
 --unattended has the machine install by itself at its next boot,
 without UMP's SSH session (a PXE machine's network boot; docs/pxe.md):

@@ -41,6 +41,10 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
 {
   "version": 1,
   "os": "debian-13",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
   "firmware": "uefi",
   "arch": "arm64",
   "options": {
@@ -293,5 +297,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "37d1c260c6a822fb0f9d29a9420a0031fe64309ac30c626f30753fbacb96f095"
+  "hash": "6bc74168b4c30ee06e664d541792c6be5ca53a6a529e86a24f94ce81fb7b2463"
 }

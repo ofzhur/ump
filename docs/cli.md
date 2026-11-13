@@ -695,45 +695,65 @@ terminal; without one, `--yes` is required.
 `--keep-data` replaces the old system and keeps its data ([keeping the
 data](keep-data.md)): no disk is wiped or partitioned and the
 profile's layout is not applied. The question says so (`Reinstall ...?
-Its data is kept: no disk is wiped. ... nothing is written to a disk
-until you confirm that plan.`); then the server goes into the rescue
-system, where the installer finds the old system, reading only, and
-prints its plan: what it formats (the old root, a separate `/boot`),
-what it keeps and mounts where it was (every other volume of the old
-fstab, a separate `/var` at `/var.old`), what it leaves unused and
-untouched, what the old root holds that is lost, and the plan's hash. A
-second question is about that plan (`Install ubuntu-26.04 on db-01 as
-the plan above says (plan 8911da13c974)? What it lists under FORMAT and
-LOST is lost.`), and the installer then writes only when the plan it
-makes anew has the same hash. `--root DEVICE` names the old root where
-the installer finds several old systems or none (a device, `UUID=...`,
-`DEVICE:SUBVOLUME` on btrfs); `--keep-root` formats nothing and moves
-the old system into `/old-root-DATE` on its file system; `--format
-MOUNTPOINT` (repeatable) formats one more volume of the old fstab and
-mounts it there again (`/var`: the new `/var`). `--yes` answers both
-questions, and takes a plan whose old system the installer found by
-itself or that `--root` names; `--dry-run` stops after the plan (the
-running system goes down for it too); `-o json` carries the plan under
-`keep_data`, with `layout` `keep-data`. Refused before the server is
-touched (exit status 2): `--keep-data` with `--layout`, `--disks` or
-`--unattended`, `--root`, `--keep-root` or `--format` without it, and a
-profile whose OS is NixOS, Arch Linux or CachyOS. The way into the
-rescue system is never a provider's own reinstall with a stock Linux,
-which erases the disks: where that would be the only way, the running
-system must let UMP in (exit status 5 otherwise, nothing changed). A
-plan that is declined, a machine or a plan the installer refuses (its
-exit status 2) and an installer that stops before its first write leave
-the disks as they were: exit status 3, the server in the rescue system,
-its private addresses given back, and a line that says how the old
-system starts again (`ump server unrescue REF --reboot`, or `ump server
-reboot REF --hard`). An installation that fails after the installer
-began to write (its exit status 1; the line `==> keep-data: writing
-begins` marks it) is exit status 1: the old root is gone or moved
-aside, the data volumes are untouched, and the same command again
-recovers, with a new plan and a new question. The state records the
-installation with `layout: keep-data` and `keep_data` (the old root,
-the plan's hash), which `ump server show` and `ump server list -o wide`
-show.
+Its data is kept: no disk is wiped. The running system is shut down
+(not always cleanly: services that write to the volumes that are kept
+are best stopped first) and the server boots the rescue system, where
+the installer finds the old system and plans what it formats and what
+it keeps; nothing is written to a disk until you confirm that plan.`).
+Then the server goes into the rescue system: on the direct way the
+running system ends with the kexec, its file systems synced and
+remounted read-only, its services not stopped; with `--via provider`
+it is shut down over SSH first where it lets UMP in (`systemctl halt`,
+five minutes at most), and reset as it runs, with a line that says so,
+where it does not. There the installer finds the old system, reading
+only, and prints its plan: what it formats (the old root, a separate
+`/boot`), what it keeps and mounts where it was (every other volume of
+the old fstab, a separate `/var` at `/var.old`), what it leaves unused
+and untouched, what the old root holds that is lost, and the plan's
+hash. A second question is about that plan (`Install ubuntu-26.04 on
+db-01 as the plan above says (plan 85baa9654455)? What it lists under
+FORMAT and LOST is lost.`), and the installer then writes only when the
+plan it makes anew has the same hash. `--root DEVICE` names the old
+root where the installer finds several old systems or none (a device,
+`UUID=...`, `DEVICE:SUBVOLUME` on btrfs); `--keep-root` formats nothing
+but a separate `/boot` and moves the old system into `/old-root-DATE`
+on its file system; `--format MOUNTPOINT` (repeatable) formats one more
+volume of the old fstab and mounts it there again (`/var`: the new
+`/var`). `--yes` answers both questions, the second for a plan whose
+old system the installer found by itself, or that `--root` names and
+the installer knows as one; not for a plan whose `root.known` is false
+(no old system where `--root` points) or that is `shrunk` (it keeps
+less than the plan of an installation that failed did): exit status 3,
+nothing written. `--dry-run` stops after the plan (the running system
+goes down for it too, and the server stays in the rescue system); `-o
+json` carries the plan under `keep_data`, with `layout` `keep-data`.
+Refused before the server is touched (exit status 2): `--keep-data`
+with `--layout`, `--disks` or `--unattended`, `--root`, `--keep-root`
+or `--format` without it, and a profile whose OS is NixOS, Arch Linux
+or CachyOS. The way into the rescue system is never a provider's own
+reinstall with a stock Linux, which erases the disks: where that would
+be the only way, the running system must let UMP in (exit status 5
+otherwise, nothing changed). A plan that is declined, a machine or a
+plan the installer refuses (its exit status 2) and an installer that
+stops before its first write leave the disks as they were: exit status
+3, the server in the rescue system, its private addresses given back,
+and a line that says how the old system starts again (`ump server
+unrescue REF --reboot` where the provider's rescue system is still the
+boot option, `ump server reboot REF --hard` where it is not, both when
+the provider does not say, a reboot from within the rescue system
+where the provider has no power control). What fails with nothing
+written is exit status 1 with the same line: an installer that could
+not be fetched, a plan run that failed, a plan file that cannot be
+read back or is not the plan that was shown, an installation that
+fails before the installer's line `==> keep-data: writing begins`. An
+installation that fails after that line is exit status 1 too: the old
+root is gone or moved aside, the volumes the plan keeps hold their
+data, and the same command again recovers, with a new plan and a new
+question. The state records the installation with `layout:
+keep-data`, in a field every ump reads, and nothing else of it; `ump
+server show` and `ump server list -o wide` show that layout, and the
+old root and the plan are on the server (`/etc/ump/install`,
+`/etc/ump/keep-data.json`).
 
 On a machine of `pxe.yaml`, the new system configures the network the
 machine's entry gives (`network`: a static address or DHCP, its DNS),
@@ -773,7 +793,7 @@ claimed within the wait is disarmed and gives them back (exit status
 ## Install several: `ump server multiinstall`
 
 ```
-ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--unattended [--no-wait [--armed-for DURATION]]] [--dry-run] [--yes] [-o json|yaml]
+ump server multiinstall REF... [--profile NAME|FILE] [--layout NAME] [--firewall NAME] [--os NAME] [--hostname NAME] [--private-network LIST|none]... [--private-ip [NETWORK=]ADDR]... [--user NAME[:KEY,...]]... [--userdata LIST]... [--ssh-key REF]... [--set FIELD=VALUE]... [--ipv6] [--mitigations] [--disks LIST] [--timezone ZONE] [--storage URL] [--group LIST]... [--via auto|direct|provider] [--keep-data [--root DEVICE] [--keep-root] [--format MOUNTPOINT]...] [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--unattended [--no-wait [--armed-for DURATION]]] [--dry-run] [--yes] [-o json|yaml]
 ump server multiinstall --plan FILE [--parallel N] [--hosts PATTERN] [--playbook LIST]... [--no-provision] [--unattended [--no-wait [--armed-for DURATION]]] [--dry-run] [--yes] [-o json|yaml]
 ```
 
@@ -807,10 +827,11 @@ The keys are the flags' names: `profile`, `layout`, `firewall`, `os`,
 `ssh-key`, `set`, `user`, `userdata`, `group`, `ipv6`, `mitigations`,
 `via`, `storage`, `keep-data`, `root`, `keep-root` and `format`; a
 repeatable flag (and `disks`) takes a list or one value, `ipv6`,
-`mitigations`, `keep-data` and `keep-root` take `true` or `false`. A server is named as on the command line (name, ID,
-IP address, `provider/id`); its value of a key replaces that of
-`defaults`, a list as a whole (`group: []`: none but `common`). The file
-is read strictly: a second YAML document, another key, a key or a server
+`mitigations`, `keep-data` and `keep-root` take `true` or `false`. A
+server is named as on the command line (name, ID, IP address,
+`provider/id`); its value of a key replaces that of `defaults`, a list
+as a whole (`group: []`: none but `common`). The file is read
+strictly: a second YAML document, another key, a key or a server
 given twice, a key without a value, or a value of the wrong kind is
 refused with its line, and so is one of these flags on the command line
 beside `--plan`. `private-network` is a list of networks (or `none`),
@@ -905,13 +926,20 @@ summary; the next `ump provision` records them).
 
 A server with `--keep-data` (`keep-data: true` in a plan) [keeps its
 data](keep-data.md#several-servers) as with `reinstall --keep-data`,
-and says `keep-data` under LAYOUT in the table. Those servers go first:
-each into the rescue system, their plans made side by side
-(`--parallel` at a time) with nothing written. One question then covers
+and says `keep-data` under LAYOUT in the table; the question names
+them (`Install on these 3 servers? Every disk of each is erased, but
+for db-01 (keep-data): there the running system is shut down (not
+always cleanly: ...), the installer plans in the rescue system, and
+nothing is written to a disk until you confirm the plans; the other
+installations start after that.`; `Reinstall these 2 servers? Their
+data is kept: ...` where all keep it). Those servers go first: each
+into the rescue system, their plans made side by side (`--parallel` at
+a time) with nothing written. One question then covers
 the plans (`Install on web-01, db-01 as their plans above say? What
-each lists under FORMAT and LOST is lost.`; `--yes` answers it), and
-only after it the installations start, those of the servers that are
-wiped too. A no ends the run with nothing written to any server (exit
+each lists under FORMAT and LOST is lost.`; `--yes` answers it where
+reinstall's `--yes` would take each of the plans, and ends the run as
+a no does where it would not), and only after it the installations
+start, those of the servers that are wiped too. A no ends the run with nothing written to any server (exit
 status 3; the locks let go, the private addresses given back, a line
 per server that says how its old system starts again). A server whose
 plan the installer refused, or could not make, is a failed installation
@@ -1376,5 +1404,5 @@ $ ump config firewall create mail --from default
 | 2 | usage or validation error |
 | 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes`; with `--keep-data` also a machine or plan the installer refused or an installer that stopped by itself before its first write (its status 2), and a plan `--yes` does not accept: nothing failed, nothing was written |
 | 4 | provider API error, or an account that could not be listed |
-| 5 | the server did not answer in time (rescue system, reboot, new system) |
+| 5 | the server did not answer in time (rescue system, reboot, new system), or the connection to it ended while the installer ran; with `--keep-data` the message says whether the installer had begun to write |
 | 6 | provisioning failed: Ansible did not complete; the hosts that failed or were unreachable are named (after a reinstall, the server is installed and recorded) |
