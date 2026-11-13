@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -2375,5 +2376,53 @@ func TestProvisionGoneMirror(t *testing.T) {
 	_, errOut, code := e.run("", false, "provision", "--yes")
 	if code != 0 || !strings.Contains(errOut, "working with the mirror as it is") || strings.Contains(errOut, "Removed ") || string(hf) != e.hostFile("db-01.yml") || !strings.Contains(errOut, "(2 hosts)") {
 		t.Errorf("provision: code %d, %q", code, errOut)
+	}
+}
+
+// TestStdinStaysTheTerminal: the questions of a run read stdin through
+// one reader, and stdin itself stays what it was: ansible-playbook gets
+// the terminal's own file. os/exec hands a file to the program as it
+// is; anything else goes through a pipe and a goroutine that copies,
+// and the run of the program then ends only when that goroutine's read
+// of the terminal returns: at the next line someone types.
+func TestStdinStaysTheTerminal(t *testing.T) {
+	// the terminal: a file that stays open
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+	a := &app{stdin: pr, stdout: io.Discard, stderr: io.Discard, isTTY: func() bool { return true }}
+	cmd := &cobra.Command{Use: "x"}
+	cmd.SetContext(context.Background())
+	// two answers typed at once: the second is there for the second
+	// question, whatever the first question's reader read ahead
+	go io.WriteString(pw, "y\nn\n")
+	if err := a.confirm(cmd, false, "Go on?"); err != nil {
+		t.Fatalf("the first question: %v", err)
+	}
+	if err := a.confirm(cmd, false, "And on?"); err == nil || err.Error() != "aborted" {
+		t.Fatalf("the second question: %v", err)
+	}
+	if f, ok := a.stdin.(*os.File); !ok || f != pr {
+		t.Fatalf("after the questions, stdin is %T, not the terminal's file", a.stdin)
+	}
+	// a program that inherits stdin, as ansible-playbook does: its run
+	// returns when it ends
+	done := make(chan error, 1)
+	go func() {
+		_, err := runAnsible(context.Background(), t.TempDir(), "true", nil, nil, a.stdin, io.Discard, io.Discard)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("the program: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Errorf("10s after the program ended, its run has not returned: it waits for a line from the terminal")
+		pw.Close()
+		<-done
 	}
 }

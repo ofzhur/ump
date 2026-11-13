@@ -68,12 +68,12 @@ server (--profile, --layout, --group and the others), or in a plan file
 The keys are the flags' names (profile, layout, firewall, os, hostname,
 private-network, private-ip, timezone, disks, ssh-key, set, user,
 userdata, group, ipv6, mitigations, via, storage, keep-data, root,
-keep-root, format), with a list for a repeatable one; a server's value replaces that of defaults. Any other
-key, a key without a value and a second YAML document are refused, and
-so is one of these flags on the command line with --plan; private-ip
-(NETWORK=ADDRESS, or ADDRESS alone in the server's only network) goes
-with one server alone (not in defaults, not with several on the command
-line).
+keep-root, format), with a list for a repeatable one; a server's value
+replaces that of defaults. Any other key, a key without a value and a
+second YAML document are refused, and so is one of these flags on the
+command line with --plan; private-ip (NETWORK=ADDRESS, or ADDRESS alone
+in the server's only network) goes with one server alone (not in
+defaults, not with several on the command line).
 
 Every check comes first, and a failure stops ump (exit status 2) before
 any server is touched: each server is resolved, once; its profile,
@@ -112,10 +112,11 @@ A server with keep-data (--keep-data for all, keep-data: true in a
 plan) keeps its data, as with reinstall --keep-data. Those servers go
 first: each into the rescue system, where the installer plans, side by
 side, and writes nothing. Then one question covers their plans (--yes
-answers it), and the installations of all servers start, the ones that
-wipe their disks too; a no ends the run with nothing written anywhere
-(exit status 3). A server whose plan the installer refused is a failed
-installation; the others go on.
+answers it where reinstall's --yes takes each of them), and the
+installations of all servers start, the ones that wipe their disks
+too; a no ends the run with nothing written anywhere (exit status 3).
+A server whose plan the installer refused is a failed installation;
+the others go on.
 
 --unattended installs every server as reinstall --unattended installs
 one (PXE machines): one question for all, all armed under their locks
@@ -250,6 +251,8 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		if unattended && e.o.via != "" && e.o.via != "auto" {
 			return e.inPlan(usageErrorf(cmd, "via %s and --unattended: the machine boots its installation by itself", e.o.via))
 		}
+		// once more, now that the entry knows of --unattended, which a
+		// plan's servers get here
 		if _, err := checkKeepFlags(cmd, e.o); err != nil {
 			return e.inPlan(err)
 		}
@@ -320,9 +323,9 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	case unattended:
 		question = fmt.Sprintf("Erase these %s at their next boot and install them unattended?", plural(len(plans), "server"))
 	case len(keeps) == len(plans):
-		question = fmt.Sprintf("Reinstall these %s? Their data is kept: no disk is wiped. Each goes down and boots the rescue system, where the installer finds the old system and plans what it formats and what it keeps; nothing is written to a disk until you confirm the plans.", plural(len(plans), "server"))
+		question = fmt.Sprintf("Reinstall these %s? Their data is kept: no disk is wiped. Each is shut down (not always cleanly: services that write to the volumes that are kept are best stopped first) and boots the rescue system, where the installer finds the old system and plans what it formats and what it keeps; nothing is written to a disk until you confirm the plans.", plural(len(plans), "server"))
 	case len(keeps) > 0:
-		question = fmt.Sprintf("Install on these %s? Every disk of each is erased, but for %s (keep-data): there the installer plans first, in the rescue system, and nothing is written to a disk until you confirm the plans; the other installations start after that.", plural(len(plans), "server"), strings.Join(keeps, ", "))
+		question = fmt.Sprintf("Install on these %s? Every disk of each is erased, but for %s (keep-data): there the running system is shut down (not always cleanly: services that write to the volumes that are kept are best stopped first), the installer plans in the rescue system, and nothing is written to a disk until you confirm the plans; the other installations start after that.", plural(len(plans), "server"), strings.Join(keeps, ", "))
 	}
 	question += voids
 	switch len(noRescue) {

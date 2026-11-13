@@ -184,7 +184,11 @@ without one, --yes is required.
 --keep-data replaces the old system and keeps its data
 (docs/keep-data.md): no disk is wiped or partitioned, and the profile's
 layout is not applied. After the first question the server goes into
-the rescue system, where the installer finds the old system, reading
+the rescue system: the running system ends with a kexec from it, or,
+on the provider's way, is shut down over SSH before the provider
+resets the server where it lets UMP in, and reset as it runs where it
+does not; services that write to the volumes that are kept are best
+stopped before. There the installer finds the old system, reading
 only, and prints its plan: what it formats (the old root, a separate
 /boot), what it keeps and mounts where it was (every other volume of
 the old fstab; a separate /var at /var.old), what it leaves untouched,
@@ -194,14 +198,19 @@ the same. --root DEVICE names the old root where the installer finds
 several old systems or none; --keep-root formats nothing and moves the
 old system into /old-root-DATE on its file system; --format MOUNTPOINT
 formats one more volume of the old fstab (/var: the new /var). --yes
-answers both questions, --dry-run stops after the plan. Not with
---layout, --disks or --unattended, and with the Ubuntu and Debian
-images alone (exit status 2). A plan that is declined and an installer
-that refuses write nothing, and ump says how the old system starts
-again (exit status 3); an installation that fails after the installer
-began to write (exit status 1) leaves the data volumes untouched and
-the old root gone or moved aside, and the same command again plans
-from what the installer saved of the old system.
+answers both questions, the second for a plan whose old system the
+installer found by itself, or knows where --root names it, and that
+keeps what an earlier plan of a failed installation kept; --dry-run
+stops after the plan. Not with --layout, --disks or --unattended, and
+with the Ubuntu and Debian images alone (exit status 2). A plan that is
+declined and an installer that refuses write nothing, and ump says how
+the old system starts again (exit status 3); so does a plan or an
+installation that fails before the installer began to write (exit
+status 1). One that fails after it (exit status 1 too; the installer's
+line "keep-data: writing begins" tells them apart) leaves the old root
+gone or moved aside and the volumes the plan keeps with their data,
+and the same command again plans from what the installer saved of the
+old system. The state records the layout keep-data.
 
 --unattended has the machine install by itself at its next boot,
 without UMP's SSH session (a PXE machine's network boot; docs/pxe.md):
@@ -815,7 +824,7 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	if o.dryRun {
 		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), p.what())
 		if p.keep != nil {
-			question = fmt.Sprintf("Bring %s into the rescue system and show the keep-data plan for %s? (dry run: the running system goes down, nothing is written to a disk)", describeRef(m), p.what())
+			question = fmt.Sprintf("Bring %s into the rescue system and show the keep-data plan for %s? (dry run: the running system is shut down as for the installation, not always cleanly; nothing is written to a disk)", describeRef(m), p.what())
 		}
 	}
 	// an OS without an image for the machine's architecture stops here,
@@ -1072,6 +1081,15 @@ type installEntry struct {
 	staging string
 }
 
+// stagingRun is the command line that runs a command in the rescue
+// system, as staging reaches it.
+func (e *installEntry) stagingRun(command string) string {
+	if strings.HasPrefix(e.staging, "ump ssh ") {
+		return e.staging + " -- " + command
+	}
+	return e.staging + " " + command
+}
+
 // enterInstall brings the server of a planned installation into the UMP
 // rescue system; stock allows the provider's stock installation as the
 // way in, which erases the machine.
@@ -1150,7 +1168,7 @@ func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e
 		// the disks hold the new system: its record, and the old host key
 		// goes, so that ump provision works after the reboot
 		admin := spec.Admin()
-		record := p.record(admin, "", a.now())
+		record := installRecord(spec.OS, p.profile, p.layout(), p.hostname, admin, "", a.now())
 		result.InstalledAt, result.Admin = &record.At, admin
 		a.forgetReplacedHostKey(system)
 		how := "a reboot"
@@ -1191,7 +1209,7 @@ func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e
 	result.System, result.Admin = sys, admin
 	a.forgetReplacedHostKey(system)
 	// what was installed goes into the state, for the inventory
-	record := p.record(admin, sys.Details, a.now())
+	record := installRecord(spec.OS, p.profile, p.layout(), p.hostname, admin, sys.Details, a.now())
 	result.InstalledAt = &record.At
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, p.hostname, sys.Root, admin, m.Name)
 	return result, &record, nil
@@ -1269,17 +1287,6 @@ func (a *app) forgetReplacedHostKey(addr string) {
 	if err == nil && forgot {
 		fmt.Fprintf(a.stderr, "Removed the old host key of %s from ~/.ssh/known_hosts: the system is new, and so is its host key.\n", addr)
 	}
-}
-
-// record is the record of the planned installation, completed: with
-// the facts the new system reported (details), and what a keep-data
-// installation replaced.
-func (p *installPlan) record(admin, details string, now time.Time) state.Install {
-	r := installRecord(p.spec.OS, p.profile, p.layout(), p.hostname, admin, details, now)
-	if p.keep != nil && p.keep.plan != nil {
-		r.KeepData = &state.KeepData{Root: p.keep.plan.root(), KeepRoot: p.keep.keepRoot, Plan: p.keep.plan.Hash}
-	}
-	return r
 }
 
 // installRecord is what the state keeps of an installation: the facts
@@ -1372,6 +1379,32 @@ func (a *app) fetch(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// manifests are manifests of the storage's images, by URL.
+type manifests struct {
+	mu  sync.Mutex
+	got map[string][]byte
+}
+
+// manifest fetches the manifest of the storage's image of an OS for an
+// architecture, once in a run; one that could not be fetched is asked
+// for again.
+func (a *app) manifest(ctx context.Context, storage, os, arch string) ([]byte, error) {
+	url := storage + "/os/" + os + "/" + arch + "/manifest.json"
+	if a.manifests == nil {
+		return a.fetch(ctx, url)
+	}
+	a.manifests.mu.Lock()
+	defer a.manifests.mu.Unlock()
+	if data, ok := a.manifests.got[url]; ok {
+		return data, nil
+	}
+	data, err := a.fetch(ctx, url)
+	if err == nil {
+		a.manifests.got[url] = data
+	}
+	return data, err
 }
 
 // keyResolver resolves the key references of a profile: ump (UMP's own
@@ -1675,7 +1708,7 @@ func (a *app) osArchs(ctx context.Context, os, storage string) map[string]string
 	bad := map[string]string{}
 	good := 0
 	for _, arch := range []string{"amd64", "arm64"} {
-		data, err := a.fetch(ctx, storage+"/os/"+os+"/"+arch+"/manifest.json")
+		data, err := a.manifest(ctx, storage, os, arch)
 		switch {
 		case err != nil && strings.HasSuffix(err.Error(), "HTTP 404"):
 			bad[arch] = "the storage has no image of " + os + " for " + arch

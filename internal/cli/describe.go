@@ -186,14 +186,6 @@ func umpSection(doc *state.Document, m provider.Machine) []provider.Section {
 			v += ", administrator " + in.Admin
 		}
 		items = append(items, provider.Item{Key: "installed", Value: v + ") on " + in.At.Format("2006-01-02 15:04 MST")})
-		if k := in.KeepData; k != nil {
-			// the installation kept the data of the system before it
-			v := "the old system's volumes kept, its root " + k.Root + " made anew"
-			if k.KeepRoot {
-				v = "the old system's volumes kept, the old system itself moved aside on its root " + k.Root
-			}
-			items = append(items, provider.Item{Key: "keep-data", Value: v + "; plan " + k.Plan})
-		}
 		if len(in.Interfaces) > 0 {
 			items = append(items, provider.Item{Key: "interfaces", Value: in.Interfaces})
 		}
