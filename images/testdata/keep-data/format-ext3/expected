@@ -1,0 +1,6 @@
+refused: --format /var/lib: /dev/sda5 holds ext3; the installer makes ext4, xfs, btrfs and vfat
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /var/lib: /dev/sda5 holds ext3; the installer makes ext4, xfs, btrfs and vfat"
+}

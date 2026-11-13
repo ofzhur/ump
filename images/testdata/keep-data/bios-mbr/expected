@@ -8,8 +8,11 @@ KEEP (as they are, mounted where they were)
   proc       proc  /proc
 LOST (on the old root, beyond the system itself)
   nothing found
-BOOT LOADER (BIOS): /dev/sda, /dev/sdb
+BOOT LOADER (BIOS): /dev/sda; and /dev/sdb, which carries GRUB now (tried: a failure there is a warning)
 WARNINGS
+  /dev/sda2 (none) is named as the old system's kernel named it; here that is /dev/sda2 (swap, 4G): taken for the volume meant, and named by its UUID from now on
+  /dev/sda3 (/home) is named as the old system's kernel named it; here that is /dev/sda3 (ext4, label DATA, 16G): taken for the volume meant, and named by its UUID from now on
+  /dev/sdb1 (/srv/big) is named as the old system's kernel named it; here that is /dev/sdb1 (xfs, 500G): taken for the volume meant, and named by its UUID from now on
   /swapfile (none) of the old fstab is dropped: a swap file of the old root
   /dev/sdc1 (/mnt/usb) of the old fstab is dropped: the device is not there
   /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
@@ -41,6 +44,7 @@ proc  /proc  proc  defaults  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "4684ebbc-8493-5c3c-9f24-4f290c45a956",
     "size_mb": 61440,
     "by": "detection"
   },
@@ -61,6 +65,9 @@ proc  /proc  proc  defaults  0 0
       "/dev/sda",
       "/dev/sdb"
     ],
+    "bios_optional": [
+      "/dev/sdb"
+    ],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -74,6 +81,7 @@ proc  /proc  proc  defaults  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "4684ebbc-8493-5c3c-9f24-4f290c45a956",
+      "label": "",
       "size_mb": 61440
     }
   ],
@@ -82,18 +90,21 @@ proc  /proc  proc  defaults  0 0
       "device": "/dev/sda2",
       "filesystem": "swap",
       "mountpoint": "swap",
+      "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
       "note": ""
     },
     {
       "device": "/dev/sda3",
       "filesystem": "ext4",
       "mountpoint": "/home",
+      "uuid": "e24ca7db-f88d-50a2-beb0-f73f17be22ee",
       "note": ""
     },
     {
       "device": "/dev/sdb1",
       "filesystem": "xfs",
       "mountpoint": "/srv/big",
+      "uuid": "2d47369a-0e85-5207-b3aa-88240fb94dd7",
       "note": ""
     },
     {
@@ -104,6 +115,7 @@ proc  /proc  proc  defaults  0 0
       "spec": "proc"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [],
@@ -120,8 +132,12 @@ proc  /proc  proc  defaults  0 0
     }
   ],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
+    "/dev/sda2 (none) is named as the old system's kernel named it; here that is /dev/sda2 (swap, 4G): taken for the volume meant, and named by its UUID from now on",
+    "/dev/sda3 (/home) is named as the old system's kernel named it; here that is /dev/sda3 (ext4, label DATA, 16G): taken for the volume meant, and named by its UUID from now on",
+    "/dev/sdb1 (/srv/big) is named as the old system's kernel named it; here that is /dev/sdb1 (xfs, 500G): taken for the volume meant, and named by its UUID from now on",
     "/swapfile (none) of the old fstab is dropped: a swap file of the old root",
     "/dev/sdc1 (/mnt/usb) of the old fstab is dropped: the device is not there",
     "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)"
@@ -184,5 +200,5 @@ proc  /proc  proc  defaults  0 0
       "action": "text"
     }
   ],
-  "hash": "8af43cc133e974285e4e41da44d6b2a2edd7a796227699fada724252e4c614db"
+  "hash": "185acfa91a0f049ebfa4dded6a05e9a5466f376d96b5d3468b4dbc975d9e4ebf"
 }

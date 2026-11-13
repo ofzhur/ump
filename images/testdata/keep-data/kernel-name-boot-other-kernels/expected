@@ -1,0 +1,6 @@
+refused: the old fstab names /boot by a kernel name (/dev/vda2), which is /dev/vda2 here (ext4, 1G), and that does not hold the old system's kernels (its vmlinuz files are of 5.10.0-8-arm64; the old root has the modules of 6.1.0-13-arm64, 6.1.0-18-arm64): it is not formatted; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL=
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab names /boot by a kernel name (/dev/vda2), which is /dev/vda2 here (ext4, 1G), and that does not hold the old system's kernels (its vmlinuz files are of 5.10.0-8-arm64; the old root has the modules of 6.1.0-13-arm64, 6.1.0-18-arm64): it is not formatted; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL="
+}

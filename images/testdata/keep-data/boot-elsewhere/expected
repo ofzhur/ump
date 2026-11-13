@@ -1,0 +1,6 @@
+refused: the old /boot (/dev/vda2) is mounted elsewhere by the old fstab too: it cannot be formatted
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot (/dev/vda2) is mounted elsewhere by the old fstab too: it cannot be formatted"
+}

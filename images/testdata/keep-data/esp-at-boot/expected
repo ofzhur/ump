@@ -8,6 +8,7 @@ LOST (on the old root, beyond the system itself)
   nothing found
 WARNINGS
   /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
+  the old system's systemd-boot moves aside with its entries (/loader on the EFI system partition, which another system that starts through it shares)
 --- /etc/fstab
 # /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
 UUID=NEW-nvme0n1p2  /  ext4  defaults,errors=remount-ro  0 1
@@ -34,6 +35,7 @@ PARTUUID=4c95c570-480b-5530-b334-e88b141a9275  /home  ext4  rw  0 2
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
     "size_mb": 102400,
     "by": "detection"
   },
@@ -51,6 +53,7 @@ PARTUUID=4c95c570-480b-5530-b334-e88b141a9275  /home  ext4  rw  0 2
     "esp": "/dev/nvme0n1p1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/nvme0n1",
     "disks": [
       "/dev/nvme0n1"
@@ -64,6 +67,7 @@ PARTUUID=4c95c570-480b-5530-b334-e88b141a9275  /home  ext4  rw  0 2
       "how": "mkfs",
       "was": "ext4",
       "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
+      "label": "",
       "size_mb": 102400
     }
   ],
@@ -72,23 +76,28 @@ PARTUUID=4c95c570-480b-5530-b334-e88b141a9275  /home  ext4  rw  0 2
       "device": "/dev/nvme0n1p1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "5A46-6FAB",
       "note": "the EFI system partition, at /boot in the old system: not formatted, the new boot loader is added; the old system's (EFI/systemd) moves aside on it, with -old-DATE after the name"
     },
     {
       "device": "/dev/nvme0n1p3",
       "filesystem": "ext4",
       "mountpoint": "/home",
+      "uuid": "a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b",
       "note": ""
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
-    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)"
+    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)",
+    "the old system's systemd-boot moves aside with its entries (/loader on the EFI system partition, which another system that starts through it shares)"
   ],
   "entries": [
     {
@@ -116,5 +125,5 @@ PARTUUID=4c95c570-480b-5530-b334-e88b141a9275  /home  ext4  rw  0 2
       "action": "keep"
     }
   ],
-  "hash": "56516b3f602a54314e72329094010828df4b1f6949f42eebcea74382baff0f35"
+  "hash": "8dee4daf37c1293841fbd3ac27a14ce6ec3d881c3079716c03bf88aae1c84438"
 }

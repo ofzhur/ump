@@ -35,14 +35,17 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
     "size_mb": 40960,
-    "by": "option"
+    "by": "option",
+    "known": false
   },
   "candidates": [],
   "boot": {
     "esp": "/dev/sda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -56,6 +59,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "ext4",
       "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
+      "label": "",
       "size_mb": 40960
     }
   ],
@@ -64,9 +68,11 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -87,10 +93,11 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/sda2 holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system"
   ],
   "entries": [],
-  "hash": "e8cfa348db881336cf955eea44733e5df1618d1014f71176fe35f234277dcef5"
+  "hash": "2fe26c7fe1e881dbe25c871c8758009df66ef42b542cfe702d27743d30197742"
 }

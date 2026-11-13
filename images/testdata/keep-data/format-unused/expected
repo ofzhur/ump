@@ -1,0 +1,6 @@
+refused: --format /usr: the new system does not use it; it stays as it is
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /usr: the new system does not use it; it stays as it is"
+}

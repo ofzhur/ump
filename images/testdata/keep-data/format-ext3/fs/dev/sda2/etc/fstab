@@ -1,0 +1,6 @@
+UUID=aaaaaaaa-0000-4000-8000-000000000002 / ext4 errors=remount-ro 0 1
+UUID=AAAA-0001 /boot/efi vfat umask=0077 0 1
+UUID=cccccccc-0000-4000-8000-000000000001 /home ext4 defaults 0 2
+UUID=dddddddd-0000-4000-8000-000000000001 /srv/old reiserfs defaults 0 2
+UUID=dddddddd-0000-4000-8000-000000000002 /var/lib ext3 defaults 0 2
+UUID=dddddddd-0000-4000-8000-000000000003 /var/cache ext4 defaults 0 2

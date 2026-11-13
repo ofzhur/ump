@@ -1,0 +1,192 @@
+{
+ "blockdevices": [
+  {
+   "name": "sda",
+   "kname": "sda",
+   "path": "/dev/sda",
+   "type": "disk",
+   "size": 107374182400,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "sda1",
+     "kname": "sda1",
+     "path": "/dev/sda1",
+     "type": "part",
+     "size": 536870912,
+     "fstype": "vfat",
+     "uuid": "3E86-EC85",
+     "partuuid": "12e6e457-a09c-5332-ac42-70b93ca32b55",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sda2",
+     "kname": "sda2",
+     "path": "/dev/sda2",
+     "type": "part",
+     "size": 1073741824,
+     "fstype": "linux_raid_member",
+     "uuid": "11111111-2222-3333-4444-555555555555",
+     "label": "old:0",
+     "partuuid": "42250a61-6d27-55d4-8bc1-fb501bc8207c",
+     "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "md127",
+       "kname": "md127",
+       "path": "/dev/md127",
+       "type": "raid1",
+       "size": 1073741824,
+       "fstype": "ext4",
+       "uuid": "f5d86f5d-fcdb-5ef2-8357-e1c735f3ac2a"
+      }
+     ]
+    },
+    {
+     "name": "sda3",
+     "kname": "sda3",
+     "path": "/dev/sda3",
+     "type": "part",
+     "size": 105226698752,
+     "fstype": "linux_raid_member",
+     "uuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+     "label": "old:1",
+     "partuuid": "f13f815a-3378-5a7f-9228-aa2bc2e3e8a1",
+     "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "md126",
+       "kname": "md126",
+       "path": "/dev/md126",
+       "type": "raid1",
+       "size": 105226698752,
+       "fstype": "LVM2_member",
+       "uuid": "eqPDFf-JznX-kWru-JKjI-ODNd-tjSj-sGpfUO",
+       "children": [
+        {
+         "name": "vg0-root",
+         "kname": "dm-0",
+         "path": "/dev/mapper/vg0-root",
+         "type": "lvm",
+         "size": 21474836480,
+         "fstype": "ext4",
+         "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c"
+        },
+        {
+         "name": "vg0-srv",
+         "kname": "dm-1",
+         "path": "/dev/mapper/vg0-srv",
+         "type": "lvm",
+         "size": 64424509440,
+         "fstype": "ext4",
+         "uuid": "289c6ec2-3a7c-535e-acf1-caedc1b7c440"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdb",
+   "kname": "sdb",
+   "path": "/dev/sdb",
+   "type": "disk",
+   "size": 107374182400,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "sdb1",
+     "kname": "sdb1",
+     "path": "/dev/sdb1",
+     "type": "part",
+     "size": 536870912,
+     "fstype": "vfat",
+     "uuid": "73B6-13A6",
+     "partuuid": "8ba35dd1-7d90-5cf9-889b-0980029f86cc",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sdb2",
+     "kname": "sdb2",
+     "path": "/dev/sdb2",
+     "type": "part",
+     "size": 1073741824,
+     "fstype": "linux_raid_member",
+     "uuid": "11111111-2222-3333-4444-555555555555",
+     "label": "old:0",
+     "partuuid": "96a170c6-b7db-5652-9ec0-bc56ecaeb1f2",
+     "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "md127",
+       "kname": "md127",
+       "path": "/dev/md127",
+       "type": "raid1",
+       "size": 1073741824,
+       "fstype": "ext4",
+       "uuid": "f5d86f5d-fcdb-5ef2-8357-e1c735f3ac2a"
+      }
+     ]
+    },
+    {
+     "name": "sdb3",
+     "kname": "sdb3",
+     "path": "/dev/sdb3",
+     "type": "part",
+     "size": 105226698752,
+     "fstype": "linux_raid_member",
+     "uuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+     "label": "old:1",
+     "partuuid": "1257bc02-6a24-54d4-b63d-908c84d7e0bc",
+     "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "md126",
+       "kname": "md126",
+       "path": "/dev/md126",
+       "type": "raid1",
+       "size": 105226698752,
+       "fstype": "LVM2_member",
+       "uuid": "eqPDFf-JznX-kWru-JKjI-ODNd-tjSj-sGpfUO",
+       "children": [
+        {
+         "name": "vg0-root",
+         "kname": "dm-2",
+         "path": "/dev/mapper/vg0-root",
+         "type": "lvm",
+         "size": 21474836480,
+         "fstype": "ext4",
+         "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c"
+        },
+        {
+         "name": "vg0-srv",
+         "kname": "dm-3",
+         "path": "/dev/mapper/vg0-srv",
+         "type": "lvm",
+         "size": 64424509440,
+         "fstype": "ext4",
+         "uuid": "289c6ec2-3a7c-535e-acf1-caedc1b7c440"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

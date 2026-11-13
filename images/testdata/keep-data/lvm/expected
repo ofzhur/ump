@@ -51,6 +51,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
     "size_mb": 10240,
     "by": "detection"
   },
@@ -68,6 +69,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "esp": "/dev/vda1",
     "boot": "/dev/vda2",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -81,6 +83,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
       "size_mb": 10240
     },
     {
@@ -90,6 +93,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -98,24 +102,28 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/vg0-swap",
       "filesystem": "swap",
       "mountpoint": "swap",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
       "note": ""
     },
     {
       "device": "/dev/mapper/vg0-data",
       "filesystem": "xfs",
       "mountpoint": "/data",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5",
       "note": ""
     },
     {
       "device": "/dev/vda4",
       "filesystem": "ext4",
       "mountpoint": "/srv/plain",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8",
       "note": ""
     },
     {
@@ -126,12 +134,14 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "spec": "tmpfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/mapper/vg0-var",
       "filesystem": "ext4",
       "from": "/var",
       "mountpoint": "/var.old",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f",
       "how": "mounted"
     }
   ],
@@ -176,6 +186,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "mb": 8790
     }
   ],
+  "crypttab": [],
   "packages": [],
   "warnings": [],
   "entries": [
@@ -244,5 +255,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "8911da13c974ed8c5d80e49b00519c87f95c8b0017f62b7beb2ef47db69c808b"
+  "hash": "9492be48c132c27e3e4b04b4c905e8fe8175157673f7fdd7a047b91cd065354f"
 }

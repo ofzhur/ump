@@ -1,0 +1,6 @@
+refused: --format /srv/plain: /dev/vda4 is on a USB or removable device
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /srv/plain: /dev/vda4 is on a USB or removable device"
+}

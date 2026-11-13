@@ -36,6 +36,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
     "size_mb": 40960,
     "by": "detection"
   },
@@ -61,6 +62,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
     "esp": "/dev/sda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -74,6 +76,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "how": "mkfs",
       "was": "ext4",
       "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
+      "label": "",
       "size_mb": 40960
     }
   ],
@@ -82,15 +85,18 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/sdb1",
       "filesystem": "ext4",
       "mountpoint": "/backup",
+      "uuid": "2d47369a-0e85-5207-b3aa-88240fb94dd7",
       "note": ""
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -104,6 +110,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/sdb1 (Debian GNU/Linux 12 (bookworm)) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is"
@@ -134,5 +141,5 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "action": "keep"
     }
   ],
-  "hash": "98869f03e8d5fcc225c43baab884f5686b4dc18b7edb26149f673eb289165671"
+  "hash": "7fc0b5a2f63ff6ef85bc263c2d6ae412dc75976a26b2b5deeb537e023c527a60"
 }

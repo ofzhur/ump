@@ -1,0 +1,2 @@
+cswap /dev/vda4 /dev/urandom swap
+cswap2 /dev/dm-3 /dev/urandom swap

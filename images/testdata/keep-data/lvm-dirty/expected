@@ -53,6 +53,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
     "size_mb": 10240,
     "by": "detection"
   },
@@ -70,6 +71,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "esp": "/dev/vda1",
     "boot": "/dev/vda2",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -83,6 +85,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
       "size_mb": 10240
     },
     {
@@ -92,6 +95,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -100,24 +104,28 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/vg0-swap",
       "filesystem": "swap",
       "mountpoint": "swap",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
       "note": ""
     },
     {
       "device": "/dev/mapper/vg0-data",
       "filesystem": "xfs",
       "mountpoint": "/data",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5",
       "note": ""
     },
     {
       "device": "/dev/vda4",
       "filesystem": "ext4",
       "mountpoint": "/srv/plain",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8",
       "note": ""
     },
     {
@@ -128,12 +136,14 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "spec": "tmpfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/mapper/vg0-var",
       "filesystem": "ext4",
       "from": "/var",
       "mountpoint": "/var.old",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f",
       "how": "mounted"
     }
   ],
@@ -178,6 +188,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "mb": 8790
     }
   ],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "the old root /dev/mapper/vg0-root was not unmounted cleanly: it is read as the disk has it, without its journal; what the old system wrote last may be missing here"
@@ -248,5 +259,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "be52e6a8be16cacfe06d1098f1176f7eedf657decb111b9cb678d0eaf9b99221"
+  "hash": "292e8923a4be8830ae27b2bfea224836e801c807f91bd2be04617a0b62a4570c"
 }

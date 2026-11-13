@@ -1,0 +1,6 @@
+refused: the old fstab mounts the root's own device /dev/mapper/vg0-root at /mnt/root too: not a layout this installer reads with certainty
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab mounts the root's own device /dev/mapper/vg0-root at /mnt/root too: not a layout this installer reads with certainty"
+}

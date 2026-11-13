@@ -1,0 +1,6 @@
+refused: --keep-root: /srv, /opt/keep me at the top of the old root cannot be renamed (chattr +i or +a): the old system could not be moved aside whole; take the attribute off in the rescue system (mount /dev/mapper/vg0-root /mnt; chattr -ia /mnt/srv; umount /mnt) and run again
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--keep-root: /srv, /opt/keep me at the top of the old root cannot be renamed (chattr +i or +a): the old system could not be moved aside whole; take the attribute off in the rescue system (mount /dev/mapper/vg0-root /mnt; chattr -ia /mnt/srv; umount /mnt) and run again"
+}

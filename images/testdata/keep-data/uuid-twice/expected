@@ -1,8 +1,8 @@
-refused: an old system's files are on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it
+refused: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d, which the /etc/fstab on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)) mounts at /, is on several devices here (/dev/mapper/vg0-root, /dev/mapper/vg0-rootsnap): a copy or a snapshot of a volume is among them: which one is the old root is not certain; --root DEVICE names it
 --- the plan (--plan)
 {
   "version": 1,
-  "refused": "an old system's files are on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it",
+  "refused": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d, which the /etc/fstab on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)) mounts at /, is on several devices here (/dev/mapper/vg0-root, /dev/mapper/vg0-rootsnap): a copy or a snapshot of a volume is among them: which one is the old root is not certain; --root DEVICE names it",
   "candidates": [
     {
       "device": "/dev/mapper/vg0-root",

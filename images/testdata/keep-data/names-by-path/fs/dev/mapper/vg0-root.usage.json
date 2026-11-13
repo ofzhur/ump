@@ -1,0 +1,61 @@
+{
+ "size_mb": 9980,
+ "used_mb": 3100,
+ "free_mb": 6300,
+ "tree_mb": 0,
+ "features": "",
+ "usage": [
+  {
+   "path": "/etc",
+   "kb": 5300
+  },
+  {
+   "path": "/root",
+   "kb": 48
+  },
+  {
+   "path": "/srv",
+   "kb": 4
+  },
+  {
+   "path": "/opt",
+   "kb": 250000
+  },
+  {
+   "path": "/home/alice",
+   "kb": 1200000
+  },
+  {
+   "path": "/home/bob",
+   "kb": 24
+  },
+  {
+   "path": "/var/lib/docker",
+   "kb": 9000000
+  },
+  {
+   "path": "/var/lib/apt",
+   "kb": 180000
+  },
+  {
+   "path": "/var/lib/dpkg",
+   "kb": 40000
+  },
+  {
+   "path": "/var/log",
+   "kb": 30000
+  },
+  {
+   "path": "/usr/local",
+   "kb": 70000
+  },
+  {
+   "path": "/backup",
+   "kb": 2048
+  },
+  {
+   "path": "/mnt",
+   "kb": 4
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+refused: the old fstab's LABEL=plain (/srv/plain) names several devices here (/dev/mapper/vg0-data, /dev/vda4): which one is meant is not certain
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab's LABEL=plain (/srv/plain) names several devices here (/dev/mapper/vg0-data, /dev/vda4): which one is meant is not certain"
+}

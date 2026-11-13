@@ -36,6 +36,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
     "size_mb": 40960,
     "by": "option"
   },
@@ -61,6 +62,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
     "esp": "/dev/sda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -74,6 +76,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "how": "mkfs",
       "was": "ext4",
       "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
+      "label": "",
       "size_mb": 40960
     }
   ],
@@ -82,15 +85,18 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/sdb1",
       "filesystem": "ext4",
       "mountpoint": "/backup",
+      "uuid": "2d47369a-0e85-5207-b3aa-88240fb94dd7",
       "note": ""
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -104,6 +110,7 @@ LABEL=backup  /backup  ext4  defaults  0 2
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/sda3 (CentOS Linux 7 (Core)) holds an operating system's files too: left as it is"
@@ -134,5 +141,5 @@ LABEL=backup  /backup  ext4  defaults  0 2
       "action": "keep"
     }
   ],
-  "hash": "7b0dd0095bbe24b41e4e5fa7397f81d2fb8c0828ff34b0f15629061492162218"
+  "hash": "c880e46402dab83a0817d0365183b811c7ddac95b1787b484c064fb36f5ca429"
 }

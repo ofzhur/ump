@@ -1,0 +1,2 @@
+/dev/mapper/vg0-root|thin|active|aaaa
+/dev/mapper/vg0-pool|thin-pool|active|bbbb

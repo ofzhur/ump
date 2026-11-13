@@ -1,0 +1,6 @@
+refused: no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root holds what an interrupted keep-data installation saved of the old system, and that is damaged: it is not read (--root /dev/mapper/vg0-root installs onto it without the old system's other volumes, which stay as they are)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace; /dev/mapper/vg0-root holds what an interrupted keep-data installation saved of the old system, and that is damaged: it is not read (--root /dev/mapper/vg0-root installs onto it without the old system's other volumes, which stay as they are)"
+}

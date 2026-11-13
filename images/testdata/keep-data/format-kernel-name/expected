@@ -1,0 +1,6 @@
+refused: --format /srv/plain: the old fstab names it by a kernel name (/dev/vda4), which may be another device here (/dev/vda4: ext4, label plain, 8G): it is not formatted; name it by UUID= or LABEL= in the old /etc/fstab
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /srv/plain: the old fstab names it by a kernel name (/dev/vda4), which may be another device here (/dev/vda4: ext4, label plain, 8G): it is not formatted; name it by UUID= or LABEL= in the old /etc/fstab"
+}

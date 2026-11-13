@@ -12,7 +12,7 @@ ASIDE (kept, under another name)
   /dev/mapper/vg0-var   ext4   /var -> /var.old  (mounted)
   /dev/mapper/vg0-root  ext4   / -> /old-root-DATE  (moved)
 --- /etc/fstab
-# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+# /etc/fstab, written by UMP (keep-data: the new system beside the old one, which was set aside; the old system's other volumes as they were)
 UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d  /  ext4  errors=remount-ro  0 1
 UUID=NEW-vda2  /boot  ext4  defaults  0 2
 UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
@@ -42,6 +42,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
     "size_mb": 10240,
     "by": "detection",
     "free_mb": 6300
@@ -60,6 +61,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "esp": "/dev/vda1",
     "boot": "/dev/vda2",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -73,6 +75,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -81,30 +84,35 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/vg0-root",
       "filesystem": "ext4",
       "mountpoint": "/",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
       "note": "the root file system, not formatted: the new system is unpacked beside the old one, which moves into /old-root-DATE"
     },
     {
       "device": "/dev/mapper/vg0-swap",
       "filesystem": "swap",
       "mountpoint": "swap",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
       "note": ""
     },
     {
       "device": "/dev/mapper/vg0-data",
       "filesystem": "xfs",
       "mountpoint": "/data",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5",
       "note": ""
     },
     {
       "device": "/dev/vda4",
       "filesystem": "ext4",
       "mountpoint": "/srv/plain",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8",
       "note": ""
     },
     {
@@ -115,12 +123,14 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "spec": "tmpfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/mapper/vg0-var",
       "filesystem": "ext4",
       "from": "/var",
       "mountpoint": "/var.old",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f",
       "how": "mounted"
     },
     {
@@ -135,6 +145,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
   "untouched": [],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [],
   "entries": [
@@ -203,5 +214,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "6bbc98670225bd3aa1b513c40e9732b15060e152a5da3f58e71510c5d604b7e2"
+  "hash": "df8b40179939e3a0258e5f5ef83caca54463eb3819b8f07a6d7b51d9cc825c50"
 }

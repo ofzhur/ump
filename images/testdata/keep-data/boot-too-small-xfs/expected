@@ -1,0 +1,6 @@
+refused: the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least), and /boot cannot be on the root instead (GRUB reads it on a partition, a linear volume or an md array with an ext4 file system; this root is xfs on /dev/mapper/vg0-root): make a larger /boot in the rescue system first (keep-data changes no partition), or install without --keep-data
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least), and /boot cannot be on the root instead (GRUB reads it on a partition, a linear volume or an md array with an ext4 file system; this root is xfs on /dev/mapper/vg0-root): make a larger /boot in the rescue system first (keep-data changes no partition), or install without --keep-data"
+}

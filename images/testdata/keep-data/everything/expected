@@ -20,6 +20,7 @@ UNUSED (left as they are, not mounted by the new system)
 UNTOUCHED (not in the old fstab: left as they are)
   /dev/mapper/sys-pool_tmeta     -      1G  (no file system)
   /dev/mapper/sys-spare          ext4   5G
+  /dev/mapper/sys-was_ext4       xfs    5G
   /dev/sda2                      -      2M  (the BIOS boot partition)
   /dev/sdc                       -      100G  (no file system)
 LOST (on the old root, beyond the system itself)
@@ -70,6 +71,7 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "95df4a58-77cd-5c92-8c9e-ebf4f7c4e8ff",
     "size_mb": 8192,
     "by": "detection"
   },
@@ -87,6 +89,7 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
     "esp": "/dev/sda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -100,6 +103,7 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "95df4a58-77cd-5c92-8c9e-ebf4f7c4e8ff",
+      "label": "",
       "size_mb": 8192
     }
   ],
@@ -108,30 +112,35 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/sys-docker",
       "filesystem": "xfs",
       "mountpoint": "/var/lib/docker",
+      "uuid": "a9d927f4-dfd2-5766-9efc-e97d28c60dde",
       "note": ""
     },
     {
       "device": "/dev/mapper/sys-home",
       "filesystem": "ext4",
       "mountpoint": "/home",
+      "uuid": "fb127515-8ca0-524a-8bb3-c5c748af5873",
       "note": ""
     },
     {
       "device": "/dev/mapper/sys-thin",
       "filesystem": "ext4",
       "mountpoint": "/srv/thin",
+      "uuid": "41a4e43f-57fb-5239-8444-7eae17ac9e1c",
       "note": ""
     },
     {
       "device": "/dev/sdb",
       "filesystem": "ext4",
       "mountpoint": "/scratch",
+      "uuid": "c227728e-95d2-5cc8-a6f4-768104907412",
       "note": ""
     },
     {
@@ -177,12 +186,14 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
       "spec": "tmpfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/mapper/sys-var",
       "filesystem": "xfs",
       "from": "/var",
       "mountpoint": "/var.old",
+      "uuid": "b44449d8-270d-543a-bf72-88aa86bdc0ad",
       "how": "mounted"
     }
   ],
@@ -190,7 +201,8 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
     {
       "device": "/dev/mapper/sys-usr",
       "filesystem": "ext4",
-      "mountpoint": "/usr"
+      "mountpoint": "/usr",
+      "uuid": "53218ee5-e860-5404-90ca-2f054b9ac16f"
     }
   ],
   "untouched": [
@@ -204,6 +216,13 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
     {
       "device": "/dev/mapper/sys-spare",
       "filesystem": "ext4",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/sys-was_ext4",
+      "filesystem": "xfs",
       "label": "",
       "size_mb": 5120,
       "note": ""
@@ -241,6 +260,7 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
     }
   ],
   "lost": [],
+  "crypttab": [],
   "packages": [
     "thin-provisioning-tools",
     "nfs-common",
@@ -386,5 +406,5 @@ tmpfs  /run/shm  tmpfs  defaults  0 0
       "action": "drop"
     }
   ],
-  "hash": "59132828b53471f1e1278f937d3176c5da66529a020452c704ff564978fd903c"
+  "hash": "17fe792e41c042998efad76917c6f70886712c2292c0a226ebbab7cc006443c1"
 }

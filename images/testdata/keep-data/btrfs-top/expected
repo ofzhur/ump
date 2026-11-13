@@ -5,6 +5,8 @@ KEEP (as they are, mounted where they were)
   /dev/vda1  vfat   /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
 LOST (on the old root, beyond the system itself)
   nothing found
+WARNINGS
+  the subvolumes of the old root's btrfs go with it, which is made anew: var/lib/machines
 --- /etc/fstab
 # /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
 UUID=NEW-vda2  /  btrfs  defaults  0 1
@@ -30,6 +32,7 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
     "subvolume": "",
     "filesystem": "btrfs",
     "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
     "size_mb": 101376,
     "by": "detection"
   },
@@ -47,6 +50,7 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
     "esp": "/dev/vda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -60,6 +64,7 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "btrfs",
       "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
       "size_mb": 101376
     }
   ],
@@ -68,16 +73,21 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
-  "warnings": [],
+  "warnings": [
+    "the subvolumes of the old root's btrfs go with it, which is made anew: var/lib/machines"
+  ],
   "entries": [
     {
       "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
@@ -96,5 +106,5 @@ UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
       "action": "esp"
     }
   ],
-  "hash": "9efe0baa58de42ed2d5208a1fdfb1b83ca0bfda778620ceb33625376c4c64bc6"
+  "hash": "c254dc6fd4d06f44234da74b9df8d02bf5e2fd9e2d1881c92cfe75de94389a41"
 }

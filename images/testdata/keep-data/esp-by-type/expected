@@ -35,6 +35,7 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "3829e1ed-8e3c-57a7-92d6-ab6ea8b3c4ad",
     "size_mb": 101376,
     "by": "detection"
   },
@@ -52,6 +53,7 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
     "esp": "/dev/sdb1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sdb",
     "disks": [
       "/dev/sdb"
@@ -65,6 +67,7 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "ext4",
       "uuid": "3829e1ed-8e3c-57a7-92d6-ab6ea8b3c4ad",
+      "label": "",
       "size_mb": 101376
     }
   ],
@@ -73,9 +76,11 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
       "device": "/dev/sdb1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "73B6-13A6",
       "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -96,6 +101,7 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "other EFI system partitions (/dev/sda1) are left as they are: a firmware that starts from one of them finds the old boot loader"
@@ -110,5 +116,5 @@ UUID=73B6-13A6  /boot/efi  vfat  umask=0077  0 1
       "action": "root"
     }
   ],
-  "hash": "d4929ca557e559529e8c7fee0afa7981d0a500becce70c8595fc9bfe874e24f6"
+  "hash": "6f5c20d4c4beaa14c157c35d065ad53b54f5267924995a775abddf7d1d0a0516"
 }

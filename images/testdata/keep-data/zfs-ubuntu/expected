@@ -28,6 +28,7 @@ LOST (on the old root, beyond the system itself)
 PACKAGES (installed for what is kept): zfsutils-linux
 WARNINGS
   ZFS: /dev/vdb1, /dev/vdc1 (tank) are left as they are; zfsutils-linux is installed, and the pools are imported at boot (the old /etc/hostid is carried over)
+  the profile's users' keys are also in /etc/ssh/authorized_keys/NAME, which the new system's sshd reads besides (sshd_config.d/20-ump-keep-data.conf): they get in whatever a ZFS dataset mounted over /home or /root holds
 --- /etc/fstab
 # /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
 UUID=NEW-vg0-root  /  ext4  defaults,errors=remount-ro  0 1
@@ -59,6 +60,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
     "size_mb": 10240,
     "by": "detection"
   },
@@ -76,6 +78,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
     "esp": "/dev/vda1",
     "boot": "/dev/vda2",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -89,6 +92,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
       "size_mb": 10240
     },
     {
@@ -98,6 +102,7 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "how": "mkfs",
       "was": "ext4",
       "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -106,24 +111,28 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/vg0-swap",
       "filesystem": "swap",
       "mountpoint": "swap",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
       "note": ""
     },
     {
       "device": "/dev/mapper/vg0-data",
       "filesystem": "xfs",
       "mountpoint": "/data",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5",
       "note": ""
     },
     {
       "device": "/dev/vda4",
       "filesystem": "ext4",
       "mountpoint": "/srv/plain",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8",
       "note": ""
     },
     {
@@ -134,12 +143,14 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "spec": "tmpfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/mapper/vg0-var",
       "filesystem": "ext4",
       "from": "/var",
       "mountpoint": "/var.old",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f",
       "how": "mounted"
     }
   ],
@@ -213,11 +224,13 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "mb": 8790
     }
   ],
+  "crypttab": [],
   "packages": [
     "zfsutils-linux"
   ],
   "warnings": [
-    "ZFS: /dev/vdb1, /dev/vdc1 (tank) are left as they are; zfsutils-linux is installed, and the pools are imported at boot (the old /etc/hostid is carried over)"
+    "ZFS: /dev/vdb1, /dev/vdc1 (tank) are left as they are; zfsutils-linux is installed, and the pools are imported at boot (the old /etc/hostid is carried over)",
+    "the profile's users' keys are also in /etc/ssh/authorized_keys/NAME, which the new system's sshd reads besides (sshd_config.d/20-ump-keep-data.conf): they get in whatever a ZFS dataset mounted over /home or /root holds"
   ],
   "entries": [
     {
@@ -285,5 +298,5 @@ tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
       "action": "text"
     }
   ],
-  "hash": "0670369454626d6a8d50756625b8f7e7309571eabd0ed55d2724d14736542590"
+  "hash": "b05a83327ec006bc9f3158414fa645b9c21f62bd0e05802c00e4c50e4518a703"
 }

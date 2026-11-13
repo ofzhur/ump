@@ -1,0 +1,6 @@
+refused: --format /home: /dev/vda2 is the root's own file system, of which /home is a subvolume: it cannot be formatted
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /home: /dev/vda2 is the root's own file system, of which /home is a subvolume: it cannot be formatted"
+}

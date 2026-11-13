@@ -1,0 +1,2 @@
+cswap /dev/vda4 /dev/urandom swap,cipher=aes-xts-plain64,size=256
+ctmp /dev/mapper/vg0-data /dev/urandom tmp

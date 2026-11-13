@@ -1,0 +1,6 @@
+refused: this machine boots with BIOS, and GRUB has no place on /dev/sda (its first partition starts at sector 63, which leaves GRUB no room before it (2048 sectors, as partitioning tools have left since 2010)): keep-data changes no partition table, and the new system could not be started
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "this machine boots with BIOS, and GRUB has no place on /dev/sda (its first partition starts at sector 63, which leaves GRUB no room before it (2048 sectors, as partitioning tools have left since 2010)): keep-data changes no partition table, and the new system could not be started"
+}

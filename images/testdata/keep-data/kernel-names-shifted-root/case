@@ -1,0 +1,1 @@
+efi=0; arch=amd64; keep_root_arg=/dev/sdb2

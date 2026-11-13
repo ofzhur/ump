@@ -43,8 +43,10 @@
 #                    same: {root, keep_root, format, confirm})
 #   --root DEVICE    the old root, where several old systems are found or none
 #                    (a device, UUID=..., DEVICE:SUBVOLUME on btrfs)
-#   --keep-root      format nothing: the old system moves into /old-root-DATE
-#                    on its file system, the new one is unpacked beside it
+#   --keep-root      do not format the root: the old system moves into
+#                    /old-root-DATE on its file system (whence it cannot be
+#                    started again), the new one is unpacked beside it; a
+#                    separate /boot is formatted all the same
 #   --format MOUNTPOINT  format this volume of the old fstab too and mount it
 #                    there again (repeatable; /var: the new /var)
 #   --plan FILE      keep-data: print the plan, write it to FILE as JSON and
@@ -115,7 +117,7 @@ while [ $# -gt 0 ]; do
 	--format) keep_format+=("$2"); shift 2 ;;
 	--plan) plan_file="$2"; shift 2 ;;
 	--confirm) confirm="$2"; shift 2 ;;
-	-h|--help) sed -n '2,/^set -euo/{/^set -euo/!p;}' "$0"; exit 0 ;;
+	-h|--help) sed -n '2,/^set -Eeuo/{/^set -Eeuo/!p;}' "$0"; exit 0 ;;
 	*) echo "install.sh: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -204,7 +206,7 @@ if [ "$keep" = 1 ]; then
 	# (a plan file from before is no plan of this run)
 	[ -z "$plan_file" ] || { dry=1; rm -f "$plan_file"; }
 	[ "$dry" = 1 ] || [[ "$confirm" =~ ^[0-9a-f]{64}$ ]] || { echo "install.sh: keep-data writes only what was confirmed: --dry-run or --plan FILE shows the plan and its hash, --confirm HASH installs it" >&2; exit 2; }
-	for t in mdadm btrfs cryptsetup lvs dumpe2fs stat du df timeout base64 readlink; do
+	for t in mdadm btrfs cryptsetup lvs dumpe2fs stat du df timeout base64 readlink od; do
 		command -v "$t" >/dev/null || { echo "install.sh: $t is missing in this rescue system; keep-data needs it (images/rescue/packages.txt)" >&2; exit 2; }
 	done
 elif [ -n "$keep_root_arg$plan_file$confirm" ] || [ "$keep_root" = 1 ] || [ ${#keep_format[@]} -gt 0 ]; then
@@ -457,6 +459,7 @@ net_record() {
 
 KD_DIR=/run/ump-keep-data
 KD_LOOK="$KD_DIR/look"
+KD_MARK=.ump-keep-data   # at the top of the root's file system: what an interrupted installation saved
 KD_STAMP=""     # the date in the names of what is set aside, when writing begins
 kd_wrote=0      # 1 from the first write on: before it, a refusal has changed nothing
 
@@ -471,6 +474,7 @@ kd_look() {
 	ext2|ext3|ext4) t=ext4; o=ro,noload,errors=continue ;;
 	xfs) o=ro,norecovery ;;
 	btrfs) o=ro,rescue=nologreplay ;;
+	"") return 1 ;;
 	esac
 	mkdir -p "$KD_LOOK"
 	kd_unlook
@@ -485,30 +489,56 @@ kd_unlook() {
 	fi
 }
 
+# kd_dirty DEV FSTYPE: true when the file system was not unmounted
+# cleanly: its journal or log holds what the look does not see
+kd_dirty() {
+	local r=false
+	case "$2" in
+	ext*) if dumpe2fs -h "$1" 2>/dev/null | grep -q '^Filesystem features:.* needs_recovery'; then r=true; fi ;;
+	xfs) if command -v xfs_logprint >/dev/null && xfs_logprint -t "$1" 2>/dev/null | grep -q '<DIRTY>'; then r=true; fi ;;
+	btrfs) if [ "$(btrfs inspect-internal dump-super "$1" 2>/dev/null | awk '$1 == "log_root" {print $2}')" -gt 0 ] 2>/dev/null; then r=true; fi ;;
+	esac
+	echo "$r"
+}
+
+# kd_marker_ok DIR: what an interrupted installation saved in DIR is
+# whole: the old fstab and the first plan are the ones it wrote
+kd_marker_ok() { [ -f "$1/SHA256SUMS" ] && [ -f "$1/etc/fstab" ] && [ -f "$1/plan.json" ] && [ -f "$1/state" ] && (cd "$1" && sha256sum -c --status SHA256SUMS 2>/dev/null); }
+# kd_state DIR KEY: a value of its state
+kd_state() { sed -n "s/^$2=//p" "$1/state" 2>/dev/null | head -n 1; }
+
 # kd_fact_lsblk: every block device, as lsblk's JSON
-kd_fact_lsblk() { lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,UUID,LABEL,PARTUUID,PARTLABEL,PARTTYPE,PARTN,PTTYPE,MOUNTPOINTS,RO,RM,TRAN; }
+kd_fact_lsblk() { lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,UUID,LABEL,PARTUUID,PARTLABEL,PARTTYPE,PARTN,PTTYPE,MOUNTPOINTS,RO,RM,TRAN,START; }
 
 # kd_fact_realpath PATH: the device a path under /dev leads to
 kd_fact_realpath() { readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"; }
 
 # kd_fact_fs DEV FSTYPE: the old systems on a file system: {roots:
 # [{subvolume, system, hostname, resume}], subvolumes: [{id, top, path}],
-# default}. A root holds /etc/fstab and /etc/os-release; on btrfs every
-# subvolume is looked at. resume: what an interrupted keep-data
-# installation left of the old root's files (.ump-keep-data)
+# default, dirty, broken}. A root holds /etc/fstab and /etc/os-release;
+# on btrfs every subvolume is looked at. resume: what an interrupted
+# keep-data installation saved of the old root's files, at the top of
+# the file system ($KD_MARK, whose state names the subvolume); broken:
+# that is there and damaged, and nothing on the file system is taken
+# for an old system
 kd_fact_fs() {
-	local dev="$1" fs="$2" o="" subs='[]' def="" roots='[]' p base b f resume system host
+	local dev="$1" fs="$2" o="" subs='[]' def="" roots='[]' p base b f resume system host mark="" msub="" broken=false dirty
 	[ "$fs" != btrfs ] || o=subvolid=5
-	kd_look "$dev" "$fs" "$o" || { echo '{"error": "it cannot be mounted"}'; return 0; }
+	dirty="$(kd_dirty "$dev" "$fs")"
+	kd_look "$dev" "$fs" "$o" || { jq -n -c --argjson dirty "$dirty" '{error: "it cannot be mounted", dirty: $dirty}'; return 0; }
 	if [ "$fs" = btrfs ]; then
 		subs="$(btrfs subvolume list "$KD_LOOK" 2>/dev/null | sed -n 's/^ID \([0-9]*\) gen [0-9]* top level \([0-9]*\) path \(.*\)$/\1\t\2\t\3/p' \
 			| jq -R -s -c 'split("\n") | map(select(. != "") | split("\t") | {id: (.[0] | tonumber), top: (.[1] | tonumber), path: .[2]})')"
 		def="$(btrfs subvolume get-default "$KD_LOOK" 2>/dev/null | sed -n 's/^ID [0-9]* gen [0-9]* top level [0-9]* path \(.*\)$/\1/p')"
 	fi
+	if [ -e "$KD_LOOK/$KD_MARK" ] || [ -L "$KD_LOOK/$KD_MARK" ]; then
+		if [ -d "$KD_LOOK/$KD_MARK" ] && [ ! -L "$KD_LOOK/$KD_MARK" ] && kd_marker_ok "$KD_LOOK/$KD_MARK"; then mark="$KD_LOOK/$KD_MARK"; msub="$(kd_state "$mark" subvolume)"; else broken=true; fi
+	fi
 	while IFS= read -r p; do
+		[ "$broken" = false ] || break
 		p="${p#=}"; base="$KD_LOOK${p:+/$p}"
-		if [ -f "$base/.ump-keep-data/etc/fstab" ]; then
-			resume=true; b="$base/.ump-keep-data"
+		if [ -n "$mark" ] && [ "$p" = "$msub" ]; then
+			resume=true; b="$mark"
 		elif [ -f "$base/etc/fstab" ] && [ ! -L "$base/etc/fstab" ] && { [ -e "$base/etc/os-release" ] || [ -L "$base/etc/os-release" ]; }; then
 			resume=false; b="$base"
 		else
@@ -521,23 +551,82 @@ kd_fact_fs() {
 		done
 		host=""; if [ -f "$b/etc/hostname" ] && [ ! -L "$b/etc/hostname" ]; then host="$(head -n 1 "$b/etc/hostname")"; fi
 		roots="$(jq -c --arg s "$p" --arg system "$system" --arg host "$host" --argjson resume "$resume" '. + [{subvolume: $s, system: $system, hostname: $host, resume: $resume}]' <<< "$roots")"
-	done < <(echo "="; jq -r '.[] | "=" + .path' <<< "$subs")
+	done < <(echo "="; jq -r '.[] | "=" + .path' <<< "$subs"; if [ -n "$msub" ] && ! jq -e --arg s "$msub" 'any(.path == $s)' >/dev/null <<< "$subs"; then echo "=$msub"; fi)
 	kd_unlook
 	# (what can be long goes to jq on its input: an argument has a limit)
-	printf '%s\n' "$roots" "$subs" | jq -c -s --arg default "$def" '{roots: .[0], subvolumes: .[1], default: $default}'
+	printf '%s\n' "$roots" "$subs" | jq -c -s --arg default "$def" --argjson dirty "$dirty" --argjson broken "$broken" '{roots: .[0], subvolumes: .[1], default: $default, dirty: $dirty, broken: $broken}'
+}
+
+# kd_fact_has_uuid UUID: a file system with this UUID is there
+kd_fact_has_uuid() { [ -n "$(blkid -U "$1" 2>/dev/null)" ]; }
+
+# kd_journal FILE: the saved fstab on stdin, with the file systems an
+# interrupted installation made anew named by the UUIDs they have now:
+# FILE has "OLD NEW" per line, written before each mkfs (one that was
+# made anew twice has a line for each time); a line whose mkfs never ran
+# changes nothing
+kd_journal() {
+	local text o n i
+	local -a olds=() news=()
+	local -A final=()
+	text="$(cat)"
+	if [ -f "$1" ] && [ ! -L "$1" ]; then
+		while read -r o n; do
+			if [ -n "$o" ] && [ -n "$n" ]; then olds+=("$o"); news+=("$n"); fi
+		done < "$1"
+		for ((i = ${#olds[@]} - 1; i >= 0; i--)); do
+			o="${olds[$i]}"; n="${news[$i]}"
+			if [ -n "${final[$n]:-}" ]; then final[$o]="${final[$n]}"
+			elif kd_fact_has_uuid "$n"; then final[$o]="$n"; fi
+		done
+		for o in "${!final[@]}"; do
+			text="$(printf '%s\n' "$text" | awk -v o="$o" -v n="${final[$o]}" 'tolower($1) == "uuid=" tolower(o) && !/^[ \t]*#/ {$1 = "UUID=" n} {print}')"
+		done
+	fi
+	printf '%s\n' "$text"
+}
+
+# kd_saved_json DIR RAM: what an interrupted installation saved (in DIR:
+# $KD_MARK of the root's file system, or the copy in memory), as
+# kd_fact_root gives it: the old fstab (kd_journal), the first plan, and
+# how far that installation came (saved: {root: old, aside or gone;
+# aside: the name the old system was moved to})
+kd_saved_json() {
+	local b="$1" keyfiles='[]' k fstab hostid="" zc=false first=null
+	rf() { if [ -f "$b/$1" ] && [ ! -L "$b/$1" ]; then cat "$b/$1"; fi; }
+	while IFS= read -r k; do
+		[ -n "$k" ] || continue
+		if [ -f "$b$k" ] && [ ! -L "$b$k" ]; then keyfiles="$(jq -c --arg p "$k" --arg m "$(stat -c %a "$b$k")" '. + [{path: $p, mode: $m}]' <<< "$keyfiles")"; fi
+	done < <(rf etc/crypttab | awk '$1 !~ /^#/ && $3 ~ /^\// && $3 !~ /^\/dev\// {print $3}' | sort -u)
+	fstab="$(rf etc/fstab | kd_journal "$b/formats")"
+	if [ -f "$b/etc/hostid" ] && [ ! -L "$b/etc/hostid" ]; then hostid="$(base64 -w0 < "$b/etc/hostid")"; fi
+	if [ -f "$b/etc/zfs/zpool.cache" ]; then zc=true; fi
+	if jq -e 'type == "object"' "$b/plan.json" >/dev/null 2>&1; then first="$(jq -c . "$b/plan.json")"; fi
+	printf '%s\n' "$first" | jq -c --arg fstab "$fstab" --arg crypttab "$(rf etc/crypttab)" --arg mdadm_conf "$(rf etc/mdadm/mdadm.conf; rf etc/mdadm.conf)" \
+		--arg hostid "$hostid" --argjson zpool_cache "$zc" --argjson keyfiles "$keyfiles" --argjson ram "$2" \
+		--arg root "$(kd_state "$b" root)" --arg aside "$(kd_state "$b" aside)" \
+		'{fstab: $fstab, crypttab: $crypttab, mdadm_conf: $mdadm_conf, hostid: $hostid, zpool_cache: $zpool_cache, keyfiles: $keyfiles, opens: {}, modules: [],
+		  resume: true, ram: $ram, first: ., saved: {root: $root, aside: $aside}}'
 }
 
 # kd_fact_root DEV SUBVOLUME FSTYPE: what the old root says: {fstab,
 # crypttab, mdadm_conf, hostid (base64), zpool_cache, keyfiles: [{path,
 # mode}] (the key files of crypttab that are files of the root), opens:
 # {NAME: false} for a crypttab entry whose key file does not open its
-# LUKS container (tried without opening it), resume}
+# LUKS container (tried without opening it), modules: the versions of
+# the kernels it has modules for, resume (then first and saved, as
+# kd_saved_json has them)}
 kd_fact_root() {
-	local dev="$1" sub="$2" fs="$3" o="" b keyfiles='[]' opens='{}' k n src co d hostid="" zc=false resume=false
-	[ "$fs" != btrfs ] || { o=subvolid=5; [ -z "$sub" ] || o="subvol=/$sub"; }
+	local dev="$1" sub="$2" fs="$3" o="" b keyfiles='[]' opens='{}' modules='[]' k n src co d hostid="" zc=false
+	[ "$fs" != btrfs ] || o=subvolid=5
 	kd_look "$dev" "$fs" "$o" || { echo '{}'; return 0; }
-	b="$KD_LOOK"
-	if [ -f "$b/.ump-keep-data/etc/fstab" ]; then b="$b/.ump-keep-data"; resume=true; fi
+	if [ -d "$KD_LOOK/$KD_MARK" ] && [ ! -L "$KD_LOOK/$KD_MARK" ] && kd_marker_ok "$KD_LOOK/$KD_MARK" && [ "$(kd_state "$KD_LOOK/$KD_MARK" subvolume)" = "$sub" ]; then
+		kd_saved_json "$KD_LOOK/$KD_MARK" false
+		kd_unlook
+		return 0
+	fi
+	b="$KD_LOOK${sub:+/$sub}"
+	[ -d "$b" ] || { kd_unlook; echo '{}'; return 0; }
 	rf() { if [ -f "$b/$1" ] && [ ! -L "$b/$1" ]; then cat "$b/$1"; fi; }
 	while IFS= read -r k; do
 		[ -n "$k" ] || continue
@@ -553,28 +642,63 @@ kd_fact_root() {
 		[ -b "$d" ] && cryptsetup isLuks "$d" 2>/dev/null || continue
 		cryptsetup open --test-passphrase --key-file "$b$k" "$d" >/dev/null 2>&1 || opens="$(jq -c --arg n "$n" '.[$n] = false' <<< "$opens")"
 	done < <(rf etc/crypttab | awk '$1 !~ /^#/ && $3 ~ /^\// && $3 !~ /^\/dev\// {print $1, $2, $3, $4}')
+	# the kernels the old system has modules for (/lib a link into /usr
+	# must not lead into this system's)
+	modules="$(for d in "$b/usr/lib/modules" "$b/lib/modules"; do
+			[ -d "$d" ] && [ ! -L "$d" ] && [ ! -L "${d%/modules}" ] || continue
+			for k in "$d"/*/; do [ -d "$k" ] && basename "$k"; done
+		done | sort -u | jq -R -s -c 'split("\n") | map(select(. != ""))')"
 	if [ -f "$b/etc/hostid" ] && [ ! -L "$b/etc/hostid" ]; then hostid="$(base64 -w0 < "$b/etc/hostid")"; fi
 	if [ -f "$b/etc/zfs/zpool.cache" ]; then zc=true; fi
 	jq -n -c --arg fstab "$(rf etc/fstab)" --arg crypttab "$(rf etc/crypttab)" --arg mdadm_conf "$(rf etc/mdadm/mdadm.conf; rf etc/mdadm.conf)" \
-		--arg hostid "$hostid" --argjson zpool_cache "$zc" --argjson keyfiles "$keyfiles" --argjson opens "$opens" --argjson resume "$resume" \
-		'{fstab: $fstab, crypttab: $crypttab, mdadm_conf: $mdadm_conf, hostid: $hostid, zpool_cache: $zpool_cache, keyfiles: $keyfiles, opens: $opens, resume: $resume}'
+		--arg hostid "$hostid" --argjson zpool_cache "$zc" --argjson keyfiles "$keyfiles" --argjson opens "$opens" --argjson modules "$modules" \
+		'{fstab: $fstab, crypttab: $crypttab, mdadm_conf: $mdadm_conf, hostid: $hostid, zpool_cache: $zpool_cache, keyfiles: $keyfiles, opens: $opens, modules: $modules, resume: false}'
 	kd_unlook
 }
 
+# kd_fact_ram: {device, subvolume, system, hostname} when an installation
+# failed in this rescue system between its first write and the moment
+# the old system's files were saved on the root (the root was being
+# formatted): they are in memory still ($KD_DIR/old, while
+# $KD_DIR/unsaved is there), and the root is the device they name, as
+# long as it holds nothing, or the file system that installation made
+kd_fact_ram() {
+	local old="$KD_DIR/old" dev now system=""
+	[ -e "$KD_DIR/unsaved" ] && kd_marker_ok "$old" || return 0
+	dev="$(kd_state "$old" device)"
+	[ -b "$dev" ] || return 0
+	now="$(kd_fact_uuid "$dev")"
+	[ -z "$now" ] || [ "$now" = "$(kd_state "$old" uuid_new)" ] || return 0
+	if [ -f "$old/etc/os-release" ]; then system="$(sed -n 's/^PRETTY_NAME="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$old/etc/os-release" | head -n 1)"; fi
+	jq -n -c --arg d "$dev" --arg s "$(kd_state "$old" subvolume)" --arg system "$system" --arg host "$(head -n 1 "$old/etc/hostname" 2>/dev/null || true)" \
+		'{device: $d, subvolume: $s, system: $system, hostname: $host}'
+}
+# kd_fact_root_ram: kd_fact_root's answer from that copy
+kd_fact_root_ram() { kd_saved_json "$KD_DIR/old" true; }
+
 # kd_fact_usage DEV SUBVOLUME FSTYPE SIZES: the old root's file system:
 # {size_mb, used_mb, free_mb, features (ext4's that an older GRUB cannot
-# read), dirty (ext4: not unmounted cleanly), usage: [{path, kb}]}: with SIZES 1 what the root holds beyond
-# the system itself: the home directories, /root, /srv, /opt, /etc, the
-# directories under /var/lib, whatever else lies at the top
+# read), dirty (not unmounted cleanly), immutable (the entries at its top
+# that cannot be renamed: chattr +i or +a), usage: [{path, kb}]}: with
+# SIZES 1 what the root holds beyond the system itself: the home
+# directories, /root, /srv, /opt, /etc, the directories under /var/lib,
+# whatever else lies at the top
 kd_fact_usage() {
-	local dev="$1" sub="$2" fs="$3" sizes="$4" o="" df usage='[]' feat="" dirty=false d tree=""
+	local dev="$1" sub="$2" fs="$3" sizes="$4" o="" df usage='[]' feat="" dirty d tree="" immutable='[]'
 	[ "$fs" != btrfs ] || { o=subvolid=5; [ -z "$sub" ] || o="subvol=/$sub"; }
-	kd_look "$dev" "$fs" "$o" || { echo '{}'; return 0; }
+	dirty="$(kd_dirty "$dev" "$fs")"
+	kd_look "$dev" "$fs" "$o" || { jq -n -c --argjson dirty "$dirty" '{dirty: $dirty}'; return 0; }
 	df="$(df -m --output=size,used,avail "$KD_LOOK" | tail -n 1)"
 	case "$fs" in ext*)
-		feat="$(dumpe2fs -h "$dev" 2>/dev/null | sed -n 's/^Filesystem features: *//p' | tr ' ' '\n' | grep -xE 'orphan_file|metadata_csum_seed|needs_recovery' | paste -sd' ' - || true)"
-		case " $feat " in *" needs_recovery "*) dirty=true; feat="$(printf '%s' " $feat " | sed 's/ needs_recovery / /; s/^ *//; s/ *$//')" ;; esac ;;
+		feat="$(dumpe2fs -h "$dev" 2>/dev/null | sed -n 's/^Filesystem features: *//p' | tr ' ' '\n' | grep -xE 'orphan_file|metadata_csum_seed' | paste -sd' ' - || true)" ;;
 	esac
+	if command -v lsattr >/dev/null; then
+		immutable="$(cd "$KD_LOOK" && for d in * .[!.]* ..?*; do
+			[ -e "$d" ] || [ -L "$d" ] || continue
+			case "$d" in lost+found|old-root-*|failed-install-*|"$KD_MARK") continue ;; esac
+			[ -L "$d" ] || lsattr -d -- "$d" 2>/dev/null | awk '$1 ~ /[ia]/ {sub(/^[^ ]+ /, ""); print "/" $0}'
+		done | jq -R -s -c 'split("\n") | map(select(. != ""))')"
+	fi
 	if [ "$sizes" = 1 ]; then
 		# the system's own directories are not counted, nor a swap file
 		usage="$(cd "$KD_LOOK" && for d in usr/local home/* var/lib/* var/* *; do
@@ -587,25 +711,42 @@ kd_fact_usage() {
 	fi
 	kd_unlook
 	set -- $df
-	jq -c --argjson size "${1:-0}" --argjson used "${2:-0}" --argjson free "${3:-0}" --argjson tree "${tree:-0}" --arg features "$feat" --argjson dirty "$dirty" \
-		'{size_mb: $size, used_mb: $used, free_mb: $free, tree_mb: $tree, features: $features, dirty: $dirty, usage: .}' <<< "$usage"
+	jq -c --argjson size "${1:-0}" --argjson used "${2:-0}" --argjson free "${3:-0}" --argjson tree "${tree:-0}" --arg features "$feat" --argjson dirty "$dirty" --argjson immutable "$immutable" \
+		'{size_mb: $size, used_mb: $used, free_mb: $free, tree_mb: $tree, features: $features, dirty: $dirty, immutable: $immutable, usage: .}' <<< "$usage"
 }
 
-# kd_fact_esp DEV ID...: the EFI system partition: {free_mb, loaders}:
-# the boot loaders on it that are the old system's: a directory under
-# EFI (but BOOT, which the new loader takes) with a file that names one
-# of the IDs, those of the old root and /boot (GRUB's image or its
-# grub.cfg does), or systemd-boot whose entries do. The firmware would
-# start them, and they would look for a system that is gone
+# kd_fact_boot DEV FSTYPE: what a device holds of a /boot: {kernels: the
+# versions of its vmlinuz-VERSION files, loaders: the boot loaders'
+# directories there (grub, grub2, extlinux, syslinux, loader, EFI)}
+kd_fact_boot() {
+	local kernels loaders f
+	kd_look "$1" "$2" || { echo '{"error": "it cannot be mounted"}'; return 0; }
+	kernels="$(for f in "$KD_LOOK"/vmlinuz-* "$KD_LOOK"/vmlinux-*; do [ -f "$f" ] && { f="${f##*/}"; printf '%s\n' "${f#vmlinu?-}"; }; done | sort -u | jq -R -s -c 'split("\n") | map(select(. != ""))')"
+	loaders="$(for f in grub grub2 extlinux syslinux loader EFI; do [ -d "$KD_LOOK/$f" ] && printf '%s\n' "$f"; done | jq -R -s -c 'split("\n") | map(select(. != ""))')"
+	kd_unlook
+	jq -n -c --argjson kernels "$kernels" --argjson loaders "$loaders" '{kernels: $kernels, loaders: $loaders}'
+}
+
+# kd_fact_esp DEV ID...: the EFI system partition: {free_mb, loaders,
+# fallback}: the boot loaders on it that are the old system's: a
+# directory under EFI (but BOOT, which the new loader takes) with a file
+# that names one of the IDs, those of the old root and /boot (GRUB's
+# image or its grub.cfg does), or systemd-boot whose entries do. The
+# firmware would start them, and they would look for a system that is
+# gone. fallback: EFI/BOOT holds a boot loader now, which the new one
+# replaces
 kd_fact_esp() {
-	local dev="$1" free loaders='[]' d n u hit; shift
+	local dev="$1" free loaders='[]' d n u hit fallback=false; shift
 	kd_look "$dev" vfat || { echo '{"error": "it cannot be mounted"}'; return 0; }
 	free="$(df -m --output=avail "$KD_LOOK" | tail -n 1 | tr -d ' ')"
 	for d in "$KD_LOOK"/EFI/*/; do
 		[ -d "$d" ] || continue
 		n="$(basename "$d")"
 		# not BOOT, which the new loader takes; not what an earlier keep-data set aside
-		case "$(printf '%s' "$n" | tr a-z A-Z)" in BOOT|*-OLD-[0-9]*-[0-9]*) continue ;; esac
+		case "$(printf '%s' "$n" | tr a-z A-Z)" in
+		BOOT) if [ -n "$(ls -A "$d" 2>/dev/null)" ]; then fallback=true; fi; continue ;;
+		*-OLD-[0-9]*-[0-9]*) continue ;;
+		esac
 		hit=0
 		for u in "$@"; do
 			[ -n "$u" ] || continue
@@ -615,7 +756,7 @@ kd_fact_esp() {
 		[ "$hit" = 0 ] || loaders="$(jq -c --arg n "EFI/$n" '. + [$n]' <<< "$loaders")"
 	done
 	kd_unlook
-	jq -n -c --argjson free "${free:-0}" --argjson loaders "$loaders" '{free_mb: $free, loaders: $loaders}'
+	jq -n -c --argjson free "${free:-0}" --argjson loaders "$loaders" --argjson fallback "$fallback" '{free_mb: $free, loaders: $loaders, fallback: $fallback}'
 }
 
 # kd_fact_mbr DISK: grub when GRUB's boot code is in the disk's first sector
@@ -625,10 +766,11 @@ kd_fact_mbr() { if dd if="$1" bs=512 count=1 status=none 2>/dev/null | grep -qa 
 kd_fact_lvs() { lvs --noheadings --separator '|' -o lv_dm_path,segtype,lv_active,lv_uuid 2>/dev/null | sed 's/^ *//' || true; }
 
 # The plan, from the facts: {machine: {efi, arch, os, unpacked_mb,
-# root_fs}, options: {root, keep_root, format}, lsblk, fs: {DEV: what
-# kd_fact_fs says}, roots: {"DEV<tab>SUBVOLUME": kd_fact_root's, with
-# fstab_sha256}, usage, esp: {DEV: kd_fact_esp's}, links: {PATH: device},
-# mbr: {DISK: grub}, lvs}. A refusal is an error {refused: why}.
+# root_fs, final}, options: {root, keep_root, format}, lsblk, fs: {DEV:
+# what kd_fact_fs says}, roots: {"DEV<tab>SUBVOLUME": kd_fact_root's,
+# with fstab_sha256}, usage, esp: {DEV: kd_fact_esp's}, boot: {DEV:
+# kd_fact_boot's}, links: {PATH: device}, mbr: {DISK: grub}, lvs}. A
+# refusal is an error {refused: why}.
 read -r -d '' KD_JQ <<'JQ' || true
 def refuse($m): error({refused: $m});
 def norm_uuid: ascii_downcase | gsub("[-:]"; "");
@@ -647,16 +789,24 @@ def opts: split(",") | map(select(. != ""));
 def opt($k): (opts | map(select(. == $k or startswith($k + "="))) | .[0]) as $o
 	| if $o == null then null elif $o == $k then "" else $o[($k | length) + 1:] end;
 def with_opt($o): if (opts | index($o)) != null then . else (opts + [$o] | join(",")) end;
+def without_opt($k): opts | map(select((. == $k or startswith($k + "=")) | not)) | join(",") | if . == "" then "defaults" else . end;
 def masked: gsub("(?<k>(^|,)(password|passwd|pass|pw)=)[^,]*"; "\(.k)***");
 def size: if . >= 10240 then "\(. / 1024 | floor)G" elif . >= 1024 then "\(. * 10 / 1024 | floor | . / 10)G" else "\(.)M" end;
-# every block device once, with all it sits on (ancestors); no loop, RAM or optical devices
+# the file systems of the kernel itself and of the network, which have no device here; those of a device the new system mounts for certain
+def pseudo: . as $t | ["tmpfs", "ramfs", "proc", "sysfs", "devpts", "devtmpfs", "debugfs", "tracefs", "securityfs", "configfs", "hugetlbfs", "mqueue", "binfmt_misc", "cgroup", "cgroup2", "efivarfs", "bpf", "fusectl", "pstore", "autofs", "rpc_pipefs", "nfsd"] | index($t) != null;
+def network: . as $t | (["nfs", "nfs4", "cifs", "smb3", "smbfs", "ceph", "glusterfs", "9p", "virtiofs", "davfs", "lustre", "ocfs2", "gfs2", "beegfs"] | index($t) != null) or ($t | test("^fuse(\\.|$)|sshfs"));
+def knownfs: . as $t | ["ext2", "ext3", "ext4", "xfs", "btrfs", "vfat", "exfat", "iso9660", "udf", "f2fs", "squashfs"] | index($t) != null;
+# a label a file system made anew can take
+def fits($fs): if . == null or . == "" then "" elif $fs == "xfs" and (length > 12 or test(" ")) then "" elif $fs == "vfat" and length > 11 then "" elif length > 16 and $fs != "btrfs" then "" else . end;
+# every block device once, with all it sits on (ancestors); no loop, RAM or optical devices; usb: on a USB or removable disk
 def devices:
-	def w($anc): . as $d | ($d | del(.children) | .ancestors = $anc), ((.children // [])[] | w($anc + [$d.path]));
-	[.blockdevices[] | w([])] | group_by(.path) | map(.[0] + {ancestors: (map(.ancestors) | add | unique)})
+	def w($anc; $usb): . as $d | (($d.tran == "usb") or ($d.rm == true) or $usb) as $u
+		| ($d | del(.children) | .ancestors = $anc | .usb = $u), ((.children // [])[] | w($anc + [$d.path]; $u));
+	[.blockdevices[] | w([]; false)] | group_by(.path) | map(.[0] + {ancestors: (map(.ancestors) | add | unique), usb: (map(.usb) | any)})
 	| map(select(.name | test("^(loop|ram|zram|sr|fd|nbd)") | not))
 	| map(.mountpoints = ((.mountpoints // []) | map(select(. != null))) | .size_mb = ((.size // 0) / 1048576 | floor));
-# the file systems an old root can be on, a btrfs of several devices once
-def filesystems: map(select(.fstype == "ext2" or .fstype == "ext3" or .fstype == "ext4" or .fstype == "xfs" or .fstype == "btrfs"))
+# the file systems an old root can be on, a btrfs of several devices once; none on a USB or removable disk
+def filesystems: map(select((.fstype == "ext2" or .fstype == "ext3" or .fstype == "ext4" or .fstype == "xfs" or .fstype == "btrfs") and (.usb | not)))
 	| group_by(if .fstype == "btrfs" then "btrfs " + (.uuid // .path) else "dev " + .path end) | map(.[0]) | sort_by(.path);
 def plan:
 	. as $f
@@ -672,6 +822,13 @@ def plan:
 	  def samefs($a; $b): $a == $b or (dev($a).fstype == "btrfs" and dev($b).fstype == "btrfs" and dev($a).uuid != null and dev($a).uuid == dev($b).uuid);
 	  def fskey($p): if dev($p).fstype == "btrfs" and dev($p).uuid != null then ([$devs[] | select(.fstype == "btrfs" and .uuid == dev($p).uuid)][0].path) else $p end;
 	  def extfs: . == "ext2" or . == "ext3" or . == "ext4";
+	  def isarray: (.type // "") | test("^(raid|md|linear)");
+	  def isesp: .fstype == "vfat" and ((.parttype // "") | ascii_downcase | (. == $espguid or . == "0xef"));
+	  # read-only: an array is as its members are (one that was assembled read-only here is made writable when writing begins)
+	  def isro($p): dev($p) as $d | if ($d | isarray) then ($d.ancestors | any(dev(.) as $a | ($a | isarray | not) and $a.ro == true)) else $d.ro == true end;
+	  # what a device is, for whoever must recognise it
+	  def what($p): dev($p) as $d | "\($d.fstype // "no file system")\(if ($d.label // "") != "" then ", label " + $d.label else "" end), \($d.size_mb | size)";
+	  def kernelname: test("^/dev/(sd|vd|hd|xvd|nvme|mmcblk|loop|md[0-9_]|md/|dm-)");
 	  # resolve: the device an fstab or crypttab field names: {how: found|missing|ambiguous|crypt|none, device}
 	  def resolve($md; $cnames):
 		. as $s
@@ -689,7 +846,7 @@ def plan:
 		  elif ($t | startswith("/dev/")) then
 			if $md[$t] != null then
 				# an array by the name the old mdadm.conf gave it: here it has another
-				[$devs[] | select(.type | test("^(raid|md|linear)")) | select(.ancestors | any(dev(.) | (.fstype == "linux_raid_member" and ((.uuid // "") | norm_uuid) == $md[$t])))] | pick
+				[$devs[] | select(isarray) | select(.ancestors | any(dev(.) | (.fstype == "linux_raid_member" and ((.uuid // "") | norm_uuid) == $md[$t])))] | pick
 			else
 				($f.links[$t] // $t) as $p
 				| [$devs[] | select(.path == $p or ("/dev/" + .kname) == $p or .path == $t)]
@@ -705,17 +862,16 @@ def plan:
 		  elif $id != null then (if $id == "5" or $id == "0" then "" else ((($i.subvolumes // []) | map(select((.id | tostring) == $id) | .path) | .[0]) // "?") end)
 		  else ($i.default // "") end;
 	  def rootfiles($c): $f.roots[$c.device + "\t" + $c.subvolume] // {};
+	  # the device the fstab of a candidate names as its root: resolve's answer, null without one such entry
+	  def rootspec($c): rootfiles($c) as $r | (($r.fstab // "") | fstab | map(select(.mountpoint == "/"))) as $e
+		| if ($e | length) != 1 then null else ($e[0].spec | resolve(($r.mdadm_conf // "") | mdconf; [])) + {spec: $e[0].spec, options: $e[0].options} end;
 	  # an old system is the one its own fstab mounts at /: a copy of it, or a snapshot, names another
 	  def consistent($c):
 		if $c.resume then true else
-			rootfiles($c) as $r
-			| (($r.fstab // "") | fstab | map(select(.mountpoint == "/"))) as $e
-			| if ($e | length) != 1 then false else
-				($e[0].spec | resolve(($r.mdadm_conf // "") | mdconf; [])) as $x
-				| if $x.how != "found" or (samefs($x.device; $c.device) | not) then false
-				  elif dev($c.device).fstype != "btrfs" then true
-				  else subvol_of($e[0].options; $c.device) == $c.subvolume end
-			  end
+			rootspec($c) as $x
+			| if $x == null or $x.how != "found" or (samefs($x.device; $c.device) | not) then false
+			  elif dev($c.device).fstype != "btrfs" then true
+			  else subvol_of($x.options; $c.device) == $c.subvolume end
 		end;
 	  def describe: "\(.device)\(if .subvolume != "" then ":" + .subvolume else "" end)\(if .system != "" then " (" + .system + ")" else "" end)";
 
@@ -723,9 +879,17 @@ def plan:
 	([$devs[] | select(.mountpoints | length > 0) | "\(.path) (\(.mountpoints | map(if . == "[SWAP]" then "swap" else . end) | join(", ")))"]) as $busy
 	| if ($busy | length) > 0 then refuse("the disks are in use: \($busy | join(", ")); unmount them (umount, swapoff) or reboot the rescue system") else . end
 	| ([($f.fs // {}) | to_entries[] | .key as $d | (.value.roots // [])[]
-		| {device: $d, subvolume: (.subvolume // ""), system: (.system // ""), hostname: (.hostname // ""), resume: (.resume // false)}]
+		| {device: $d, subvolume: (.subvolume // ""), system: (.system // ""), hostname: (.hostname // ""), resume: (.resume // false)} + (if .ram == true then {ram: true} else {} end)]
 		| map(. + {consistent: consistent(.)})) as $cands
 	| ([$devs[] | select(.fstype == "crypto_LUKS") | .path]) as $luks
+	| ([$devs[] | select(.fstype == "zfs_member") | .path]) as $zfsm
+	# what was not seen: file systems that could not be looked at, or not whole
+	| ([($f.fs // {}) | to_entries[] | select(.value.broken == true) | .key]) as $broken
+	| ([($f.fs // {}) | to_entries[] | select(.value.error != null) | .key]) as $unseen
+	| ([($f.fs // {}) | to_entries[] | select(.value.dirty == true and ((.value.roots // []) | length) == 0 and .value.broken != true) | .key]) as $unclean
+	| ((if ($broken | length) > 0 then "; \($broken | join(", ")) holds what an interrupted keep-data installation saved of the old system, and that is damaged: it is not read (--root \($broken[0]) installs onto it without the old system's other volumes, which stay as they are)" else "" end)
+	   + (if ($unseen | length) > 0 then "; \($unseen | map(. + " (" + (dev(.).fstype // "?") + ")") | join(", ")) could not be looked at (it cannot be mounted read-only)" else "" end)
+	   + (if ($unclean | length) > 0 then "; \($unclean | map(. + " (" + (dev(.).fstype // "?") + ")") | join(", ")) was not unmounted cleanly and is read without its journal: an old system on it may not be seen (mount it once in the rescue system, which replays the journal, and run again)" else "" end)) as $hints
 
 	# --- the old root: the one old system, or the one --root names
 	| (if ($o.root // "") != "" then
@@ -737,12 +901,13 @@ def plan:
 		  elif $r0.x.how != "found" then refuse("--root \($o.root): no such device on this machine")
 		  else
 			fskey($r0.x.device) as $d | dev($d) as $dd
+			| ($cands | map(select(.device == $d))) as $here
 			| if (chain($d) | any(dev(.).fstype == "crypto_LUKS")) then refuse("--root \($d) is encrypted (LUKS): an encrypted root is not supported in this version")
 			  elif $dd.fstype == "zfs_member" then refuse("--root \($d) is a member of a ZFS pool: a ZFS root is not supported")
+			  elif ($here | any(.ram == true)) then ($here | map(select(.ram == true)) | .[0]) + {by: "option", known: true}
 			  elif (($dd.fstype // "") | (extfs or . == "xfs" or . == "btrfs")) | not then refuse("--root \($d) holds \($dd.fstype // "no file system"): the root to replace is an ext4, xfs or btrfs file system")
 			  else
-				($cands | map(select(.device == $d))) as $here
-				| (if $r0.sub != null then ($here | map(select(.subvolume == $r0.sub)))
+				(if $r0.sub != null then ($here | map(select(.subvolume == $r0.sub)))
 				   elif ($here | length) <= 1 then $here
 				   else ($here | map(select(.consistent))) end) as $pick
 				| if ($pick | length) == 1 then $pick[0] + {by: "option", known: true}
@@ -759,13 +924,19 @@ def plan:
 		($cands | map(select(.consistent))) as $ok
 		| if ($ok | length) == 1 then $ok[0] + {by: "detection", known: true}
 		  elif ($ok | length) > 1 then error({refused: "several old systems are on this machine: \($ok | map(describe) | join(", ")); --root DEVICE names the one to replace", candidates: $cands})
-		  elif ($cands | length) > 0 then error({refused: "an old system's files are on \($cands | map(describe) | join(", ")), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it", candidates: $cands})
-		  elif ($luks | length) > 0 then refuse("no old system is found (a file system with /etc/fstab and /etc/os-release), and \($luks | join(", ")) \(if ($luks | length) > 1 then "are LUKS containers" else "is a LUKS container" end), not opened here: an encrypted root is not supported in this version")
-		  else refuse("no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace") end
+		  elif ($cands | length) > 0 then
+			# why none of them is the root: the root its fstab names is on several devices, or elsewhere
+			([$cands[] | . as $c | rootspec($c) | select(. != null and .how == "ambiguous") | "\(.spec), which the /etc/fstab on \($c | describe) mounts at /, is on several devices here (\(.matches | join(", "))): a copy or a snapshot of a volume is among them"]) as $twice
+			| if ($twice | length) > 0 then error({refused: "\($twice | join("; ")): which one is the old root is not certain; --root DEVICE names it\($hints)", candidates: $cands})
+			  else error({refused: "an old system's files are on \($cands | map(describe) | join(", ")), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it\($hints)", candidates: $cands}) end
+		  elif ($luks | length) > 0 then refuse("no old system is found (a file system with /etc/fstab and /etc/os-release), and \($luks | join(", ")) \(if ($luks | length) > 1 then "are LUKS containers" else "is a LUKS container" end), not opened here: an encrypted root is not supported in this version\($hints)")
+		  elif ($zfsm | length) > 0 then refuse("no old system is found (a file system with /etc/fstab and /etc/os-release), and \($zfsm | join(", ")) \(if ($zfsm | length) > 1 then "are members of ZFS pools" else "is a member of a ZFS pool" end), not imported here: a ZFS root is not supported; --root DEVICE names a root on another file system\($hints)")
+		  else refuse("no old system is found (a file system with /etc/fstab and /etc/os-release); --root DEVICE names the root to replace\($hints)") end
 	   end) as $root
 	| dev($root.device) as $rd
 	| if (chain($root.device) | any(dev(.).fstype == "crypto_LUKS")) then refuse("the old root \($root.device) is encrypted (LUKS): an encrypted root is not supported in this version") else . end
-	| if $rd.ro == true then refuse("the old root \($root.device) is read-only") else . end
+	| if isro($root.device) then refuse("the old root \($root.device) is read-only (a write-protected disk, or blockdev --setro): nothing can be installed onto it") else . end
+	| if $rd.usb then refuse("the old root \($root.device) is on a USB or removable device: the installer installs onto none") else . end
 	| rootfiles($root) as $R
 	| (($R.mdadm_conf // "") | mdconf) as $md
 	| (($R.fstab // "") | fstab | to_entries | map(.value + {i: .key})) as $E
@@ -778,16 +949,56 @@ def plan:
 	  then refuse("the old root is the btrfs subvolume \($root.subvolume) of \($root.device), which its fstab does not name (the default subvolume): a layout this installer does not read with certainty") else . end
 	| if $rd.fstype == "btrfs" and ($subroot | not) and ($keeproot | not) and $rdevs > 1
 	  then refuse("the old root is a btrfs over \($rdevs) devices, at its top: it cannot be made anew on one of them; --keep-root keeps the file system") else . end
+	# a second attempt: how far the interrupted one came (old: the old root is there; aside: moved aside whole; gone)
+	| ((($R.saved // {}).root) // "") as $sroot
+	| ((($R.saved // {}).aside) // "") as $saside
+	| if $root.resume and $keeproot and $sroot == "gone" then refuse("the interrupted installation replaced the old root on \($root.device) already: --keep-root has nothing left to keep; run it without --keep-root") else . end
+	# a device named as the kernel named it: an array the old mdadm.conf names is known by its UUID, the rest
+	# by nothing but the name. When the root's own name does not lead to the root, the names here are not
+	# the old system's
+	| def kn: . as $s | ($s | kernelname) and ($md[$s] == null);
+	  (if ($rootE | length) == 1 and ($rootE[0].spec | kn) and ($root.resume | not)
+	   then (($rootE[0].spec | resolve($md; [])) as $x | $x.how != "found" or (samefs($x.device; $root.device) | not)) else false end) as $knbad
+	| "named by a kernel name, and the kernel names here are not the old system's (its root's, \($rootE[0].spec // "?"), does not lead to the root)" as $knwhy
+	# the root made anew: with the file system of the layout; else it stays what it is
+	| (if $keeproot or $subroot then $rd.fstype else ($m.root_fs // "ext4") end) as $newfs
+	# GRUB reads /boot on the root: a partition, a linear volume or an array, with an ext file system
+	| ((($f.lvs // []) | map(select(.path == $root.device) | .segtype) | .[0]) // "") as $rseg
+	| ((chain($root.device) | all(dev(.) as $a | $a.type == "part" or $a.type == "disk" or $a.type == "lvm" or ($a | isarray)))
+	   and ($rseg == "" or $rseg == "linear" or $rseg == "striped") and (($newfs // "") | extfs)) as $grubroot
 
 	# --- the old crypttab: what the new system opens again
 	| (($R.crypttab // "") | crypttab | map(. as $c
 		| ($c.source | resolve($md; [])) as $x
 		| if $x.how == "ambiguous" then refuse("the old crypttab's \($c.source) (\($c.name)) names several devices here (\($x.matches | join(", ")))") else . end
+		| (if $x.device != null then dev($x.device) else null end) as $d
+		| ($c.options | opts) as $co
 		| (if ($c.keyfile == "none" or $c.keyfile == "-" or $c.keyfile == "") then "passphrase"
 		   elif ($c.keyfile | startswith("/dev/")) then "device"
 		   elif (($R.keyfiles // []) | any(.path == $c.keyfile)) then (if ($R.opens // {})[$c.name] == false then "wrong" else "file" end)
 		   else "elsewhere" end) as $key
-		| $c + {device: $x.device, keep: ($x.how == "found" or $x.how == "none"), key: $key, nofail: ($key != "file" and $key != "device" or $x.how == "none")})) as $C
+		# made anew at every boot: systemd-cryptsetup runs mkswap or mkfs on it, whatever it holds
+		| (if ($co | any(. == "swap")) then "swap" elif ($co | any(. == "tmp" or startswith("tmp="))) then "tmp"
+		   elif ($c.keyfile | test("^/dev/(u?random|hwrng)$")) and (($d.fstype // "") != "crypto_LUKS") then "a random key" else "" end) as $vol
+		| ($c.source | kn) as $k
+		# a small file system in front (offset=), which names it: as its documentation has it
+		| ($vol != "" and ($co | any(startswith("offset="))) and ($c.source | test("^(UUID|LABEL)=|^/dev/disk/by-(uuid|label)/"))) as $labelled
+		| (if $x.how == "none" then null
+		   elif $d == null then "\($c.source) is not there"
+		   elif $k and $knbad then $knwhy
+		   elif $vol != "" then
+			(if $d.fstype != null and ($labelled | not) then "it is made anew at every boot (\($vol)), and \($d.path) holds a file system now (\(what($d.path))), which that would overwrite"
+			 elif $d.usb then "it is made anew at every boot (\($vol)), and \($d.path) is on a USB or removable device"
+			 elif $k and (($d.partuuid // "") == "") then "it is made anew at every boot (\($vol)), and \($c.source) is a kernel name, with no PARTUUID to name it by: the new system could overwrite another device"
+			 else null end)
+		   elif $d.fstype != "crypto_LUKS" and ($co | any(. == "plain" or . == "tcrypt" or . == "bitlk" or startswith("header=")) | not) then "\($d.path) holds \($d.fstype // "no file system"), not a LUKS container"
+		   else null end) as $why
+		| $c + {device: $x.device, keep: ($why == null), why: $why, key: $key, volatile: $vol, kn: ($k and $d != null),
+			nofail: ($key != "file" and $key != "device" or $x.how == "none")}
+		| if .keep and .kn then
+			(if $d.fstype == "crypto_LUKS" and (($d.uuid // "") != "") then .source_new = "UUID=" + $d.uuid
+			 elif ($d.partuuid // "") != "" then .source_new = "PARTUUID=" + $d.partuuid else . end)
+		  else . end)) as $C
 
 	# --- every entry of the old fstab
 	| def unusedpath: test("^/(usr|bin|sbin|lib|lib32|lib64|libx32|etc|dev|proc|sys|run)(/|$)") and (test("^/usr/local(/|$)") | not);
@@ -797,7 +1008,8 @@ def plan:
 		| ($e.spec | resolve($md; ($C | map(.name)))) as $x
 		| ($e.spec | test("^(UUID|LABEL|PARTUUID|PARTLABEL)=|^/dev/")) as $isdev
 		| (if $x.device != null then dev($x.device) else null end) as $d
-		| def out($a; $n): $e + {device: $x.device, action: $a, note: $n};
+		| (($e.spec | kn) and $d != null) as $k
+		| def out($a; $n): $e + {device: $x.device, action: $a, note: $n} + (if $k then {kn: true} else {} end);
 		  def crypt:
 			($C | map(select(.name == $x.name)) | .[0]) as $c
 			| if $c.keep then $e + {device: $c.device, action: "keep", crypt: $c.name, nofail: $c.nofail,
@@ -806,22 +1018,34 @@ def plan:
 					   elif $c.key == "device" then "with a key from " + $c.keyfile
 					   elif $c.key == "elsewhere" then "with the key file " + $c.keyfile + ", which is not on the old root (nofail)"
 					   elif $c.key == "wrong" then "with the key file " + $c.keyfile + ", which does not open it now (nofail)"
-					   else "with a passphrase (nofail)" end))}
-			  else $e + {device: null, action: "drop", note: ("its encrypted volume " + $c.name + " (" + $c.source + ") is not there")} end;
+					   else "with a passphrase (nofail)" end))} + (if $c.volatile != "" then {volatile: $c.volatile} else {} end)
+			  else $e + {device: null, action: "drop", note: ("its encrypted volume " + $c.name + " is dropped: " + $c.why)} end;
 		  if $e.mountpoint == "/" then out("root"; "")
 		  elif $x.how == "ambiguous" then refuse("the old fstab's \($e.spec) (\($e.mountpoint)) names several devices here (\($x.matches | join(", "))): which one is meant is not certain")
 		  elif $e.type == "swap" then
 			if ($isdev | not) then out("drop"; "a swap file of the old root")
 			elif $x.how == "crypt" then crypt
 			elif $d == null then out("drop"; "the device is not there")
+			elif $k and $knbad then out("drop"; $knwhy)
 			elif $d.fstype != "swap" then out("drop"; "\($d.path) holds \($d.fstype // "nothing"), not swap space")
 			else out("swap"; "") end
-		  elif ($isdev | not) then out("text"; "")
+		  elif ($isdev | not) then
+			# no device of this machine: a file system of the kernel's own stays where it is; a bind mount or a
+			# network file system where the new system has its own is mounted beside it, or not at all
+			if ($e.type | pseudo) then out("text"; "")
+			elif ($e.mountpoint | asidepath) then out("text"; "at \($e.mountpoint) in the old system: the new system's own is on the root") + {to: ($e.mountpoint + ".old")}
+			elif ($e.mountpoint | unusedpath) then out("unused"; "")
+			elif $e.type == "zfs" then out("text"; "a ZFS dataset: with nofail") + {nofail: true}
+			elif ($e.type | network) or $e.type == "overlay" or ($e.spec | startswith("/")) or ($e.options | opts | any(. == "bind" or . == "rbind")) then out("text"; "")
+			else out("text"; "\($e.type): with nofail, the new system may not know it") + {nofail: true, unsure: true} end
 		  elif $x.how == "crypt" then crypt
 		  elif $d == null then
 			if ($C | any(.keep)) and ($e.spec | test("^(UUID|LABEL)=")) then
 				$e + {device: null, action: "keep", nofail: true, note: "not found now, perhaps inside an encrypted volume: kept with nofail"}
 			else out("drop"; "the device is not there") end
+		  elif $k and $knbad then
+			if $e.mountpoint == "/boot" then refuse("the old fstab names /boot by a kernel name (\($e.spec)), and the kernel names here are not the old system's (its root's, \($rootE[0].spec), does not lead to the root): what would be formatted as /boot is not certain; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL=")
+			else out("drop"; $knwhy) end
 		  elif ($e.type | (extfs or . == "xfs" or . == "btrfs" or . == "vfat")) and $d.fstype != $e.type and ((($e.type | extfs) and (($d.fstype // "") | extfs)) | not) then
 			out("drop"; "the old fstab says \($e.type), \($d.path) holds \($d.fstype // "no file system")")
 		  elif samefs($d.path; $root.device) then
@@ -830,6 +1054,8 @@ def plan:
 			else subvol_of($e.options; $root.device) as $sv
 				| if $sv == $root.subvolume or ($sv | startswith($root.subvolume + "/")) or $sv == "" or $sv == "?" then
 					refuse("the old fstab mounts \(if $sv == "" then "the top" else "the subvolume " + $sv end) of the root's btrfs at \($e.mountpoint): it holds or is the root subvolume \($root.subvolume), which is replaced; not a layout this installer reads with certainty")
+				  elif $e.mountpoint == "/boot" then
+					refuse("the old /boot is the subvolume \($sv) of the root's btrfs: the new /boot would be in the root subvolume, and the old one mounted over it; not supported in this version")
 				  else out("keep"; "the subvolume \($sv) of the root's btrfs") end
 			end
 		  elif $e.mountpoint == "/boot" then (if $d.fstype == "vfat" and $m.efi then out("esp"; "") else out("boot"; "") end)
@@ -838,16 +1064,27 @@ def plan:
 			elif $m.efi then out("esp"; "") else out("keep"; "") end
 		  elif ($e.mountpoint | unusedpath) then out("unused"; "")
 		  elif ($e.mountpoint | asidepath) then out("aside"; "") + {to: ($e.mountpoint + ".old")}
+		  elif (($d.fstype // "") | knownfs) | not then out("keep"; "\($d.fstype // "no file system the installer knows"): with nofail, the new system may not be able to mount it") + {nofail: true, unsure: true}
+		  elif $d.usb then out("keep"; "on a USB or removable device: with nofail") + {nofail: true}
 		  else out("keep"; "") end;
 	  ($E | map(select(.mountpoint != "none" or .type == "swap") | classify)) as $E1
+	# an EFI system partition named as the kernel named it must be one by its partition type too
+	| ($E1 | map(if .action == "esp" and .kn == true and (dev(.device) | isesp | not) then .action = "drop" | .note = "named by a kernel name, and \(.device) is no EFI system partition by its type" else . end)) as $E1
 	# one ESP: the first; a second one stays mounted where it was
 	| ($E1 | map(select(.action == "esp")) | .[0]) as $espE
 	| ($E1 | map(if .action == "esp" and .i != $espE.i then .action = "keep" else . end)) as $E2
 	| ($E2 | map(select(.action == "boot"))) as $bootEs
 	| if ($bootEs | length) > 1 then refuse("the old fstab mounts /boot twice") else . end
-	| ($bootEs[0]) as $bootE
-	| if $bootE != null and ([$E2[] | select(.device != null and samefs(.device; $bootE.device))] | length) > 1
-	  then refuse("the old /boot (\($bootE.device)) is mounted elsewhere by the old fstab too: it cannot be formatted") else . end
+	# how many entries, the root among them, are on the file system of a device
+	| def users($p): [$root.device, ($E2[] | select(.action != "root") | .device // empty)] | map(select(samefs(.; $p))) | length;
+	  if ($bootEs | length) == 1 and users($bootEs[0].device) > 1
+	  then refuse("the old /boot (\($bootEs[0].device)) is mounted elsewhere by the old fstab too: it cannot be formatted") else . end
+	# a /boot too small for the new kernels is left alone, and /boot is on the root, where GRUB reads that
+	| (($bootEs | length) == 1 and dev($bootEs[0].device).size_mb < 300) as $bootsmall
+	| if $bootsmall and ($grubroot | not) then refuse("the old /boot (\($bootEs[0].device), \(dev($bootEs[0].device).size_mb) MB) is too small for the new system's kernels (300 MB at least), and /boot cannot be on the root instead (GRUB reads it on a partition, a linear volume or an md array with an ext4 file system; this root is \($newfs // "?") on \($root.device)\(if $rseg != "" then ", " + $rseg else "" end)): make a larger /boot in the rescue system first (keep-data changes no partition), or install without --keep-data") else . end
+	| ($E2 | map(if .action == "boot" and $bootsmall then .action = "unused" | .note = "too small for the new system's kernels (\(dev(.device).size_mb) MB, 300 MB at least): /boot is on the root" else . end)) as $E2
+	| ($E2 | map(select(.action == "boot")) | .[0]) as $bootE
+	| (if ($bootEs | length) == 1 then $bootEs[0].device else null end) as $oldboot
 
 	# --- --format: volumes of the old fstab that are formatted too
 	| (($o.format // []) | map(if length > 1 then sub("/+$"; "") else . end) | unique) as $fmt
@@ -863,23 +1100,51 @@ def plan:
 			  elif $h.action == "drop" then refuse("--format \($mp): \($h.note)")
 			  elif $h.action == "text" then refuse("--format \($mp): not a volume of this machine (\($h.spec), \($h.type))")
 			  elif $h.crypt != null or $h.device == null then refuse("--format \($mp): it is encrypted, and the installer opens no encrypted volume")
-			  elif ([$E2[] | select(.device != null and samefs(.device; $h.device))] | length) > 1 then refuse("--format \($mp): \($h.device) is mounted elsewhere by the old fstab too (subvolumes): it cannot be formatted")
+			  elif $h.kn == true then refuse("--format \($mp): the old fstab names it by a kernel name (\($h.spec)), which may be another device here (\($h.device): \(what($h.device))): it is not formatted; name it by UUID= or LABEL= in the old /etc/fstab")
+			  elif samefs($h.device; $root.device) then refuse("--format \($mp): \($h.device) is the root's own file system\(if $subroot then ", of which \($mp) is a subvolume" else "" end): it cannot be formatted")
+			  elif users($h.device) > 1 then refuse("--format \($mp): \($h.device) is mounted elsewhere by the old fstab too (subvolumes): it cannot be formatted")
 			  elif (dev($h.device).fstype | (. == "ext4" or . == "xfs" or . == "btrfs" or . == "vfat")) | not then refuse("--format \($mp): \($h.device) holds \(dev($h.device).fstype); the installer makes ext4, xfs, btrfs and vfat")
 			  elif ([$devs[] | select(.fstype == "btrfs" and .uuid == dev($h.device).uuid)] | length) > 1 then refuse("--format \($mp): a btrfs over several devices cannot be made anew on one")
-			  elif dev($h.device).ro == true then refuse("--format \($mp): \($h.device) is read-only")
+			  elif isro($h.device) then refuse("--format \($mp): \($h.device) is read-only")
+			  elif dev($h.device).usb then refuse("--format \($mp): \($h.device) is on a USB or removable device")
 			  elif ($mp | test("\\\\")) then refuse("--format \($mp): a mountpoint with escaped characters is not supported")
 			  else $h.i end
 		  end)) as $fmti
-	# a device the old system named as its kernel did is named by its UUID: the new kernel may name it otherwise
-	| def kernelname: test("^/dev/(sd|vd|hd|xvd|nvme|mmcblk|md[0-9]|md/[0-9]+$|dm-)");
-	  ($E2 | map(if (.i as $i | $fmti | index($i)) != null then .action = "format" | .fs = dev(.device).fstype | del(.to) else . end)
+	# a device the old system named as its kernel did is named by its UUID: the new kernel may name it otherwise;
+	# a volume made anew has no subvolumes
+	| ($E2 | map(if (.i as $i | $fmti | index($i)) != null then .action = "format" | .fs = dev(.device).fstype | del(.to) | .options = (.options | without_opt("subvol") | without_opt("subvolid")) else . end)
 		| map(if .device != null and .crypt == null and (.spec | kernelname) and ((dev(.device).uuid // "") != "") then .spec_new = "UUID=" + dev(.device).uuid else . end)) as $E3
-	| ($C | map(if .device != null and (.source | kernelname) and ((dev(.device).uuid // "") != "") and dev(.device).fstype == "crypto_LUKS" then .source_new = "UUID=" + dev(.device).uuid else . end)) as $C
+	# what an entry without a device needs of the old root: the source of a bind mount, the file of a loop
+	# mount, the directories of an overlay. Where they are now: on a kept volume, as before; on one that
+	# is set aside, under its new name; on the old root or a formatted volume, gone
+	| def fate($s):
+		([$E3[] | select(.action != "root" and .action != "swap" and .action != "drop" and .action != "unused" and (.mountpoint as $mp | $s == $mp or ($s | startswith($mp + "/"))))] | sort_by(.mountpoint | length) | last) as $h
+		| if $h == null then {on: "root"}
+		  elif $h.to != null then {on: "aside", path: ($h.to + $s[($h.mountpoint | length):])}
+		  elif $h.action == "format" then {on: "format"}
+		  else {on: "kept"} end;
+	  ($E3 | map(
+		if .action != "text" or (.type | pseudo) or (.type | network) then .
+		elif .type == "overlay" then
+			([((.options | opt("lowerdir")) // "" | split(":") | .[]), ((.options | opt("upperdir")) // empty), ((.options | opt("workdir")) // empty)] | map(select(startswith("/")))) as $dirs
+			| ($dirs | map(select(fate(.).on != "kept"))) as $gone
+			| if ($gone | length) > 0 then .action = "drop" | .note = "an overlay whose directories (\($gone | join(", "))) were on the old root, or on a volume that is set aside or formatted" else . end
+		elif (.spec | test("^/[^/]") | not) then .
+		elif (.options | opts | any(. == "bind" or . == "rbind")) then
+			fate(.spec) as $w
+			| if $w.on == "aside" then .spec_new = $w.path | .source = "aside" elif $w.on == "kept" then . else .source = $w.on end
+		else
+			fate(.spec) as $w
+			| if $w.on == "aside" then .spec_new = $w.path | .source = "aside"
+			  elif $w.on == "kept" then .
+			  else .action = "drop" | .note = "its file \(.spec) was \(if $w.on == "root" then "on the old root" else "on a volume that is formatted" end)" end
+		end)) as $E3
+	| ($C | map(select(.keep and .volatile != ""))) as $Cvol
 
 	# --- how the machine boots
 	| (if $m.efi then
 		(if $espE != null then {device: $espE.device, from: "fstab"}
-		 else ([$devs[] | select(.fstype == "vfat" and ((.parttype // "") | ascii_downcase | (. == $espguid or . == "0xef")))]) as $esps
+		 else ([$devs[] | select(isesp and (.usb | not))]) as $esps
 			| (disks_of($root.device)) as $rdisks
 			| (($esps | map(select(.path as $p | disks_of($p) | any(. as $x | $rdisks | index($x) != null)))) + $esps | .[0]) as $e
 			| if $e == null then refuse("this machine boots with UEFI and has no EFI system partition: it cannot be made bootable without repartitioning, which keep-data never does")
@@ -887,56 +1152,87 @@ def plan:
 		 end)
 	   else null end) as $esp
 	| if $m.efi and (chain($esp.device) | any(dev(.).fstype == "crypto_LUKS" or dev(.).type == "lvm")) then refuse("the EFI system partition \($esp.device) is not a plain partition") else . end
+	| if $m.efi and isro($esp.device) then refuse("the EFI system partition \($esp.device) is read-only: the new boot loader cannot be put there") else . end
+	| if $m.efi and ($E3 | any(.action == "format" and samefs(.device; $esp.device))) then refuse("--format \($E3 | map(select(.action == "format" and samefs(.device; $esp.device)) | .mountpoint) | join(", ")): \($esp.device) is the EFI system partition, which is never formatted (other systems' boot loaders may be on it)") else . end
 	| if ($m.efi | not) and $m.arch != "amd64" then refuse("this machine does not boot with UEFI: on \($m.arch) the installer has no other way to make it bootable") else . end
 	| (if $bootE != null then $bootE.device else $root.device end) as $bootdev
 	| if $bootE != null and (chain($bootdev) | any(dev(.).fstype == "crypto_LUKS")) then refuse("the old /boot (\($bootdev)) is encrypted") else . end
-	| if $bootE != null and dev($bootdev).size_mb < 300 then refuse("the old /boot (\($bootdev), \(dev($bootdev).size_mb) MB) is too small for the new system's kernels (300 MB at least)") else . end
-	| (if $m.efi then [] else
+	| if $bootE != null and isro($bootdev) then refuse("the old /boot (\($bootdev)) is read-only") else . end
+	| if $bootE != null and dev($bootdev).usb then refuse("the old /boot (\($bootdev)) is on a USB or removable device") else . end
+	# a /boot the old fstab named as the kernel did is the old /boot when it holds the old system's kernels
+	| (($f.boot // {})[$bootdev] // {}) as $bootfacts
+	| ((($bootfacts.kernels // []) | map(select(. as $v | ($R.modules // []) | index($v) != null)))) as $bootproof
+	| if $bootE != null and $bootE.kn == true and $m.final == true and ($bootproof | length) == 0
+	  then refuse("the old fstab names /boot by a kernel name (\($bootE.spec)), which is \($bootdev) here (\(what($bootdev))), and that does not hold the old system's kernels (\(if (($bootfacts.kernels // []) | length) > 0 then "its vmlinuz files are of " + ($bootfacts.kernels | join(", ")) else "no vmlinuz-VERSION is on it" end); the old root has \(if (($R.modules // []) | length) > 0 then "the modules of " + ($R.modules | join(", ")) else "no kernel modules to tell by" end)): it is not formatted; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL=") else . end
+	# GRUB's place on a disk under BIOS: "" when it has one, else what is wrong
+	| def biosboot($p): ([$devs[] | select((.ancestors | index($p)) != null and ((.parttype // "") | ascii_downcase) == $biosguid)] | length) > 0;
+	  def grubroom($p):
+		if dev($p).pttype == "dos" then
+			([$devs[] | select(.type == "part" and (.ancestors | index($p)) != null) | .start]) as $s
+			| if ($s | length) == 0 or ($s | any(. == null)) then "where its partitions start is not known"
+			  elif ($s | min) < 2048 then "its first partition starts at sector \($s | min), which leaves GRUB no room before it (2048 sectors, as partitioning tools have left since 2010)"
+			  else "" end
+		elif biosboot($p) then ""
+		else "a GPT without a BIOS boot partition (or no partition table)" end;
+	  (if $m.efi then {must: [], also: [], left: []} else
 		(disks_of($bootdev)) as $bd
-		| ($bd | map(select(. as $p | (dev($p).pttype != "dos") and (([$devs[] | select((.ancestors | index($p)) != null and ((.parttype // "") | ascii_downcase) == $biosguid)] | length) == 0)))) as $bad
+		| ($bd | map(select(grubroom(.) != ""))) as $bad
 		| if ($bd | length) == 0 then refuse("the disk under \($bootdev) is not found: where the boot loader goes is not certain")
-		  elif ($bad | length) > 0 then refuse("this machine boots with BIOS, and \($bad | join(", ")) \(if ($bad | length) > 1 then "have" else "has" end) a GPT without a BIOS boot partition (or no partition table): GRUB has no place there, and keep-data changes no partition table")
+		  elif ($bad | length) > 0 then refuse("this machine boots with BIOS, and GRUB has no place on \($bad | map(. + " (" + grubroom(.) + ")") | join(", ")): keep-data changes no partition table, and the new system could not be started")
 		  else
 			# and every other disk that carries GRUB's boot code now: the BIOS may start any of them
-			($bd + [$devs[] | select(.type == "disk" and $f.mbr[.path] == "grub") | .path
-				| select(. as $p | (dev($p).pttype == "dos") or (([$devs[] | select((.ancestors | index($p)) != null and ((.parttype // "") | ascii_downcase) == $biosguid)] | length) > 0))] | unique)
+			([$devs[] | select(.type == "disk" and (.usb | not) and $f.mbr[.path] == "grub") | .path | select(. as $p | ($bd | index($p)) == null)]) as $others
+			| {must: $bd, also: ($others | map(select(grubroom(.) == ""))), left: ($others | map(select(grubroom(.) != "")))}
 		  end
-	   end) as $biosdisks
+	   end) as $bios
 
 	# --- the root: what becomes of it
-	| (if $keeproot or $subroot then $rd.fstype else ($m.root_fs // "ext4") end) as $newfs
 	| ($f.usage // {}) as $U
 	| (($m.unpacked_mb // 0)) as $need
 	| if ($keeproot | not) and ($subroot | not) and $need > 0 and $rd.size_mb < $need * 2
-	  then refuse("the old root \($root.device) (\($rd.size_mb) MB) is too small for \($m.os) (\($need) MB unpacked; twice that is needed)") else . end
+	  then refuse("the old root \($root.device) (\($rd.size_mb) MB) is too small for \($m.os) (\($need) MB unpacked; twice that is needed): grow it in the rescue system first (a logical volume: lvextend -r -L \($need * 2)M \($root.device)), or install without --keep-data") else . end
 	| if ($keeproot or $subroot) and $need > 0 and ($U.free_mb != null) and (($U.free_mb + (if $keeproot then 0 else ($U.tree_mb // 0) end)) < $need + 1024)
-	  then refuse("the old root \($root.device) has \($U.free_mb) MB free: too little for \($m.os) beside what stays (\($need) MB unpacked and 1024 MB to spare are needed)") else . end
+	  then refuse("the old root \($root.device) has \($U.free_mb) MB free: too little for \($m.os) beside what stays (\($need) MB unpacked and 1024 MB to spare are needed): free or grow it in the rescue system first\(if $keeproot then ", or run without --keep-root" else "" end)") else . end
+	| if $keeproot and ($subroot | not) and ((($U.immutable // []) | length) > 0)
+	  then refuse("--keep-root: \($U.immutable | join(", ")) at the top of the old root cannot be renamed (chattr +i or +a): the old system could not be moved aside whole; take the attribute off in the rescue system (mount \($root.device) /mnt; chattr -ia /mnt\($U.immutable[0]); umount /mnt) and run again") else . end
 	| if $m.efi and ($f.esp[$esp.device] != null) and ($f.esp[$esp.device].error != null) then refuse("the EFI system partition \($esp.device) cannot be read: \($f.esp[$esp.device].error)") else . end
-	| if $m.efi and ($f.esp[$esp.device] != null) and (($f.esp[$esp.device].free_mb // 0) < 16) then refuse("the EFI system partition \($esp.device) has \($f.esp[$esp.device].free_mb // 0) MB free: too little for the new boot loader (16 MB)") else . end
+	| if $m.efi and ($f.esp[$esp.device] != null) and (($f.esp[$esp.device].free_mb // 0) < 16) then refuse("the EFI system partition \($esp.device) has \($f.esp[$esp.device].free_mb // 0) MB free: too little for the new boot loader (16 MB); remove what is not needed from it in the rescue system") else . end
 	| (($f.esp[($esp.device // "")] // {}).loaders // []) as $loaders
 	| (if $subroot then ($rfs.subvolumes // []) | map(.path | select(startswith($root.subvolume + "/"))) else [] end) as $nested
+	# a btrfs made anew takes its subvolumes with it: those the system makes by itself go, any other is data
+	| (if $rd.fstype == "btrfs" and ($subroot | not) and ($keeproot | not) then (($rfs.subvolumes // []) | map(.path)) else [] end) as $topsubs
+	| ($topsubs | map(select(test("^var/lib/(machines|portables)$|^var/lib/(docker|containers/storage)/btrfs/subvolumes/") | not))) as $datasubs
+	| if ($datasubs | length) > 0 then refuse("the old root is the top of the btrfs \($root.device), which holds the subvolumes \($datasubs | join(", ")): made anew, the file system would take them with it; --keep-root keeps the file system, and the old system moves into /old-root-DATE") else . end
+	# the default subvolume cannot be deleted: the top is the default while the root subvolume is replaced
+	| (($rfs.default // "") as $dflt | if $subroot and $dflt != "" and ($dflt == $root.subvolume or (($keeproot | not) and ($dflt | startswith($root.subvolume + "/")))) then {reset: true, restore: ($dflt == $root.subvolume)} else {reset: false, restore: false} end) as $default
 
 	# --- the views of the plan
 	| ([(if $keeproot then empty
 	     elif $subroot then {device: $root.device, filesystem: "btrfs", mountpoint: "/", how: "subvolume", subvolume: $root.subvolume, size_mb: $rd.size_mb}
-	     else {device: $root.device, filesystem: $newfs, mountpoint: "/", how: "mkfs", was: $rd.fstype, uuid: $rd.uuid, size_mb: $rd.size_mb} end),
-	    (if $bootE != null then {device: $bootdev, filesystem: "ext4", mountpoint: "/boot", how: "mkfs", was: dev($bootdev).fstype, uuid: dev($bootdev).uuid, size_mb: dev($bootdev).size_mb} else empty end),
+	     else {device: $root.device, filesystem: $newfs, mountpoint: "/", how: "mkfs", was: $rd.fstype, uuid: $rd.uuid, label: ($rd.label // ""), size_mb: $rd.size_mb} end),
+	    (if $bootE != null then {device: $bootdev, filesystem: "ext4", mountpoint: "/boot", how: "mkfs", was: dev($bootdev).fstype, uuid: dev($bootdev).uuid, label: (dev($bootdev).label // ""), size_mb: dev($bootdev).size_mb} else empty end),
 	    ($E3[] | select(.action == "format") | {device: .device, filesystem: .fs, mountpoint: .mountpoint, how: "mkfs", was: .fs, uuid: dev(.device).uuid, label: (dev(.device).label // ""), size_mb: dev(.device).size_mb})]) as $format
-	| ([(if $esp != null then {device: $esp.device, filesystem: "vfat", mountpoint: "/boot/efi",
+	| ([(if $esp != null then {device: $esp.device, filesystem: "vfat", mountpoint: "/boot/efi", uuid: (dev($esp.device).uuid // ""),
 			note: ("the EFI system partition" + (if $esp.from != "fstab" then ", found by its partition type" elif $espE.mountpoint != "/boot/efi" then ", at \($espE.mountpoint) in the old system" else "" end)
 				+ ": not formatted, the new boot loader is added"
 				+ (if ($loaders | length) > 0 then "; the old system's (\($loaders | join(", "))) \(if ($loaders | length) > 1 then "move" else "moves" end) aside on it, with -old-DATE after the name" else "" end))} else empty end),
-	    (if $keeproot and ($subroot | not) then {device: $root.device, filesystem: $rd.fstype, mountpoint: "/", note: "the root file system, not formatted: the new system is unpacked beside the old one, which moves into /old-root-DATE"} else empty end),
-	    ($E3[] | select(.action == "swap") | {device: .device, filesystem: "swap", mountpoint: "swap", note: ""}),
-	    ($E3[] | select(.action == "keep" or .action == "text") | {device: .device, filesystem: (if .device != null and (.crypt == null) then (dev(.device).fstype // .type) else .type end), mountpoint: .mountpoint,
-			note: (.note // "")}
-			+ (if .action == "text" then {spec: .spec} else {} end))]) as $keep
-	| ([($E3[] | select(.action == "aside") | {device: .device, filesystem: dev(.device).fstype, from: .mountpoint, mountpoint: .to, how: "mounted"}),
+	    (if $keeproot and ($subroot | not) then {device: $root.device, filesystem: $rd.fstype, mountpoint: "/", uuid: ($rd.uuid // ""), note: "the root file system, not formatted: the new system is unpacked beside the old one, which moves into /old-root-DATE"} else empty end),
+	    ($E3[] | select(.action == "swap") | {device: .device, filesystem: "swap", mountpoint: "swap", uuid: (dev(.device).uuid // ""), note: ""}),
+	    ($E3[] | select((.action == "keep" or .action == "text") and .volatile == null)
+			| {device: .device, filesystem: (if .device != null and (.crypt == null) then (dev(.device).fstype // .type) else .type end), mountpoint: (.to // .mountpoint)}
+			+ (if .device != null then {uuid: (dev(.device).uuid // "")} else {} end)
+			+ {note: (.note // "")}
+			+ (if .action == "text" then {spec: (.spec_new // .spec)} else {} end))]) as $keep
+	# what the new system makes anew at every boot, as the old one did: the encrypted swap and /tmp of crypttab
+	| ([$Cvol[] | . as $c | {device: .device, filesystem: (if .volatile == "swap" then "swap" else "-" end), mountpoint: (([$E3[] | select(.crypt == $c.name) | .mountpoint] | .[0]) // "-"),
+		name: .name, source: (.source_new // .source), options: .options, how: .volatile}]) as $volatile
+	| ([($E3[] | select(.action == "aside") | {device: .device, filesystem: dev(.device).fstype, from: .mountpoint, mountpoint: .to, uuid: (dev(.device).uuid // ""), how: "mounted"}),
 	    (if $keeproot and ($subroot | not) then {device: $root.device, filesystem: $rd.fstype, from: "/", mountpoint: "/old-root-DATE", how: "moved"}
 	     elif $keeproot then {device: $root.device, filesystem: "btrfs", from: $root.subvolume, mountpoint: ($root.subvolume + "-old-DATE"), how: "renamed"} else empty end)]) as $aside
-	| ([$E3[] | select(.action == "unused") | {device: .device, filesystem: dev(.device).fstype, mountpoint: .mountpoint}]) as $unused
+	| ([$E3[] | select(.action == "unused") | {device: .device, filesystem: (if .device != null then dev(.device).fstype else .type end), mountpoint: .mountpoint}
+		+ (if .device != null then {uuid: (dev(.device).uuid // "")} else {spec: .spec} end) + (if (.note // "") != "" then {note: .note} else {} end)]) as $unused
 	| ([$E3[] | select(.action == "drop") | {spec: .spec, mountpoint: .mountpoint, reason: .note}]) as $dropped
-	| ([$root.device, ($esp.device // empty), ($E3[] | .device // empty), ($C[] | select(.keep) | .device // empty)] | map(fskey(.)) | unique) as $used
+	| ([$root.device, ($esp.device // empty), ($E3[] | select(.action != "drop") | .device // empty), ($C[] | select(.keep) | .device // empty)] | map(fskey(.)) | unique) as $used
 	| ([$devs[].ancestors[]] | unique) as $parents
 	| ([$devs[] | select(.path as $p | ($parents | index($p)) == null and ($used | index(fskey($p))) == null)
 		| select((.type == "disk" and .fstype == null and .pttype != null) | not)
@@ -950,6 +1246,7 @@ def plan:
 			  elif .fstype == null then "no file system"
 			  elif ($cands | any(.device == $d.path and (.consistent | not))) then "holds an operating system's files, whose fstab names another root"
 			  elif ($cands | any(.device == $d.path)) then "holds another old system"
+			  elif .usb then "on a USB or removable device"
 			  else "" end)}]) as $untouched
 	| (if $keeproot then [] else
 		[($U.usage // [])[] | select(if (.path | test("^/(etc|root|home/[^/]+)$")) then true
@@ -963,45 +1260,83 @@ def plan:
 	   + (if ((($f.lvs // []) | map(select(.segtype | test("thin")) | .path)) as $thin | ([$root.device, $bootdev, ($live[] | .device // empty)] | any(. as $p | $thin | index($p) != null))) then ["thin-provisioning-tools"] else [] end)
 	   + (if ($live | any(.type == "nfs" or .type == "nfs4")) then ["nfs-common"] else [] end)
 	   + (if ($live | any(.type == "cifs" or .type == "smb3")) then ["cifs-utils"] else [] end)) as $packages
-	| ([$E3[] | select((.action == "keep" or .action == "format") and .device != null and (.mountpoint | test("^/(home|root)(/|$)")))]) as $homes
-	# the bind mounts whose source was on the old root: the new root has no such directory
-	| ([$E3[] | select(.action == "text" and (.spec | startswith("/")) and ((.options | opts) | any(. == "bind" or . == "rbind")))
-		| .spec as $s | select(($E3 | any((.action == "keep" or .action == "aside" or .action == "format") and (.mountpoint as $mp | $s == $mp or ($s | startswith($mp + "/"))))) | not)]) as $binds
-	| ([$devs[] | select(.fstype == "vfat" and ((.parttype // "") | ascii_downcase | (. == $espguid or . == "0xef")) and .path != ($esp.device // ""))
+	# the volumes the home directories lie on: those the installer mounts for the users' section, and those
+	# it cannot (encrypted, of the network, of ZFS, of a file system it does not know, read-only), which hide
+	# what it makes on the root once the new system mounts them
+	| ([$E3[] | select(.action == "keep" and .device != null and .crypt == null and .unsure != true and (.mountpoint | test("^/(home|root)(/|$)"))) | select(isro(.device) | not)]) as $homes
+	| ([$E3[] | select((.action == "keep" or .action == "text") and ((.to // .mountpoint) | test("^/(home|root)(/|$)")) and (.i as $i | ($homes | map(.i) | index($i)) == null))]) as $hidden
+	| ($ubuntu and ($zfs.members | length) > 0) as $zfson
+	# the bind mounts whose source went with the old root or a formatted volume: an empty directory in its place
+	| ([$E3[] | select(.action == "text" and (.source == "root" or .source == "format"))]) as $binds
+	| ([$devs[] | select(isesp and .path != ($esp.device // ""))
 		| select(.path as $p | ($E3 | any(.device == $p)) | not) | .path]) as $otheresp
+	# a second attempt after an interrupted one: what the first plan kept, formatted or set aside and this one does not
+	| def mounted: [(.format // [])[], (.keep // [])[], (.aside // [])[], (.volatile // [])[] | .mountpoint | select(. != "/" and (test("DATE$") | not))];
+	  (if $root.resume and $R.first != null then
+		(({format: $format, keep: $keep, aside: $aside, volatile: $volatile} | mounted) as $now
+		 | reduce $now[] as $x ($R.first | mounted; index($x) as $i | if $i == null then . else del(.[$i]) end))
+	   else [] end) as $missing
+	| ($root.resume and (($missing | length) > 0 or $R.first == null)) as $shrunk
 
 	| ([
 		(if ($root.known | not) then "\($root.device) holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system" else empty end),
 		(if $root.known and ($root.consistent | not) and ($root.resume | not) then "the /etc/fstab on \($root.device) does not mount it at /: it is the root because --root says so" else empty end),
-		(if $root.resume then "\($root.device) holds an interrupted keep-data installation: the old system's fstab is the one saved there" else empty end),
+		(if $root.resume then "\($root.device) \(if $root.ram == true then "was being formatted by a keep-data installation that failed: the old system's fstab is the one this rescue system still has in memory" else "holds an interrupted keep-data installation: the old system's fstab is the one saved there" end)" else empty end),
+		(if $shrunk then "this plan keeps less than the one the interrupted installation was confirmed with: \(if ($missing | length) > 0 then ($missing | join(", ")) + " \(if ($missing | length) > 1 then "are" else "is" end) not in it any more" else "that plan was not saved" end); what the old fstab named there is not found now. Look at it before you confirm" else empty end),
+		(if $root.resume and ($keeproot | not) and ($subroot | not) and $saside != "" and $sroot != "gone" then "the interrupted installation was moving the old system into /\($saside) (--keep-root): without --keep-root it is lost with the root now" else empty end),
 		(if $U.dirty == true then "the old root \($root.device) was not unmounted cleanly: it is read as the disk has it, without its journal; what the old system wrote last may be missing here" else empty end),
-		($cands[] | select(.device != $root.device or .subvolume != $root.subvolume) | "\(describe) holds an operating system's files too\(if .consistent then "" else ", a copy or snapshot whose fstab names another root" end): left as it is"),
+		(if $knbad then "the old fstab names its root as its kernel did (\($rootE[0].spec)), and that name does not lead to the root here: the kernel names of this rescue system are not the old system's, and every other entry named that way is dropped" else empty end),
+		($cands[] | select(.device != $root.device or .subvolume != $root.subvolume)
+			| if .device == $root.device and $saside != "" and .subvolume == $saside then "\(describe) is the old system, which the interrupted installation set aside: left as it is"
+			  else "\(describe) holds an operating system's files too\(if .consistent then "" else ", a copy or snapshot whose fstab names another root" end): left as it is" end),
+		($unseen[] | "\(.) (\(dev(.).fstype // "?")) could not be looked at (it cannot be mounted read-only): no old system was looked for on it"),
+		($broken[] | select(. != $root.device) | "\(.) holds what an interrupted keep-data installation saved, damaged: it is not read"),
+		($E3[] | select(.kn == true and .action != "drop" and .action != "root")
+			| "\(.spec) (\(.mountpoint)) is named as the old system's kernel named it; here that is \(.device) (\(what(.device))): \(if .action == "boot" then "it holds the old system's kernels (\($bootproof | join(", "))), so it is the old /boot" elif .action == "esp" then "it is an EFI system partition by its type" else "taken for the volume meant, and named by its UUID from now on" end)"),
 		($dropped[] | "\(.spec) (\(.mountpoint)) of the old fstab is dropped: \(.reason)"),
-		($C[] | select(.keep | not) | "\(.name) of the old crypttab is dropped: \(.source) is not there"),
-		($C[] | select(.keep and .nofail) | "the encrypted volume \(.name) \(if .key == "passphrase" then "asks for a passphrase" elif .key == "wrong" then "is not opened by its key file (\(.keyfile))" elif .key == "elsewhere" then "has its key (\(.keyfile)) outside the old root" else "is a file (\(.source)), which may not be there at boot" end): nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@\(.name))"),
+		($C[] | select(.keep | not) | "\(.name) of the old crypttab is dropped: \(.why)"),
+		($C[] | select(.keep and .kn) | "\(.name) of the old crypttab names \(.source) as the old system's kernel did; here that is \(.device) (\(what(.device)))\(if .source_new != null then ": named \(.source_new) from now on" else "" end)"),
+		($C[] | select(.keep and .nofail and .volatile == "") | "the encrypted volume \(.name) \(if .key == "passphrase" then "asks for a passphrase" elif .key == "wrong" then "is not opened by its key file (\(.keyfile))" elif .key == "elsewhere" then "has its key (\(.keyfile)) outside the old root" else "is a file (\(.source)), which may not be there at boot" end): nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@\(.name))"),
+		($Cvol[] | "\(.name) of the old crypttab (\(.source_new // .source), \(.volatile)) is made anew at every boot of the new system, as it was by the old one: whatever \(.device) holds then is overwritten"),
 		(if ($nested | length) > 0 and ($keeproot | not) then "the subvolumes inside the root subvolume go with it: \($nested | join(", "))" else empty end),
+		(if ($topsubs | length) > 0 then "the subvolumes of the old root's btrfs go with it, which is made anew: \($topsubs | join(", "))" else empty end),
+		(if $default.reset and $keeproot then "the root subvolume \($root.subvolume) is the default subvolume of \($root.device): the new \($root.subvolume) becomes the default (the old one, renamed, would be mounted in its place)"
+		 elif $default.reset then "the root subvolume \($root.subvolume) \(if $default.restore then "is" else "holds" end) the default subvolume of \($root.device), which cannot be deleted: the default is the top of the file system while the root subvolume is replaced\(if $default.restore then ", and the new \($root.subvolume) after" else ", and stays that" end)" else empty end),
+		(if $bootsmall then "the old /boot (\($oldboot), \(dev($oldboot).size_mb) MB) is too small for the new system's kernels (300 MB at least): it is left as it is, and /boot is on the root" else empty end),
 		(if ($zfs.members | length) > 0 then
 			(if $ubuntu then "ZFS: \($zfs.members | join(", ")) (\($zfs.pools | join(", "))) \(if ($zfs.members | length) > 1 then "are" else "is" end) left as \(if ($zfs.members | length) > 1 then "they are" else "it is" end); zfsutils-linux is installed, and the pools are imported at boot\(if ($R.hostid // "") != "" then " (the old /etc/hostid is carried over)" else "" end)"
 			 else "ZFS: \($zfs.members | join(", ")) (\($zfs.pools | join(", "))) \(if ($zfs.members | length) > 1 then "are" else "is" end) left as \(if ($zfs.members | length) > 1 then "they are" else "it is" end); \($m.os) has no ZFS packaged with its kernel: install it and import the pools yourself\(if ($R.hostid // "") != "" then " (the old /etc/hostid is carried over)" else "" end)" end)
 		 else empty end),
-		(if ($homes | map(select(.action == "keep" and .crypt == null)) | length) > 0 then "\($homes | map(select(.action == "keep" and .crypt == null) | .mountpoint) | join(", ")) is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)" else empty end),
-		($homes[] | select(.crypt != null) | "\(.mountpoint) is encrypted and not opened by the installer: the profile's users' home directories and keys are made on the root, where \(.mountpoint) hides them once it is mounted"),
+		(if ($homes | length) > 0 then "\($homes | map(.mountpoint) | join(", ")) is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)" else empty end),
+		($hidden[] | "\(.to // .mountpoint) is kept and not mounted by the installer (\(if .crypt != null then "encrypted" elif .device == null then .type else "a file system or device it does not write to" end)): the profile's users' home directories and keys are made on the root, where it hides them once it is mounted"),
+		(if ($hidden | length) > 0 or $zfson then "the profile's users' keys are also in /etc/ssh/authorized_keys/NAME, which the new system's sshd reads besides (sshd_config.d/20-ump-keep-data.conf): they get in whatever \(if ($hidden | length) > 0 then ($hidden | map(.to // .mountpoint) | join(", ")) else "a ZFS dataset mounted over /home or /root" end) holds" else empty end),
 		(if ($otheresp | length) > 0 then "other EFI system partitions (\($otheresp | join(", "))) are left as they are: a firmware that starts from one of them finds the old boot loader" else empty end),
-		($binds[] | "the source \(.spec) of the bind mount at \(.mountpoint) was on the old root: the new system gets an empty directory there, so that the mount does not fail"),
+		(if $esp != null and (($f.esp[$esp.device] // {}).fallback == true) then "EFI/BOOT on the EFI system partition holds a boot loader now, whichever system put it there: the new system's replaces it" else empty end),
+		(if ($loaders | any(ascii_downcase == "efi/systemd")) then "the old system's systemd-boot moves aside with its entries (/loader on the EFI system partition, which another system that starts through it shares)" else empty end),
+		($binds[] | "the source \(.spec) of the bind mount at \(.mountpoint) was \(if .source == "root" then "on the old root" else "on a volume that is formatted" end): the new system gets an empty directory there, so that the mount does not fail\(if .source == "root" and $keeproot then " (the old one is under /old-root-DATE)" else "" end)"),
+		($E3[] | select(.action == "text" and .source == "aside") | "\(.spec) of the entry at \(.mountpoint) is on a volume that is set aside: the entry names \(.spec_new) from now on"),
+		($E3[] | select(.action != "drop" and .unsure == true) | "\(.device // .spec) (\(.mountpoint)) is \(if .device != null then (dev(.device).fstype // "of no file system the installer knows") else .type end), which the new system may not be able to mount: kept with nofail, so that it boots without it"),
+		($E3[] | select(.action == "text" and .type == "zfs" and ($zfson | not)) | "\(.spec) (\(.mountpoint)) is a ZFS dataset, and the new system has no ZFS: kept with nofail"),
+		($E3[] | select(.action == "unused" and .device == null) | "\(.spec) (\(.mountpoint), \(.type)) of the old fstab is not mounted by the new system, whose own \(.mountpoint) is on the root"),
+		($E3[] | select(.action == "text" and .to != null) | "\(.spec) (\(.mountpoint), \(.type)) of the old fstab is mounted at \(.to): the new system's own \(.mountpoint) is on the root"),
 		(if ($live | any(.type == "nfs" or .type == "nfs4" or .type == "cifs" or .type == "smb3")) then "network file systems are kept as the old fstab has them; nfs-common or cifs-utils is installed for them on Ubuntu and Debian" else empty end),
-		(if $keeproot and $bootE == null and (($U.features // "") != "") and ($m.os | test("^(ubuntu-2[02]\\.|debian-1[012]$)")) then "the root file system has the ext4 features \($U.features), which the GRUB of \($m.os) cannot read, and /boot is on it: the new system may not boot" else empty end),
+		(if ($keeproot or $bootsmall) and $bootE == null and (($U.features // "") != "") and ($m.os | test("^(ubuntu-2[02]\\.|debian-1[012]$)")) then "the root file system has the ext4 features \($U.features), which the GRUB of \($m.os) cannot read, and /boot is on it: the new system may not boot" else empty end),
+		($bios.left[] | "\(.) carries GRUB's boot code now and has no place for the new one (\(grubroom(.))): it is left as it is, and a BIOS that starts from it finds the old boot loader"),
 		(($f.lvs // [])[] | select(.active != "active") | "the logical volume \(.path) is not active here (\(.segtype)): what is on it is not seen")
 	  ]) as $warnings
 
 	| {version: 1, os: $m.os, firmware: (if $m.efi then "uefi" else "bios" end), arch: $m.arch,
-	   options: {root: ($o.root // ""), keep_root: $keeproot, format: $fmt},
-	   old: {system: $root.system, hostname: $root.hostname, fstab_sha256: ($R.fstab_sha256 // "")},
-	   root: ({device: $root.device, subvolume: $root.subvolume, filesystem: $newfs, was: $rd.fstype, size_mb: $rd.size_mb, by: $root.by}
+	   options: {root: ($o.root // ""), keep_root: $keeproot, format: $fmt}}
+	  + (if $root.resume then {resumed: true} else {} end) + (if $shrunk then {shrunk: true} else {} end)
+	  + {old: {system: $root.system, hostname: $root.hostname, fstab_sha256: ($R.fstab_sha256 // "")},
+	   root: ({device: $root.device, subvolume: $root.subvolume, filesystem: $newfs, was: $rd.fstype, uuid: ($rd.uuid // ""), size_mb: $rd.size_mb, by: $root.by}
+		+ (if $root.known then {} else {known: false} end)
 		+ (if ($keeproot or $subroot) and $U.free_mb != null then {free_mb: $U.free_mb} else {} end)),
 	   candidates: $cands,
-	   boot: {esp: ($esp.device // ""), boot: (if $bootE != null then $bootdev else "" end), bios_disks: $biosdisks,
+	   boot: {esp: ($esp.device // ""), boot: (if $bootE != null then $bootdev else "" end), bios_disks: ($bios.must + $bios.also), bios_optional: $bios.also,
 		disk: ((disks_of($esp.device // $bootdev))[0] // ""), disks: ([$root.device, $bootdev, ($esp.device // empty)] | map(disks_of(.)[]) | unique)},
-	   format: $format, keep: $keep, aside: $aside, unused: $unused, untouched: $untouched, dropped: $dropped, lost: $lost,
+	   format: $format, keep: $keep, volatile: $volatile, aside: $aside, unused: $unused, untouched: $untouched, dropped: $dropped, lost: $lost,
+	   crypttab: ($C | map(select(.keep) | {name, device, source: (.source_new // .source), keyfile, options: (if .nofail then (.options | with_opt("nofail")) else .options end)})),
 	   packages: $packages, warnings: $warnings,
 	   entries: ($E3 | map({spec, mountpoint, type, options: (.options | masked), device, action})),
 	   private: {entries: $E3, crypttab: $C, keyfiles: ($R.keyfiles // []), hostid: ($R.hostid // ""), zpool_cache: ($R.zpool_cache // false),
@@ -1009,7 +1344,7 @@ def plan:
 		loaders: $loaders,
 		# what a boot loader of the old system names its root or /boot by: the file system, the volume, the
 		# array, or the partition's number on the disk it was started from (GRUB's "(,gpt3)/grub")
-		loader_ids: ([$root.device, $bootdev] | unique | map(. as $p
+		loader_ids: ([$root.device, ($oldboot // $root.device)] | unique | map(. as $p
 			| (dev($p).uuid // empty),
 			  ((($f.lvs // []) | map(select(.path == $p) | .uuid) | .[0]) // empty | select(. != "")),
 			  (dev($p).ancestors[] | dev(.) | select(.fstype == "linux_raid_member") | (.uuid // "") | norm_uuid | select(. != "") | "mduuid/" + .),
@@ -1017,29 +1352,38 @@ def plan:
 				((dev($p).partn // ((dev($p).kname | capture("(?<n>[0-9]+)$").n) // empty)) | tostring) as $n
 				| (if dev($p).pttype == "dos" then ",msdos" else ",gpt" end) + $n + ")"
 			   else empty end)) | unique),
-		binds: ($binds | map(.spec)), md: ([$devs[] | select(.type | test("^(raid|md|linear)"))] | length > 0),
-		zfs: ($ubuntu and ($zfs.members | length) > 0), homes: ($homes | map(select(.action == "keep" and .crypt == null) | .i)),
-		rw: ([$format[].device, (if $keeproot or $subroot then $root.device else empty end)] | map(chain(.)[]) | map(select(dev(.).type | test("^(raid|md|linear)"))) | unique)}};
+		binds: ($binds | map(.spec)), md: ([$devs[] | select(isarray)] | length > 0),
+		zfs: $zfson, homes: ($homes | map(.i)), keys_outside: (($hidden | length) > 0 or $zfson),
+		default: $default, saved: {root: $sroot, aside: $saside}, ram: ($root.ram == true),
+		labels: ($format | map(select(.how == "mkfs") | . as $r | {key: $r.device, value: (($r.label // "") | fits($r.filesystem))}) | from_entries),
+		# the old fstab as a second attempt reads it: a device named as the kernel named it, and one that is
+		# formatted (whose label may go), by the UUID it has now
+		resolved: ([$E3[] | select(.device != null and .crypt == null and ((dev(.device).uuid // "") != "") and ((.spec | kernelname) or .action == "boot" or .action == "format"))
+			| {spec, mountpoint, to: ("UUID=" + dev(.device).uuid)}]),
+		rw: ([$format[].device, $root.device, $bootdev, ($esp.device // empty), ($homes[] | .device)] | map(chain(.)[]) | map(select(dev(.) | isarray)) | unique)}};
 # the plan as people read it, a line each
 def text:
 	def pad($n): . + ([range(0; $n - length)] | map(" ") | join(""));
 	def fsname: .filesystem | if . == null or . == "" then "-" else . end;
-	([.format[], .keep[], .aside[], .unused[], .untouched[] | (.device // .spec // "-") | length] | max // 0) as $w
-	| ([.format[], .keep[], .aside[], .unused[], .untouched[] | fsname | length] | max // 0) as $v
+	([.format[], .keep[], .volatile[], .aside[], .unused[], .untouched[] | (.device // .spec // "-") | length] | max // 0) as $w
+	| ([.format[], .keep[], .volatile[], .aside[], .unused[], .untouched[] | fsname | length] | max // 0) as $v
 	| def row: "  \((.device // .spec // "-") | pad($w))  \(fsname | pad($v))  \(.mountpoint)";
 	  def note: if (.note // "") != "" then "  (\(.note))" else "" end;
-	"keep-data: the old system\(if .old.system != "" then " " + .old.system else "" end)\(if .old.hostname != "" then " (" + .old.hostname + ")" else "" end) on \(.root.device)\(if .root.subvolume != "" then ", subvolume " + .root.subvolume else "" end)\(if .root.by == "option" then " (--root)" else "" end); \(.firmware | ascii_upcase) firmware; the layout of the profile is not applied, no disk is wiped or partitioned",
+	"keep-data: the old system\(if .old.system != "" then " " + .old.system else "" end)\(if .old.hostname != "" then " (" + .old.hostname + ")" else "" end) on \(.root.device)\(if .root.subvolume != "" then ", subvolume " + .root.subvolume else "" end)\(if .root.by == "option" then " (--root)" else "" end)\(if .resumed == true then ", after an interrupted installation" else "" end); \(.firmware | ascii_upcase) firmware; the layout of the profile is not applied, no disk is wiped or partitioned",
 	"FORMAT (what is on them is lost)",
-	(.format[] | row + (if .how == "subvolume" then "  (the subvolume \(.subvolume) is deleted and made anew; the rest of the file system stays)" else "  (\(.size_mb | size)\(if (.was // "") != "" and .was != .filesystem then ", was " + .was else "" end))" end)),
+	(.format[] | row + (if .how == "subvolume" then "  (the subvolume \(.subvolume) is deleted and made anew; the rest of the file system stays)"
+		else "  (\(.size_mb | size)\(if (.was // "") != "" and .was != .filesystem then ", was " + .was else "" end)\(if (.label // "") != "" then ", label " + .label else "" end))" end)),
 	(if (.format | length) == 0 then "  nothing" else empty end),
 	"KEEP (as they are, mounted where they were)",
 	(.keep[] | row + note),
 	(if (.keep | length) == 0 then "  nothing" else empty end),
+	(if (.volatile | length) > 0 then "MADE ANEW AT EVERY BOOT (crypttab: what is on them is overwritten each time the new system starts, as the old one did)",
+		(.volatile[] | row + "  (\(.name): \(.source), \(.options))") else empty end),
 	(if (.aside | length) > 0 then "ASIDE (kept, under another name)", (.aside[] | "  \(.device | pad($w))  \(fsname | pad($v))  \(.from) -> \(.mountpoint)  (\(.how))") else empty end),
-	(if (.unused | length) > 0 then "UNUSED (left as they are, not mounted by the new system)", (.unused[] | row) else empty end),
+	(if (.unused | length) > 0 then "UNUSED (left as they are, not mounted by the new system)", (.unused[] | row + note) else empty end),
 	(if (.untouched | length) > 0 then "UNTOUCHED (not in the old fstab: left as they are)", (.untouched[] | "  \(.device | pad($w))  \(fsname | pad($v))  \(.size_mb | size)\(if .label != "" and .filesystem != "zfs_member" then "  " + .label else "" end)" + note) else empty end),
 	(if .options.keep_root then empty else "LOST (on the old root, beyond the system itself)", (.lost[] | "  \(.path)  \(.mb | size)"), (if (.lost | length) == 0 then "  nothing found" else empty end) end),
-	(if (.boot.bios_disks | length) > 0 then "BOOT LOADER (BIOS): \(.boot.bios_disks | join(", "))" else empty end),
+	(if (.boot.bios_disks | length) > 0 then "BOOT LOADER (BIOS): \(.boot.bios_disks - .boot.bios_optional | join(", "))\(if (.boot.bios_optional | length) > 0 then "; and \(.boot.bios_optional | join(", ")), which \(if (.boot.bios_optional | length) > 1 then "carry" else "carries" end) GRUB now (tried: a failure there is a warning)" else "" end)" else empty end),
 	(if (.packages | length) > 0 then "PACKAGES (installed for what is kept): \(.packages | join(", "))" else empty end),
 	(if (.warnings | length) > 0 then "WARNINGS", (.warnings[] | "  " + .) else empty end);
 JQ
@@ -1059,11 +1403,19 @@ kd_refused() {
 # private and its hash (sha256 of the rest, keys sorted); status 9 and
 # {refused: why} when the installer refuses the machine. Reads only.
 kd_build() {
-	local lsblk fs='{}' roots='{}' links='{}' mbr='{}' esp='{}' usage=null lvs facts plan dev fstype info rinfo sub key path disk root rsub rfs ids e pass
+	local lsblk fs='{}' roots='{}' links='{}' mbr='{}' esp='{}' boot='{}' usage=null lvs facts plan dev fstype info rinfo sub key path disk root rsub rfs ids e pass ram rdev=""
 	lsblk="$(kd_fact_lsblk)"
 	jq -e '.blockdevices | length > 0' >/dev/null <<< "$lsblk"
+	# an installation that failed here while it formatted the root: what it held of the old system is in memory
+	ram="$(kd_fact_ram)"
+	if [ -n "$ram" ]; then
+		rdev="$(jq -r .device <<< "$ram")"
+		rinfo="$(kd_fact_root_ram)"
+		fs="$(jq -c '{(.device): {roots: [{subvolume, system, hostname, resume: true, ram: true}], subvolumes: [], default: ""}}' <<< "$ram")"
+		roots="$(printf '%s\n' "$ram" "$rinfo" | jq -c -s --arg sum "$(jq -j '.fstab // ""' <<< "$rinfo" | sha256sum | cut -d' ' -f1)" '{(.[0].device + "\t" + .[0].subvolume): (.[1] + {fstab_sha256: $sum})}')"
+	fi
 	while IFS=$'\t' read -r dev fstype; do
-		[ -n "$dev" ] || continue
+		[ -n "$dev" ] && [ "$dev" != "$rdev" ] || continue
 		info="$(kd_fact_fs "$dev" "$fstype")"
 		fs="$(printf '%s\n' "$fs" "$info" | jq -c -s --arg d "$dev" '.[0] + {($d): .[1]}')"
 		while IFS= read -r sub; do
@@ -1085,25 +1437,29 @@ kd_build() {
 			[ -n "$path" ] || continue
 			jq -e --arg s "$path" 'has($s)' >/dev/null <<< "$links" || links="$(jq -c --arg s "$path" --arg p "$(kd_fact_realpath "$path")" '.[$s] = $p' <<< "$links")"
 		done < <({ jq -r '.[] | (.fstab // ""), (.crypttab // "")' <<< "$roots" | awk '$1 !~ /^#/ {print $1; print $2}'; printf '%s\n' "$keep_root_arg" "${keep_root_arg%:*}"; } | grep '^/dev/' | sort -u || true)
-		facts="$(printf '%s\n' "$lsblk" "$fs" "$roots" "$links" "$mbr" "$esp" "$usage" "$lvs" | jq -c -s \
-			--argjson efi "$([ "$efi" = 1 ] && echo true || echo false)" --arg arch "$arch" --arg os "$os" \
+		facts="$(printf '%s\n' "$lsblk" "$fs" "$roots" "$links" "$mbr" "$esp" "$usage" "$lvs" "$boot" | jq -c -s \
+			--argjson efi "$([ "$efi" = 1 ] && echo true || echo false)" --arg arch "$arch" --arg os "$os" --argjson final "$([ "$pass" = 2 ] && echo true || echo false)" \
 			--argjson unpacked "${unpacked_mb:-0}" --arg root_fs "$(kd_root_fs)" --arg root "$keep_root_arg" --argjson keep_root "$([ "$keep_root" = 1 ] && echo true || echo false)" \
 			--argjson format "$(printf '%s\n' "${keep_format[@]:-}" | jq -R -s -c 'split("\n") | map(select(. != ""))')" \
-			'{machine: {efi: $efi, arch: $arch, os: $os, unpacked_mb: $unpacked, root_fs: $root_fs}, options: {root: $root, keep_root: $keep_root, format: $format},
-			  lsblk: .[0], fs: .[1], roots: .[2], links: .[3], mbr: .[4], esp: .[5], usage: .[6], lvs: .[7]}')"
+			'{machine: {efi: $efi, arch: $arch, os: $os, unpacked_mb: $unpacked, root_fs: $root_fs, final: $final}, options: {root: $root, keep_root: $keep_root, format: $format},
+			  lsblk: .[0], fs: .[1], roots: .[2], links: .[3], mbr: .[4], esp: .[5], usage: .[6], lvs: .[7], boot: .[8]}')"
 		plan="$(kd_jq 'try plan catch (if type == "object" and has("refused") then . else error end)' <<< "$facts")"
 		if jq -e 'has("refused")' >/dev/null <<< "$plan"; then
 			kd_refused "$(jq -r .refused <<< "$plan")" "$(jq -c 'del(.refused)' <<< "$plan")"
 		fi
 		[ "$pass" = 1 ] || break
-		# the root is known: what it holds, and what is on the ESP
-		root="$(jq -r .root.device <<< "$plan")"; rsub="$(jq -r .root.subvolume <<< "$plan")"; rfs="$(jq -r .root.was <<< "$plan")"
+		# the root is known: what it holds, what a separate /boot holds, and what is on the ESP
+		root="$(jq -r .root.device <<< "$plan")"; rsub="$(jq -r .root.subvolume <<< "$plan")"; rfs="$(jq -r '.root.was // ""' <<< "$plan")"
 		key="$root"$'\t'"$rsub"
 		if ! jq -e --arg k "$key" 'has($k)' >/dev/null <<< "$roots"; then
 			info="$(kd_fact_root "$root" "$rsub" "$rfs")"
 			roots="$(printf '%s\n' "$roots" "$info" | jq -c -s --arg k "$key" --arg sum "$(jq -j '.fstab // ""' <<< "$info" | sha256sum | cut -d' ' -f1)" '.[0] + {($k): (.[1] + {fstab_sha256: $sum})}')"
 		fi
 		usage="$(kd_fact_usage "$root" "$rsub" "$rfs" "$([ "$keep_root" = 1 ] && echo 0 || echo 1)")"
+		e="$(jq -r .boot.boot <<< "$plan")"
+		if [ -n "$e" ]; then
+			boot="$(kd_fact_boot "$e" "$(jq -r --arg d "$e" '[.format[] | select(.device == $d) | .was // ""][0] // ""' <<< "$plan")" | jq -c --arg d "$e" '{($d): .}')"
+		fi
 		e="$(jq -r .boot.esp <<< "$plan")"
 		if [ -n "$e" ]; then
 			mapfile -t ids < <(jq -r '.private.loader_ids[]' <<< "$plan")
@@ -1129,14 +1485,28 @@ kd_text() { kd_jq 'text' -r <<< "$kd_plan"; }
 # kd_fact_uuid DEV: the UUID of what is on a device now
 kd_fact_uuid() { blkid -s UUID -o value "$1" 2>/dev/null || true; }
 
-# kd_cleanup: nothing of the old system stays mounted, no key stays in memory
+# kd_new_uuid FS: a UUID for a file system that is made anew, as blkid
+# will show it: known before mkfs runs, so that what is saved for a
+# second attempt can name the new file system
+kd_new_uuid() {
+	local h
+	case "$1" in
+	vfat) h="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n' | tr a-f A-F)"; printf '%s-%s\n' "${h:0:4}" "${h:4:4}" ;;
+	*) cat /proc/sys/kernel/random/uuid ;;
+	esac
+}
+
+# kd_cleanup: nothing of the old system stays mounted, and no key stays in
+# memory, unless memory is the only place the old system's files are in
+# (an installation that failed while it formatted the root: the next run
+# in this rescue system reads them there)
 kd_cleanup() {
 	local m
 	for m in "$KD_LOOK" "$KD_DIR/top"; do
 		if mountpoint -q "$m" 2>/dev/null; then umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null || true; fi
 	done
 	if [ -s "$KD_DIR/read-only" ]; then blockdev --setrw "$(cat "$KD_DIR/read-only")" 2>/dev/null || true; rm -f "$KD_DIR/read-only"; fi
-	rm -rf "$KD_DIR/old"
+	[ -e "$KD_DIR/unsaved" ] || rm -rf "${KD_DIR:?}/old"
 	return 0
 }
 
@@ -1194,31 +1564,60 @@ kd_confirmed() {
 }
 
 # kd_may_format DEV FS: format()'s guard in keep mode: the device is one
-# the confirmed plan formats, and still holds what the plan saw there
+# the confirmed plan formats, and still holds what the plan saw there;
+# each once
 kd_may_format() {
-	local e u
+	local e u i
 	case "$2" in ext4|xfs|btrfs|vfat) ;; *) die "keep-data: $1 as $2: not a file system keep-data makes" ;; esac
-	for e in "${KD_FORMAT[@]:-}"; do
+	for i in "${!KD_FORMAT[@]}"; do
+		e="${KD_FORMAT[$i]}"
 		[ "${e%% *}" = "$1" ] || continue
 		u="$(kd_fact_uuid "$1")"
 		[ "$u" = "${e#* }" ] || die "keep-data: $1 is not what the confirmed plan saw (UUID ${e#* } then, ${u:-none} now): not formatted"
+		unset "KD_FORMAT[$i]"
 		return 0
 	done
 	die "keep-data: $1 is not in the confirmed plan: not formatted"
 }
 
+# kd_check_write: once more, before the first write, what the plan's
+# rules already say: no device is formatted twice, and none that the
+# root (kept, or a subvolume), /boot or the EFI system partition is on
+# beside its own row
+kd_check_write() {
+	local bad
+	bad="$(jq -r '([.format[] | select(.how == "mkfs") | .device] | group_by(.) | map(select(length > 1) | .[0])) as $twice
+		| ([.format[] | select(.how == "mkfs" and .mountpoint != "/") | .device]) as $others
+		| ([(.root.device), (.boot.esp | select(. != ""))] | map(select(. as $d | $others | index($d) != null))) as $own
+		| ($twice + $own) | unique | join(", ")' <<< "$kd_plan")"
+	[ -z "$bad" ] || die "keep-data: the plan formats $bad twice, or under the root or the EFI system partition: nothing is written (a fault of the installer: report it)"
+}
+
 # kd_save_old: what the new system takes over from the old root, into
-# memory before the root goes: its fstab and crypttab (for a second
-# attempt after a failed one), the key files crypttab names, the host ID
-# and the pool cache of ZFS
+# memory before the root goes ($KD_DIR/old, as it is then saved on the
+# root's file system for a second attempt): its fstab, with the devices
+# the plan found for kernel names and for what it formats named by their
+# UUIDs, its crypttab and the key files crypttab names, the host ID and
+# the pool cache of ZFS, the plan that was confirmed, and the state: the
+# root device and subvolume, the date, how far the installation came. A
+# second attempt keeps what the first saved, its plan included
 kd_save_old() {
-	local dev sub fs o="" b old="$KD_DIR/old" f k
-	dev="$(jq -r .root.device <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"; fs="$(jq -r .root.was <<< "$kd_plan")"
-	[ "$fs" != btrfs ] || { o=subvolid=5; [ -z "$sub" ] || o="subvol=/$sub"; }
-	rm -rf "$old"; mkdir -p "$old/etc"; chmod 700 "$old"
+	local dev sub fs o="" b old="$KD_DIR/old" f k t
+	dev="$(jq -r .root.device <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"; fs="$(jq -r '.root.was // ""' <<< "$kd_plan")"
+	if [ "$(jq -r .private.ram <<< "$kd_plan")" = true ]; then
+		kd_marker_ok "$old" || die "keep-data: what this rescue system held of the old system in memory is gone"
+		return 0
+	fi
+	[ "$fs" != btrfs ] || o=subvolid=5
+	rm -rf "${KD_DIR:?}/old" "${KD_DIR:?}/unsaved"; mkdir -p "$old/etc"; chmod 700 "$old"
 	kd_look "$dev" "$fs" "$o" || die "keep-data: the old root $dev cannot be mounted"
-	b="$KD_LOOK"
-	if [ -f "$b/.ump-keep-data/etc/fstab" ]; then b="$b/.ump-keep-data"; fi
+	if [ "$(jq -r '.resumed // false' <<< "$kd_plan")" = true ]; then
+		kd_marker_ok "$KD_LOOK/$KD_MARK" || die "keep-data: what the interrupted installation saved on $dev is gone or damaged"
+		cp -a "$KD_LOOK/$KD_MARK/." "$old/"
+		kd_unlook
+		return 0
+	fi
+	b="$KD_LOOK${sub:+/$sub}"
 	for f in etc/fstab etc/crypttab etc/mdadm/mdadm.conf etc/mdadm.conf etc/hostid etc/hostname etc/zfs/zpool.cache; do
 		if [ -f "$b/$f" ] && [ ! -L "$b/$f" ]; then mkdir -p "$old/$(dirname "$f")"; cp -a "$b/$f" "$old/$f"; fi
 	done
@@ -1233,79 +1632,195 @@ kd_save_old() {
 		cp -a "$b$k" "$old$k"
 	done < <(jq -r '.private.keyfiles[].path' <<< "$kd_plan")
 	kd_unlook
+	# the fstab as a second attempt reads it
+	while IFS=$'\x1f' read -r f k t; do
+		[ -n "$f" ] || continue
+		awk -v s="$f" -v m="$k" -v t="$t" '{x = $2; sub(/\/+$/, "", x)} $1 == s && (x == m || $2 == m) && !/^[ \t]*#/ {$1 = t} {print}' "$old/etc/fstab" > "$old/etc/fstab.new"
+		mv "$old/etc/fstab.new" "$old/etc/fstab"
+	done < <(jq -r '.private.resolved[] | [.spec, .mountpoint, .to] | join("\u001f")' <<< "$kd_plan")
+	kd_public > "$old/plan.json"
+	printf 'device=%s\nsubvolume=%s\nstamp=%s\nroot=old\naside=\nuuid_old=%s\nuuid_new=\n' "$dev" "$sub" "$KD_STAMP" "$(jq -r '.root.uuid // ""' <<< "$kd_plan")" > "$old/state"
+	(cd "$old" && sha256sum etc/fstab plan.json > SHA256SUMS)
+}
+
+# kd_state_set DIR KEY VALUE...: new values in a state, the file replaced
+# whole, and on the disk before the step it announces
+kd_state_set() {
+	local d="$1"; shift
+	cp "$d/state" "$d/state.new"
+	while [ $# -ge 2 ]; do
+		{ grep -v "^$1=" "$d/state.new" || true; printf '%s=%s\n' "$1" "$2"; } > "$d/state.tmp"
+		mv "$d/state.tmp" "$d/state.new"; shift 2
+	done
+	sync "$d/state.new" 2>/dev/null || true
+	mv "$d/state.new" "$d/state"
+	sync -f "$d" 2>/dev/null || sync
+}
+
+# kd_marker_write TOP: what kd_save_old holds, onto the root's file
+# system mounted at TOP: under another name first, on the disk, then
+# under its own. From then on a second attempt finds the old system's
+# files there, and the copy in memory is no longer the only one
+kd_marker_write() {
+	local m="${1:?}/$KD_MARK"
+	if [ -d "$m" ] && [ ! -L "$m" ] && kd_marker_ok "$m"; then
+		# a second attempt: what the first saved stays, with the state of this one
+		cp "$KD_DIR/old/state" "$m/state.new" || die "keep-data: the state cannot be saved on the root ($m)"
+		sync "$m/state.new" 2>/dev/null || true
+		mv "$m/state.new" "$m/state"
+	else
+		rm -rf "$m" "$m.new"
+		mkdir -m 700 "$m.new" || die "keep-data: the old system's files cannot be saved on the root ($m)"
+		cp -a "$KD_DIR/old/." "$m.new/" || die "keep-data: the old system's files cannot be saved on the root ($m)"
+		sync -f "$m.new" 2>/dev/null || sync
+		mv "$m.new" "$m" || die "keep-data: the old system's files cannot be saved on the root ($m)"
+	fi
+	sync -f "$1" 2>/dev/null || sync
+	kd_marker_ok "$m" || die "keep-data: what was saved of the old system on the root ($m) does not read back"
+	rm -f "$KD_DIR/unsaved"
 }
 
 # kd_write: the storage of the confirmed plan: the root made anew (a file
 # system, or its btrfs subvolume) or its old system moved aside, /boot
 # and what --format names formatted. Nothing else is written to: no
-# partition table, no array, no volume group
+# partition table, no array, no volume group. Before the first step that
+# destroys, the old system's files are saved for a second attempt at the
+# top of the root's file system ($KD_MARK); where the root itself is
+# formatted, they are in memory until the new file system has them
+# ($KD_DIR/unsaved says so, and the next run in this rescue system reads
+# them there)
 kd_write() {
-	local dev fs label mp sub top="$KD_DIR/top" e p old root was now
-	KD_STAMP="$(date -u +%Y%m%d-%H%M%S)"
+	local dev fs mp sub top="$KD_DIR/top" e p old="$KD_DIR/old" was new first aside sroot id now dflt
+	KD_STAMP="$(date -u +%Y%m%d-%H%M%S)"; now="$KD_STAMP"
 	# what format() may make anew: the plan's devices, each with the UUID it had
 	mapfile -t KD_FORMAT < <(jq -r '.format[] | select(.how == "mkfs") | "\(.device) \(.uuid // "")"' <<< "$kd_plan")
+	kd_check_write
 	kd_save_old
+	# a second attempt: how far the first one came, and the name it gave what it set aside
+	sroot="$(kd_state "$old" root)"; aside="$(kd_state "$old" aside)"
+	dev="$(jq -r .root.device <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"; fs="$(jq -r '.root.was // ""' <<< "$kd_plan")"
+	# the default subvolume that the new root subvolume is to be: this plan's word, or the first attempt's
+	dflt="$(kd_state "$old" default)"; [ "$(jq -r .private.default.restore <<< "$kd_plan")" != true ] || dflt=restore
 	log "keep-data: writing begins"
 	kd_wrote=1
-	for dev in $(jq -r '.private.rw[]' <<< "$kd_plan"); do mdadm --readwrite "$dev" >/dev/null 2>&1 || true; done
-	dev="$(jq -r .root.device <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"; fs="$(jq -r .root.was <<< "$kd_plan")"
+	for p in $(jq -r '.private.rw[]' <<< "$kd_plan"); do
+		mdadm --readwrite "$p" >/dev/null 2>&1 || true
+		[ "$(blockdev --getro "$p" 2>/dev/null)" != 1 ] || die "keep-data: the array $p stays read-only (mdadm --readwrite $p)"
+	done
 	mkdir -p "$top"
 	if [ "$fs" = btrfs ] && [ -n "$sub" ]; then
 		mount -t btrfs -o subvolid=5 "$dev" "$top" || die "keep-data: $dev cannot be mounted"
-		[ -d "$top/$sub" ] || die "keep-data: $dev has no subvolume $sub any more"
 		if [ "$keep_root" = 1 ]; then
-			log "the old root subvolume $sub is now $sub-old-$KD_STAMP"
-			mv "$top/$sub" "$top/$sub-old-$KD_STAMP" || die "keep-data: the subvolume $sub cannot be renamed"
+			if [ "$sroot" = aside ] && [ -n "$aside" ] && [ -d "$top/$aside" ]; then
+				# a second attempt: the old root is aside already; what the first made in its place goes aside too
+				KD_STAMP="${aside##*-old-}"
+				kd_marker_write "$top"
+				if [ -d "$top/$sub" ]; then
+					log "the subvolume $sub of the interrupted installation is now $sub-failed-$now (it can be deleted)"
+					mv "$top/$sub" "$top/$sub-failed-$now" || die "keep-data: the subvolume $sub cannot be renamed"
+				fi
+			else
+				[ -d "$top/$sub" ] || die "keep-data: $dev has no subvolume $sub any more"
+				kd_state_set "$old" stamp "$KD_STAMP" root old aside "$sub-old-$KD_STAMP" default "$dflt"
+				kd_marker_write "$top"
+				log "the old root subvolume $sub is now $sub-old-$KD_STAMP"
+				mv "$top/$sub" "$top/$sub-old-$KD_STAMP" || die "keep-data: the subvolume $sub cannot be renamed"
+				kd_state_set "$top/$KD_MARK" root aside
+			fi
 		else
-			log "deleting the old root subvolume $sub of $dev"
-			# the subvolumes inside it first, the deepest first
-			while IFS= read -r p; do
-				[ -n "$p" ] || continue
-				btrfs subvolume delete "$top/$p" >/dev/null || die "keep-data: the subvolume $p cannot be deleted"
-			done < <(btrfs subvolume list "$top" | sed -n 's/^ID [0-9]* gen [0-9]* top level [0-9]* path //p' | awk -v s="$sub/" 'index($0, s) == 1 {print length($0) "\t" $0}' | sort -rn | cut -f2-)
-			btrfs subvolume delete "$top/$sub" >/dev/null || die "keep-data: the subvolume $sub cannot be deleted"
-			btrfs subvolume sync "$top" >/dev/null 2>&1 || true
+			kd_state_set "$old" stamp "$KD_STAMP" root gone default "$dflt"
+			kd_marker_write "$top"
+			if [ "$(jq -r .private.default.reset <<< "$kd_plan")" = true ]; then
+				log "the default subvolume of $dev is its top while $sub is replaced"
+				btrfs subvolume set-default 5 "$top" >/dev/null || die "keep-data: the default subvolume of $dev cannot be changed"
+			fi
+			if [ -d "$top/$sub" ]; then
+				log "deleting the old root subvolume $sub of $dev"
+				# the subvolumes inside it first, the deepest first
+				while IFS= read -r p; do
+					[ -n "$p" ] || continue
+					btrfs subvolume delete "$top/$p" >/dev/null || die "keep-data: the subvolume $p cannot be deleted"
+				done < <(btrfs subvolume list "$top" | sed -n 's/^ID [0-9]* gen [0-9]* top level [0-9]* path //p' | awk -v s="$sub/" 'index($0, s) == 1 {print length($0) "\t" $0}' | sort -rn | cut -f2-)
+				btrfs subvolume delete "$top/$sub" >/dev/null || die "keep-data: the subvolume $sub cannot be deleted"
+				btrfs subvolume sync "$top" >/dev/null 2>&1 || true
+			fi
 		fi
 		btrfs subvolume create "$top/$sub" >/dev/null || die "keep-data: the subvolume $sub cannot be made"
-		old="$top/$sub"
+		if [ "$dflt" = restore ]; then
+			id="$(btrfs subvolume list "$top" | awk -v s="$sub" '{p = $0; sub(/^ID [0-9]* gen [0-9]* top level [0-9]* path /, "", p)} p == s {print $2}')"
+			if [ -n "$id" ] && btrfs subvolume set-default "$id" "$top" >/dev/null; then log "the default subvolume of $dev is the new $sub"
+			else warn "the default subvolume of $dev could not be set to the new $sub: it is the top of the file system"; fi
+		fi
 	elif [ "$keep_root" = 1 ]; then
 		mount -t "$fs" "$dev" "$top" || die "keep-data: the old root $dev cannot be mounted"
-		old="$top/old-root-$KD_STAMP"
-		log "the old system moves into /old-root-$KD_STAMP on $dev"
-		mkdir "$old" || die "keep-data: $old cannot be made"
+		if [ "$sroot" = aside ] && [ -n "$aside" ] && [ -d "$top/$aside" ]; then
+			# a second attempt: the old system is aside already, whole; what the first unpacked goes aside too
+			KD_STAMP="${aside#old-root-}"
+			kd_marker_write "$top"
+			first="$top/failed-install-$now"
+			log "what the interrupted installation unpacked moves into /failed-install-$now on $dev (it can be removed)"
+		else
+			# (a second attempt that finds the move begun carries on into the same directory)
+			if [ "$sroot" = old ] && [ -n "$aside" ] && [ -d "$top/$aside" ]; then KD_STAMP="${aside#old-root-}"; fi
+			kd_state_set "$old" stamp "$KD_STAMP" root old aside "old-root-$KD_STAMP"
+			kd_marker_write "$top"
+			first="$top/old-root-$KD_STAMP"
+			log "the old system moves into /old-root-$KD_STAMP on $dev"
+		fi
+		mkdir -p "$first" || die "keep-data: $first cannot be made"
 		for e in "$top"/* "$top"/.[!.]* "$top"/..?*; do
 			[ -e "$e" ] || [ -L "$e" ] || continue
-			case "${e##*/}" in lost+found|old-root-*|.ump-keep-data) continue ;; esac
-			mv "$e" "$old/" || die "keep-data: ${e#"$top"} cannot be moved aside; what was moved is in /old-root-$KD_STAMP of $dev"
+			case "${e##*/}" in lost+found|old-root-*|failed-install-*|"$KD_MARK"|"$KD_MARK".new) continue ;; esac
+			mv "$e" "$first/" || die "keep-data: ${e#"$top"} cannot be moved aside; what was moved is in /${first##*/} of $dev, and the same command carries on"
 		done
-		old="$top"
+		kd_state_set "$top/$KD_MARK" root aside
 	else
+		new="$(kd_new_uuid "$(jq -r .root.filesystem <<< "$kd_plan")")"
+		kd_state_set "$old" stamp "$KD_STAMP" root gone uuid_new "$new"
+		# from here until the new file system holds them, the old system's files are in memory alone
+		echo "$dev" > "$KD_DIR/unsaved"
 		log "formatting $dev ($(jq -r .root.filesystem <<< "$kd_plan"), /)"
-		format "$dev" "$(jq -r .root.filesystem <<< "$kd_plan")" ""
+		format "$dev" "$(jq -r .root.filesystem <<< "$kd_plan")" "$(jq -r --arg d "$dev" '.private.labels[$d] // ""' <<< "$kd_plan")" "$new"
 		udevadm settle
 		mount "$dev" "$top" || die "keep-data: the new root $dev cannot be mounted"
-		old="$top"
+		kd_marker_write "$top"
 	fi
-	# the old system's files for a second attempt, should this one fail
-	rm -rf "$old/.ump-keep-data"
-	mkdir -m 700 "$old/.ump-keep-data"
-	cp -a "$KD_DIR/old/." "$old/.ump-keep-data/"
-	umount "$top" || die "keep-data: $dev cannot be unmounted"
-	root="$dev"
-	while IFS=$'\x1f' read -r dev fs mp was label; do
+	# the other file systems that are made anew: each with a UUID that is
+	# written down first, beside the old one, so that a second attempt
+	# reads the saved fstab's entry as the new file system
+	while IFS=$'\x1f' read -r p fs mp was; do
 		[ "$mp" != / ] || continue
-		log "formatting $dev ($fs, $mp)"
-		format "$dev" "$fs" "$label"
-		udevadm settle
-		# its UUID is new: the fstab saved for a second attempt names it by that
-		now="$(kd_fact_uuid "$dev")"
-		if [ -n "$was" ] && [ -n "$now" ]; then
-			mount ${sub:+-o "subvol=/$sub"} "$root" "$top" || die "keep-data: $root cannot be mounted"
-			sed -i "s/$was/$now/gI" "$top/.ump-keep-data/etc/fstab"
-			umount "$top" || die "keep-data: $root cannot be unmounted"
+		new="$(kd_new_uuid "$fs")"
+		if [ -n "$was" ]; then
+			printf '%s %s\n' "$was" "$new" >> "$top/$KD_MARK/formats"
+			sync "$top/$KD_MARK/formats" 2>/dev/null || true
+			sync -f "$top" 2>/dev/null || sync
 		fi
-	done < <(jq -r '.format[] | select(.how == "mkfs") | [.device, .filesystem, .mountpoint, (.uuid // ""), (.label // "")] | join("\u001f")' <<< "$kd_plan")
+		log "formatting $p ($fs, $mp)"
+		format "$p" "$fs" "$(jq -r --arg d "$p" '.private.labels[$d] // ""' <<< "$kd_plan")" "$new"
+		udevadm settle
+	done < <(jq -r '.format[] | select(.how == "mkfs") | [.device, .filesystem, .mountpoint, (.uuid // "")] | join("\u001f")' <<< "$kd_plan")
+	umount "$top" || die "keep-data: $dev cannot be unmounted"
 	udevadm settle
+}
+
+# kd_done: the installation is complete: what was saved of the old system
+# for a second attempt goes, the key files with it
+kd_done() {
+	local dev sub top="$KD_DIR/top"
+	dev="$(jq -r .root.device <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"
+	if [ -n "$sub" ]; then
+		mkdir -p "$top"
+		if mount -t btrfs -o subvolid=5 "$dev" "$top"; then
+			rm -rf "${top:?}/$KD_MARK" "${top:?}/$KD_MARK.new"
+			umount "$top" || true
+		else
+			warn "the top of $dev could not be mounted: /$KD_MARK there (the old system's fstab and the key files of its crypttab) is to be removed by hand"
+		fi
+	else
+		rm -rf "${TARGET:?}/$KD_MARK" "${TARGET:?}/$KD_MARK.new"
+	fi
+	rm -rf "${KD_DIR:?}/old" "${KD_DIR:?}/unsaved"
 }
 
 # kd_mounts: what the new system is unpacked into: the root, /boot, the
@@ -1344,7 +1859,8 @@ kd_esp_aside() {
 # UUID; one that was formatted has a new one
 kd_fstab() {
 	local dev fs opts sub u spec mp type dump pass action nofail new last
-	echo "# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)"
+	if [ "$keep_root" = 1 ]; then echo "# /etc/fstab, written by UMP (keep-data: the new system beside the old one, which was set aside; the old system's other volumes as they were)"
+	else echo "# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)"; fi
 	dev="$(jq -r .root.device <<< "$kd_plan")"; fs="$(jq -r .root.filesystem <<< "$kd_plan")"; sub="$(jq -r .root.subvolume <<< "$kd_plan")"
 	# a root that was not made anew keeps the options it had
 	opts="$(kd_jq '.private.root_entry | if . == null then "" else (.options | opts | map(select((startswith("subvol=") or startswith("subvolid=")) | not)) | join(",")) end
@@ -1367,12 +1883,13 @@ kd_fstab() {
 		esac
 		printf '%s  %s  %s  %s  %s %s\n' "$spec" "$mp" "$type" "$opts" "$dump" "$pass"
 	done < <(kd_jq '.private.entries | (map(select(.action == "swap")) + map(select(.action == "keep" or .action == "text" or .action == "aside" or .action == "format")))[]
-		| [.action, .spec, (if .action == "aside" then .to else .mountpoint end), (if .action == "format" then .fs else .type end),
+		| [.action, .spec, (.to // .mountpoint), (if .action == "format" then .fs else .type end),
 		   (if .nofail == true then (.options | with_opt("nofail")) else .options end), .dump, .pass, (.device // "-"), (.spec_new // .spec)] | join("\u001f")' -r <<< "$kd_plan")
 }
 
 # kd_crypttab: the new /etc/crypttab: the old entries whose devices are
-# there; those that cannot be opened unattended with nofail
+# there (one named as the kernel named it by its UUID or PARTUUID);
+# those that cannot be opened unattended with nofail
 kd_crypttab() {
 	kd_jq '.private.crypttab | map(select(.keep)) | if length == 0 then empty else
 		"# /etc/crypttab, written by UMP (keep-data: the old system'"'"'s entries)",
@@ -1407,9 +1924,10 @@ kd_carry() {
 		else
 			mkdir -p "$d" 2>/dev/null || warn "the mountpoint $mp could not be made"
 		fi
-	done < <(jq -r '.private.entries[] | select(.action == "keep" or .action == "text" or .action == "aside") | if .action == "aside" then .to else .mountpoint end' <<< "$kd_plan")
-	# a bind mount's source on the root is gone with the old root: an
-	# empty one, so that the mount does not fail the boot
+	done < <(jq -r '.private.entries[] | select(.action == "keep" or .action == "text" or .action == "aside") | (.to // .mountpoint)' <<< "$kd_plan")
+	# a bind mount's source on the root is gone with the old root, one on
+	# a formatted volume with what that held: an empty one, so that the
+	# mount does not fail the boot
 	while IFS= read -r spec; do
 		d="$TARGET$(printf "${spec//%/%%}")"
 		if [ ! -e "$d" ]; then mkdir -p "$d" 2>/dev/null || warn "the source $spec of a bind mount could not be made"; fi
@@ -1464,6 +1982,57 @@ kd_home_take() {
 	if [ -f "$d/.ssh/authorized_keys" ] && [ ! -L "$d/.ssh/authorized_keys" ]; then
 		cp -p "$d/.ssh/authorized_keys" "$d/.ssh/authorized_keys.old-$KD_STAMP"
 	fi
+}
+
+# kd_keys_outside: the profile's users' keys also where no kept volume
+# hides them: /home or /root that the installer could not mount (of the
+# network, encrypted, a ZFS dataset) covers the home directories it made
+# on the root, and nobody would get in
+kd_keys_outside() {
+	local n name
+	[ "$(jq -r .private.keys_outside <<< "$kd_plan")" = true ] || return 0
+	mkdir -p -m 755 "$TARGET/etc/ssh/authorized_keys" "$TARGET/etc/ssh/sshd_config.d"
+	n="$(jq '.users | length' <<< "$spec")"
+	for ((i = 0; i < n; i++)); do
+		name="$(jq -r ".users[$i].name" <<< "$spec")"
+		jq -r ".users[$i].keys[]" <<< "$spec" | awk '!seen[$0]++' > "$TARGET/etc/ssh/authorized_keys/$name"
+		chmod 644 "$TARGET/etc/ssh/authorized_keys/$name"
+	done
+	printf '%s\n' "# UMP (keep-data): /home or /root is a volume of the old system that the" \
+		"# installer could not mount. The keys of the profile's users are in" \
+		"# /etc/ssh/authorized_keys/NAME too, so that they get in whatever that" \
+		"# volume holds." \
+		"AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys/%u" > "$TARGET/etc/ssh/sshd_config.d/20-ump-keep-data.conf"
+	log "ssh: the users' keys also in /etc/ssh/authorized_keys (a kept volume may cover their home directories)"
+}
+
+# kd_mdadm_conf: the arrays for the new system's mdadm.conf: those that
+# are there, each under the name the old mdadm.conf gave it, else the one
+# it has here, and by its UUID alone (no name of another host)
+kd_mdadm_conf() {
+	local old="$KD_DIR/old" line u name f
+	mdadm --detail --scan | while IFS= read -r line; do
+		u="$(printf '%s\n' "$line" | sed -n 's/.*UUID=\([0-9a-fA-F:]*\).*/\1/p')"
+		name="$(printf '%s\n' "$line" | awk '{print $2}')"
+		[ -n "$u" ] || { printf '%s\n' "$line"; continue; }
+		for f in "$old/etc/mdadm/mdadm.conf" "$old/etc/mdadm.conf"; do
+			[ -f "$f" ] || continue
+			name="$(awk -v u="$u" '$1 == "ARRAY" {for (i = 3; i <= NF; i++) if (tolower($i) == "uuid=" tolower(u)) {print $2; exit}}' "$f" | grep . || echo "$name")"
+		done
+		printf 'ARRAY %s%s UUID=%s\n' "$name" "$(printf '%s\n' "$line" | sed -n 's/.*\( metadata=[^ ]*\).*/\1/p')" "$u"
+	done
+}
+
+# kd_verify_fstab: the new fstab, read by the new system's findmnt: what
+# it finds wrong is a warning (an entry that cannot be mounted stops the
+# boot unless it has nofail); the volumes crypttab opens are not there yet
+kd_verify_fstab() {
+	local out
+	out="$(in_target findmnt --verify 2>&1 | awk -v skip="$(jq -r '[.private.crypttab[] | select(.keep) | "/dev/mapper/" + .name] | join(" ")' <<< "$kd_plan")" '
+		BEGIN {n = split(skip, s, " "); for (i = 1; i <= n; i++) crypt[s[i]] = 1}
+		/^[^ ]/ {target = $0; next}
+		/\[E\]/ {for (c in crypt) if (index($0, c)) next; print target ":" $0}')" || true
+	[ -z "$out" ] || { warn "findmnt --verify finds fault with the new /etc/fstab (an entry that cannot be mounted stops the boot, unless it has nofail):"; printf '%s\n' "$out" | sed 's/^/install.sh:   /' >&2; }
 }
 
 # kd_packages: the packages what is kept needs in the new system
@@ -1848,8 +2417,12 @@ if [ "$keep" = 1 ]; then
 	while IFS= read -r line; do log "$line"; done < <(kd_text)
 	log "plan: $(jq -r .hash <<< "$kd_plan") (sha256; --confirm takes it)"
 	if [ "$dry" = 1 ]; then
-		if [ -n "$plan_file" ]; then kd_public > "$plan_file"; log "plan file: $plan_file"; fi
-		log "dry run: stopping here, no disk was touched"
+		if [ -n "$plan_file" ]; then
+			kd_public > "$plan_file"; log "plan file: $plan_file"
+			log "the plan is made: stopping here, no disk was touched; --confirm with its hash installs it"
+		else
+			log "dry run: stopping here, no disk was touched"
+		fi
 		exit 0
 	fi
 	kd_confirmed
@@ -1882,6 +2455,9 @@ kill_chrooted() {
 # --keep-data, which calls kd_write instead.
 wipe_disks() {
 [ "$keep" = 0 ] || die "keep-data: the disks are never wiped"
+# (what a keep-data installation that failed here still held in memory
+# of an old system is of no use once the disks are wiped)
+rm -rf /run/ump-keep-data
 log "releasing the disks"
 kill_chrooted
 swapoff -a 2>/dev/null || true
@@ -1963,17 +2539,17 @@ fi
 return 0
 }
 
-format() { # format DEV FS LABEL
-	local l=()
+format() { # format DEV FS LABEL [UUID]
+	local l=() u="${4:-}"
 	# keep-data: only a device the confirmed plan names, still as the plan saw it
 	[ "$keep" = 0 ] || kd_may_format "$1" "$2"
 	case "$2" in
-	efi|vfat) [ -n "$3" ] && l=(-n "$3"); mkfs.vfat -F 32 "${l[@]}" "$1" >/dev/null ;;
+	efi|vfat) [ -n "$3" ] && l=(-n "$3"); [ -z "$u" ] || l+=(-i "${u//-/}"); mkfs.vfat -F 32 "${l[@]}" "$1" >/dev/null ;;
 	# without orphan_file and metadata_csum_seed, which a current mkfs.ext4
 	# turns on and the GRUB of older releases (Ubuntu 22.04) cannot read
-	ext4) [ -n "$3" ] && l=(-L "$3"); mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed "${l[@]}" "$1" ;;
-	xfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.xfs >/dev/null || die "mkfs.xfs is missing"; mkfs.xfs -f -q "${l[@]}" "$1" ;;
-	btrfs) [ -n "$3" ] && l=(-L "$3"); command -v mkfs.btrfs >/dev/null || die "mkfs.btrfs is missing"; mkfs.btrfs -f -q "${l[@]}" "$1" >/dev/null ;;
+	ext4) [ -n "$3" ] && l=(-L "$3"); [ -z "$u" ] || l+=(-U "$u"); mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed "${l[@]}" "$1" ;;
+	xfs) [ -n "$3" ] && l=(-L "$3"); [ -z "$u" ] || l+=(-m "uuid=$u"); command -v mkfs.xfs >/dev/null || die "mkfs.xfs is missing"; mkfs.xfs -f -q "${l[@]}" "$1" ;;
+	btrfs) [ -n "$3" ] && l=(-L "$3"); [ -z "$u" ] || l+=(-U "$u"); command -v mkfs.btrfs >/dev/null || die "mkfs.btrfs is missing"; mkfs.btrfs -f -q "${l[@]}" "$1" >/dev/null ;;
 	swap) [ -n "$3" ] && l=(-L "$3"); mkswap -f "${l[@]}" "$1" >/dev/null ;;
 	lvm) pvcreate -ff -y "$1" >/dev/null ;;
 	bios|none|md) ;;
@@ -2492,6 +3068,7 @@ for ((n = 0; n < nusers; n++)); do
 	chmod 600 "$TARGET$home/.ssh/authorized_keys"
 	[ "$name" = root ] || in_target chown -R "$name:$name" "$home/.ssh"
 done
+[ "$keep" = 0 ] || kd_keys_outside
 # root over SSH only when the profile lists it with keys (the image says
 # no)
 mkdir -p "$TARGET/etc/ssh/sshd_config.d"
@@ -2529,6 +3106,7 @@ if jq -e '.firewall.policy == "drop"' >/dev/null <<< "$spec" && [ ! -x "$TARGET/
 fi
 
 [ "$keep" = 0 ] || kd_packages
+[ "$keep" = 0 ] || kd_verify_fstab
 
 # the userdata: each entry as a script under /etc/ump/userdata in the new
 # system, run there in order as root, with network; a failing one fails
@@ -2609,7 +3187,7 @@ kd_md=0; [ "$keep" = 0 ] || [ "$(jq -r .private.md <<< "$kd_plan")" != true ] ||
 if [ ${#M_LEVEL[@]} -gt 0 ] || [ "$kd_md" = 1 ]; then
 	mdadm_conf=/etc/mdadm/mdadm.conf; [ "$family" = arch ] && mdadm_conf=/etc/mdadm.conf
 	mkdir -p "$TARGET$(dirname "$mdadm_conf")"
-	mdadm --detail --scan >> "$TARGET$mdadm_conf"
+	if [ "$keep" = 1 ]; then kd_mdadm_conf >> "$TARGET$mdadm_conf"; else mdadm --detail --scan >> "$TARGET$mdadm_conf"; fi
 fi
 need_initramfs=0
 [ ${#M_LEVEL[@]} -gt 0 ] && need_initramfs=1
@@ -2640,9 +3218,17 @@ amd64)
 		done
 	done
 	# keep-data: under BIOS, the disks the plan names: those /boot is on,
-	# and those that carry GRUB now; under UEFI the ESP alone
+	# and those that carry GRUB now, where a failure is no failure of the
+	# installation: the new system starts from the first; under UEFI the
+	# ESP alone
 	if [ "$keep" = 1 ]; then
-		for x in $(jq -r '.boot.bios_disks[]' <<< "$kd_plan"); do run_in_target "grub-install (BIOS, $x)" grub-install --target=i386-pc --recheck "$x"; done
+		for x in $(jq -r '(.boot.bios_disks - .boot.bios_optional)[]' <<< "$kd_plan"); do run_in_target "grub-install (BIOS, $x)" grub-install --target=i386-pc --recheck "$x"; done
+		for x in $(jq -r '.boot.bios_optional[]' <<< "$kd_plan"); do
+			if ! out="$(in_target grub-install --target=i386-pc --recheck "$x" 2>&1)"; then
+				printf '%s\n' "$out" | tail -n 3 >&2
+				warn "grub-install on $x failed (above): it carries the old boot loader still, and a BIOS that starts from it does not find the new system"
+			fi
+		done
 	fi
 	[ "$has_efi" = 1 ] && run_in_target "grub-install (EFI)" grub-install --target=x86_64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable --no-nvram --recheck
 	;;
@@ -2818,7 +3404,7 @@ if [ "$keep" = 1 ]; then
 	# second attempt are not needed any more
 	kd_record >> "$TARGET/etc/ump/install"
 	kd_public > "$TARGET/etc/ump/keep-data.json"
-	rm -rf "$TARGET/.ump-keep-data"
+	kd_done
 fi
 chmod 644 "$TARGET/etc/ump/install"
 

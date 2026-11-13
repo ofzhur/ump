@@ -1,0 +1,176 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) on /dev/vda2, subvolume @, after an interrupted installation; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/vda2  btrfs  /  (the subvolume @ is deleted and made anew; the rest of the file system stays)
+KEEP (as they are, mounted where they were)
+  /dev/vda1  vfat   /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+  /dev/vda2  btrfs  /home  (the subvolume @home of the root's btrfs)
+  /dev/vda2  btrfs  /.snapshots  (the subvolume @snapshots of the root's btrfs)
+LOST (on the old root, beyond the system itself)
+  /etc  6M
+  /var/lib/machines  879M
+WARNINGS
+  /dev/vda2 holds an interrupted keep-data installation: the old system's fstab is the one saved there
+  /dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is
+  /dev/vda2:@snapshots/2/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is
+  /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /  btrfs  compress=zstd,subvol=/@  0 0
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /home  btrfs  subvol=/@home,compress=zstd  0 0
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots  0 0
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "resumed": true,
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "",
+    "fstab_sha256": "2e5cf318055c5d0c5607706dc95899ab1c27435b197c2aff0e186d3e4cd58f52"
+  },
+  "root": {
+    "device": "/dev/vda2",
+    "subvolume": "@",
+    "filesystem": "btrfs",
+    "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+    "size_mb": 101376,
+    "by": "detection",
+    "free_mb": 60000
+  },
+  "candidates": [
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@snapshots/1/snapshot",
+      "system": "Ubuntu 22.04.5 LTS",
+      "hostname": "",
+      "resume": false,
+      "consistent": false
+    },
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@snapshots/2/snapshot",
+      "system": "Ubuntu 22.04.5 LTS",
+      "hostname": "",
+      "resume": false,
+      "consistent": false
+    },
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "",
+      "resume": true,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/",
+      "how": "subvolume",
+      "subvolume": "@",
+      "size_mb": 101376
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/home",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "note": "the subvolume @home of the root's btrfs"
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/.snapshots",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "note": "the subvolume @snapshots of the root's btrfs"
+    }
+  ],
+  "volatile": [],
+  "aside": [],
+  "unused": [],
+  "untouched": [],
+  "dropped": [],
+  "lost": [
+    {
+      "path": "/etc",
+      "mb": 6
+    },
+    {
+      "path": "/var/lib/machines",
+      "mb": 879
+    }
+  ],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "/dev/vda2 holds an interrupted keep-data installation: the old system's fstab is the one saved there",
+    "/dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
+    "/dev/vda2:@snapshots/2/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
+    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/",
+      "type": "btrfs",
+      "options": "subvol=@,compress=zstd",
+      "device": "/dev/vda2",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/home",
+      "type": "btrfs",
+      "options": "subvol=/@home,compress=zstd",
+      "device": "/dev/vda2",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/.snapshots",
+      "type": "btrfs",
+      "options": "subvol=@snapshots",
+      "device": "/dev/vda2",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    }
+  ],
+  "hash": "6a7c2c0212cf1785e75952347a0c312625c7293c2b4fcb3c60d768a5ca3e6453"
+}

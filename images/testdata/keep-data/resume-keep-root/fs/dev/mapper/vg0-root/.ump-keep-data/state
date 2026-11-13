@@ -1,0 +1,7 @@
+device=/dev/mapper/vg0-root
+subvolume=
+stamp=20260101-000000
+root=aside
+aside=old-root-20260101-000000
+uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d
+uuid_new=

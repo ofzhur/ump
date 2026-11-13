@@ -12,7 +12,7 @@ WARNINGS
   /dev/vda2:@snapshots/2/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is
   /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
 --- /etc/fstab
-# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+# /etc/fstab, written by UMP (keep-data: the new system beside the old one, which was set aside; the old system's other volumes as they were)
 UUID=715fc437-210c-5242-bc49-5a07f9b90747  /  btrfs  compress=zstd,subvol=/@  0 0
 UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
 UUID=715fc437-210c-5242-bc49-5a07f9b90747  /home  btrfs  subvol=/@home,compress=zstd  0 0
@@ -38,6 +38,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "subvolume": "@",
     "filesystem": "btrfs",
     "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
     "size_mb": 101376,
     "by": "detection",
     "free_mb": 60000
@@ -72,6 +73,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "esp": "/dev/vda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -83,21 +85,25 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/home",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @home of the root's btrfs"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/.snapshots",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @snapshots of the root's btrfs"
     }
   ],
+  "volatile": [],
   "aside": [
     {
       "device": "/dev/vda2",
@@ -111,6 +117,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
   "untouched": [],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
@@ -151,5 +158,5 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "action": "esp"
     }
   ],
-  "hash": "f85f90cc825f173c9eea200b02b40390496769e6bacdd6da26a56afe4eda8716"
+  "hash": "7babff2c5b9fc0ffdb722dd5d3f79dd7d07919b254cd4444b0e3fd368642a6af"
 }

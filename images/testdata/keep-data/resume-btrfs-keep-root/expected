@@ -1,0 +1,175 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) on /dev/vda2, subvolume @, after an interrupted installation; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  nothing
+KEEP (as they are, mounted where they were)
+  /dev/vda1  vfat   /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+  /dev/vda2  btrfs  /home  (the subvolume @home of the root's btrfs)
+  /dev/vda2  btrfs  /.snapshots  (the subvolume @snapshots of the root's btrfs)
+ASIDE (kept, under another name)
+  /dev/vda2  btrfs  @ -> @-old-DATE  (renamed)
+WARNINGS
+  /dev/vda2 holds an interrupted keep-data installation: the old system's fstab is the one saved there
+  /dev/vda2:@-old-20260101-000000 (Ubuntu 22.04.5 LTS) is the old system, which the interrupted installation set aside: left as it is
+  /dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is
+  /dev/vda2:@snapshots/2/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is
+  /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the new system beside the old one, which was set aside; the old system's other volumes as they were)
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /  btrfs  compress=zstd,subvol=/@  0 0
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /home  btrfs  subvol=/@home,compress=zstd  0 0
+UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots  0 0
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": true,
+    "format": []
+  },
+  "resumed": true,
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "",
+    "fstab_sha256": "2e5cf318055c5d0c5607706dc95899ab1c27435b197c2aff0e186d3e4cd58f52"
+  },
+  "root": {
+    "device": "/dev/vda2",
+    "subvolume": "@",
+    "filesystem": "btrfs",
+    "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+    "size_mb": 101376,
+    "by": "detection",
+    "free_mb": 60000
+  },
+  "candidates": [
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@-old-20260101-000000",
+      "system": "Ubuntu 22.04.5 LTS",
+      "hostname": "btr",
+      "resume": false,
+      "consistent": false
+    },
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@snapshots/1/snapshot",
+      "system": "Ubuntu 22.04.5 LTS",
+      "hostname": "",
+      "resume": false,
+      "consistent": false
+    },
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@snapshots/2/snapshot",
+      "system": "Ubuntu 22.04.5 LTS",
+      "hostname": "",
+      "resume": false,
+      "consistent": false
+    },
+    {
+      "device": "/dev/vda2",
+      "subvolume": "@",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "",
+      "resume": true,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/home",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "note": "the subvolume @home of the root's btrfs"
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/.snapshots",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "note": "the subvolume @snapshots of the root's btrfs"
+    }
+  ],
+  "volatile": [],
+  "aside": [
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "from": "@",
+      "mountpoint": "@-old-DATE",
+      "how": "renamed"
+    }
+  ],
+  "unused": [],
+  "untouched": [],
+  "dropped": [],
+  "lost": [],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "/dev/vda2 holds an interrupted keep-data installation: the old system's fstab is the one saved there",
+    "/dev/vda2:@-old-20260101-000000 (Ubuntu 22.04.5 LTS) is the old system, which the interrupted installation set aside: left as it is",
+    "/dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
+    "/dev/vda2:@snapshots/2/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
+    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/",
+      "type": "btrfs",
+      "options": "subvol=@,compress=zstd",
+      "device": "/dev/vda2",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/home",
+      "type": "btrfs",
+      "options": "subvol=/@home,compress=zstd",
+      "device": "/dev/vda2",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/.snapshots",
+      "type": "btrfs",
+      "options": "subvol=@snapshots",
+      "device": "/dev/vda2",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    }
+  ],
+  "hash": "ae17676090c98aadff7dce31b7b9e6c4d8de53ac2a108fbd2df3dc9873b96a0a"
+}

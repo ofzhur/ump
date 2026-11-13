@@ -1,0 +1,6 @@
+refused: --root /dev/vda3 is a member of a ZFS pool: a ZFS root is not supported
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--root /dev/vda3 is a member of a ZFS pool: a ZFS root is not supported"
+}

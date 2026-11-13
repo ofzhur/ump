@@ -1,0 +1,6 @@
+refused: the old /boot is the subvolume @boot of the root's btrfs: the new /boot would be in the root subvolume, and the old one mounted over it; not supported in this version
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot is the subvolume @boot of the root's btrfs: the new /boot would be in the root subvolume, and the old one mounted over it; not supported in this version"
+}

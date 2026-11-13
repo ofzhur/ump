@@ -1,0 +1,6 @@
+refused: --root /dev/vda2 is a btrfs with subvolumes and no old system at its top; name the subvolume: --root /dev/vda2:SUBVOLUME
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--root /dev/vda2 is a btrfs with subvolumes and no old system at its top; name the subvolume: --root /dev/vda2:SUBVOLUME"
+}

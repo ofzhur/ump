@@ -40,6 +40,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "subvolume": "@",
     "filesystem": "btrfs",
     "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
     "size_mb": 101376,
     "by": "detection",
     "free_mb": 60000
@@ -74,6 +75,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "esp": "/dev/vda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -94,21 +96,25 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/home",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @home of the root's btrfs"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/.snapshots",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @snapshots of the root's btrfs"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [],
@@ -123,6 +129,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "mb": 879
     }
   ],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/vda2:@snapshots/1/snapshot (Ubuntu 22.04.5 LTS) holds an operating system's files too, a copy or snapshot whose fstab names another root: left as it is",
@@ -164,5 +171,5 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "action": "esp"
     }
   ],
-  "hash": "b0d014a7480c2ff3525722e4155dffa08dc60983b4844b27ad52a71a5d9bc0f2"
+  "hash": "1bc867685076beb937970d94ea6e8a20563766c1cb670374e98e8f5ae297934b"
 }

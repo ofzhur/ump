@@ -1,0 +1,10 @@
+# /etc/fstab: static file system information.
+UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+/dev/mapper/vg0-var /var ext4 defaults 0 2
+/dev/vg0/data /data xfs defaults,noatime 0 2
+LABEL=plain /srv/plain ext4 defaults 0 2
+/dev/mapper/vg0-swap none swap sw 0 0
+tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+tank/home /home zfs defaults 0 0

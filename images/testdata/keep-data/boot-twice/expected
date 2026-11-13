@@ -1,0 +1,6 @@
+refused: the old fstab mounts /boot twice
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab mounts /boot twice"
+}

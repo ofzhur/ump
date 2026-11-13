@@ -1,0 +1,6 @@
+refused: the old fstab names /boot by a kernel name (/dev/sda1), and the kernel names here are not the old system's (its root's, /dev/sda2, does not lead to the root): what would be formatted as /boot is not certain; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL=
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab names /boot by a kernel name (/dev/sda1), and the kernel names here are not the old system's (its root's, /dev/sda2, does not lead to the root): what would be formatted as /boot is not certain; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL="
+}

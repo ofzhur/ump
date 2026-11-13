@@ -1,0 +1,6 @@
+refused: the old root is a btrfs over 2 devices, at its top: it cannot be made anew on one of them; --keep-root keeps the file system
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root is a btrfs over 2 devices, at its top: it cannot be made anew on one of them; --keep-root keeps the file system"
+}

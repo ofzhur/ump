@@ -36,6 +36,7 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c",
     "size_mb": 20480,
     "by": "detection"
   },
@@ -56,6 +57,7 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "/dev/sda",
       "/dev/sdb"
     ],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda",
@@ -70,6 +72,7 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "how": "mkfs",
       "was": "ext4",
       "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c",
+      "label": "",
       "size_mb": 20480
     },
     {
@@ -79,6 +82,7 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "how": "mkfs",
       "was": "ext4",
       "uuid": "f5d86f5d-fcdb-5ef2-8357-e1c735f3ac2a",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -87,9 +91,11 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "device": "/dev/mapper/vg0-srv",
       "filesystem": "ext4",
       "mountpoint": "/srv",
+      "uuid": "289c6ec2-3a7c-535e-acf1-caedc1b7c440",
       "note": ""
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -110,6 +116,7 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [],
   "entries": [
@@ -138,5 +145,5 @@ UUID=NEW-md127  /boot  ext4  defaults  0 2
       "action": "keep"
     }
   ],
-  "hash": "589ecea69f87eef5546e44d467fa8a664cefa5b7039eeed81a7838cd1a34dcd1"
+  "hash": "bb0b2f6bdca0dd35e2c768d2373dafa36c3a9e22e7b344334cde8c04bc04d41a"
 }

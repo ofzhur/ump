@@ -40,6 +40,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "subvolume": "@snapshots/2/snapshot",
     "filesystem": "btrfs",
     "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
     "size_mb": 101376,
     "by": "option",
     "free_mb": 60000
@@ -74,6 +75,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
     "esp": "/dev/vda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/vda",
     "disks": [
       "/dev/vda"
@@ -94,21 +96,25 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "device": "/dev/vda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/home",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @home of the root's btrfs"
     },
     {
       "device": "/dev/vda2",
       "filesystem": "btrfs",
       "mountpoint": "/.snapshots",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
       "note": "the subvolume @snapshots of the root's btrfs"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [],
@@ -123,6 +129,7 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "mb": 879
     }
   ],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "the /etc/fstab on /dev/vda2 does not mount it at /: it is the root because --root says so",
@@ -164,5 +171,5 @@ UUID=715fc437-210c-5242-bc49-5a07f9b90747  /.snapshots  btrfs  subvol=@snapshots
       "action": "esp"
     }
   ],
-  "hash": "8231b14c492249aa7b0273f2e33e4e13f71cb3225cc63adb67783a18aa0a7b3c"
+  "hash": "85b85d51d899cc4544ae1dd4a6358aec8f19427636ee9388fbd6b3708bb914a7"
 }

@@ -7,19 +7,23 @@ KEEP (as they are, mounted where they were)
   /dev/nvme0n1p4  xfs          /srv/vault  (encrypted: opened by the new system as vault, with a passphrase (nofail))
   /dev/nvme0n1p5  ext4         /srv/usbkey  (encrypted: opened by the new system as usbkey, with the key file /media/key/usb.key, which is not on the old root (nofail))
   /dev/nvme0n1p8  ext4         /srv/stale  (encrypted: opened by the new system as stale, with the key file /etc/keys/stale.key, which does not open it now (nofail))
-  /dev/nvme0n1p6  swap         none  (encrypted: opened by the new system as cswap, with a key from /dev/urandom)
   -               ext4         /srv/inside  (not found now, perhaps inside an encrypted volume: kept with nofail)
+MADE ANEW AT EVERY BOOT (crypttab: what is on them is overwritten each time the new system starts, as the old one did)
+  /dev/nvme0n1p6  swap         none  (cswap: PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe, swap,cipher=aes-xts-plain64,size=256)
 UNTOUCHED (not in the old fstab: left as they are)
   /dev/nvme0n1p7  crypto_LUKS  50G  (a LUKS container the old crypttab does not open)
 LOST (on the old root, beyond the system itself)
   nothing found
 PACKAGES (installed for what is kept): cryptsetup
 WARNINGS
-  /dev/mapper/gone (/srv/gone) of the old fstab is dropped: its encrypted volume gone (UUID=99999999-9999-9999-9999-999999999999) is not there
+  /dev/mapper/gone (/srv/gone) of the old fstab is dropped: its encrypted volume gone is dropped: UUID=99999999-9999-9999-9999-999999999999 is not there
   gone of the old crypttab is dropped: UUID=99999999-9999-9999-9999-999999999999 is not there
+  vault of the old crypttab names /dev/nvme0n1p4 as the old system's kernel did; here that is /dev/nvme0n1p4 (crypto_LUKS, 100G): named UUID=6be8065f-32ef-56e9-b7b0-bbadbf1e21f5 from now on
+  cswap of the old crypttab names /dev/nvme0n1p6 as the old system's kernel did; here that is /dev/nvme0n1p6 (no file system, 8G): named PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe from now on
   the encrypted volume vault asks for a passphrase: nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@vault)
   the encrypted volume usbkey has its key (/media/key/usb.key) outside the old root: nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@usbkey)
   the encrypted volume stale is not opened by its key file (/etc/keys/stale.key): nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@stale)
+  cswap of the old crypttab (PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe, swap) is made anew at every boot of the new system, as it was by the old one: whatever /dev/nvme0n1p6 holds then is overwritten
 --- /etc/fstab
 # /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
 UUID=NEW-nvme0n1p2  /  ext4  defaults,errors=remount-ro  0 1
@@ -36,7 +40,7 @@ data  UUID=a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b  /etc/keys/data.key  luks,discar
 vault  UUID=6be8065f-32ef-56e9-b7b0-bbadbf1e21f5  none  luks,nofail
 usbkey  UUID=3aa708e0-3ff4-585d-a3b2-2108e00fa4ec  /media/key/usb.key  luks,nofail
 stale  UUID=a3d03e2b-aeef-51cb-96ca-33ecc95e86df  /etc/keys/stale.key  nofail
-cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
+cswap  PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
 --- the plan (--plan)
 {
   "version": 1,
@@ -58,6 +62,7 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
     "size_mb": 51200,
     "by": "detection"
   },
@@ -75,6 +80,7 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
     "esp": "/dev/nvme0n1p1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/nvme0n1",
     "disks": [
       "/dev/nvme0n1"
@@ -88,6 +94,7 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
       "how": "mkfs",
       "was": "ext4",
       "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
+      "label": "",
       "size_mb": 51200
     }
   ],
@@ -96,43 +103,53 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
       "device": "/dev/nvme0n1p1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "5A46-6FAB",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/nvme0n1p3",
       "filesystem": "ext4",
       "mountpoint": "/srv/data",
+      "uuid": "a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b",
       "note": "encrypted: opened by the new system as data, with the key file /etc/keys/data.key"
     },
     {
       "device": "/dev/nvme0n1p4",
       "filesystem": "xfs",
       "mountpoint": "/srv/vault",
+      "uuid": "6be8065f-32ef-56e9-b7b0-bbadbf1e21f5",
       "note": "encrypted: opened by the new system as vault, with a passphrase (nofail)"
     },
     {
       "device": "/dev/nvme0n1p5",
       "filesystem": "ext4",
       "mountpoint": "/srv/usbkey",
+      "uuid": "3aa708e0-3ff4-585d-a3b2-2108e00fa4ec",
       "note": "encrypted: opened by the new system as usbkey, with the key file /media/key/usb.key, which is not on the old root (nofail)"
     },
     {
       "device": "/dev/nvme0n1p8",
       "filesystem": "ext4",
       "mountpoint": "/srv/stale",
+      "uuid": "a3d03e2b-aeef-51cb-96ca-33ecc95e86df",
       "note": "encrypted: opened by the new system as stale, with the key file /etc/keys/stale.key, which does not open it now (nofail)"
-    },
-    {
-      "device": "/dev/nvme0n1p6",
-      "filesystem": "swap",
-      "mountpoint": "none",
-      "note": "encrypted: opened by the new system as cswap, with a key from /dev/urandom"
     },
     {
       "device": null,
       "filesystem": "ext4",
       "mountpoint": "/srv/inside",
       "note": "not found now, perhaps inside an encrypted volume: kept with nofail"
+    }
+  ],
+  "volatile": [
+    {
+      "device": "/dev/nvme0n1p6",
+      "filesystem": "swap",
+      "mountpoint": "none",
+      "name": "cswap",
+      "source": "PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe",
+      "options": "swap,cipher=aes-xts-plain64,size=256",
+      "how": "swap"
     }
   ],
   "aside": [],
@@ -150,19 +167,59 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
     {
       "spec": "/dev/mapper/gone",
       "mountpoint": "/srv/gone",
-      "reason": "its encrypted volume gone (UUID=99999999-9999-9999-9999-999999999999) is not there"
+      "reason": "its encrypted volume gone is dropped: UUID=99999999-9999-9999-9999-999999999999 is not there"
     }
   ],
   "lost": [],
+  "crypttab": [
+    {
+      "name": "data",
+      "device": "/dev/nvme0n1p3",
+      "source": "UUID=a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b",
+      "keyfile": "/etc/keys/data.key",
+      "options": "luks,discard"
+    },
+    {
+      "name": "vault",
+      "device": "/dev/nvme0n1p4",
+      "source": "UUID=6be8065f-32ef-56e9-b7b0-bbadbf1e21f5",
+      "keyfile": "none",
+      "options": "luks,nofail"
+    },
+    {
+      "name": "usbkey",
+      "device": "/dev/nvme0n1p5",
+      "source": "UUID=3aa708e0-3ff4-585d-a3b2-2108e00fa4ec",
+      "keyfile": "/media/key/usb.key",
+      "options": "luks,nofail"
+    },
+    {
+      "name": "stale",
+      "device": "/dev/nvme0n1p8",
+      "source": "UUID=a3d03e2b-aeef-51cb-96ca-33ecc95e86df",
+      "keyfile": "/etc/keys/stale.key",
+      "options": "nofail"
+    },
+    {
+      "name": "cswap",
+      "device": "/dev/nvme0n1p6",
+      "source": "PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe",
+      "keyfile": "/dev/urandom",
+      "options": "swap,cipher=aes-xts-plain64,size=256"
+    }
+  ],
   "packages": [
     "cryptsetup"
   ],
   "warnings": [
-    "/dev/mapper/gone (/srv/gone) of the old fstab is dropped: its encrypted volume gone (UUID=99999999-9999-9999-9999-999999999999) is not there",
+    "/dev/mapper/gone (/srv/gone) of the old fstab is dropped: its encrypted volume gone is dropped: UUID=99999999-9999-9999-9999-999999999999 is not there",
     "gone of the old crypttab is dropped: UUID=99999999-9999-9999-9999-999999999999 is not there",
+    "vault of the old crypttab names /dev/nvme0n1p4 as the old system's kernel did; here that is /dev/nvme0n1p4 (crypto_LUKS, 100G): named UUID=6be8065f-32ef-56e9-b7b0-bbadbf1e21f5 from now on",
+    "cswap of the old crypttab names /dev/nvme0n1p6 as the old system's kernel did; here that is /dev/nvme0n1p6 (no file system, 8G): named PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe from now on",
     "the encrypted volume vault asks for a passphrase: nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@vault)",
     "the encrypted volume usbkey has its key (/media/key/usb.key) outside the old root: nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@usbkey)",
-    "the encrypted volume stale is not opened by its key file (/etc/keys/stale.key): nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@stale)"
+    "the encrypted volume stale is not opened by its key file (/etc/keys/stale.key): nofail in crypttab and fstab, so that the new system boots without it; open it after the boot (systemctl start systemd-cryptsetup@stale)",
+    "cswap of the old crypttab (PARTUUID=51de5d8f-48da-5e9c-ad8a-d886d6428dbe, swap) is made anew at every boot of the new system, as it was by the old one: whatever /dev/nvme0n1p6 holds then is overwritten"
   ],
   "entries": [
     {
@@ -238,5 +295,5 @@ cswap  /dev/nvme0n1p6  /dev/urandom  swap,cipher=aes-xts-plain64,size=256
       "action": "keep"
     }
   ],
-  "hash": "f16b76e2d1d87208231dd30a7bb5860616f07d75f4ad6ca8d4e6085acb969d10"
+  "hash": "77fb8b31213a26a3dbc97bc4b35d0867a3dcd34cde14585f1a5ee97998c0e5d7"
 }

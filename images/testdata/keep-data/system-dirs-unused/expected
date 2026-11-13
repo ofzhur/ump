@@ -1,0 +1,263 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) (old.example.net) on /dev/mapper/vg0-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/mapper/vg0-root  ext4  /  (10G)
+  /dev/vda2             ext4  /boot  (1G)
+KEEP (as they are, mounted where they were)
+  /dev/vda1             vfat  /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+UNUSED (left as they are, not mounted by the new system)
+  /dev/mapper/vg0-var   ext4  /usr/share
+  /dev/mapper/vg0-data  xfs   /etc/app
+  /dev/vda4             ext4  /lib/firmware
+  /dev/mapper/vg0-swap  ext4  /sbin
+  /dev/vdb1             ext4  /bin
+  /dev/vdb2             ext4  /lib64
+LOST (on the old root, beyond the system itself)
+  /backup  2M
+  /etc  6M
+  /home/alice  1.1G
+  /home/bob  1M
+  /opt  245M
+  /root  1M
+  /usr/local  69M
+  /var/lib/apt  176M
+  /var/lib/docker  8.5G
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-vg0-root  /  ext4  defaults,errors=remount-ro  0 1
+UUID=NEW-vda2  /boot  ext4  defaults  0 2
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "old.example.net",
+    "fstab_sha256": "707d891afe692b02bdcbc16a2fd1c245f108f2c292434be5b0d10e44d4b500b0"
+  },
+  "root": {
+    "device": "/dev/mapper/vg0-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+    "size_mb": 10240,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "/dev/vda2",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
+      "size_mb": 10240
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "ext4",
+      "mountpoint": "/boot",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
+      "size_mb": 1024
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    }
+  ],
+  "volatile": [],
+  "aside": [],
+  "unused": [
+    {
+      "device": "/dev/mapper/vg0-var",
+      "filesystem": "ext4",
+      "mountpoint": "/usr/share",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f"
+    },
+    {
+      "device": "/dev/mapper/vg0-data",
+      "filesystem": "xfs",
+      "mountpoint": "/etc/app",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5"
+    },
+    {
+      "device": "/dev/vda4",
+      "filesystem": "ext4",
+      "mountpoint": "/lib/firmware",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8"
+    },
+    {
+      "device": "/dev/mapper/vg0-swap",
+      "filesystem": "ext4",
+      "mountpoint": "/sbin",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d"
+    },
+    {
+      "device": "/dev/vdb1",
+      "filesystem": "ext4",
+      "mountpoint": "/bin",
+      "uuid": "b1b1b1b1-0000-4000-8000-000000000001"
+    },
+    {
+      "device": "/dev/vdb2",
+      "filesystem": "ext4",
+      "mountpoint": "/lib64",
+      "uuid": "b1b1b1b1-0000-4000-8000-000000000002"
+    }
+  ],
+  "untouched": [],
+  "dropped": [],
+  "lost": [
+    {
+      "path": "/backup",
+      "mb": 2
+    },
+    {
+      "path": "/etc",
+      "mb": 6
+    },
+    {
+      "path": "/home/alice",
+      "mb": 1172
+    },
+    {
+      "path": "/home/bob",
+      "mb": 1
+    },
+    {
+      "path": "/opt",
+      "mb": 245
+    },
+    {
+      "path": "/root",
+      "mb": 1
+    },
+    {
+      "path": "/usr/local",
+      "mb": 69
+    },
+    {
+      "path": "/var/lib/apt",
+      "mb": 176
+    },
+    {
+      "path": "/var/lib/docker",
+      "mb": 8790
+    }
+  ],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [],
+  "entries": [
+    {
+      "spec": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "errors=remount-ro",
+      "device": "/dev/mapper/vg0-root",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/boot",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vda2",
+      "action": "boot"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    },
+    {
+      "spec": "/dev/mapper/vg0-var",
+      "mountpoint": "/usr/share",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/vg0-var",
+      "action": "unused"
+    },
+    {
+      "spec": "/dev/vg0/data",
+      "mountpoint": "/etc/app",
+      "type": "xfs",
+      "options": "defaults",
+      "device": "/dev/mapper/vg0-data",
+      "action": "unused"
+    },
+    {
+      "spec": "LABEL=plain",
+      "mountpoint": "/lib/firmware",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vda4",
+      "action": "unused"
+    },
+    {
+      "spec": "UUID=fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
+      "mountpoint": "/sbin",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/vg0-swap",
+      "action": "unused"
+    },
+    {
+      "spec": "UUID=b1b1b1b1-0000-4000-8000-000000000001",
+      "mountpoint": "/bin",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vdb1",
+      "action": "unused"
+    },
+    {
+      "spec": "UUID=b1b1b1b1-0000-4000-8000-000000000002",
+      "mountpoint": "/lib64",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vdb2",
+      "action": "unused"
+    }
+  ],
+  "hash": "12e09789e482c16fa06a7e3db6c1d363831f5ee6837862dacda6f7706daf9c20"
+}

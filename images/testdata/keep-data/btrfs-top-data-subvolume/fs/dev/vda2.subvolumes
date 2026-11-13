@@ -1,0 +1,3 @@
+256 5 var/lib/machines
+257 5 home
+258 257 home/.snapshots

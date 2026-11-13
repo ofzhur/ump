@@ -38,6 +38,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c",
     "size_mb": 20480,
     "by": "detection"
   },
@@ -55,6 +56,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "esp": "/dev/sda1",
     "boot": "/dev/md127",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda",
@@ -69,6 +71,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "ext4",
       "uuid": "3171551d-22a2-5099-b55d-bc5f2d19b30c",
+      "label": "",
       "size_mb": 20480
     },
     {
@@ -78,6 +81,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "ext4",
       "uuid": "f5d86f5d-fcdb-5ef2-8357-e1c735f3ac2a",
+      "label": "",
       "size_mb": 1024
     }
   ],
@@ -86,15 +90,18 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     },
     {
       "device": "/dev/mapper/vg0-srv",
       "filesystem": "ext4",
       "mountpoint": "/srv",
+      "uuid": "289c6ec2-3a7c-535e-acf1-caedc1b7c440",
       "note": ""
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -108,6 +115,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "other EFI system partitions (/dev/sdb1) are left as they are: a firmware that starts from one of them finds the old boot loader"
@@ -146,5 +154,5 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "action": "keep"
     }
   ],
-  "hash": "f66480791162414b03a02dac744845949078bbf48bcc392cc7710c0df1aa720f"
+  "hash": "597bfa024f81e5420465250cc8d3ee628b6131f3e29f5a3617741970f4ffc9ed"
 }

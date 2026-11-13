@@ -35,6 +35,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "subvolume": "",
     "filesystem": "ext4",
     "was": "ext4",
+    "uuid": "e24ca7db-f88d-50a2-beb0-f73f17be22ee",
     "size_mb": 40960,
     "by": "option"
   },
@@ -60,6 +61,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
     "esp": "/dev/sda1",
     "boot": "",
     "bios_disks": [],
+    "bios_optional": [],
     "disk": "/dev/sda",
     "disks": [
       "/dev/sda"
@@ -73,6 +75,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "how": "mkfs",
       "was": "ext4",
       "uuid": "e24ca7db-f88d-50a2-beb0-f73f17be22ee",
+      "label": "",
       "size_mb": 40960
     }
   ],
@@ -81,9 +84,11 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "device": "/dev/sda1",
       "filesystem": "vfat",
       "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
       "note": "the EFI system partition: not formatted, the new boot loader is added"
     }
   ],
+  "volatile": [],
   "aside": [],
   "unused": [],
   "untouched": [
@@ -104,6 +109,7 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
   ],
   "dropped": [],
   "lost": [],
+  "crypttab": [],
   "packages": [],
   "warnings": [
     "/dev/sda2 (Debian GNU/Linux 12 (bookworm)) holds an operating system's files too: left as it is"
@@ -126,5 +132,5 @@ UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
       "action": "esp"
     }
   ],
-  "hash": "f044b7e47fa4649a6b40b7c41a5e6ea031dd48b35e43de2e6b1a4b3a5dd0997a"
+  "hash": "e431bca1cf850e404306ad3c30ae797ccd865f3d1fddfcd1dfc90e52116714fc"
 }

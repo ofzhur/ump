@@ -1,0 +1,4 @@
+UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+/dev/vg0/data /usr xfs defaults 0 2
