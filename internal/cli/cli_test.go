@@ -345,10 +345,23 @@ type testEnv struct {
 	installHook     func()
 	installExit     int
 	installNoScript bool
-	reboots         int
-	installed       bool
-	booted          bool
-	bootFails       bool
+	// the installer with --keep-data (keepdata_test.go): keepCase is the
+	// machine of images/testdata/keep-data it plans for (lvm when empty),
+	// keepCaseAt that per address; keepExit is the exit status of the run
+	// that writes (1: after it began to write, 2: before), keepDrift makes
+	// that run plan another machine than the one confirmed, keepNoFile
+	// leaves no plan file; keepFiles are the plan files in the rescue
+	// systems, by address
+	keepCase   string
+	keepCaseAt map[string]string
+	keepExit   int
+	keepDrift  string
+	keepNoFile bool
+	keepFiles  map[string]string
+	reboots    int
+	installed  bool
+	booted     bool
+	bootFails  bool
 
 	// repo is the infrastructure repository ump provisions from: a
 	// directory with ansible.cfg, inventory/ and playbooks/00-base.yml.
@@ -839,6 +852,17 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 		}
 		e.kexeced = true
 		return "==> downloading the rescue image for amd64\n==> booting into the UMP rescue system; reconnect as root@203.0.113.10\n", "Connection reset by peer\n", 255
+	case cmd == "cat /tmp/ump-keep-data.json":
+		if file, ok := e.keepFiles[sshAddr(argv)]; ok {
+			return file, "", 0
+		}
+		return "", "cat: /tmp/ump-keep-data.json: No such file or directory\n", 1
+	case strings.Contains(cmd, "/install/install.sh") && strings.Contains(cmd, " --keep-data"):
+		e.installs = append(e.installs, cmd)
+		if e.installNoScript {
+			return "", "curl: (22) The requested URL returned error: 404\n", 22
+		}
+		return e.keepInstaller(sshAddr(argv), cmd)
 	case strings.Contains(cmd, "/install/install.sh"):
 		e.installs = append(e.installs, cmd)
 		if e.installNoScript {

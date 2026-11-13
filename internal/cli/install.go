@@ -62,12 +62,22 @@ type installOptions struct {
 	unattended bool
 	noWait     bool
 	armedFor   time.Duration
+
+	// keepData is --keep-data: the old system is replaced and its data
+	// volumes stay (keepdata.go); root is --root, the old root where the
+	// installer finds several or none, keepRoot --keep-root (nothing is
+	// formatted, the old system moves aside) and format --format, the
+	// mountpoints of the old fstab that are formatted too
+	keepData bool
+	root     string
+	keepRoot bool
+	format   []string
 }
 
 // serverFlags are the flags of reinstall that concern the installation
 // on one server, by name: multiinstall takes them for every server, and
 // its plan file per server, under these names.
-var serverFlags = []string{"profile", "layout", "firewall", "os", "hostname", "private-network", "private-ip", "timezone", "disks", "ssh-key", "set", "user", "userdata", "group", "ipv6", "mitigations", "via", "storage"}
+var serverFlags = []string{"profile", "layout", "firewall", "os", "hostname", "private-network", "private-ip", "timezone", "disks", "ssh-key", "set", "user", "userdata", "group", "ipv6", "mitigations", "via", "storage", "keep-data", "root", "keep-root", "format"}
 
 // addServerFlags adds the flags of serverFlags.
 func addServerFlags(sub *cobra.Command, o *installOptions) {
@@ -89,6 +99,10 @@ func addServerFlags(sub *cobra.Command, o *installOptions) {
 	sub.Flags().BoolVar(&o.mitigations, "mitigations", false, "keep the CPU vulnerability mitigations on, whatever the profile says")
 	sub.Flags().StringVar(&o.via, "via", "auto", "how to reach the rescue system first: direct, provider, or auto")
 	o.groups.add(sub, "group", "a group of the new system besides common")
+	sub.Flags().BoolVar(&o.keepData, "keep-data", false, "replace the old system and keep its data: no disk is wiped, the layout is not applied; the installer's plan is shown and confirmed before anything is written")
+	sub.Flags().StringVar(&o.root, "root", "", "with --keep-data: the old root, where several old systems are found or none (a device, UUID=..., DEVICE:SUBVOLUME on btrfs)")
+	sub.Flags().BoolVar(&o.keepRoot, "keep-root", false, "with --keep-data: format nothing; the old system moves into /old-root-DATE on its file system")
+	sub.Flags().StringArrayVar(&o.format, "format", nil, "with --keep-data: a mountpoint of the old fstab whose volume is formatted too and mounted there again (repeatable; /var: the new /var)")
 }
 
 func (a *app) newServerReinstallCmd() *cobra.Command {
@@ -167,6 +181,28 @@ installation, recorded but not provisioned (ump provision --hosts
 HOSTNAME after the reboot). Asks for confirmation on a terminal;
 without one, --yes is required.
 
+--keep-data replaces the old system and keeps its data
+(docs/keep-data.md): no disk is wiped or partitioned, and the profile's
+layout is not applied. After the first question the server goes into
+the rescue system, where the installer finds the old system, reading
+only, and prints its plan: what it formats (the old root, a separate
+/boot), what it keeps and mounts where it was (every other volume of
+the old fstab; a separate /var at /var.old), what it leaves untouched,
+and what the old root loses. A second question is about that plan, and
+only then the installer writes, and only when the plan it makes then is
+the same. --root DEVICE names the old root where the installer finds
+several old systems or none; --keep-root formats nothing and moves the
+old system into /old-root-DATE on its file system; --format MOUNTPOINT
+formats one more volume of the old fstab (/var: the new /var). --yes
+answers both questions, --dry-run stops after the plan. Not with
+--layout, --disks or --unattended, and with the Ubuntu and Debian
+images alone (exit status 2). A plan that is declined and an installer
+that refuses write nothing, and ump says how the old system starts
+again (exit status 3); an installation that fails after the installer
+began to write (exit status 1) leaves the data volumes untouched and
+the old root gone or moved aside, and the same command again plans
+from what the installer saved of the old system.
+
 --unattended has the machine install by itself at its next boot,
 without UMP's SSH session (a PXE machine's network boot; docs/pxe.md):
 the installation is rendered and checked as above, the disks it may
@@ -194,6 +230,9 @@ disarmed and gives them back (exit status 5).`,
   ump server reinstall db-01 --private-ip 10.0.0.10
   ump server reinstall db-01 --private-network default,db --private-ip db=10.0.1.10
   ump server reinstall lab-01 --no-provision --private-network none
+  ump server reinstall db-01 --keep-data --dry-run
+  ump server reinstall db-01 --keep-data --format /var
+  ump server reinstall db-01 --keep-data --root /dev/vg0/root --keep-root
   ump server reinstall pxe/web-07 --unattended
   ump server reinstall pxe/web-07 --unattended --no-wait --disks nvme-eui.0025388b91c0a1b2`,
 		Args: usageArgs(cobra.ExactArgs(1)),
@@ -233,6 +272,11 @@ type installResult struct {
 	// Armed is the unattended installation armed for the machine's next
 	// boot, which ump did not wait for (--no-wait).
 	Armed string `json:"armed,omitempty" yaml:"armed,omitempty"`
+	// KeepData is the installer's plan of a keep-data installation
+	// (--keep-data), as it made it (install/README.md): what is formatted,
+	// kept, set aside, left unused and untouched, what the old root loses,
+	// and the hash that was confirmed.
+	KeepData any `json:"keep_data,omitempty" yaml:"keep_data,omitempty"`
 	// written says that the installer wrote the disks, or may have (the
 	// connection ended while it ran): the private addresses are the new
 	// system's then
@@ -253,6 +297,8 @@ type installFlags struct {
 	users    []userFlag
 	userdata []string
 	private  privateFlags
+	// keep is the keep-data installation of --keep-data (nil: none)
+	keep *keepData
 }
 
 // checkServerFlags checks what the flags of one installation say by
@@ -283,6 +329,9 @@ func checkServerFlags(cmd *cobra.Command, o installOptions) (installFlags, error
 		return f, err
 	}
 	if f.userdata, err = parseUserdataFlags(cmd, o.userdata); err != nil {
+		return f, err
+	}
+	if f.keep, err = checkKeepFlags(cmd, o); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -368,6 +417,9 @@ type installPlan struct {
 	armed  *provider.InstallState
 	disks  *provider.InstallDisks
 	voided *unattendedImport
+	// keep is the keep-data installation (nil: the disks are wiped and
+	// the layout applied), with the installer's plan once it made one
+	keep *keepData
 }
 
 // newInstallPlan starts the plan of an installation on m: the server
@@ -387,7 +439,21 @@ func newInstallPlan(ref string, m provider.Machine, prov provider.Provider, o in
 			return nil, fmt.Errorf("the name %q of %s is not a valid hostname; give one with --hostname", m.Name, m.Ref())
 		}
 	}
-	return &installPlan{ref: ref, m: m, prov: prov, hostname: hostname, groups: f.groups, via: o.via}, nil
+	p := &installPlan{ref: ref, m: m, prov: prov, hostname: hostname, groups: f.groups, via: o.via}
+	if f.keep != nil {
+		keep := *f.keep
+		p.keep = &keep
+	}
+	return p, nil
+}
+
+// layout is the layout the installation is recorded and shown with: the
+// profile's, or keep-data where none is applied.
+func (p *installPlan) layout() string {
+	if p.keep != nil {
+		return keepLayout
+	}
+	return p.spec.Layout.Name
 }
 
 // inGroups are the groups of the new system in the inventory, common
@@ -401,9 +467,12 @@ func (p *installPlan) inGroups() []string {
 // groups as in the inventory; installed_at comes with the record.
 func (p *installPlan) result(dryRun bool) installResult {
 	r := installResult{Machine: p.m, Hostname: p.hostname, DryRun: dryRun}
-	r.OS, r.Profile, r.Layout = p.spec.OS, p.profile, p.spec.Layout.Name
+	r.OS, r.Profile, r.Layout = p.spec.OS, p.profile, p.layout()
 	r.Groups, r.InstalledAt = p.inGroups(), nil
 	putPrivate(&r.Machine, p.private)
+	if p.keep != nil && p.keep.plan != nil {
+		r.KeepData = p.keep.plan.doc
+	}
 	return r
 }
 
@@ -413,7 +482,11 @@ func (p *installPlan) what() string {
 	if len(p.private) > 0 {
 		private = ", " + privateAddresses(p.private)
 	}
-	return fmt.Sprintf("%s (profile %s from %s, layout %s%s)", p.spec.OS, p.profile, p.from, p.spec.Layout.Name, private)
+	layout := "layout " + p.spec.Layout.Name
+	if p.keep != nil {
+		layout = "keeping the data"
+	}
+	return fmt.Sprintf("%s (profile %s from %s, %s%s)", p.spec.OS, p.profile, p.from, layout, private)
 }
 
 // assignPlans gives the planned installations their private addresses
@@ -541,6 +614,13 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 			if users, err = a.loadUsers(ctx, storage); err != nil {
 				return err
 			}
+		}
+	}
+	// a keep-data installation is one of the systems unpacked from an
+	// image, which the installer checks too, in the rescue system
+	if p.keep != nil {
+		if err := a.checkKeepOS(ctx, p.m, prof.OS, storage); err != nil {
+			return err
 		}
 	}
 	var layouts map[string]*profile.Layout
@@ -723,6 +803,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 		return a.reinstallUnattended(cmd, cfg, p, o, tail)
 	}
 	question := fmt.Sprintf("Install %s on %s as %s? Every disk of the server is erased.", p.what(), describeRef(m), hostname) + a.voids(armed, "it")
+	if p.keep != nil {
+		question = fmt.Sprintf("Reinstall %s with %s as %s? %s", describeRef(m), p.what(), hostname, keepFirst) + a.voids(armed, "it")
+	}
 	if noRescueWarning(m, prov) != "" {
 		question += " There is no rescue system to fall back on: a failed installation is yours to recover."
 	}
@@ -731,6 +814,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	if o.dryRun {
 		question = fmt.Sprintf("Bring %s into the rescue system and show the installation plan for %s? (dry run: nothing is erased)", describeRef(m), p.what())
+		if p.keep != nil {
+			question = fmt.Sprintf("Bring %s into the rescue system and show the keep-data plan for %s? (dry run: the running system goes down, nothing is written to a disk)", describeRef(m), p.what())
+		}
 	}
 	// an OS without an image for the machine's architecture stops here,
 	// before the reboot, the rescue system or a provider's reinstall
@@ -763,6 +849,22 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	r := installRun{dryRun: o.dryRun, noReboot: o.noReboot}
 	if !o.noProvision {
 		r.after = run.String()
+	}
+	// a keep-data installation plans first, in the rescue system, and
+	// asks about the plan: nothing is written before the answer
+	if p.keep != nil {
+		planned, err := a.planKeep(cmd, p, r)
+		if err == nil && !o.dryRun {
+			err = a.confirmKeep(cmd, o.yes, []*installPlan{p})
+		}
+		if err != nil {
+			a.releasePrivate(ctx, []*installPlan{p})
+			return err
+		}
+		if o.dryRun {
+			planned.Playbooks = run.playbooks
+			return a.installReport(planned, format)
+		}
 	}
 	result, record, err := a.runInstall(cmd, p, r)
 	if err != nil {
@@ -900,26 +1002,31 @@ type installRun struct {
 // error.
 func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (installResult, *state.Install, error) {
 	ctx := cmd.Context()
-	m, prov, ref, spec := p.m, p.prov, p.ref, p.spec
+	m := p.m
 	result := p.result(r.dryRun)
+	// a keep-data installation is in the rescue system already, where its
+	// plan was made (planKeep), and installs that plan
+	if p.keep != nil {
+		e := p.keep.entry
+		if e == nil || p.keep.plan == nil {
+			return result, nil, fmt.Errorf("%s: a keep-data installation without a plan", m.Ref())
+		}
+		result.Via = e.via
+		if err := a.installKept(ctx, p, r, e, &result); err != nil {
+			return result, nil, err
+		}
+		return a.startInstalled(cmd, p, r, e, result)
+	}
 	// everything on the way is progress (stderr); stdout is for the result
-	entry, err := a.bringToImage(cmd, m, prov, p.keys, p.keyPath, p.keyPaths, p.rescueURL, entryOptions{via: p.via, confirmed: true, quiet: true, stock: !r.dryRun, unguarded: true, users: p.logins})
+	e, err := a.enterInstall(cmd, p, !r.dryRun)
 	if err != nil {
 		return result, nil, err
 	}
-	result.Via = entry.via
-	// where the installed system answers: where the rescue system did,
-	// or the machine's own address; the rescue system is reached at its
-	// own (staging) when that is another
-	system := nonEmpty(entry.system, entry.addr)
-	staging := "ump ssh " + ref + " --staging"
-	if system != entry.addr {
-		staging = shellJoin(a.sshShown(entry.user, entry.addr, []string{p.keyPath}, true, true, nil))
-	}
+	result.Via = e.via
 
 	// the installer, from the storage, in the rescue system, with the
 	// specification on its stdin
-	args := []string{"--spec", "/tmp/ump-install.json"}
+	args := []string{}
 	if r.dryRun {
 		args = append(args, "--dry-run")
 		fmt.Fprintf(a.stderr, "Installation plan for %s on %s:\n", p.what(), m.Name)
@@ -929,37 +1036,99 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	if r.after != "" {
 		fmt.Fprintf(a.stderr, "Provisioning after the first boot: %s.\n", r.after)
 	}
-	installer := p.storage + "/install/install.sh"
-	// the keys go into the rescue system too, so that it stays reachable
-	// with them while the installation runs
-	remote := ensureKeysCommand(p.keys) + "cat > /tmp/ump-install.json && " + fetchAndRun(installer, "/tmp/ump-install.sh", args)
-	argv := withSSHOptions(a.sshTo(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
-	var buf bytes.Buffer
-	w := io.MultiWriter(a.stderr, &buf)
-	code, err := a.sshExec(ctx, argv, bytes.NewReader(p.specJSON), w, w)
+	code, out, err := a.runInstaller(ctx, p, e, args, "")
 	if err != nil {
 		return result, nil, err
 	}
 	// the installer ends with 1 (a failed step) or 2 (a bad specification
 	// or environment) and says so; anything else without a line of it is
 	// the fetch that failed
-	installerRan := strings.Contains(buf.String(), "==> ") || strings.Contains(buf.String(), "install.sh:")
-	result.written = !r.dryRun && (code == 0 || code == 255 && installerRan)
+	ran := installerRan(out)
+	result.written = !r.dryRun && (code == 0 || code == 255 && ran)
 	switch {
 	case code == 255:
-		return result, nil, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (%s)", entry.addr, staging))
-	case code != 0 && !installerRan && code != 1 && code != 2:
-		return result, nil, fmt.Errorf("%s could not fetch the installer from %s (exit status %d); the server must reach the storage", entry.addr, installer, code)
+		return result, nil, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (%s)", e.addr, e.staging))
+	case code != 0 && !ran && code != 1 && code != 2:
+		return result, nil, a.noInstaller(p, e, code)
 	case code == 2:
 		return result, nil, fmt.Errorf("the installer refused the specification or the machine (exit status 2, see above); nothing was changed, %s stays in the UMP rescue system", m.Name)
 	case code != 0:
-		return result, nil, fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (%s)", m.Name, code, staging)
+		return result, nil, fmt.Errorf("the installation on %s failed (exit status %d, see above); the server stays in the UMP rescue system (%s)", m.Name, code, e.staging)
 	}
 	if r.dryRun {
-		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (%s).\n", m.Name, staging)
+		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (%s).\n", m.Name, e.staging)
 		return result, nil, nil
 	}
+	return a.startInstalled(cmd, p, r, e, result)
+}
 
+// installEntry is a server in the UMP rescue system, for its
+// installation: how it was brought there, where the installed system
+// answers (where the rescue system did, or the machine's own address),
+// and how the rescue system is reached, as a command line to show.
+type installEntry struct {
+	*imageEntry
+	system  string
+	staging string
+}
+
+// enterInstall brings the server of a planned installation into the UMP
+// rescue system; stock allows the provider's stock installation as the
+// way in, which erases the machine.
+func (a *app) enterInstall(cmd *cobra.Command, p *installPlan, stock bool) (*installEntry, error) {
+	entry, err := a.bringToImage(cmd, p.m, p.prov, p.keys, p.keyPath, p.keyPaths, p.rescueURL, entryOptions{via: p.via, confirmed: true, quiet: true, stock: stock, unguarded: true, users: p.logins, keepData: p.keep != nil})
+	if err != nil {
+		return nil, err
+	}
+	// the rescue system is reached at its own address (staging) when that
+	// is another than the installed system's
+	e := &installEntry{imageEntry: entry, system: nonEmpty(entry.system, entry.addr), staging: "ump ssh " + p.ref + " --staging"}
+	if e.system != entry.addr {
+		e.staging = shellJoin(a.sshShown(entry.user, entry.addr, []string{p.keyPath}, true, true, nil))
+	}
+	return e, nil
+}
+
+// installerSpec is where the specification is put in the rescue system.
+const installerSpec = "/tmp/ump-install.json"
+
+// runInstaller fetches the installer from the storage and runs it in the
+// rescue system, with the specification on its stdin and args after
+// --spec; first is a shell command that runs before it. What it prints
+// goes to stderr as it comes, and comes back with its exit status.
+func (a *app) runInstaller(ctx context.Context, p *installPlan, e *installEntry, args []string, first string) (int, string, error) {
+	installer := p.storage + "/install/install.sh"
+	// the keys go into the rescue system too, so that it stays reachable
+	// with them while the installation runs
+	remote := ensureKeysCommand(p.keys) + first + "cat > " + installerSpec + " && " + fetchAndRun(installer, "/tmp/ump-install.sh", append([]string{"--spec", installerSpec}, args...))
+	argv := withSSHOptions(a.sshTo(e.user, e.addr, []string{p.keyPath}, true, true, []string{remote}), batchOptions(10*time.Second)...)
+	var buf bytes.Buffer
+	w := io.MultiWriter(a.stderr, &buf)
+	code, err := a.sshExec(ctx, argv, bytes.NewReader(p.specJSON), w, w)
+	return code, buf.String(), err
+}
+
+// installerRan says that the output is the installer's: a line of its
+// progress, or one of its errors.
+func installerRan(out string) bool {
+	return strings.Contains(out, "==> ") || strings.Contains(out, "install.sh:")
+}
+
+// noInstaller is the error of a rescue system that could not fetch the
+// installer.
+func (a *app) noInstaller(p *installPlan, e *installEntry, code int) error {
+	return fmt.Errorf("%s could not fetch the installer from %s/install/install.sh (exit status %d); the server must reach the storage", e.addr, p.storage, code)
+}
+
+// startInstalled starts the system the installer put on the disks of a
+// server in the rescue system (e): the provider is told to boot it, the
+// server is rebooted (unless r.noReboot), and ump waits until the new
+// system answers as its administrator. The record of the installation
+// comes back with the result.
+func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e *installEntry, result installResult) (installResult, *state.Install, error) {
+	ctx := cmd.Context()
+	m, prov, ref, spec := p.m, p.prov, p.ref, p.spec
+	entry, system := e.imageEntry, e.system
 	// providers that keep the rescue system as the boot option until told
 	// otherwise would boot it again
 	if rs, ok := prov.(provider.Rescue); ok {
@@ -981,7 +1150,7 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 		// the disks hold the new system: its record, and the old host key
 		// goes, so that ump provision works after the reboot
 		admin := spec.Admin()
-		record := installRecord(spec.OS, p.profile, spec.Layout.Name, p.hostname, admin, "", a.now())
+		record := p.record(admin, "", a.now())
 		result.InstalledAt, result.Admin = &record.At, admin
 		a.forgetReplacedHostKey(system)
 		how := "a reboot"
@@ -1022,7 +1191,7 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	result.System, result.Admin = sys, admin
 	a.forgetReplacedHostKey(system)
 	// what was installed goes into the state, for the inventory
-	record := installRecord(spec.OS, p.profile, spec.Layout.Name, p.hostname, admin, sys.Details, a.now())
+	record := p.record(admin, sys.Details, a.now())
 	result.InstalledAt = &record.At
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, p.hostname, sys.Root, admin, m.Name)
 	return result, &record, nil
@@ -1100,6 +1269,17 @@ func (a *app) forgetReplacedHostKey(addr string) {
 	if err == nil && forgot {
 		fmt.Fprintf(a.stderr, "Removed the old host key of %s from ~/.ssh/known_hosts: the system is new, and so is its host key.\n", addr)
 	}
+}
+
+// record is the record of the planned installation, completed: with
+// the facts the new system reported (details), and what a keep-data
+// installation replaced.
+func (p *installPlan) record(admin, details string, now time.Time) state.Install {
+	r := installRecord(p.spec.OS, p.profile, p.layout(), p.hostname, admin, details, now)
+	if p.keep != nil && p.keep.plan != nil {
+		r.KeepData = &state.KeepData{Root: p.keep.plan.root(), KeepRoot: p.keep.keepRoot, Plan: p.keep.plan.Hash}
+	}
+	return r
 }
 
 // installRecord is what the state keeps of an installation: the facts

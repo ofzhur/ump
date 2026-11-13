@@ -419,6 +419,10 @@ type entryOptions struct {
 	// users where root cannot log in (loginUsers); root and ump when
 	// empty.
 	users []string
+	// keepData says that the way in is for a keep-data installation: a
+	// provider's stock installation, which erases the machine, is not
+	// one, and where it would be the only one the refusal says so.
+	keepData bool
 }
 
 // imageEntry is how a server was brought into the UMP rescue system and
@@ -547,6 +551,8 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		if !hasRescue {
 			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
 				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and the running system does not let UMP in", m.Provider))
+			} else if ok && o.keepData {
+				return nil, withExit(exitUnreachable, keepNoWay(addr, fmt.Sprintf("provider type %s has no rescue system", m.Provider)))
 			}
 			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system: ump installs such a server only through its running system, so it must let UMP in (as root or a sudo user, with one of your keys, ~/.ssh or the ssh-agent, or UMP's own, ump config key show); put one there, at the provider when the server is created, and run this again. Nothing was changed", addr, m.Provider))
 		}
@@ -577,6 +583,8 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if kr, ok := prov.(provider.KeylessRescue); ok && kr.RescueTakesNoKey(m) {
 		if si, ok := prov.(provider.StockInstaller); ok && o.stock && addr != "" {
 			return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("The provider's rescue system of %s takes no SSH key", m.Name))
+		} else if ok && o.keepData && addr != "" {
+			return nil, withExit(exitUnreachable, keepNoWay(addr, fmt.Sprintf("the provider's rescue system of %s takes no SSH key", m.Name)))
 		}
 		return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself; give UMP root access to the running system (UMP's key in root's authorized_keys, see ump config key) for the direct way, or use ump server rescue --no-image with the mailed password", m.Name))
 	}

@@ -57,6 +57,16 @@ planned in full before anything is touched: `ump server reinstall
 --dry-run` prints the plan, with every partition, array and volume per
 disk and its size.
 
+## Without a layout: keeping the data
+
+`ump server reinstall --keep-data` applies no layout and erases no
+disk: the installer finds the old system, formats its root (and a
+separate `/boot`) and mounts every other volume of the old `/etc/fstab`
+where it was, LVM, md, LUKS, btrfs subvolumes and ZFS pools included.
+The profile's layout then says one thing only, the file system of the
+new root (the one it gives `/`: ext4, xfs or btrfs), and `--layout` and
+`--disks` are refused. [Keeping the data](keep-data.md) has the rules.
+
 ## Parts
 
 A layout is a list of **parts**, applied in order. There are three kinds:

@@ -67,8 +67,8 @@ server (--profile, --layout, --group and the others), or in a plan file
 
 The keys are the flags' names (profile, layout, firewall, os, hostname,
 private-network, private-ip, timezone, disks, ssh-key, set, user,
-userdata, group, ipv6, mitigations, via, storage), with a list for a
-repeatable one; a server's value replaces that of defaults. Any other
+userdata, group, ipv6, mitigations, via, storage, keep-data, root,
+keep-root, format), with a list for a repeatable one; a server's value replaces that of defaults. Any other
 key, a key without a value and a second YAML document are refused, and
 so is one of these flags on the command line with --plan; private-ip
 (NETWORK=ADDRESS, or ADDRESS alone in the server's only network) goes
@@ -107,6 +107,15 @@ recap. --no-provision runs nothing (where the layout is there, the host
 files are still written). --dry-run brings every server into the rescue
 system and prints each installer's plan, side by side; nothing is
 written, nothing provisioned.
+
+A server with keep-data (--keep-data for all, keep-data: true in a
+plan) keeps its data, as with reinstall --keep-data. Those servers go
+first: each into the rescue system, where the installer plans, side by
+side, and writes nothing. Then one question covers their plans (--yes
+answers it), and the installations of all servers start, the ones that
+wipe their disks too; a no ends the run with nothing written anywhere
+(exit status 3). A server whose plan the installer refused is a failed
+installation; the others go on.
 
 --unattended installs every server as reinstall --unattended installs
 one (PXE machines): one question for all, all armed under their locks
@@ -202,6 +211,9 @@ type installOutcome struct {
 	record *serverRecord
 	err    error
 	unlock func()
+	// stopped says that the installation ended with the plan of its
+	// keep-data installation: refused or failed, or a dry run
+	stopped bool
 }
 
 func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) error {
@@ -237,6 +249,9 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		e.o.unattended, e.o.noWait, e.o.armedFor = unattended, noWait, o.server.armedFor
 		if unattended && e.o.via != "" && e.o.via != "auto" {
 			return e.inPlan(usageErrorf(cmd, "via %s and --unattended: the machine boots its installation by itself", e.o.via))
+		}
+		if _, err := checkKeepFlags(cmd, e.o); err != nil {
+			return e.inPlan(err)
 		}
 	}
 	ctx := cmd.Context()
@@ -285,7 +300,7 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		if len(p.private) > 0 {
 			private = privateIPv4(p.private)
 		}
-		rows = append(rows, []string{p.ref, p.m.Ref(), p.spec.OS, p.spec.Layout.Name, p.hostname, private, strings.Join(p.inGroups(), ",")})
+		rows = append(rows, []string{p.ref, p.m.Ref(), p.spec.OS, p.layout(), p.hostname, private, strings.Join(p.inGroups(), ",")})
 	}
 	if err := writeTable(a.stderr, []string{"SERVER", "PROVIDER", "OS", "LAYOUT", "HOSTNAME", "PRIVATE-IPV4", "GROUPS"}, rows, false); err != nil {
 		return err
@@ -298,8 +313,16 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		voids += a.voids(p.armed, p.ref)
 	}
 	question := fmt.Sprintf("Install on these %s? Every disk of each is erased.", plural(len(plans), "server"))
-	if unattended {
+	// the servers that keep their data: nothing is written there before
+	// the second question, about their plans
+	keeps := keepNames(plans)
+	switch {
+	case unattended:
 		question = fmt.Sprintf("Erase these %s at their next boot and install them unattended?", plural(len(plans), "server"))
+	case len(keeps) == len(plans):
+		question = fmt.Sprintf("Reinstall these %s? Their data is kept: no disk is wiped. Each goes down and boots the rescue system, where the installer finds the old system and plans what it formats and what it keeps; nothing is written to a disk until you confirm the plans.", plural(len(plans), "server"))
+	case len(keeps) > 0:
+		question = fmt.Sprintf("Install on these %s? Every disk of each is erased, but for %s (keep-data): there the installer plans first, in the rescue system, and nothing is written to a disk until you confirm the plans; the other installations start after that.", plural(len(plans), "server"), strings.Join(keeps, ", "))
 	}
 	question += voids
 	switch len(noRescue) {
@@ -330,6 +353,9 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	unlocks, err := a.lockServers(ctx, plans, "multiinstall")
 	if err != nil {
 		return err
+	}
+	for i := range unlocks {
+		unlocks[i] = sync.OnceFunc(unlocks[i])
 	}
 	locked := true
 	defer func() {
@@ -387,12 +413,42 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		if parallel < len(plans) {
 			at = fmt.Sprintf("%d at a time", parallel)
 		}
-		if o.dryRun {
-			fmt.Fprintf(a.stderr, "Installation plans for %s, %s ...\n", plural(len(plans), "server"), at)
-		} else {
-			fmt.Fprintf(a.stderr, "Installing %s, %s ...\n", plural(len(plans), "server"), at)
+		r := installRun{dryRun: o.dryRun}
+		// the keep-data installations plan first, side by side, and one
+		// question covers their plans; the others wait for the answer
+		var planned []installOutcome
+		if len(keeps) > 0 {
+			fmt.Fprintf(a.stderr, "Keep-data plans for %s, %s ...\n", strings.Join(keeps, ", "), at)
+			planned = a.installAll(cmd, cfg, plans, unlocks, r, parallel, nil, true)
+			var made []*installPlan
+			for i, p := range plans {
+				if p.keep != nil && !planned[i].stopped {
+					made = append(made, p)
+				}
+			}
+			if len(made) > 0 {
+				if err := a.confirmKeep(cmd, o.yes, made); err != nil {
+					a.releasePrivate(ctx, plans)
+					return err
+				}
+			}
 		}
-		outcomes = a.installAll(cmd, cfg, plans, unlocks, installRun{dryRun: o.dryRun}, parallel)
+		// what is left to install: all but the keep-data installations that
+		// ended with their plans
+		left := len(plans)
+		for _, oc := range planned {
+			if oc.stopped {
+				left--
+			}
+		}
+		switch {
+		case left == 0:
+		case o.dryRun:
+			fmt.Fprintf(a.stderr, "Installation plans for %s, %s ...\n", plural(left, "server"), at)
+		default:
+			fmt.Fprintf(a.stderr, "Installing %s, %s ...\n", plural(left, "server"), at)
+		}
+		outcomes = a.installAll(cmd, cfg, plans, unlocks, r, parallel, planned, false)
 		locked = false
 	}
 	defer func() {
@@ -780,15 +836,19 @@ func (a *app) planInstalls(cmd *cobra.Command, cfg *config.Config, repo *infraRe
 	return plans, warnings, nil
 }
 
-// installAll runs the planned installations side by side, parallel at
-// a time, in order, each under its server's lock (unlocks releases them)
-// and as a copy of the app whose stderr puts [NAME] in front of every
-// line; with --verbose, the copy builds its server's provider, so that
-// the API calls are such lines too. A completed installation keeps its
-// lock (installOutcome.unlock); an interrupt leaves the installations
-// not started yet with its error, their addresses given back and their
+// installAll runs a step of the planned installations side by side,
+// parallel at a time, in order, each under its server's lock (unlocks
+// releases them) and as a copy of the app whose stderr puts [NAME] in
+// front of every line; with --verbose, the copy builds its server's
+// provider, so that the API calls are such lines too. The step is the
+// installation (installOne), or with planning the plan of a keep-data
+// installation (planOne), which the others have none of; planned are
+// the outcomes of that step, and an installation that stopped there
+// keeps its outcome. A completed installation keeps its lock
+// (installOutcome.unlock); an interrupt leaves the installations not
+// started yet with its error, their addresses given back and their
 // locks let go.
-func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*installPlan, unlocks []func(), r installRun, parallel int) []installOutcome {
+func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*installPlan, unlocks []func(), r installRun, parallel int, planned []installOutcome, planning bool) []installOutcome {
 	ctx := cmd.Context()
 	// what the copies share: the state's store, a bad wait said once, and
 	// with --verbose the settings of the servers' accounts, resolved once
@@ -805,10 +865,25 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 			settings[p.m.Account] = s
 		}
 	}
+	step := (*app).installOne
+	if planning {
+		step = (*app).planOne
+	}
 	outcomes := make([]installOutcome, len(plans))
+	var todo []int
+	for i, p := range plans {
+		switch {
+		case planning && p.keep == nil:
+			// no plan to make: its installation is the next step
+		case planned != nil && planned[i].stopped:
+			outcomes[i] = planned[i]
+		default:
+			todo = append(todo, i)
+		}
+	}
 	next := make(chan int)
 	go func() {
-		for i := range plans {
+		for _, i := range todo {
 			next <- i
 		}
 		close(next)
@@ -823,7 +898,7 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 				sub := *a
 				sub.stderr, sub.stdout, sub.isTTY = w, w, nil
 				if err := ctx.Err(); err != nil {
-					outcomes[i] = installOutcome{result: p.result(r.dryRun), err: err}
+					outcomes[i] = installOutcome{result: p.result(r.dryRun), err: err, stopped: true}
 					sub.releasePrivate(ctx, []*installPlan{p})
 					unlocks[i]()
 					w.Flush()
@@ -836,7 +911,7 @@ func (a *app) installAll(cmd *cobra.Command, cfg *config.Config, plans []*instal
 						p = &own
 					}
 				}
-				outcomes[i] = sub.installOne(cmd, p, r, unlocks[i])
+				outcomes[i] = step(&sub, cmd, p, r, unlocks[i])
 				w.Flush()
 			}
 		})
@@ -866,6 +941,26 @@ func (a *app) installOne(cmd *cobra.Command, p *installPlan, r installRun, unloc
 		return oc
 	}
 	oc.record, oc.unlock = &serverRecord{p.m, *record, p.groups, p.private}, unlock
+	return oc
+}
+
+// planOne makes the plan of one keep-data installation of multiinstall
+// under its server's lock, which it keeps for the installation; a plan
+// that was refused or failed, and a dry run, end the installation there
+// (stopped): the private address goes back and the lock is let go.
+func (a *app) planOne(cmd *cobra.Command, p *installPlan, r installRun, unlock func()) installOutcome {
+	result, err := a.planKeep(cmd, p, r)
+	oc := installOutcome{result: result, err: err, stopped: err != nil || r.dryRun}
+	switch {
+	case errors.Is(err, context.Canceled):
+		fmt.Fprintln(a.stderr, "ump: interrupted")
+	case err != nil:
+		fmt.Fprintf(a.stderr, "ump: %v\n", err)
+	}
+	if oc.stopped {
+		a.releasePrivate(cmd.Context(), []*installPlan{p})
+		unlock()
+	}
 	return oc
 }
 
@@ -948,6 +1043,7 @@ func planOptions(v plan.Values) installOptions {
 		timezone: str(v.Timezone), storage: str(v.Storage), via: str(v.Via),
 		disks: strings.Join(v.Disks, ","), keyFiles: v.SSHKey, sets: v.Set, users: v.User, userdata: v.Userdata,
 		groups: groupFlags(v.Group), ipv6: v.IPv6 != nil && *v.IPv6, mitigations: v.Mitigations != nil && *v.Mitigations,
+		keepData: v.KeepData != nil && *v.KeepData, root: str(v.Root), keepRoot: v.KeepRoot != nil && *v.KeepRoot, format: v.Format,
 	}
 	if o.via == "" {
 		o.via = "auto"

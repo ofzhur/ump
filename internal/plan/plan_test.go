@@ -71,7 +71,7 @@ func TestOver(t *testing.T) {
 }
 
 func TestKeys(t *testing.T) {
-	want := "profile layout firewall os hostname private-network private-ip timezone disks ssh-key set user userdata group ipv6 mitigations via storage"
+	want := "profile layout firewall os hostname private-network private-ip timezone disks ssh-key set user userdata group ipv6 mitigations via storage keep-data root keep-root format"
 	if got := strings.Join(Keys(), " "); got != want {
 		t.Errorf("keys %s, want %s", got, want)
 	}

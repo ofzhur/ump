@@ -97,7 +97,7 @@ servers:                   # each over the defaults
 		{"server:\n  web-01: {}\n", "line 1: server is no part of a plan (defaults, servers)"},
 		{"servers:\n  web-01: {}\nservers:\n  db-01: {}\n", "line 3: servers is given twice"},
 		{"servers:\n  web-01: {}\n  web-01: {}\n", "line 3: server web-01 is given twice"},
-		{"servers:\n  web-01:\n    profil: web\n", "line 3: servers.web-01: profil is no flag of a server (profile, layout, firewall, os, hostname, private-network, private-ip, timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations, via, storage)"},
+		{"servers:\n  web-01:\n    profil: web\n", "line 3: servers.web-01: profil is no flag of a server (profile, layout, firewall, os, hostname, private-network, private-ip, timezone, disks, ssh-key, set, user, userdata, group, ipv6, mitigations, via, storage, keep-data, root, keep-root, format)"},
 		{"defaults:\n  no-reboot: true\nservers:\n  web-01:\n", "line 2: defaults: no-reboot is no flag of a server"},
 		{"defaults:\n  profile: web\n  private-ip: 10.0.0.5\nservers:\n  web-01:\n", "line 3: defaults: private-ip would give every server the same address; give it per server"},
 		{"defaults:\n  private-ip: [db=10.0.1.5]\nservers:\n  web-01:\n", "line 2: defaults: private-ip would give every server the same address; give it per server"},

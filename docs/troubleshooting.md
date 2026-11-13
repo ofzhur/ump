@@ -20,6 +20,8 @@ stopped:
 | The jump | `==> booting into the UMP rescue system` | nothing more is printed: see [the rescue system does not answer](#the-rescue-system-does-not-answer) |
 | The UMP rescue system | `Waiting for the UMP rescue system ... up after ...` | exit 5 after the wait (15 minutes by default) |
 | The installation | the installer's `==>` lines | exit 1; the server stays in the rescue system, where you can log in and look |
+| The plan of `--keep-data` | `Keep-data plan for ...`, the installer's FORMAT, KEEP, ... | exit 3: the installer refused the machine, or you the plan; nothing was written, and the last lines say how the old system starts again ([keeping the data](keep-data.md#after-a-failure)) |
+| The installation of `--keep-data` | `==> keep-data: writing begins` | before that line exit 3, nothing written; after it exit 1: the old root is gone or moved aside, the data volumes are untouched, and the same command again recovers |
 | The first boot | `Waiting for ... the new system` | exit 5: see [the installed system does not boot](#the-installed-system-does-not-boot) |
 
 ## Getting a server back

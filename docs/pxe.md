@@ -302,7 +302,10 @@ A machine also takes reinstall's values under the names of its flags
 does for one server; `ump config pxe list` shows the profile. They are
 checked, and are what a standing installation installs (`mode:
 install`); `ump server reinstall pxe/NAME` takes its flags instead, as
-for any server. `via` and `unattended` are no keys here.
+for any server. `via` and `unattended` are no keys here, and neither
+are `keep-data`, `root`, `keep-root` and `format`: an installation that
+[keeps the data](keep-data.md) asks about its plan, which `ump server
+reinstall pxe/NAME --keep-data` does.
 
 Values of `defaults` come under every machine, a site's under its
 machines', and a machine's own win; a value replaces the one below it,

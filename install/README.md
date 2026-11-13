@@ -165,8 +165,10 @@ machine in the rescue system, with whatever was mounted unmounted again.
 `--keep-data` (or `keep_data` in the specification) is a second way to
 install: the old system is replaced, its data stays. No disk is wiped,
 no partition table, array or volume group is touched, and the layout of
-the specification is not applied. The steps 2, 4 and 5 above do not
-run; what runs instead:
+the specification is not applied. `ump server reinstall --keep-data`
+runs it twice, for the plan and for the installation, and asks in
+between ([keeping the data](../docs/keep-data.md)). The steps 2, 4 and
+5 above do not run; what runs instead:
 
 1. **Finds the old system**, reading only: arrays are assembled
    read-only and volume groups activated, every ext4, xfs and btrfs file

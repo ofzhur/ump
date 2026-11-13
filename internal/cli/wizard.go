@@ -38,7 +38,12 @@ func (a *app) newPrompterTo(ctx context.Context, out io.Writer) *prompter {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &prompter{ctx: ctx, in: bufio.NewReader(a.stdin), out: out, readSecret: a.readSecret, saveTerm: a.saveTerm}
+	// one reader for all the questions of a run: what the reader of one
+	// question read ahead (an answer typed early, the lines of a script)
+	// is there for the next
+	in := bufio.NewReader(a.stdin)
+	a.stdin = in
+	return &prompter{ctx: ctx, in: in, out: out, readSecret: a.readSecret, saveTerm: a.saveTerm}
 }
 
 var (
