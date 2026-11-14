@@ -121,9 +121,11 @@ As of November 2026, ump does what the [README](../README.md) and the
   [Next steps](next-steps.md) describes the repository it is meant for.
 - **The skill.** Packaged operating knowledge for AI agents that run a
   fleet with ump, Terraform and Ansible, with an approval step that stays
-  human. [The design outline](skill.md) is written; the tool-side
-  pieces it needs (a plan with a hash, a separate approval command, an
-  inventory export) are not.
+  human. [The design outline](skill.md) is written, and a first skill
+  for today's commands is in [`skills/ump/`](../skills/ump/SKILL.md);
+  the tool-side pieces the outline needs (a plan with a hash, a
+  separate approval command, an inventory export, `ump skill install`
+  with the skill embedded in the binary) are not.
 
 ## Open questions
 

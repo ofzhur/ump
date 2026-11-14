@@ -212,7 +212,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Installer](install/README.md) | what runs in the rescue system: disks, md and LVM, the system, users, userdata, firewall, the boot loader |
 | [Published profiles](profiles/README.md) | the directory the published profiles, layouts, firewalls, networks, users and userdata come from |
 | [Roadmap](docs/roadmap.md) | what is there, what comes next, open questions |
-| [Skill](docs/skill.md) | design outline for a planned part: operating a fleet and its Terraform and Ansible repository with an AI agent |
+| [Skill](docs/skill.md) | operating a fleet and its Ansible repository with an AI agent: the skill for today's commands in [skills/ump](skills/ump/SKILL.md), and the design outline of what it grows into |
 
 ## Principles
 
