@@ -115,13 +115,14 @@ image alone) and serve this below it:
 | `rescue/<arch>/initrd.zst` | the rescue system: a zstd-compressed initramfs with `init` and the system as a squashfs |
 | `rescue/<arch>/kexec` | a static `kexec` binary, used where the rescue system has none (optional, listed in the manifest when present) |
 | `rescue/<arch>/kexec-tools-<version>.tar.xz` | its source (GPL-2.0), published with it; nothing fetches it |
-| `rescue/freebsd-<release>/<arch>/manifest.json`, `disk.img.zst` | the [FreeBSD rescue image](../freebsd/README.md) of a release (`15.1`, `14.5`): a disk image, and the manifest with its SHA-256, its size and the memory it needs |
+| `rescue/freebsd-<release>/<arch>/manifest.json`, `disk.img.zst` | the [FreeBSD rescue image](../freebsd/README.md) of a release (`15.1`, `14.5`): a disk image, and the manifest with its SHA-256, its size, the memory it needs, and where the source of its FreeBSD is (`src.txz`, below) |
 | `install/install.sh` | [the installer](../../install/README.md); ump has the rescue system fetch and run it |
 | `profiles/ubuntu-26.04.yaml`, `profiles/ubuntu-24.04.yaml`, `profiles/ubuntu-22.04.yaml`, `profiles/layouts.yaml`, `profiles/firewalls.yaml`, `profiles/networks.yaml`, `profiles/users.yaml` | the published [profile](../../docs/profiles.md), [layouts](../../docs/disk-layouts.md), [firewalls](../../docs/firewalls.md) and [private networks](../../docs/networks.md); a copy in `~/.config/ump/profiles/` wins |
 | `os/index.json` | `{"images": ["ubuntu-22.04", ...]}`: the images the storage has, which the profile wizard offers (optional; the known names are tried without it) |
 | `os/<os>/<arch>/manifest.json` | an [OS image](../base/README.md): version, kernel, unpacked size, and the SHA-256 and size of the archive |
 | `os/<os>/<arch>/rootfs.tar.zst` | the system, a zstd-compressed tar |
 | `os/freebsd-<release>/<arch>/manifest.json`, `base.txz`, `kernel.txz`, `packages.tar` | [FreeBSD](../freebsd/README.md#building): the release's distribution sets and FreeBSD's packages, with the manifest that pins them |
+| `os/freebsd-<release>/<arch>/src.txz`, `packages-source.tar` | their [source](../freebsd/README.md#licenses-and-sources), published with them: the release's own, and that of the packages whose licenses ask for it (GPL, LGPL); nothing fetches them |
 | `*/SHA256SUMS`, `*/packages.txt` | for people; nothing fetches them |
 | `rescue/v/<version>/<arch>/...`, `rescue/freebsd-<release>/v/<version>/<arch>/...`, `os/<os>/v/<version>/<arch>/...` | the same per version, kept for rollbacks (optional) |
 

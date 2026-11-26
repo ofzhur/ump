@@ -46,9 +46,15 @@
 ./usr/share/atf
 ./usr/share/kyua
 
-# documentation, and the data of programs nobody runs here
+# documentation, and the data of programs nobody runs here. Of
+# /usr/share/doc the directories with license files stay, as /COPYRIGHT
+# does: legal (firmware), llvm (the C++ library and the compiler's
+# runtime), atf and kyua, a few files. build.sh stops when /COPYRIGHT,
+# legal or llvm's license is not in the memory root
 ./usr/share/man
-./usr/share/doc
+./usr/share/doc/IPv6
+./usr/share/doc/ntp
+./usr/share/doc/pjdfstest
 ./usr/share/examples
 ./usr/share/openssl
 ./usr/share/dict

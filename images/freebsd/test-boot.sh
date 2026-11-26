@@ -10,11 +10,12 @@
 #             clock (the machine's is in 2020), a plan.json for an
 #             installer; then the system itself: the root in memory and
 #             no disk mounted, sshd's settings, every tool an installer
-#             calls, pf, the zones and the CA certificates, a GPT, a
-#             FAT32 file system and a ZFS pool made on a second disk, the
-#             drivers of server NICs and storage controllers, no program
-#             without its libraries; after the shutdown, boot.log on the
-#             partition
+#             calls, pf, the zones and the CA certificates, FreeBSD's
+#             notices, the packages' licenses and where the source is, a
+#             GPT, a FAT32 file system and a ZFS pool made on a second
+#             disk, the drivers of server NICs and storage controllers,
+#             no program without its libraries; after the shutdown,
+#             boot.log on the partition
 #   dhcp      two NICs, DHCP on the one of ump.boot-mac alone with the
 #             lease's resolver, the key from ump.authorized_keys, a
 #             value that is no address ignored, and under UEFI the
@@ -224,6 +225,11 @@ ok "pf: pf.ko loads, pfctl takes a ruleset; msdosfs.ko is there" \
 	sh -c 'kldload -n pf && echo "block in all" | pfctl -nf - && [ -f /boot/kernel/pf.ko ] && [ -f /boot/kernel/msdosfs.ko ] && kldstat -q -m msdosfs'
 ok "time zones: $(find /usr/share/zoneinfo -type f | wc -l | tr -d ' ') files; CA certificates: $(ls /usr/share/certs/trusted | wc -l | tr -d ' '), which openssl finds" \
 	sh -c '[ -f /usr/share/zoneinfo/Europe/Berlin ] && openssl verify "$(ls /usr/share/certs/trusted/*.pem | head -n 1)"'
+# what goes with the programs: FreeBSD's notices, the licenses of the
+# packages whose files are here, and where the source of the release is
+ok "notices: /COPYRIGHT and /usr/share/doc of FreeBSD, the licenses of $(ls /usr/local/share/licenses | paste -sd' ' -); /etc/ump-rescue-source names the release's source" \
+	sh -c '[ -s /COPYRIGHT ] && [ -s /usr/share/doc/llvm/LICENSE.TXT ] && ls /usr/share/doc/legal/* && for p in pkg jq oniguruma; do ls /usr/local/share/licenses/$p-*/LICENSE || exit 1; done \
+	&& grep -q "^os/freebsd-$RELEASE/[a-z0-9]*/src.txz" /etc/ump-rescue-source && grep -q "^[0-9a-f]\{64\}\.$" /etc/ump-rescue-source'
 # what an installer does to a disk, on the second one
 for d in vtbd0 vtbd1; do gpart show -l "$d" 2>/dev/null | grep -q umpboot || disk="$d"; done
 ok "disk $disk: a GPT, a FAT32 file system, a pool with a file system, exported again" \

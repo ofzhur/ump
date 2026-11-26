@@ -40,7 +40,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-plan-test freebsd-render-test freebsd-install-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image freebsd-image freebsd-test upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-plan-test freebsd-render-test freebsd-install-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image freebsd-image freebsd-test freebsd-sources-test upload
 
 all: build
 
@@ -147,6 +147,9 @@ freebsd-image: ## build the FreeBSD rescue image and the storage's files of the 
 
 freebsd-test: ## boot the built FreeBSD rescue images of FREEBSD_LIST for TEST_ARCH (default: this machine's) in QEMU from a staged disk and check them over SSH (amd64: with UEFI and with BIOS, FIRMWARE=bios for one)
 	@for release in $(FREEBSD_LIST); do images/freebsd/test-boot.sh $(TEST_ARCH) $$release || exit 1; done
+
+freebsd-sources-test: ## check that the built FreeBSD files of FREEBSD_LIST for FREEBSD_ARCH go out with their source: src.txz as SHA256SUMS pins it, every package decided by images/freebsd/licenses.txt, and in packages-source.tar the port and every file of its distinfo for each package that asks for its source (no machine: bash, jq, tar, zstd)
+	@for release in $(FREEBSD_LIST); do for arch in $(FREEBSD_ARCH); do images/freebsd/test-sources.sh $$arch $$release || exit 1; done; done
 
 pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump pxe serve: rescue by MAC, unknown MACs (FIRMWARE=bios on amd64)
 	images/test-pxe.sh $(TEST_ARCH)
