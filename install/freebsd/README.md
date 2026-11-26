@@ -100,9 +100,10 @@ the manifest there. No installation asks `download.freebsd.org` or
 install.sh --spec FILE [--record DIR] [--dry-run] [--force]
 ```
 
-`ump server reinstall` will fetch it from the storage
-(`install/freebsd/install.sh`) and run it with the specification, as it
-runs the other installer in the Linux rescue system. By hand, in the
+`ump server reinstall` fetches it from the storage
+(`install/freebsd/install.sh`) and runs it with the specification, as it
+runs the other installer in the Linux rescue system
+([how](../../docs/cli.md#install-ump-server-reinstall)). By hand, in the
 FreeBSD rescue system, with a specification such as
 `/etc/ump/spec.json` of an installed system:
 

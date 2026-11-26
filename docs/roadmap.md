@@ -45,6 +45,15 @@ As of November 2026, ump does what the [README](../README.md) and the
   command line, UEFI and BIOS boot; `--dry-run`; Ubuntu 26.04, 24.04
   and 22.04 and Debian 13 and 12 from UMP's base images, NixOS 25.11,
   Arch Linux and CachyOS (experimental); `ump ssh`.
+- **FreeBSD:** 15.1 and 14.5 from the release's distribution sets in
+  the storage, with the root on ZFS (one disk, a stripe, a mirror, a
+  raidz), installed in two steps through a second rescue system, the
+  UMP FreeBSD rescue system, which the first step writes to the disks
+  and the machine's firmware starts; the same profiles, users, keys,
+  interface names and firewall rules (pf); the collection's `base`
+  from ofzhur.ansible 0.8.0 on. Shown in QEMU (arm64 and emulated
+  amd64, UEFI and BIOS); no real server has been installed yet
+  ([FreeBSD](oses.md#freebsd)).
 - **Keeping the data:** `ump server reinstall --keep-data` (and
   `multiinstall`) replaces the old system and leaves its data: the old
   root found from its own fstab, formatted or with `--keep-root` moved
@@ -99,12 +108,26 @@ As of November 2026, ump does what the [README](../README.md) and the
   storage (`ofzhur.ansible.facts`) and the server's own secrets, so
   that a server provisioned by ump stays configured
   ([provisioning](provisioning.md#servers-that-pull)).
-- **More images.** Ubuntu, Debian and NixOS are there; Talos and
-  cloud-init images may follow as userdata types.
+- **More images.** Ubuntu, Debian, NixOS, Arch Linux, CachyOS and
+  FreeBSD are there; Talos and cloud-init images may follow as userdata
+  types.
+- **FreeBSD, the rest.** Real machines: every provider's firmware and
+  the hardware of dedicated servers, which QEMU stands in for so far,
+  and a check of a machine's network card and disk controller against
+  FreeBSD's drivers before the disks are wiped. Then what the first
+  version leaves out: the operator's tools, message of the day and
+  prompt; `freebsd-update` at installation; the FreeBSD rescue system
+  for `ump server rescue`, without a write to a disk; a way from a
+  running FreeBSD into the rescue system, without which a server whose
+  provider has no rescue system cannot be reinstalled by ump again;
+  `--unattended` for PXE machines; `--keep-data` with a pool that is
+  kept; the collection's roles `firewall` (pf) and `wireguard` on
+  FreeBSD; pools beside the root pool, encryption, disks with 4096-byte
+  sectors.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
   partition.
 - **Keeping the data, the rest.** An encrypted root and a ZFS root;
-  NixOS, Arch Linux and CachyOS as the new system; LUKS volumes opened
+  NixOS, Arch Linux, CachyOS and FreeBSD as the new system; LUKS volumes opened
   during the installation; unattended installations that keep the
   data; a shutdown of the running system before the kexec of the direct
   way, which today syncs and remounts read-only and stops no service;

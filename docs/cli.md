@@ -460,6 +460,16 @@ the way:
    server is reset into it, and once it answers ump reports it and loads
    the image from there the same way.
 
+A server that runs [FreeBSD](oses.md#leaving-freebsd-again), or the
+UMP FreeBSD rescue system an installation left it in, lets UMP in at
+step 2 and still cannot take it: no kexec leads from FreeBSD into a
+Linux. ump says so (`yes (FreeBSD 15.1-RELEASE, as ump with sudo); the
+running system is FreeBSD, which cannot jump into the UMP rescue
+system.`) and goes on with step 3. With `--via direct`, and where the
+provider has no rescue system, it stops with exit code 5 and nothing
+changed. The UMP rescue system is a Linux without ZFS: it reaches the
+disks of a FreeBSD server, and cannot import its pool.
+
 The same keys go into the UMP rescue system. With none but UMP's, a
 boxed warning comes first; see [keys in rescue
 systems](keys.md#keys-in-rescue-systems).
@@ -729,8 +739,8 @@ goes down for it too, and the server stays in the rescue system); `-o
 json` carries the plan under `keep_data`, with `layout` `keep-data`.
 Refused before the server is touched (exit status 2): `--keep-data`
 with `--layout`, `--disks` or `--unattended`, `--root`, `--keep-root`
-or `--format` without it, and a profile whose OS is NixOS, Arch Linux
-or CachyOS. The way into the rescue system is never a provider's own
+or `--format` without it, and a profile whose OS is NixOS, Arch Linux,
+CachyOS or FreeBSD. The way into the rescue system is never a provider's own
 reinstall with a stock Linux, which erases the disks: where that would
 be the only way, the running system must let UMP in (exit status 5
 otherwise, nothing changed). A plan that is declined, a machine or a
@@ -755,6 +765,81 @@ server show` and `ump server list -o wide` show that layout, and the
 old root and the plan are on the server (`/etc/ump/install`,
 `/etc/ump/keep-data.json`).
 
+**FreeBSD** (`--profile freebsd-15.1` or `freebsd-14.5`, with a [ZFS
+layout](disk-layouts.md#zfs-freebsds-layouts): `zfs`, `zfs-mirror`,
+`zfs-raidz` or one of yours; [FreeBSD](oses.md#freebsd)) is installed
+in two steps, each from a rescue system of its own, and ump drives
+both:
+
+1. The installer in the UMP rescue system plans as for every system,
+   wipes the disks and writes the boot image of the UMP FreeBSD rescue
+   system to them, with its settings. Its last line is `==> staged:`,
+   where another system has `==> installed:`.
+2. ump has the provider start the server from its disks, now and not
+   after the installation: a rescue system that stays the boot option
+   is disabled, a provider that starts a kernel of its own is switched
+   to the disks.
+3. ump reboots the server (through the provider where step 2 needs
+   that, or the reboot over SSH fails) and waits until the FreeBSD
+   rescue system answers where the UMP rescue system did, as root with
+   UMP's key, with its version and `FreeBSD`: `Waiting for the UMP
+   FreeBSD rescue system on 203.0.113.10 (up to 15m) ... up after 44s
+   (ump-rescue 2026.11.26, FreeBSD 15.1-RELEASE).` The wait is the
+   configured one (`wait`, `UMP_WAIT`).
+4. The [installer for FreeBSD](../install/freebsd/README.md) is fetched
+   from the storage (`install/freebsd/install.sh`, with `fetch`, a
+   failed fetch tried again for half a minute) and run there with the
+   same specification, the keys put into root's first.
+5. ump reboots the server (`shutdown -r now`), waits for the new
+   system and logs in as the administrator, as after any installation.
+
+| Flag | With FreeBSD |
+|---|---|
+| `--dry-run` | the plan of step 1, with the pool; nothing is written and the server stays in the UMP rescue system. What only FreeBSD could say (a disk it does not see) is not in it |
+| `--no-reboot` | the reboot of step 3 happens, it is part of the installation; the last one does not: `Installed; web-01 stays in the UMP FreeBSD rescue system, a reboot starts freebsd-15.1.` |
+| `--layout NAME` | a ZFS layout; another is refused (exit status 1), as a ZFS layout is for another system |
+| `--ipv6`, `--mitigations` | the profile's switches, with [FreeBSD's meaning](profiles.md#freebsd) |
+| `--userdata` | entries of type `bash`; a `nix` one is refused (exit status 1) |
+| `--keep-data`, `--unattended` | refused before the server is touched (exit status 2) |
+| the others | as for every system |
+
+An installation that stops after step 1 has wiped the disks, and what
+ump says names what they hold then:
+
+- **The FreeBSD rescue system does not answer within the wait** (exit
+  status 5): `the UMP FreeBSD rescue system on 203.0.113.10 did not
+  answer within 15m. The disks of web-01 hold that rescue system and
+  nothing else: the old system is gone, and freebsd-15.1 is not
+  installed.` The same command again, or one with another profile,
+  starts over through the provider's rescue system; its installer
+  prints the boot log the FreeBSD rescue system left on a disk, when it
+  came as far as its network, also with `--dry-run`
+  ([troubleshooting](troubleshooting.md#the-freebsd-rescue-system-does-not-answer)).
+- **The installer for FreeBSD refuses** (its exit status 2; ump's 1):
+  it wrote nothing, and the server stays in the FreeBSD rescue system,
+  whose image is all the disks hold. `ump ssh REF --staging` gets
+  there.
+- **The installer for FreeBSD fails** (its exit status 1; ump's 1), or
+  **the connection to it ends** (ump's 5): the server stays in the
+  FreeBSD rescue system, and a reboot finds no system on its disks.
+- **The installer could not be fetched** (ump's 1): the server must
+  reach the storage from the FreeBSD rescue system too.
+
+The private addresses are the server's once step 1 ended well, or
+lost its connection after the installer's line `==> releasing the
+disks`: whatever happens in the steps after it, they stay. No kexec
+leads from FreeBSD
+into the UMP rescue system, so every next attempt, and every later
+reinstall of the server to whatever system, goes through the provider's
+rescue system, with a line that says so; `--via direct` ends with exit
+status 5. Where the provider has none, `reinstall` has it put its stock
+Linux on the server first where it can (Vultr), and ends with exit
+status 5 where it cannot (DigitalOcean, a server added by hand): there
+FreeBSD is installed the direct way once, and the question says what
+that means (`There is no rescue system to fall back on: a failed
+installation is yours to recover. FreeBSD cannot be left again from
+here: the next reinstall of this server is the provider's.`).
+
 On a machine of `pxe.yaml`, the new system configures the network the
 machine's entry gives (`network`: a static address or DHCP, its DNS),
 not the one the rescue system has, and that may not overlap the
@@ -766,7 +851,8 @@ neither is refused.
 `--unattended` has the machine install by itself, at its next boot,
 without ump's SSH session ([unattended
 installations](pxe.md#unattended-installations); PXE machines alone,
-exit status 2 for others): ump renders and checks the installation as
+exit status 2 for others, and for a FreeBSD profile, whose two steps
+ump drives over SSH): ump renders and checks the installation as
 above, says which disks it may erase (`--disks` by stable names, else
 those its last network boot reported, else blank ones alone), asks once
 (`Erase pxe/web-07 (web-07, 192.0.2.17) at its next boot and install
@@ -945,6 +1031,16 @@ per server that says how its old system starts again). A server whose
 plan the installer refused, or could not make, is a failed installation
 with the reason in the summary; the others go on. `--dry-run` makes the
 plans alone. Not with `--unattended` (exit status 2).
+
+A server that gets [FreeBSD](#install-ump-server-reinstall) (a FreeBSD
+profile for it in a plan, or for all) is installed in its two steps
+beside the others, its lines under its name like theirs; one whose
+second step fails is a failed installation with the reason in the
+summary, and keeps its private addresses, since its disks were
+written. On providers without a rescue system the question names the
+servers FreeBSD goes to (`FreeBSD cannot be left again from db-01: the
+next reinstall of this server is the provider's.`). Not with
+`--unattended` or `keep-data` (exit status 2).
 
 The summary on stdout says per server whether it was installed (`dry-run`
 for a plan alone, `armed` for an installation not waited for) and
@@ -1400,9 +1496,9 @@ $ ump config firewall create mail --from default
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | generic error, including a failed installation (the server stays in the rescue system). With `--keep-data` the message says whether the installer began to write: after it did, the old root is gone or moved aside and the volumes the plan keeps hold their data; nothing was written when the installer could not be fetched, the plan run failed (an installer status other than 0 and 2), the plan file could not be read back, was a refusal, or had no hash or not the hash the installer printed, or the run that installs failed before the installer's line `==> keep-data: writing begins` |
+| 1 | generic error, including a failed installation (the server stays in the rescue system; with FreeBSD that is the UMP FreeBSD rescue system once the first step staged it, and the message says what the disks hold). With `--keep-data` the message says whether the installer began to write: after it did, the old root is gone or moved aside and the volumes the plan keeps hold their data; nothing was written when the installer could not be fetched, the plan run failed (an installer status other than 0 and 2), the plan file could not be read back, was a refusal, or had no hash or not the hash the installer printed, or the run that installs failed before the installer's line `==> keep-data: writing begins` |
 | 2 | usage or validation error |
 | 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes`; with `--keep-data` also a machine or plan the installer refused or an installer that stopped by itself before its first write (its status 2), and a plan `--yes` does not accept: nothing failed, nothing was written |
 | 4 | provider API error, or an account that could not be listed |
-| 5 | the server did not answer in time (rescue system, reboot, new system), or the connection to it ended while the installer ran; with `--keep-data` the message says whether the installer had begun to write |
+| 5 | the server did not answer in time (rescue system, the UMP FreeBSD rescue system of an installation of FreeBSD, reboot, new system), or the connection to it ended while the installer ran, or it runs FreeBSD and the provider's rescue system is no way (`--via direct`, no such system); with `--keep-data` the message says whether the installer had begun to write |
 | 6 | provisioning failed: Ansible did not complete; the hosts that failed or were unreachable are named (after a reinstall, the server is installed and recorded) |

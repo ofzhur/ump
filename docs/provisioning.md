@@ -115,7 +115,10 @@ nixos`) and leave that group out, with `hosts: all:!nixos` in the plays
 or `--hosts 'all:!nixos'`. The collection's `base` runs on `common`,
 every server ump installs; a repository with such servers writes its
 own `00-base.yml`, a play on `common:!nixos` with the role
-`ofzhur.ansible.users`.
+`ofzhur.ansible.users`. A [FreeBSD](#freebsd) server is no such
+server: `base` runs on it, and plays of your own that are written for
+Linux leave it out the same way (`--group freebsd`, `hosts:
+web:!freebsd`).
 
 ## The infrastructure repository
 
@@ -288,7 +291,9 @@ vars:
   network, each with the network's CIDR; `ump_private_address`,
   `ump_private_network` and `ump_private_cidr` are those of its first
   network. `ump_attributes` are your
-  [attributes](inventory.md#attributes). A host behind a jump host (a
+  [attributes](inventory.md#attributes). A [FreeBSD](#freebsd) server
+  has `ansible_python_interpreter: /usr/local/bin/python3` after
+  `ansible_host`. A host behind a jump host (a
   PXE site's `jump`) has `ansible_ssh_common_args: -o
   ProxyJump=JUMP -o StrictHostKeyChecking=accept-new`, which replaces
   the common SSH arguments of `ansible.cfg` and of ump's runs for it
@@ -365,6 +370,13 @@ secret_key_file = secrets/storage.secret_key
   ends in `.yml` or `.yaml` (but for dot names) as a host file; no
   object is an empty inventory. In Vault, an object is the field `json`
   of a secret.
+- Of Ansible's own variables such a host file has `ansible_host`
+  alone: the plugin takes no other from a storage, since a connection
+  variable there would run commands on every machine that reads it. So
+  the object of a host behind a jump host, or of a FreeBSD server, is
+  without the variable its file in `inventory/hosts/` would have; what
+  the hosts need of them goes into `inventory/host_vars/`, reviewed
+  with the repository.
 - Next to `url`, the pointer may set the options that are no
   credentials: `endpoint`, `region`, `vault_namespace`, `ca_file`
   (relative to the pointer) and `ssh_args`. Any other key, a credential
@@ -785,6 +797,49 @@ the simplest: the repository and a key that opens it is all there is. A
 pulling server holds its own share, as above. Never write a token or a
 private key into a profile or userdata: both end up in git and on the
 server.
+
+## FreeBSD
+
+A [FreeBSD](oses.md#freebsd) server is a host of the fleet like the
+others: in `common` and its groups, logged in to as its administrator
+with UMP's key, who has sudo without a password there too. What
+differs:
+
+- **Python.** FreeBSD has none at `/usr/bin/python3`; the
+  installation's package is `/usr/local/bin/python3`. The host file
+  says so, and ump as the inventory does:
+
+  ```yaml
+  vars:
+    ansible_host: 203.0.113.10
+    ansible_python_interpreter: /usr/local/bin/python3
+    ump_admin: ump
+    ump_os: freebsd-15.1
+  ```
+
+  by the recorded `os` of the server (a name that starts with
+  `freebsd`), whatever the repository's `ansible.cfg` has for
+  `interpreter_python`. A host file in a storage has no such variable
+  ([above](#host-files-in-a-storage)): Ansible finds the interpreter by
+  itself there (the template's `auto_silent` does), and where an
+  `ansible.cfg` pins `/usr/bin/python3`, `inventory/group_vars/` or
+  `host_vars/` name FreeBSD's.
+- **The collection.** From ofzhur.ansible **0.8.0** on, the playbook
+  `base` runs on FreeBSD: its role `users` puts the sudo drop-ins into
+  `/usr/local/etc/sudoers.d`, owned by group 0 (wheel there), and gives
+  new users `/usr/local/bin/bash`. The roles `firewall`, `wireguard`
+  (the mesh and the tunnel) and `ump_pxe` are for Linux: on a FreeBSD
+  host each changes nothing and says so in one line, so that a play
+  over a mixed fleet goes on; the Linux hosts leave such a host out of
+  the mesh. pf, as the installation wrote it, stays the firewall.
+- **An older collection** (0.7.0 and before) fails on a FreeBSD host
+  at its sudoers file. Install FreeBSD with `--no-provision` until the
+  repository has 0.8.0, and keep `ump provision` away from the host
+  (`--hosts 'all:!freebsd'`, with `--group freebsd` at the
+  installation): ump does not check the collection's version.
+- **Plays of your own** written for Linux (`apt`, `systemd`) leave
+  FreeBSD out by a group, as said [above](#groups-and-playbooks); a
+  FreeBSD server is in no group by itself.
 
 ## NixOS
 

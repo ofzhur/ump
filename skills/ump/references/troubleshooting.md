@@ -10,6 +10,8 @@ guide is docs/troubleshooting.md of the ump repository.
 |---|---|---|
 | 1 | `the installation on NAME failed (exit status N, see above); the server stays in the UMP rescue system` | read the installer's `==>` lines above; look with `ump ssh NAME --staging -- lsblk -f` (read-only); fix the profile or layout (a Change, with the human), then a new dry-run and approval |
 | 1 | `could not fetch the installer from ...` | the server cannot reach the storage: its network or the storage URL (`staging.image`, `--storage`) |
+| 1 | FreeBSD: `the installer for FreeBSD refused the specification or the machine ... and wrote nothing; NAME stays in the UMP FreeBSD rescue system` | the disks are wiped and hold that rescue system alone; read the installer's `install.sh:` line above (a disk it does not see, a user name FreeBSD's base has, a time zone); fix the profile with the human, then the same reinstall, which goes through the provider's rescue system again: a new plan and approval |
+| 1 | FreeBSD: `the installation on NAME failed in the UMP FreeBSD rescue system (exit status N, see above); the server stays there ... a reboot finds no system on its disks` | read the installer's lines above; look with `ump ssh NAME --staging -- gpart show` (read-only; it is FreeBSD: `geom disk list`, `zpool import`, no `lsblk`); do not reboot it; the next attempt is a new reinstall with the human's go |
 | 1 | a reference matched nothing, or several without a terminal | `ump server list` for the right `provider/id`, or `--account` |
 | 2 | `the installer refused the specification or the machine ... nothing was changed` | the plan does not fit the machine: a layout whose targets match no disk, too few disks for a RAID level, firmware without the layout's `bios`/`efi` part |
 | 2 | a missing `ansible.cfg`, `inventory/` or playbook; a playbook that does not parse; a hostname that is a group; `--hosts` matching nothing; a host file ump did not write | fix the repository (a commit) or run from its root; `--no-provision` installs without it |
@@ -20,6 +22,8 @@ guide is docs/troubleshooting.md of the ump repository.
 | 3 | `kexec-into-rescue.sh` reports too little memory | the server keeps running what it ran; the provider's rescue system (`--via provider`) may have more |
 | 4 | an account could not be listed, or the provider refused a call | `ump config isp test NAME`; credentials and API access are the human's |
 | 5 | `Waiting for the UMP rescue system ...` ran out | the jump happened and nothing answers: network driver, kernel hang; host-down.md, docs/troubleshooting.md "The rescue system does not answer" |
+| 5 | FreeBSD: `the UMP FreeBSD rescue system on ADDR did not answer within ... The disks of NAME hold that rescue system and nothing else` | the first step wiped the disks and the firmware did not bring the second rescue system up, or nothing reaches it: no system is left. Tell the human at once. `ump server reinstall NAME --profile ... --dry-run` goes through the provider's rescue system and prints the boot log that rescue system left (`==> a FreeBSD rescue system was here and left its boot log`), or says that it left none; docs/troubleshooting.md "The FreeBSD rescue system does not answer" |
+| 5 | `the running system of NAME is FreeBSD, and no kexec leads from FreeBSD into the UMP rescue system` (also `NAME runs the UMP FreeBSD rescue system ...`) | with `--via direct`: drop it, ump then goes through the provider's rescue system; with `provider type ... has no rescue system`: ump has no way in, and leaving FreeBSD there is the provider's (console, its own rescue system, a rebuild), the human's to do |
 | 5 | `Waiting for SSH on ...` after the reboot ran out | the new system does not answer: host-down.md; from a rescue system check the network configuration, the firewall, the boot loader (docs/troubleshooting.md "The installed system does not boot") |
 | 5 | no root access with `--via direct` | the running system does not let UMP in; without `--via direct` ump goes through the provider's rescue system |
 | 6 | `provisioning failed on HOST (failed\|unreachable)` | the server is installed and recorded; fix what Ansible reports, then `ump provision --hosts HOST` |
@@ -42,4 +46,7 @@ Each is a Change: propose it, with what it does to what the server runs.
   there.
 - Do not retry a failed reinstall in a loop: the second failure says
   nothing the first did not, and each run is a reboot.
+- Do not reboot a server that an installation of FreeBSD left in the
+  UMP FreeBSD rescue system after a failure: it runs from memory, and
+  the disks may hold nothing that starts.
 - Do not edit `state.yaml` or a host file to make a check pass.

@@ -7,7 +7,10 @@ layout, the same users, network names, firewall and tools. Ubuntu and
 Debian come as UMP's own prebuilt images from its storage; NixOS is installed from
 NixOS's public servers with UMP's configuration on top, and Arch Linux,
 a rolling release, from its mirrors with the packages of the day, as is
-CachyOS, Arch with packages built for newer CPUs (experimental). They work on amd64 and
+CachyOS, Arch with packages built for newer CPUs (experimental).
+FreeBSD is its release's own distribution sets, from UMP's storage,
+with its root on ZFS ([FreeBSD](#freebsd): new, and shown in QEMU
+only so far). They work on amd64 and
 arm64 (Arch Linux and CachyOS on amd64 only), boot from UEFI and,
 on amd64, from BIOS, and are meant to be used as they are: pick one, and
 the machine is a well-kept server a few minutes later.
@@ -20,6 +23,7 @@ $ ump server reinstall web-01 --profile debian-13                    # Debian
 $ ump server reinstall web-01 --profile nixos-25.11 --no-provision   # NixOS
 $ ump server reinstall web-01 --profile archlinux                    # Arch Linux
 $ ump server reinstall web-01 --profile cachyos                      # CachyOS
+$ ump server reinstall web-01 --profile freebsd-15.1                 # FreeBSD
 $ ump server reinstall web-01 --os ubuntu-24.04                      # another Ubuntu, same profile
 ```
 
@@ -33,6 +37,8 @@ $ ump server reinstall web-01 --os ubuntu-24.04                      # another U
 | `nixos-25.11` | NixOS 25.11, from its stable channel | `nixos-25.11` | `nixos-install` from NixOS's public servers, with the profile as NixOS modules |
 | `archlinux` | Arch Linux, the rolling release, amd64 only | `archlinux` | `pacstrap` from the Arch mirrors, then configured in place like Ubuntu |
 | `cachyos` | CachyOS, experimental: Arch Linux with packages built for x86-64-v3 and CachyOS's server kernel, rolling, amd64 only | `cachyos` | the same as Arch Linux, with CachyOS's repositories in front |
+| `freebsd-15.1` | FreeBSD 15.1-RELEASE, with its root on ZFS | `freebsd-15.1` | the release's distribution sets and a pinned set of packages from the storage, by FreeBSD's own tools in a second rescue system, [the UMP FreeBSD rescue system](#two-rescue-systems-on-the-way) |
+| `freebsd-14.5` | FreeBSD 14.5-RELEASE, the same | `freebsd-14.5` | the same |
 
 `ump config os create` lists what the storage offers (its
 `os/index.json`), and [profiles](profiles.md#choosing-the-operating-system) says how a
@@ -41,7 +47,9 @@ profile, a server's own setting or `--os` picks one.
 ## What every system gets
 
 Whichever system it is, ump installs it the same way, from the same
-[profile](profiles.md), from UMP's own rescue system:
+[profile](profiles.md), from UMP's own rescue system (the Linux
+systems below; [FreeBSD](#freebsd) has the same profile, what is
+FreeBSD's in place of each, and not all of it yet):
 
 - **Disks** as the [layout](disk-layouts.md) says: partitions, md
   arrays, LVM with linear, striped or mirrored volumes, on whatever
@@ -397,6 +405,266 @@ manifest takes CachyOS's packages from `mirror.cachyos.org`, not their
 CDN (`cdn77.cachyos.org`), which answers a `+` in a file name
 (`glibc-2.44+r50...`) with 404 to Arch's pacman. CachyOS's own pacman, on
 the installed system, uses their mirror lists.
+
+## FreeBSD
+
+FreeBSD 15.1 and 14.5, as their releases are published: ump unpacks the
+release's own distribution sets and configures the result from the same
+profiles, users, firewalls and keys as the other systems. The root is
+on ZFS, the only layout it takes.
+
+```console
+$ ump server reinstall web-01 --profile freebsd-15.1
+$ ump server reinstall db-01 --profile freebsd-15.1 --layout zfs-mirror
+```
+
+**New in this version, and shown in QEMU only**: the whole
+installation ran there as ump drives it, on arm64 with UEFI (one disk,
+1 GB of memory), and the same chain without ump on a mirror and a
+raidz there and on emulated amd64, with UEFI and with BIOS. On which
+providers' machines and on which real hardware it works is not known
+yet: no real server has been installed. The first one of a kind is
+best a machine whose provider has a rescue system and a console.
+
+The run of `ump provision` after the installation needs the
+collection ofzhur.ansible 0.8.0 or newer in the repository; with an
+older one, give `--no-provision`
+([provisioning](provisioning.md#freebsd)).
+
+### What a FreeBSD server has
+
+The published profile [`freebsd-15.1`](../profiles/freebsd-15.1.yaml)
+is the Ubuntu profile with `os: freebsd-15.1`, the layout `zfs` and
+the userdata `freebsd`: every disk in one ZFS pool, the sudo user `ump`
+with your keys, no root over SSH, ICMP and SSH open
+([what its fields mean on FreeBSD](profiles.md#freebsd)).
+
+- **Base:** `base.txz` and `kernel.txz` of the release (the GENERIC
+  kernel), checked against the storage's manifest. No patch level: the
+  system is the release as published, `freebsd-version` says
+  `15.1-RELEASE`.
+- **Packages**, from FreeBSD's quarterly repository as it was when the
+  image was built, pinned by the manifest and served by the storage:
+  `pkg`, `sudo`, `bash` and `python3` with what they depend on (11
+  packages), under `/usr/local`. Nothing else: no operator tools,
+  message of the day or prompt of UMP's yet.
+- **ZFS:** one pool (`zroot`) over a partition on every disk of the
+  [layout](disk-layouts.md#zfs-freebsds-layouts): `zfs` stripes them,
+  `zfs-mirror` and `zfs-raidz` do what they say; lz4 compression, no
+  atime, no encryption. The datasets are FreeBSD's own arrangement
+  (`zroot/ROOT/default` at `/`, `home`, `tmp`, `var/log`, `var/tmp`,
+  ...), and the system is a **boot environment** that `bectl` and
+  `freebsd-update` find (`bectl list`: `default NR`).
+- **Boot:** FreeBSD's `loader.efi` on the removable path of an EFI
+  system partition on every disk that has one, and on amd64
+  `gptzfsboot` with `pmbr`, so a mirror starts from whichever disk is
+  left, under UEFI or BIOS. No boot entry is written to the firmware.
+  Swap is a plain partition per disk.
+- **Network:** `/etc/rc.conf` with the uplink static (the address and
+  gateway the machine had, a gateway outside the network reached
+  on-link; a PXE machine's as `pxe.yaml` gives it), resolvers 1.1.1.1
+  and 8.8.8.8 in `/etc/resolv.conf`. The interfaces have the names of the
+  other systems, `ext01`, `int01`, ..., bound to their MAC addresses by
+  an rc script of UMP's (`/usr/local/etc/rc.d/ump_ifnames`): FreeBSD's
+  own renaming goes by the driver's name, which is the kernel's order.
+- **Users:** made with `pw`, without passwords; the administrator in
+  `wheel` with a `NOPASSWD` file in `/usr/local/etc/sudoers.d`. Their
+  shell is bash, `/usr/local/bin/bash`: a profile's `/bin/bash` means
+  that one.
+- **SSH:** keys only, no root login unless the profile lists root
+  (`/etc/ssh/sshd_config.d/50-ump.conf`), and `UseDNS no`, without
+  which a resolver that does not answer holds every login for half a
+  minute.
+- **Firewall:** the profile's rules as `/etc/pf.conf`, pf enabled
+  ([firewalls](firewalls.md)). pf has no counterpart to the rule that
+  holds forwarded connections to the same list: jails and virtual
+  machines behind the host need rules of their own.
+- **Kernel switches:** `mitigations: false` turns page table isolation
+  off on amd64 (`vm.pmap.pti=0`); `ipv6: false` gives no interface an
+  IPv6 address (the kernel has IPv6 built in); `kernel.extra` are
+  loader tunables for `/boot/loader.conf`.
+- **Services:** `sshd`, `ntpd`, `zfs`, pf with `pflog`; no sendmail.
+- **Userdata:** bash scripts, run by `/usr/local/bin/bash` in the new
+  system before its first boot (`pkg install -y nginx`, `sysrc
+  nginx_enable=YES`); the published entry is `freebsd`
+  ([userdata](userdata.md)).
+- **The record:** `/etc/ump/install`, with the pool's root dataset as
+  `root` and FreeBSD's disk names (`nda0`, `ada0`, `vtbd0`).
+
+Updates are FreeBSD's: `freebsd-update fetch install` for the base
+system, which is at the release's level until you run it, and `pkg
+upgrade` for the packages, from `pkg.FreeBSD.org` from then on.
+[The installer for FreeBSD](../install/freebsd/README.md) has every
+file it writes.
+
+### Two rescue systems on the way
+
+FreeBSD's pool is made by FreeBSD's own `zpool`, of the release that
+will import it, and that runs on FreeBSD alone. So the installation
+goes through two rescue systems, and ump drives both over SSH:
+
+1. **In the UMP rescue system**, the Linux one every installation
+   starts from, the installer plans the disks, the pool, the network
+   and the users as for every system (`--dry-run` ends here, nothing
+   written), refuses what cannot work, wipes the disks and writes a
+   small boot image of the **UMP FreeBSD rescue system** to the start
+   of every disk of the plan that can carry it, with its settings
+   beside it: the address the rescue system has, root's keys, the plan.
+   It ends with `==> staged:`.
+2. **ump** has the provider start the server from its disks (its
+   rescue system off where that stays on, the disks as the boot device
+   where the provider starts a kernel of its own), reboots the server
+   and waits until the FreeBSD rescue system answers at the same
+   address: `Waiting for the UMP FreeBSD rescue system on 203.0.113.10
+   (up to 15m) ... up after 44s (ump-rescue 2026.11.26, FreeBSD
+   15.1-RELEASE).`
+3. **In the FreeBSD rescue system**, FreeBSD running from memory with
+   no disk in use, [the installer for
+   FreeBSD](../install/freebsd/README.md) gets the same specification,
+   finds the plan's disks again (by serial number, else by size),
+   partitions them, makes the pool, unpacks the sets, adds the
+   packages and configures the system. It ends with `==> installed:`.
+4. **ump** reboots the server (`shutdown -r now`), waits for the new
+   system and logs in as the administrator, as after any installation.
+
+```console
+$ ump server reinstall web-01 --profile freebsd-15.1 --no-provision
+...
+Installing freebsd-15.1 (profile freebsd-15.1 from the storage, layout zfs, private address 10.0.0.7 in default) on web-01 as web-01 ...
+==> machine: arm64, UEFI firmware, 2 CPUs, 963 MB RAM
+==> disks (1): /dev/vda (10G HDD virtio)
+==>   /dev/vda: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   zroot: stripe over /dev/vda, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/vda and starts from there
+...
+==> releasing the disks
+==> wiping the disks
+==> writing the FreeBSD rescue system to /dev/vda
+==> staged: the UMP FreeBSD rescue system is on the disks, with its boot config; a reboot starts it, and the installation goes on there
+Rebooting web-01 into the UMP FreeBSD rescue system ...
+Waiting for the UMP FreeBSD rescue system on 203.0.113.10 (up to 15m) ...... up after 44s (ump-rescue 2026.11.26, FreeBSD 15.1-RELEASE).
+==> machine: arm64, UEFI firmware, 2 CPUs, 1024 MB RAM
+==> disks (1): vtbd0 (10 GiB, /dev/vda in the plan, found by size)
+==> plan: the plan of the Linux rescue system (/etc/ump/boot/plan.json)
+...
+==> installed: freebsd-15.1 15.1-RELEASE as web-01, root on zroot/ROOT/default (623M used; layout zfs over 1 disk(s)); reboot to start it
+Rebooting web-01 into freebsd-15.1 ...
+Waiting for SSH on 203.0.113.10 to go down ... down after 0s.
+Waiting for SSH on 203.0.113.10 (up to 15m) .... up after 31s.
+web-01 is up: FreeBSD 15.1-RELEASE, hostname web-01, root on zroot/ROOT/default; log in as ump (ump ssh web-01).
+```
+
+What that costs is a second boot through the machine's firmware: a
+virtual machine spends seconds there, a dedicated server minutes, in
+each of the two. Measured in QEMU on 2026-11-26 (arm64 with hardware
+virtualisation, UEFI, a 10 GB virtio disk, 1 GB of memory): 90 s from
+the UMP rescue system to FreeBSD answering, of which 42 to 45 s until
+the FreeBSD rescue system answered and 31 s until the new system did.
+No time on a real machine is known yet.
+
+What the machine needs: the memory the FreeBSD rescue system runs in,
+592 MB of what the Linux rescue system sees on amd64 and 524 MB on
+arm64 for 15.1 (a machine sold with 1 GB has it, one with 512 MB has
+not); a first disk with 512-byte logical sectors (one with 4096-byte
+sectors is refused), and a pool that holds the system twice over,
+about 2.2 GB; Secure Boot off; and a network card and a disk
+controller that FreeBSD's GENERIC kernel or its modules drive. The
+installer checks memory and disks before it wipes. The other two show
+only in a FreeBSD rescue system that does not answer.
+
+### When it stops on the way
+
+From the wipe on, the old system is gone, as in any installation. What
+is on the disks then, and what ump says:
+
+| Where it stops | The disks | ump | Go on with |
+|---|---|---|---|
+| the installer in the UMP rescue system refuses (its exit status 2) | as they were | exit status 1, `nothing was changed`, the server in the UMP rescue system | the profile or the flags it names, and the same command |
+| the FreeBSD rescue system does not answer within the wait | that rescue system's boot image, nothing else | exit status 5: `the UMP FreeBSD rescue system on ... did not answer within 15m. The disks of web-01 hold that rescue system and nothing else: ...` | the same command again, or another profile; `ump server rescue web-01` to look first |
+| the installer for FreeBSD refuses (2) | the same; it wrote nothing | exit status 1, the server in the FreeBSD rescue system (`ump ssh web-01 --staging`) | what it names, and the same command |
+| the installer for FreeBSD fails (1), or the connection to it ends | what it came to: a reboot finds no system | exit status 1, or 5 for the connection; the server in the FreeBSD rescue system | the same command again |
+
+Every next attempt goes through the provider's rescue system: no kexec
+leads from the FreeBSD rescue system into the Linux one, which is where
+an installation starts. A FreeBSD rescue system that came up as far as
+its network scripts left a log on its boot partition (the interfaces
+and their addresses, the devices and the drivers that took them, the
+disks, the kernel's messages), and the installer of the next attempt
+prints it before it wipes, also with `--dry-run`: `==> a FreeBSD rescue
+system was here and left its boot log (/dev/vda1):`. No log means the
+firmware did not start the disk, or the kernel did not get that far:
+the console says which ([troubleshooting](troubleshooting.md)).
+
+### Leaving FreeBSD again
+
+A running Linux lets ump load the rescue system by a kexec; FreeBSD
+has none into a Linux. So ump goes through the provider's rescue
+system for every later reinstall of a FreeBSD server, to whatever
+system, and for `ump server rescue`, and says so:
+
+```
+Checking root access to 203.0.113.10 over SSH ... yes (FreeBSD 15.1-RELEASE, as ump with sudo); the running system is FreeBSD, which cannot jump into the UMP rescue system.
+Going through the provider's rescue system.
+```
+
+- **A provider with a rescue system** (Hetzner, OVHcloud dedicated
+  servers, Linode, a PXE site): nothing to do; `--via direct` ends with
+  exit status 5.
+- **A provider without one that can put its stock Linux on the server**
+  (Vultr, an OVHcloud VPS): `reinstall`, which erases the server
+  anyway, has the provider do that first; `rescue`, which never erases,
+  ends with exit status 5.
+- **Neither** (DigitalOcean, a server added by hand): FreeBSD is
+  installed there the direct way, once. The question says so before
+  anything happens: `There is no rescue system to fall back on: a
+  failed installation is yours to recover. FreeBSD cannot be left
+  again from here: the next reinstall of this server is the
+  provider's.` From then on ump ends with exit status 5 until the
+  server runs a Linux again that lets UMP in, which the provider's
+  panel, console or rebuild brings. A FreeBSD rescue system that does
+  not come up there is the same case, without a system.
+
+The UMP rescue system has no ZFS: `ump server rescue` of a FreeBSD
+server gets a Linux beside a pool it cannot import. Repairs of the
+pool are for the FreeBSD rescue system, which an installation leaves
+the server in with `--no-reboot`, or FreeBSD's own install media.
+
+### What is not there yet
+
+- `--keep-data`: a pool that is kept across a reinstall (exit status 2).
+- `--unattended`: FreeBSD's two steps are driven over SSH; a PXE
+  machine is installed like any server, with the uplink of `pxe.yaml`
+  (exit status 2 with the flag).
+- Provisioning beyond users: the collection's `base` runs on FreeBSD
+  from ofzhur.ansible 0.8.0 on; its roles `firewall`, `wireguard`
+  (the mesh and the tunnel) and `ump_pxe` are for Linux and leave a
+  FreeBSD host as it is ([provisioning](provisioning.md#freebsd)).
+- `ump server rescue` into FreeBSD, with the pool at hand.
+- `freebsd-update` at installation, the operator's tools, UMP's
+  message of the day and prompt.
+- Pools beside the root pool, encryption, a boot disk with 4096-byte
+  sectors.
+- A check of the machine's network card and disk controller against
+  what FreeBSD drives, before the wipe.
+
+### What the storage holds for FreeBSD
+
+Everything an installation needs; nothing comes from
+`download.freebsd.org` or `pkg.FreeBSD.org`:
+
+- `os/freebsd-15.1/<arch>/`: `base.txz`, `kernel.txz`, `packages.tar`
+  (the packages as FreeBSD built them) and the manifest (`"family":
+  "freebsd"`, the release, the rescue image it is installed from, the
+  packages with their checksums);
+- `rescue/freebsd-15.1/<arch>/`: the UMP FreeBSD rescue image,
+  `disk.img.zst`, 69 to 90 MB, with its manifest (the memory it needs).
+  One per release, because the pool is made by the release that
+  imports it ([the image](../images/freebsd/README.md));
+- `install/freebsd/install.sh`: the installer for FreeBSD.
+
+`make freebsd-image` builds the images, on Linux, without a FreeBSD
+host; `images/test-install.sh freebsd-15.1` runs the chain in QEMU
+without ump, `make freebsd-install-test` the installer for FreeBSD.
 
 ## More systems
 

@@ -53,6 +53,16 @@ its chains and UMP's are both evaluated, and a drop in either is final.
 not enabled. The image ships `nftables`; the installer installs it when a
 firewall needs it and the image lacks it.
 
+On [FreeBSD](oses.md#freebsd) the same firewall is pf's: the installer
+writes `/etc/pf.conf` (`block in all`, `pass out all`, a `pass in` line
+per allowed entry, the loopback skipped), checks it with `pfctl -nf`
+and enables pf. pf keeps state, so the answers to the server's own
+connections pass. It has no forward chain, and so nothing of the
+exception above: `block in all` holds for every packet that comes in on
+any interface, and jails and virtual machines behind the host need
+rules of their own. `pfctl -sr` shows what is active; the collection's
+role `firewall` leaves a FreeBSD host as it is.
+
 ## Fields
 
 ```yaml
