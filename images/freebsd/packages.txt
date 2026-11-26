@@ -1,0 +1,12 @@
+# Packages of a FreeBSD system UMP installs, one per line: build.sh takes
+# them and what they depend on from FreeBSD's quarterly repository into
+# packages.tar of the storage, and the installer adds them from there.
+
+# the package manager itself, so that the installed system has it without a download
+pkg
+# the administrator, ump's logins, Ansible's become
+sudo
+# the users' shell, and userdata
+bash
+# Ansible
+python3

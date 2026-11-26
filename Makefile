@@ -24,19 +24,23 @@ NFPM_VERSION ?= v2.48.0
 
 export CGO_ENABLED := 0
 
-# the images are built for both architectures; RESCUE_ARCH=amd64 or
-# OS_ARCH=arm64 limits a target to one, and the QEMU test takes one
+# the images are built for both architectures; RESCUE_ARCH=amd64,
+# OS_ARCH=arm64 or FREEBSD_ARCH=arm64 limits a target to one, and the
+# QEMU test takes one
 IMAGE_ARCHS ?= amd64 arm64
 RESCUE_ARCH ?= $(IMAGE_ARCHS)
 OS_ARCH     ?= $(IMAGE_ARCHS)
+FREEBSD_ARCH ?= $(IMAGE_ARCHS)
 # the base images to build: OS_LIST="ubuntu-24.04 ubuntu-22.04 debian-13 debian-12" for others
 OS_LIST     ?= ubuntu-26.04
+# the FreeBSD releases to build and to test: FREEBSD_LIST=15.1 for one
+FREEBSD_LIST ?= 15.1 14.5
 TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 # the images carry the day they were built as their version
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image freebsd-image freebsd-test upload
 
 all: build
 
@@ -59,10 +63,10 @@ fmt-check:
 	@out="$$(gofmt -l cmd internal packaging)"; \
 	if [ -n "$$out" ]; then echo "files need gofmt:"; echo "$$out"; exit 1; fi
 
-scripts-check: ## syntax-check the shell scripts of the rescue image, the installer and the packages
-	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh packaging/*.sh; do bash -n "$$f" || exit 1; done
+scripts-check: ## syntax-check the shell scripts of the rescue images, the installer and the packages
+	@for f in images/*.sh images/rescue/*.sh images/base/*.sh images/freebsd/*.sh install/install.sh packaging/*.sh; do bash -n "$$f" || exit 1; done
 	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh
+	@for f in images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh images/freebsd/overlay/etc/rc.d/* install/get.sh packaging/scripts/*.sh; do sh -n "$$f" || exit 1; done
 
 network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
 	@images/test-network.sh
@@ -113,7 +117,7 @@ release-assets: ## attach dist/pkg/ to the GitHub release of VERSION (gh; DRY_RU
 clean: ## remove the binary and dist/
 	rm -rf $(BINARY) $(BINARY).exe dist
 
-images: rescue-image os-image ## build every image for every architecture
+images: rescue-image os-image freebsd-image ## build every image for every architecture
 
 rescue-image: ## build the rescue image for RESCUE_ARCH (default: amd64 and arm64) in a privileged Debian container
 	@for arch in $(RESCUE_ARCH); do \
@@ -129,6 +133,13 @@ os-image: ## build the base image(s) (Ubuntu, Debian) of OS_LIST (default: ubunt
 
 rescue-test: ## boot the built rescue image for TEST_ARCH (default: this machine's) in QEMU and check it over SSH
 	images/rescue/test-boot.sh $(TEST_ARCH)
+
+freebsd-image: ## build the FreeBSD rescue image and the storage's files of the releases of FREEBSD_LIST (default: 15.1 and 14.5) for FREEBSD_ARCH (default: amd64 and arm64) in a Debian container without privileges
+	@$(CONTAINER) run --rm -v "$(CURDIR)/images/freebsd:/work" -w /work -e VERSION=$(IMAGE_VERSION) debian:trixie \
+		sh -c 'for release in $(FREEBSD_LIST); do for arch in $(FREEBSD_ARCH); do ./build.sh $$arch $$release || exit 1; done; done'
+
+freebsd-test: ## boot the built FreeBSD rescue images of FREEBSD_LIST for TEST_ARCH (default: this machine's) in QEMU from a staged disk and check them over SSH (amd64: with UEFI and with BIOS, FIRMWARE=bios for one)
+	@for release in $(FREEBSD_LIST); do images/freebsd/test-boot.sh $(TEST_ARCH) $$release || exit 1; done
 
 pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump pxe serve: rescue by MAC, unknown MACs (FIRMWARE=bios on amd64)
 	images/test-pxe.sh $(TEST_ARCH)

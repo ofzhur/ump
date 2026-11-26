@@ -1,0 +1,8 @@
+# UMP FreeBSD rescue system: root with keys only, from the boot config.
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UseDNS no
+ClientAliveInterval 30
+ClientAliveCountMax 10
+Subsystem sftp /usr/libexec/sftp-server
