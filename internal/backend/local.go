@@ -99,6 +99,9 @@ func (l *Local) Delete(ctx context.Context, p string) error {
 	return nil
 }
 
+// List lists the home as it is while others write: a file or a
+// directory deleted meanwhile is left out and the rest still listed,
+// never an empty listing, which would read as a home with nothing in it.
 func (l *Local) List(ctx context.Context) ([]Entry, error) {
 	var out []Entry
 	err := filepath.WalkDir(l.Dir, func(path string, d fs.DirEntry, err error) error {
@@ -120,15 +123,15 @@ func (l *Local) List(ctx context.Context) ([]Entry, error) {
 			return nil
 		}
 		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // deleted since its directory was read
+		}
 		if err != nil {
 			return err
 		}
 		out = append(out, Entry{Path: rel, Version: HashVersion(data)})
 		return nil
 	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
 	return out, err
 }
 
