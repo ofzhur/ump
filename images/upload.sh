@@ -26,10 +26,13 @@
 #   rescue/kexec-into-rescue.sh
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, kexec-tools-<version>.tar.xz, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
+#   rescue/freebsd-<release>/<arch>/manifest.json, disk.img.zst, ...   the FreeBSD rescue image
+#   rescue/freebsd-<release>/v/<version>/<arch>/...                    (kept for rollbacks)
 #   install/install.sh, install/nixos/ump.nix, install/motd.sh, install/bashrc.sh
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/networks.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
+#   os/freebsd-<release>/<arch>/manifest.json, base.txz, kernel.txz, packages.tar, ...
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)
 #
 # Large files go up once, under v/, and are copied to the current path on
@@ -175,8 +178,8 @@ list_dirs() { # list_dirs PREFIX: the directory names right below it
 # --- what is published ----------------------------------------------------
 
 # publish_image DIR KIND NAME: the files of a built image directory to
-# <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the rescue
-# image has no name level: rescue/<arch>/)
+# <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the Linux
+# rescue image has no name level: rescue/<arch>/)
 publish_image() {
 	local d="$1" k="$2" name="$3" arch version base files f src
 	arch="$(basename "$d")"
@@ -184,7 +187,7 @@ publish_image() {
 	[ -n "$version" ] || { echo "upload.sh: no version in $d/manifest.json" >&2; exit 2; }
 	base="$k${name:+/$name}"
 	files=()
-	for f in vmlinuz initrd.zst kexec rootfs.tar.zst SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
+	for f in vmlinuz initrd.zst kexec rootfs.tar.zst disk.img.zst base.txz kernel.txz packages.tar SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
 	# the static kexec (GPL-2.0) goes out with its source, or not at all
 	if [ -f "$d/kexec" ]; then
 		src="$(cd "$d" && ls kexec-tools-*.tar.xz 2>/dev/null | head -n 1 || true)"
@@ -217,9 +220,19 @@ for w in "${what[@]}"; do
 			[ -f "$d/manifest.json" ] || continue
 			publish_image "${d%/}" rescue ""; built=1
 		done
+		# the FreeBSD rescue images, one per release: rescue/freebsd-<release>/<arch>/
+		for d in "$HERE"/freebsd/out/rescue/*/*/; do
+			[ -f "$d/manifest.json" ] || continue
+			name="$(sed -n 's/.*"system": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)-$(sed -n 's/.*"release": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
+			case "$name" in
+			freebsd-[0-9]*) ;;
+			*) echo "upload.sh: no system and release in $d/manifest.json" >&2; exit 2 ;;
+			esac
+			publish_image "${d%/}" rescue "$name"; built=1
+		done
 		;;
 	os)
-		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/ "$HERE"/arch/out/*/*/; do
+		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/ "$HERE"/arch/out/*/*/ "$HERE"/freebsd/out/os/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }
@@ -296,5 +309,5 @@ for w in "${what[@]}"; do
 	*) echo "upload.sh: unknown item $w (rescue, os, index, bin, pkg, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
-[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist, make packages)" >&2; exit 2; }
+[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make freebsd-image, make dist, make packages)" >&2; exit 2; }
 echo "==> done: the URL that serves $TARGET is the storage (ump's storage setting)"
