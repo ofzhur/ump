@@ -1,0 +1,6 @@
+==> the plan
+disks (1): vtbd0 (10 GiB, /dev/vda in the plan, found by size)
+  vtbd0: 1: 512M efi, 2: 2G swap, 3: rest zfs (zroot)
+  zroot: stripe over vtbd0, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: this machine boots with BIOS and the plan has no bios part
+(exit status 1)

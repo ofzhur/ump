@@ -1,0 +1,65 @@
+==> the plan
+disks (3): vtbd0 (10 GiB), vtbd1 (10 GiB), vtbd2 (10 GiB)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  vtbd1: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  vtbd2: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: raidz over vtbd0 vtbd1 vtbd2, at /; the system in zroot/ROOT/default, a boot environment
+==> the disks
+clear_disk vtbd0
+gpart create -s gpt vtbd0
+gpart add -a 4k -t freebsd-boot -i 1 -l boot0 -s 512k vtbd0
+gpart add -a 1m -t efi -i 2 -l efi0 -s 512m vtbd0
+gpart add -a 1m -t freebsd-swap -i 3 -l swap0 -s 2g vtbd0
+gpart add -a 1m -t freebsd-zfs -i 4 -l zfs0 vtbd0
+zero_ends vtbd0p1
+zero_ends vtbd0p2
+zero_ends vtbd0p3
+zero_ends vtbd0p4
+clear_disk vtbd1
+gpart create -s gpt vtbd1
+gpart add -a 4k -t freebsd-boot -i 1 -l boot1 -s 512k vtbd1
+gpart add -a 1m -t efi -i 2 -l efi1 -s 512m vtbd1
+gpart add -a 1m -t freebsd-swap -i 3 -l swap1 -s 2g vtbd1
+gpart add -a 1m -t freebsd-zfs -i 4 -l zfs1 vtbd1
+zero_ends vtbd1p1
+zero_ends vtbd1p2
+zero_ends vtbd1p3
+zero_ends vtbd1p4
+clear_disk vtbd2
+gpart create -s gpt vtbd2
+gpart add -a 4k -t freebsd-boot -i 1 -l boot2 -s 512k vtbd2
+gpart add -a 1m -t efi -i 2 -l efi2 -s 512m vtbd2
+gpart add -a 1m -t freebsd-swap -i 3 -l swap2 -s 2g vtbd2
+gpart add -a 1m -t freebsd-zfs -i 4 -l zfs2 vtbd2
+zero_ends vtbd2p1
+zero_ends vtbd2p2
+zero_ends vtbd2p3
+zero_ends vtbd2p4
+==> the pool
+zpool create -f -o altroot=/mnt -o ashift=12 -O compression=lz4 -O atime=off -O mountpoint=none zroot raidz /dev/gpt/zfs0 /dev/gpt/zfs1 /dev/gpt/zfs2
+zfs create -o mountpoint=none zroot/ROOT
+zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/default
+zfs mount zroot/ROOT/default
+zfs create -o mountpoint=/home zroot/home
+zfs create -o mountpoint=/tmp -o setuid=off zroot/tmp
+zfs create -o mountpoint=/usr -o canmount=off zroot/usr
+zfs create -o mountpoint=/var -o canmount=off zroot/var
+zfs create -o exec=off -o setuid=off zroot/var/audit
+zfs create -o exec=off -o setuid=off zroot/var/crash
+zfs create -o exec=off -o setuid=off zroot/var/log
+zfs create -o atime=on zroot/var/mail
+zfs create -o setuid=off zroot/var/tmp
+zpool set bootfs=zroot/ROOT/default zroot
+==> /etc/fstab
+# /etc/fstab, written by UMP at installation (layout zfs-raidz over vtbd0 vtbd1 vtbd2).
+# The datasets of zroot mount themselves (zfs_enable in /etc/rc.conf).
+# failok and no check at boot: the system starts without this disk too
+/dev/gpt/efi0	/boot/efi	msdosfs	rw,failok	0	0
+/dev/gpt/swap0	none	swap	sw	0	0
+/dev/gpt/swap1	none	swap	sw	0	0
+/dev/gpt/swap2	none	swap	sw	0	0
+==> /etc/ump/install (the disks)
+layout=zfs-raidz
+disks=/dev/vtbd0 /dev/vtbd1 /dev/vtbd2
+boot_disk=/dev/vtbd0
+root=zroot/ROOT/default

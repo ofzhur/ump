@@ -1,0 +1,60 @@
+==> /etc/ssh/sshd_config.d/50-ump.conf
+# UMP: no passwords over SSH, and no root login. The installer writes
+# 10-ump-root.conf (which wins, sshd keeps the first value it reads) with
+# "PermitRootLogin prohibit-password" when the profile lists root with
+# keys. The administrator is the profile's sudo user, ump by default.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+# FreeBSD's sshd looks every client up in the DNS unless told not to: a
+# resolver that does not answer would hold every login for half a minute.
+UseDNS no
+==> /usr/local/etc/rc.d/ump_ifnames
+#!/bin/sh
+#
+# UMP: uniform interface names, bound to the MAC addresses. ump_ifnames
+# in /etc/rc.conf lists them, NAME=MAC each, as /etc/ump/install does;
+# every interface with one of the addresses is renamed before the
+# network starts, so that ifconfig_NAME configures it. sysctl names
+# (dev.em.0) keep the driver's.
+#
+# PROVIDE: ump_ifnames
+# REQUIRE: FILESYSTEMS
+# BEFORE: netif
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="ump_ifnames"
+desc="Name the network interfaces by their MAC addresses"
+rcvar="ump_ifnames_enable"
+start_cmd="ump_ifnames_start"
+stop_cmd=":"
+
+ump_ifnames_start()
+{
+	local pair want mac i m
+	for pair in ${ump_ifnames}; do
+		want="${pair%%=*}"; mac="${pair#*=}"
+		for i in $(ifconfig -l ether); do
+			m="$(ifconfig "$i" ether 2>/dev/null | awk '$1 == "ether" {print $2}')"
+			[ "$m" = "$mac" ] || continue
+			[ "$i" = "$want" ] || ifconfig "$i" name "$want" >/dev/null
+			break
+		done
+	done
+}
+
+load_rc_config $name
+: ${ump_ifnames_enable:="NO"}
+: ${ump_ifnames:=""}
+run_rc_command "$1"
+==> /etc/hosts
+# /etc/hosts, written by UMP at installation.
+::1		localhost
+127.0.0.1	localhost
+127.0.0.1	web-01.example.net web-01
+# /etc/hosts, written by UMP at installation.
+::1		localhost
+127.0.0.1	localhost
+127.0.0.1	web-01

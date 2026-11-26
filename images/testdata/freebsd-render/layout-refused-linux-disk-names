@@ -1,0 +1,2 @@
+install.sh: /dev/nvme0n1, /dev/nvme1n1 of the specification is no disk of this machine (it has nda0, nda1, ada0); without a plan.json its disks are named as FreeBSD names them
+(exit status 1)

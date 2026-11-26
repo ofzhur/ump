@@ -1,0 +1,23 @@
+os=freebsd-15.1
+image_version=15.1-RELEASE
+image_kernel=15.1-RELEASE
+installed=2026-11-26T14:46:59Z
+profile=freebsd-15.1
+layout=zfs-mirror
+disks=/dev/nda0 /dev/nda1
+boot_disk=/dev/nda0
+root=zroot/ROOT/default
+hostname=web-01.example.net
+admin=ump
+interfaces=int01=0c:c4:7a:aa:bb:10 ext01=0c:c4:7a:aa:bb:11
+uplink=ext01
+ipv6=off
+mitigations=off
+firewall=drop
+userdata=freebsd,web
+private=default:10.0.0.7,db:10.0.1.7
+private_network=default
+private_address=10.0.0.7
+network=dhcp
+network6=none
+dns=192.0.2.53

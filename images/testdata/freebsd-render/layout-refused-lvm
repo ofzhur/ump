@@ -1,0 +1,2 @@
+install.sh: layout lvm-linear, part 3 (slice): FreeBSD takes efi, bios and swap slices and one zfs part, its root pool; slice with ext4 is for the Linux systems (the ZFS layouts are zfs, zfs-mirror and zfs-raidz)
+(exit status 1)

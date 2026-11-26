@@ -36,7 +36,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-render-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
 
 all: build
 
@@ -63,6 +63,7 @@ scripts-check: ## syntax-check the shell scripts of the rescue image, the instal
 	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh packaging/*.sh; do bash -n "$$f" || exit 1; done
 	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
 	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh
+	@for f in install/freebsd/install.sh images/test-freebsd-render.sh; do sh -n "$$f" || exit 1; done
 
 network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
 	@images/test-network.sh
@@ -70,7 +71,10 @@ network-test: ## render the network configuration of install.sh for every case a
 keep-plan-test: ## make the keep-data plan of install.sh for every machine of images/testdata/keep-data and compare; check its guards (needs bash 4 or later and jq)
 	@images/test-keep-plan.sh
 
-check: fmt-check vet test scripts-check network-test keep-plan-test ## gofmt, go vet, the tests, the script syntax checks, the network test and the keep-data plan test
+freebsd-render-test: ## render what install/freebsd/install.sh plans and writes (the disks of a plan found again, the partitions and the pool, rc.conf for every uplink, pf.conf, loader.conf, the record) and compare it with images/testdata/freebsd-render (needs sh and jq)
+	@images/test-freebsd-render.sh
+
+check: fmt-check vet test scripts-check network-test keep-plan-test freebsd-render-test ## gofmt, go vet, the tests, the script syntax checks, the network test, the keep-data plan test and the render test of the installer for FreeBSD
 
 FUZZTIME ?= 10s
 

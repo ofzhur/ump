@@ -1,0 +1,8 @@
+==> the plan
+disks (3): vtbd0 (10 GiB), vtbd1 (10 GiB), vtbd2 (10 GiB)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  vtbd1: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  vtbd2: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: raidz2 over vtbd0 vtbd1 vtbd2, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: raidz2 needs 4 disks, and the plan gives it 3
+(exit status 1)

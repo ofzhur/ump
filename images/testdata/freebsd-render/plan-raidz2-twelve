@@ -1,0 +1,15 @@
+==> the plan
+disks (12): da0 (7452 GiB, WD-0, /dev/sda in the plan, found by serial number), da1 (7452 GiB, WD-1, /dev/sdb in the plan, found by serial number), da2 (7452 GiB, WD-2, /dev/sdc in the plan, found by serial number), da3 (7452 GiB, WD-3, /dev/sdd in the plan, found by serial number), da4 (7452 GiB, WD-4, /dev/sde in the plan, found by serial number), da5 (7452 GiB, WD-5, /dev/sdf in the plan, found by serial number), da6 (7452 GiB, WD-6, /dev/sdg in the plan, found by serial number), da7 (7452 GiB, WD-7, /dev/sdh in the plan, found by serial number), da8 (7452 GiB, WD-8, /dev/sdi in the plan, found by serial number), da9 (7452 GiB, WD-9, /dev/sdj in the plan, found by serial number), da10 (7452 GiB, WD-10, /dev/sdk in the plan, found by serial number), da11 (7452 GiB, WD-11, /dev/sdl in the plan, found by serial number)
+  da0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da1: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da2: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da3: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da4: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da5: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da6: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da7: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da8: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da9: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da10: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  da11: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: raidz2 over da0 da1 da2 da3 da4 da5 da6 da7 da8 da9 da10 da11, at /; the system in zroot/ROOT/default, a boot environment

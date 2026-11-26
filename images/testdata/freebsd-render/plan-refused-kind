@@ -1,0 +1,7 @@
+==> the plan
+disks (1): vtbd0 (10 GiB, /dev/vda in the plan, found by size)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 20G ext4, 4: rest zfs (zroot)
+  zroot: stripe over vtbd0, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: vtbd0, partition 3: FreeBSD takes bios, efi, swap and zfs parts, not ext4
+the parts of vtbd0 do not fit its 10 GiB
+(exit status 1)

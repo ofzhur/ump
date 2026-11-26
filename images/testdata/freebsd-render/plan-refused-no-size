@@ -1,0 +1,2 @@
+install.sh: plan.json cannot be read: a disk in it lacks its name, its size in bytes or its parts
+(exit status 1)

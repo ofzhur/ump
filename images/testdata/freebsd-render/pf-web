@@ -1,0 +1,19 @@
+==> the plan
+drop, allow icmp, tcp/22, tcp/80, tcp/443
+==> /etc/pf.conf
+# /etc/pf.conf, written by UMP from the profile's firewall section. After
+# editing, pfctl -nf /etc/pf.conf checks it and service pf reload loads it.
+set skip on lo0
+set block-policy drop
+# in: only what is allowed below; out: everything, and the answers come
+# back in with the states
+block in all
+pass out all
+pass in inet proto icmp
+pass in inet6 proto icmp6
+pass in proto tcp to port 22
+pass in proto tcp to port 80
+pass in proto tcp to port 443
+==> /etc/rc.conf
+pf_enable="YES"
+pflog_enable="YES"
