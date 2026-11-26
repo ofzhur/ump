@@ -51,6 +51,13 @@ forces one way; --no-image stops in the provider's rescue system, for
 the provider's own tools. The image comes from the base URL in the
 configuration (staging.image) or --image.
 
+A server that runs FreeBSD, or the UMP FreeBSD rescue system an
+installation of FreeBSD left it in, lets UMP in and still cannot load
+the image: no kexec leads from FreeBSD into a Linux. ump says so and
+goes through the provider's rescue system; with --via direct, or where
+the provider has none, it stops (exit status 5). The UMP rescue system
+has no ZFS: a FreeBSD server's pool cannot be imported there.
+
 --no-reboot only arms the provider's rescue system for the next boot;
 --no-wait returns right after the reset; both stop at the provider's
 rescue system. Rescue systems have a fresh host key every boot, so the

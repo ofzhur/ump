@@ -401,6 +401,9 @@ type testEnv struct {
 	installed bool
 	booted    bool
 	bootFails bool
+	// fb plays FreeBSD: the installation in two steps and the machines
+	// that run FreeBSD (freebsd_test.go)
+	fb fakeFreeBSD
 
 	// repo is the infrastructure repository ump provisions from: a
 	// directory with ansible.cfg, inventory/ and playbooks/00-base.yml.
@@ -467,6 +470,7 @@ func (h *hookReader) Read(p []byte) (int, error) {
 type fakeMachine struct {
 	kexeced, installed, booted bool
 	versionPolls               int
+	fb                         freebsdMachine
 }
 
 // isDown says that the machine was shut down over SSH and not reset
@@ -681,10 +685,10 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 					e.machines[addr] = m
 				}
 				exit := e.installExit
-				e.kexeced, e.installed, e.booted, e.versionPolls = m.kexeced, m.installed, m.booted, m.versionPolls
+				e.kexeced, e.installed, e.booted, e.versionPolls, e.fb.freebsdMachine = m.kexeced, m.installed, m.booted, m.versionPolls, m.fb
 				e.installExit = e.installExitAt[addr]
 				defer func() {
-					m.kexeced, m.installed, m.booted, m.versionPolls = e.kexeced, e.installed, e.booted, e.versionPolls
+					m.kexeced, m.installed, m.booted, m.versionPolls, m.fb = e.kexeced, e.installed, e.booted, e.versionPolls, e.fb.freebsdMachine
 					e.installExit = exit
 				}()
 			}
@@ -696,6 +700,7 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	}
 	e.kexeced, e.versionPolls = false, 0
 	e.installed, e.booted, e.reboots, e.haltedAt = false, false, 0, 0
+	e.fb.freebsdMachine = freebsdMachine{}
 	if e.machines != nil {
 		e.machines = map[string]*fakeMachine{}
 	}
@@ -878,6 +883,9 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	}
 	inProviderRescue := fakePower.rescue["fake/1"]
 	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
+	if stdout, stderr, code, ok := e.remoteFreeBSD(argv, cmd, inProviderRescue); ok {
+		return stdout, stderr, code
+	}
 	switch {
 	case strings.HasPrefix(cmd, "# ump key roll\n"):
 		e.keyAdds = append(e.keyAdds, "roll")
@@ -4051,46 +4059,6 @@ func TestReinstallUserdata(t *testing.T) {
 	}
 	if len(e.installs) != installs {
 		t.Errorf("an installer ran: %v", e.installs[installs:])
-	}
-}
-
-// TestReinstallFreeBSD: a FreeBSD profile is refused before the server is
-// touched, as long as ump does not run the second step of its
-// installation; a ZFS layout and FreeBSD are refused apart.
-func TestReinstallFreeBSD(t *testing.T) {
-	e := newTestEnv(t)
-	e.write(testConfig)
-	e.writeProfiles()
-	e.directRoot = true
-	resetFakePower()
-	const twoSteps = " is installed in two steps, the second from the UMP FreeBSD rescue system, and this version of ump does not run the second yet; web-01 was not touched\n"
-	for _, c := range []struct {
-		args []string
-		code int
-		msg  string
-	}{
-		{[]string{"--profile", "freebsd-15.1"}, 2, "ump: freebsd-15.1" + twoSteps},
-		{[]string{"--profile", "freebsd-14.5", "--layout", "zfs-mirror", "--no-provision"}, 2, "ump: freebsd-14.5" + twoSteps},
-		{[]string{"--profile", "freebsd-15.1", "--dry-run"}, 2, "ump: freebsd-15.1" + twoSteps},
-		{[]string{"--profile", "freebsd-15.1", "--layout", "lvm-raid1"}, 1, "ump: profile freebsd-15.1: layout lvm-raid1 has md, LVM or Linux file systems, which freebsd-15.1 does not take; its layouts are ZFS ones (zfs, zfs-mirror, zfs-raidz in layouts.yaml)\n"},
-		{[]string{"--os", "freebsd-15.1"}, 1, "ump: profile ubuntu-26.04: layout lvm-linear has md, LVM or Linux file systems, which freebsd-15.1 does not take; its layouts are ZFS ones (zfs, zfs-mirror, zfs-raidz in layouts.yaml)\n"},
-		{[]string{"--layout", "zfs"}, 1, "ump: profile ubuntu-26.04: layout zfs is a ZFS layout, which only FreeBSD takes; ubuntu-26.04 takes the others (lvm-linear, ...)\n"},
-		{[]string{"--profile", "debian-13", "--layout", "zfs-raidz"}, 1, "ump: profile debian-13: layout zfs-raidz is a ZFS layout, which only FreeBSD takes; debian-13 takes the others (lvm-linear, ...)\n"},
-	} {
-		_, errOut, code := e.run("", false, append([]string{"server", "reinstall", "web-01", "--yes", "--account", "one"}, c.args...)...)
-		if code != c.code || !strings.HasSuffix(errOut, c.msg) {
-			t.Errorf("%v: code %d, %q", c.args, code, errOut)
-		}
-	}
-	if len(e.installs) != 0 || len(e.remoteCalls) != 0 {
-		t.Errorf("the server was touched: installs %v, remote calls %v", e.installs, e.remoteCalls)
-	}
-	// the published profiles and layouts are there to look at and start from
-	if out, _, code := e.run("", false, "config", "os", "list"); code != 0 || !strings.Contains(out, "freebsd-15.1") || !strings.Contains(out, "freebsd-14.5") || !strings.Contains(out, "FreeBSD 15.1 on every disk as one ZFS pool") {
-		t.Errorf("config os list: code %d\n%s", code, out)
-	}
-	if out, _, code := e.run("", false, "config", "dl", "list"); code != 0 || !strings.Contains(out, "zfs-mirror") || strings.Contains(out, "unknown part type") {
-		t.Errorf("config dl list: code %d\n%s", code, out)
 	}
 }
 

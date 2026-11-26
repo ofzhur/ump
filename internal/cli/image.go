@@ -29,8 +29,10 @@ var imageWaitTimeout = 15 * time.Minute
 const bootMarker = "==> booting into the UMP rescue system"
 
 // probeCommand asks a machine who it is: the uid we got, the UMP rescue
-// version when it runs the image, and the name of the operating system.
-const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; echo; } | head -n 1; sudo -n true 2>/dev/null && echo sudo || echo -; uname -m`
+// version when it runs one of UMP's rescue systems, the name of the
+// operating system, whether sudo asks no password, the architecture and
+// the kernel.
+const probeCommand = `id -u; cat /etc/ump-rescue-version 2>/dev/null || echo -; { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; echo; } | head -n 1; sudo -n true 2>/dev/null && echo sudo || echo -; uname -m; uname -s`
 
 // hostProbe is a machine's answer to probeCommand.
 type hostProbe struct {
@@ -41,11 +43,23 @@ type hostProbe struct {
 	// arch is the CPU architecture as Go names it (amd64, arm64), from
 	// uname -m; empty when unknown.
 	arch string
+	// kernel is what uname -s says (Linux, FreeBSD); empty when unknown.
+	kernel string
 }
 
 // admin reports whether the login can do what root can: it is root, or
 // sudo asks it no password.
 func (p hostProbe) admin() bool { return p.root || p.sudo }
+
+// freebsd reports whether the machine runs FreeBSD: an installed one,
+// or the UMP FreeBSD rescue system (with version). Nothing there loads
+// the UMP rescue system, which is Linux: no kexec leads out of FreeBSD.
+func (p hostProbe) freebsd() bool { return p.kernel == "FreeBSD" }
+
+// rescue reports whether the machine runs the UMP rescue system, the
+// Linux one that every installation starts from. The UMP FreeBSD rescue
+// system has the version file too, and is not it.
+func (p hostProbe) rescue() bool { return p.version != "" && !p.freebsd() }
 
 // defaultAdmin is the administrator of the default profile, and the
 // user ump tries after root on a system it does not know.
@@ -124,7 +138,10 @@ func (a *app) probeHost(ctx context.Context, user, addr string, identities []str
 		p.sudo = lines[3] == "sudo"
 	}
 	if len(lines) > 4 {
-		p.arch = map[string]string{"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}[lines[4]]
+		p.arch = map[string]string{"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}[lines[4]]
+	}
+	if len(lines) > 5 {
+		p.kernel = lines[5]
 	}
 	return p, true
 }
@@ -353,7 +370,8 @@ func (a *app) stockThenImage(ctx context.Context, m provider.Machine, si provide
 	// was created with lets in whoever's those are
 	identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
 	for {
-		if p, ok := a.probeHost(ctx, "root", addr, identities, false); ok && p.root {
+		// a FreeBSD that still answers is the old system, not the stock Linux
+		if p, ok := a.probeHost(ctx, "root", addr, identities, false); ok && p.root && !p.freebsd() {
 			fmt.Fprintf(a.stderr, " yes after %s (%s).\n", time.Since(start).Round(time.Second), nonEmpty(p.os, "unknown system"))
 			if len(keys) > 0 {
 				a.setupUMPKey(ctx, m, "root", addr, identities, keyPath, keys[0])
@@ -507,6 +525,10 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		return a.confirm(cmd, o.yes, question)
 	}
 	hostname := rescueHostname(m.Name)
+	// noJump says, of a running system that lets UMP in, why it cannot
+	// load the UMP rescue system: it is FreeBSD, and no kexec leads from
+	// there into a Linux. The provider is the only way then.
+	noJump := ""
 
 	if o.via != "provider" && addr != "" {
 		fmt.Fprintf(a.stderr, "Checking root access to %s over SSH ...", addr)
@@ -519,15 +541,23 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		if ok && p.version == "" && len(keys) > 0 {
 			a.setupUMPKey(ctx, m, user, addr, identities, keyPath, keys[0])
 		}
+		how := ""
+		if ok && !p.root {
+			how = fmt.Sprintf(", as %s with sudo", user)
+		}
 		switch {
-		case ok && p.version != "":
+		case ok && p.rescue():
 			fmt.Fprintf(a.stderr, " %s already runs the UMP rescue system %s.\n", m.Name, p.version)
 			return &imageEntry{addr: addr, user: user, version: p.version, via: "running"}, nil
+		case ok && p.freebsd() && p.version != "":
+			// left there by an installation of FreeBSD that stopped, or by
+			// its --no-reboot
+			noJump = fmt.Sprintf("%s runs the UMP FreeBSD rescue system %s", m.Name, p.version)
+			fmt.Fprintf(a.stderr, " %s, which cannot jump into the UMP rescue system.\n", noJump)
+		case ok && p.freebsd():
+			noJump = fmt.Sprintf("the running system of %s is FreeBSD", m.Name)
+			fmt.Fprintf(a.stderr, " yes (%s%s); the running system is FreeBSD, which cannot jump into the UMP rescue system.\n", nonEmpty(p.os, "FreeBSD"), how)
 		case ok:
-			how := ""
-			if !p.root {
-				how = fmt.Sprintf(", as %s with sudo", user)
-			}
 			fmt.Fprintf(a.stderr, " yes (%s%s).\n", nonEmpty(p.os, "unknown system"), how)
 			if !hasRescue && !o.unguarded {
 				return nil, withExit(exitAborted, fmt.Errorf("%s has no provider rescue system to fall back on: if the jump into the UMP rescue system fails, only the provider's console brings the server back. ump server rescue --force takes that risk; ump server reinstall, which erases the server anyway, asks once and needs no --force", describeRef(m)))
@@ -554,8 +584,17 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		default:
 			fmt.Fprintf(a.stderr, " no (tried %s).\n", strings.Join(users, ", "))
 		}
+		if o.via == "direct" && noJump != "" {
+			return nil, withExit(exitUnreachable, fmt.Errorf("%s, and no kexec leads from FreeBSD into the UMP rescue system: --via direct has no way in. --via provider, or no --via, goes through the provider's rescue system. Nothing was changed", noJump))
+		}
 		if o.via == "direct" {
 			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH (as root, or a sudo user with UMP's key); --via provider goes through the provider's rescue system", addr))
+		}
+		if !hasRescue && noJump != "" {
+			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
+				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and FreeBSD cannot jump into the UMP rescue system", m.Provider))
+			}
+			return nil, withExit(exitUnreachable, fmt.Errorf("%s, and no kexec leads from FreeBSD into the UMP rescue system; provider type %s has no rescue system, so ump has no way in. Leaving FreeBSD on this server is the provider's: its console, its own rescue system, or its reinstall with a Linux, which ump reaches again. Nothing was changed", noJump, m.Provider))
 		}
 		if !hasRescue {
 			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
@@ -583,7 +622,9 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		if len(users) == 0 {
 			users = []string{"root", defaultAdmin}
 		}
-		return a.waitedRescue(ctx, m, rs, rw, keys, keyPath, keyPaths, out, users, o.via == "provider")
+		// the running system is rebooted over SSH where it lets UMP in:
+		// one that was not asked, or one that cannot jump
+		return a.waitedRescue(ctx, m, rs, rw, keys, keyPath, keyPaths, out, users, o.via == "provider" || noJump != "")
 	}
 	pw, canReboot := prov.(provider.Power)
 	if !canReboot {
@@ -595,10 +636,16 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		} else if ok && o.keepData && addr != "" {
 			// with --via provider the running system was not asked
 			first := "no root access to " + addr + " over SSH"
-			if o.via == "provider" {
+			switch {
+			case noJump != "":
+				first = noJump + ", from where no kexec leads into the UMP rescue system"
+			case o.via == "provider":
 				first = "--via provider leaves the running system of " + addr + " aside"
 			}
 			return nil, withExit(exitUnreachable, keepNoWay(first, fmt.Sprintf("the provider's rescue system of %s takes no SSH key", m.Name)))
+		}
+		if noJump != "" {
+			return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself, and %s, from where no kexec leads into the UMP rescue system; use ump server rescue --no-image with the mailed password", m.Name, noJump))
 		}
 		return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself; give UMP root access to the running system (UMP's key in root's authorized_keys, see ump config key) for the direct way, or use ump server rescue --no-image with the mailed password", m.Name))
 	}
@@ -613,7 +660,7 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		if len(users) == 0 {
 			users = []string{"root", defaultAdmin}
 		}
-		down = a.shutDownFirst(ctx, m, addr, users, keyPath, o.via != "provider")
+		down = a.shutDownFirst(ctx, m, addr, users, keyPath, o.via != "provider" && noJump == "")
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -636,6 +683,11 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if !ok {
 		manual := shellJoin(a.sshShown(user, info.Address, []string{keyPath}, true, true, nil))
 		return nil, withExit(exitUnreachable, fmt.Errorf("the rescue system of %s did not accept UMP's key; connect by hand (%s) and run: curl -fsSL %s/kexec-into-rescue.sh -o /tmp/kexec-into-rescue.sh && bash /tmp/kexec-into-rescue.sh -u %s", m.Name, manual, imageURL, imageURL))
+	}
+	if p.freebsd() {
+		// the provider's rescue system is a Linux: this is the server's own
+		// disk again, which the reset started
+		return nil, withExit(exitUnreachable, fmt.Errorf("after the reset FreeBSD answers at %s, not the provider's rescue system: %s started from its disks again, and no kexec leads from FreeBSD into the UMP rescue system. Look at the server at its provider (ump server describe %s, its console) and run this again", info.Address, m.Name, m.Name))
 	}
 	if p.version != "" {
 		fmt.Fprintf(a.stderr, "%s already runs the UMP rescue system %s.\n", m.Name, p.version)
@@ -695,6 +747,9 @@ func (a *app) shutDownFirst(ctx context.Context, m provider.Machine, addr string
 		return false
 	}
 	command := "systemctl halt || shutdown -H now"
+	if p.freebsd() {
+		command = "shutdown -h now"
+	}
 	if !p.root {
 		command = "sudo -n sh -c " + shellJoin([]string{command})
 	}
@@ -797,6 +852,9 @@ func (a *app) rebootOverSSH(ctx context.Context, m provider.Machine, users []str
 		return false
 	}
 	command := "systemctl reboot"
+	if p.freebsd() {
+		command = "shutdown -r now"
+	}
 	if !p.root {
 		command = "sudo -n " + command
 	}
