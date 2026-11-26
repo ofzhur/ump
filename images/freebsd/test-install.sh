@@ -189,8 +189,8 @@ print(" ".join("%s:%d:%d" % (d["device"], d["stats"]["wr_operations"], d["stats"
 ASK
 }
 
-# the layouts of layouts.yaml, as ump renders them: the pool's name, and
-# its raid level where it has one
+# the layouts of layouts.yaml, as ump renders them: a zfs part with an
+# empty filesystem, the pool's name, and its raid level where it has one
 case "$LAYOUT" in
 zfs) boot_target='["first"]' ;;
 *) boot_target='[".*"]' ;;
@@ -199,7 +199,7 @@ layout="$(jq -n --arg name "$LAYOUT" --argjson raid "$raid" --argjson boot "$boo
 	{type: "slice", target: $boot, size: "512K", filesystem: "bios"},
 	{type: "slice", target: $boot, size: "512M", filesystem: "efi", mountpoint: "/boot/efi"},
 	{type: "slice", target: $boot, size: "2G", filesystem: "swap"},
-	({type: "zfs", target: [".*"], size: "rest", name: "zroot", mountpoint: "/"} + if $raid == null then {} else {raid: $raid} end)]}')"
+	({type: "zfs", target: [".*"], size: "rest", filesystem: "", mountpoint: "/", name: "zroot"} + if $raid == null then {} else {raid: $raid} end)]}')"
 # the uplink of a PXE machine: QEMU's user network, by DHCP with its
 # resolver, or the same address static
 case "$UPLINK" in

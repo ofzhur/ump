@@ -272,7 +272,7 @@ plan_from_file() {
 # specification, when it names any, are FreeBSD's names. The zfs part's
 # name is the pool's (zroot when it has none), and its raid level says
 # how the pool joins its disks: none or 0 a stripe, 1 a mirror, 5 raidz,
-# 6 raidz2
+# 6 raidz2; its filesystem is empty, as ump renders it, absent or zfs
 plan_from_layout() {
 	printf '%s' "$spec" | jq -c --argjson have "$1" --arg firmware "$firmware" "$jq_lib"'
 	(.layout.name // "inline") as $layout
@@ -290,7 +290,7 @@ plan_from_layout() {
 		| reduce ($parts | to_entries[]) as $e ({disks: [$disks[] | . + {parts: []}], pool: null, refused: []};
 			$e.value as $p
 			| "layout \($layout), part \($e.key + 1) (\($p.type))" as $at
-			| (if $p.type == "zfs" and (($p.filesystem // "zfs") == "zfs") then "zfs"
+			| (if $p.type == "zfs" and (($p.filesystem // "") | . == "" or . == "zfs") then "zfs"
 			   elif $p.type == "slice" and ($p.filesystem == "efi" or $p.filesystem == "bios" or $p.filesystem == "swap") then $p.filesystem
 			   else null end) as $kind
 			| ({"0": "stripe", "1": "mirror", "5": "raidz", "6": "raidz2"}[($p.raid // 0) | if type == "number" then tostring else "" end]) as $vdev

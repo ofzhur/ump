@@ -87,14 +87,15 @@ plan_json() {
 		pool: {name: "zroot", vdev: $vdev, mountpoint: "/"}}'
 }
 
-# layout NAME: a layout of layouts.yaml as the specification has it
+# layout NAME: a layout of layouts.yaml as the specification has it (a
+# zfs part with an empty filesystem, as ump renders it)
 layout() {
 	case "$1" in
 	zfs) echo '{"name": "zfs", "parts": [
 		{"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
 		{"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
 		{"type": "slice", "target": ["first"], "size": "2G", "filesystem": "swap"},
-		{"type": "zfs", "target": [".*"], "size": "rest", "name": "zroot", "mountpoint": "/"}]}' ;;
+		{"type": "zfs", "target": [".*"], "size": "rest", "filesystem": "", "mountpoint": "/", "name": "zroot"}]}' ;;
 	zfs-mirror|zfs-raidz|zfs-raidz2|zfs-raid10)
 		# (the raid level of each; 10 is none a pool has)
 		case "$1" in zfs-mirror) raid=1 ;; zfs-raidz) raid=5 ;; zfs-raidz2) raid=6 ;; *) raid=10 ;; esac
@@ -102,7 +103,7 @@ layout() {
 		{"type": "slice", "target": [".*"], "size": "512K", "filesystem": "bios"},
 		{"type": "slice", "target": [".*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
 		{"type": "slice", "target": [".*"], "size": "2G", "filesystem": "swap"},
-		{"type": "zfs", "target": [".*"], "size": "rest", "name": "zroot", "raid": '"$raid"', "mountpoint": "/"}]}' ;;
+		{"type": "zfs", "target": [".*"], "size": "rest", "filesystem": "", "mountpoint": "/", "name": "zroot", "raid": '"$raid"'}]}' ;;
 	lvm-linear) echo '{"name": "lvm-linear", "parts": [
 		{"type": "slice", "target": ["first"], "size": "1M", "filesystem": "bios"},
 		{"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
