@@ -156,6 +156,57 @@ vars:
 	}
 }
 
+// TestFreeBSDHostVars: a server whose recorded system is FreeBSD has its
+// Python named, in the host file and where ump is the inventory; no
+// other server has, and a host file in a storage, which takes none of
+// Ansible's variables but the address, has not either.
+func TestFreeBSDHostVars(t *testing.T) {
+	m := provider.Machine{Provider: "hetzner-cloud", Account: "main", ID: "123", Name: "bsd-01", IPv4: "203.0.113.10"}
+	rec := state.Install{OS: "freebsd-15.1", Profile: "freebsd-15.1"}
+	v := hostVarsFor(m, rec, "ump", nil)
+	data, err := renderHostFile("bsd-01", []string{"common"}, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "plugin: ofzhur.ansible.host\ngroups: [common]\nvars:\n  ansible_host: 203.0.113.10\n  ansible_python_interpreter: /usr/local/bin/python3\n  ump_admin: ump\n  ump_name: bsd-01\n  ump_ref: hetzner-cloud/123\n  ump_provider: hetzner-cloud\n  ump_account: main\n  ump_os: freebsd-15.1\n  ump_profile: freebsd-15.1\n"
+	if !strings.HasSuffix(string(data), want) {
+		t.Errorf("host file:\n%s", data)
+	}
+	if js, _ := json.Marshal(v); !strings.Contains(string(js), `"ansible_host":"203.0.113.10","ansible_python_interpreter":"/usr/local/bin/python3","ump_admin":"ump"`) {
+		t.Errorf("as JSON: %s", js)
+	}
+	// behind a jump host: Ansible's variables together
+	jump := m
+	jump.Jump = "ump@198.51.100.7"
+	if data, _ := renderHostFile("bsd-01", []string{"common"}, hostVarsFor(jump, rec, "ump", nil)); !strings.Contains(string(data), "  ansible_host: 203.0.113.10\n  ansible_python_interpreter: /usr/local/bin/python3\n  ansible_ssh_common_args: -o ProxyJump=ump@198.51.100.7 ") {
+		t.Errorf("behind a jump host:\n%s", data)
+	}
+	// an image of one's own under a FreeBSD name is FreeBSD; no other
+	// system has the variable
+	if v := hostVarsFor(m, state.Install{OS: "freebsd-15.1-jails"}, "ump", nil); v.AnsiblePython != "/usr/local/bin/python3" {
+		t.Errorf("freebsd-15.1-jails: %+v", v)
+	}
+	for _, os := range []string{"ubuntu-26.04", "debian-13", "nixos-25.11", "archlinux", ""} {
+		if v := hostVarsFor(m, state.Install{OS: os}, "ump", nil); v.AnsiblePython != "" {
+			t.Errorf("%s: %+v", os, v)
+		}
+	}
+	// written into the repository as it is, into a storage without it
+	ctx := context.Background()
+	a := &app{stderr: io.Discard}
+	for _, stored := range []bool{false, true} {
+		dir := t.TempDir()
+		h := &hostFiles{objects: &backend.Directory{Dir: dir, DirMode: 0o755, FileMode: 0o644}, where: dir, stored: stored, files: map[string][]byte{}}
+		if err := a.writeHost(ctx, h, "bsd-01", []string{"common"}, v); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(filepath.Join(dir, "bsd-01.yml"))
+		if strings.Contains(string(got), "ansible_python_interpreter") == stored || !strings.Contains(string(got), "  ansible_host: 203.0.113.10\n") || !strings.Contains(string(got), "  ump_os: freebsd-15.1\n") {
+			t.Errorf("stored %v:\n%s", stored, got)
+		}
+	}
+}
+
 func TestWriteHostFile(t *testing.T) {
 	ctx := context.Background()
 	repo := &infraRepo{dir: t.TempDir()}
