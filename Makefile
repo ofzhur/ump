@@ -62,7 +62,7 @@ fmt-check:
 scripts-check: ## syntax-check the shell scripts of the rescue image, the installer and the packages
 	@for f in images/*.sh images/rescue/*.sh images/base/*.sh install/install.sh packaging/*.sh; do bash -n "$$f" || exit 1; done
 	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
-	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh
+	@for f in images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh; do sh -n "$$f" || exit 1; done
 	@for f in install/freebsd/install.sh images/test-freebsd-render.sh; do sh -n "$$f" || exit 1; done
 	@bash -n images/freebsd/test-install.sh
 
