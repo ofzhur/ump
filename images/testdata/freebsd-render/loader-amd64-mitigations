@@ -1,0 +1,13 @@
+==> /boot/loader.conf
+# /boot/loader.conf, written by UMP at installation.
+zfs_load="YES"
+autoboot_delay="2"
+# the pool's disks under their GPT labels alone
+kern.geom.label.disk_ident.enable="0"
+kern.geom.label.gptid.enable="0"
+# the kernel's messages on the serial port and the screen
+boot_multicons="YES"
+console="comconsole,vidconsole"
+==> the plan
+loader tunables: 
+left out: 

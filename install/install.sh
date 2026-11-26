@@ -15,6 +15,14 @@
 #                   module (install/nixos/ump.nix on the storage), with the
 #                   profile's userdata as NixOS modules, and runs
 #                   nixos-install from the image's channel
+#   freebsd         is not installed from here: the disks are planned and
+#                   wiped as for every system, then get the boot image of
+#                   the UMP FreeBSD rescue system, with its boot config
+#                   and the plan (ump/cmdline, authorized_keys, plan.json
+#                   on the image's partition umpboot). The firmware
+#                   starts it, and the installer for FreeBSD
+#                   (install/freebsd/install.sh on the storage) makes the
+#                   layout, a ZFS one, and installs there
 #
 # Usage: install.sh --spec FILE [--record DIR] [--dry-run] [--force]
 #        install.sh --spec FILE --keep-data [--root DEVICE] [--keep-root] [--format MOUNTPOINT]...
@@ -73,7 +81,9 @@
 #
 # Exit status: 0 done; 1 a failed step; 2 refused (usage, the environment).
 # With --keep-data 2 is every end before the first write: nothing was
-# changed; 1 every failure after it.
+# changed; 1 every failure after it. For FreeBSD likewise: 2 before the
+# disks are wiped, 1 after; 0 says that its rescue system is on the disks
+# (the last line is "==> staged: ..." instead of "==> installed: ...").
 set -Eeuo pipefail
 # the new system's files as a root shell over SSH makes them, whatever
 # umask the caller has (a PXE machine's runner has 077: /etc/ump would
@@ -144,10 +154,12 @@ command -v mdadm >/dev/null || echo "install.sh: warning: mdadm is missing; old 
 
 log() { printf '==> %s\n' "$*"; }
 # (keep-data: before the first write a failure is a refusal, status 2:
-# nothing was changed)
+# nothing was changed; FreeBSD, whose installation goes on in another
+# system: the same before the disks are wiped)
 die() {
 	dying=1; echo "install.sh: $*" >&2
 	if [ "${keep:-0}" = 1 ] && [ "${kd_wrote:-0}" = 0 ]; then echo "install.sh: keep-data: nothing was written to the disks" >&2; exit 2; fi
+	if [ "${fb:-0}" = 1 ] && [ "${fb_wrote:-0}" = 0 ]; then echo "install.sh: nothing was written to the disks" >&2; exit 2; fi
 	exit 1
 }
 # a command that fails under set -e names its line, so that a failure is
@@ -156,6 +168,8 @@ die() {
 # whose status the caller looks at
 trap 'rc=$?; [ "$rc" = 0 ] || [ -n "${dying:-}" ] || [ "$BASHPID" != "$$" ] || echo "install.sh: failed at line $LINENO (exit status $rc)" >&2' ERR
 warn() { echo "install.sh: warning: $*" >&2; }
+# (a function, for images/test-freebsd-plan.sh, whose disks are none)
+is_block() { [ -b "$1" ]; }
 TARGET=/mnt/target
 
 # --- the specification -------------------------------------------------
@@ -214,6 +228,12 @@ elif [ -n "$keep_root_arg$plan_file$confirm" ] || [ "$keep_root" = 1 ] || [ ${#k
 	echo "install.sh: --root, --keep-root, --format, --plan and --confirm belong to --keep-data" >&2; exit 2
 fi
 [ "$keep" = 1 ] || jq -e '.layout.parts | length > 0' >/dev/null <<< "$spec" || die "the layout has no parts"
+# a layout with a zfs part is FreeBSD's (fb): root on a ZFS pool, which
+# the installer for FreeBSD makes in the UMP FreeBSD rescue system; this
+# run plans it and puts that system on the disks. fb_wrote is 1 from the
+# wipe on: before it, a refusal has changed nothing
+fb=0; fb_wrote=0
+if [ "$keep" = 0 ] && jq -e '[.layout.parts[] | select(.type == "zfs")] | length > 0' >/dev/null <<< "$spec"; then fb=1; fi
 jq -e '.users | length > 0' >/dev/null <<< "$spec" || die "the specification names no users"
 profile_name="$(s .profile.name)"
 # the private networks, in order; a specification from before several
@@ -2072,6 +2092,336 @@ kd_record() {
 	printf 'aside=%s\n' "$(jq -r --arg d "$KD_STAMP" '[.aside[] | "\(.device):\(.mountpoint | sub("DATE$"; $d))"] | join(" ")' <<< "$kd_plan")"
 }
 
+# --- FreeBSD: the plan for its installer, and the boot config of its rescue system ---
+
+# Functions only, which images/test-freebsd-plan.sh runs on machines of
+# its own. FreeBSD is installed in a rescue system of its own, which this
+# run puts on the disks: its boot image, written to the start of every
+# disk of the plan that can carry it, with a boot config in the
+# directory ump of the image's FAT partition (GPT label umpboot):
+# cmdline, the words the rescue images take at boot
+# (images/rescue/README.md), authorized_keys, root's keys, and plan.json,
+# the disks and their partitions as planned here, by which the installer
+# for FreeBSD finds the disks again under FreeBSD's names and makes the
+# layout. What the machine holds comes through the fb_fact_ functions
+# alone (the test has its own).
+
+# fb_fact_disk DISK: its size in bytes, the size of its logical sectors,
+# its serial number and its WWN, as JSON
+fb_field() { lsblk -dn -o "$1" "$2" 2>/dev/null | head -n 1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+fb_fact_disk() {
+	jq -n -c --argjson size "$(blockdev --getsize64 "$1")" --argjson sector "$(blockdev --getss "$1")" \
+		--arg serial "$(fb_field SERIAL "$1")" --arg wwn "$(fb_field WWN "$1")" '{size: $size, sector: $sector, serial: $serial, wwn: $wwn}'
+}
+# fb_fact_memory: the machine's memory in MB, as the kernel counts it
+fb_fact_memory() { awk '/^MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo; }
+# fb_fact_words: the words this rescue system was started with: those of
+# its boot config, which come first, and the kernel command line's
+fb_fact_words() { { cat /etc/ump/boot/cmdline 2>/dev/null || true; cat /proc/cmdline; } | tr '\n' ' '; }
+fb_fact_hostname() { hostname; }
+# fb_fact_resolvers: the resolvers this rescue system asks, comma-separated
+fb_fact_resolvers() { { awk '$1 == "nameserver" && $2 !~ /%/ && $2 !~ /^127\./ {print $2}' /run/systemd/resolve/resolv.conf 2>/dev/null || true; } | head -n 3 | paste -sd, -; }
+# fb_fact_keys: root's authorized_keys here, without comments and blank lines
+fb_fact_keys() { { grep -v '^[[:space:]]*#' /root/.ssh/authorized_keys 2>/dev/null || true; } | { grep '[^[:space:]]' || true; }; }
+fb_fact_time() { date +%s; }
+fb_fact_fetch() { curl -fsSL "$1"; }
+# fb_fact_was DISK: what an earlier attempt left on DISK: nothing where
+# no partition has the label umpboot; else that partition's path, and
+# after it the boot log the FreeBSD rescue system wrote there
+# (ump/boot.log), when it wrote one. The partition is mounted read-only
+# for it: nothing is written.
+fb_fact_was() {
+	local part mnt
+	part="$(lsblk -lnpo NAME,PARTLABEL "$1" 2>/dev/null | awk '$2 == "umpboot" {print $1; exit}')"
+	[ -n "$part" ] || return 0
+	echo "$part"
+	mnt="$(mktemp -d)"
+	if mount -t vfat -o ro "$part" "$mnt" 2>/dev/null; then
+		cat "$mnt/ump/boot.log" 2>/dev/null || true
+		umount "$mnt" 2>/dev/null || true
+	fi
+	rmdir "$mnt" 2>/dev/null || true
+}
+
+# fb_fact_holds DISK: what DISK and its partitions hold, as JSON: the
+# kind of file system or member (fstype), its label and the GPT label
+# of each
+fb_fact_holds() {
+	lsblk -J -o FSTYPE,LABEL,PARTLABEL "$1" 2>/dev/null | jq -c '[.. | objects | select(has("fstype")) | {fstype: (.fstype // ""), label: (.label // ""), partlabel: (.partlabel // "")}]'
+}
+
+# fb_word NAME: a word this rescue system was started with (ump.dns, ...)
+fb_word() { local w; for w in $(fb_fact_words); do case "$w" in "$1="*) printf '%s' "${w#*=}"; return 0 ;; esac; done; return 0; }
+# fb_vdev RAID: how a pool of that raid level joins its disks, as
+# plan.json names it (none is 0, a stripe); nothing for a number that
+# is no level of a pool (raidz3 has none in a layout in this version)
+fb_vdev() { case "$1" in none|0) echo stripe ;; 1) echo mirror ;; 5) echo raidz ;; 6) echo raidz2 ;; esac; }
+# fb_need VDEV: the disks it needs
+fb_need() { case "$1" in mirror) echo 2 ;; raidz) echo 3 ;; raidz2) echo 4 ;; raidz3) echo 5 ;; *) echo 1 ;; esac; }
+# fb_has_parts DISK: the plan puts a partition on it
+fb_has_parts() { local i; for i in "${!P_DISK[@]}"; do if [ "${P_DISK[$i]}" = "$1" ]; then return 0; fi; done; return 1; }
+# fb_bytes SIZE: a size of the plan (512K, 2G) in bytes
+fb_bytes() { case "$1" in *K) echo $(( ${1%K} * 1024 )) ;; *M) echo $(( ${1%M} * 1048576 )) ;; *G) echo $(( ${1%G} * 1073741824 )) ;; *T) echo $(( ${1%T} * 1099511627776 )) ;; *) echo 0 ;; esac; }
+
+# fb_check_layout: the rules of a layout with a zfs part, as ump checks
+# them when a layout is edited: one pool, which is the root, and beside
+# it efi, bios and swap slices alone; and no --record
+fb_check_layout() {
+	local bad
+	# (the record of an installation is made where it ends: by the
+	# installer for FreeBSD, with its own --record)
+	[ -z "${record:-}" ] || die "--record: this run stages FreeBSD's installation, which ends in the UMP FreeBSD rescue system; the record is made there, by its installer"
+	bad="$(jq -r '
+		[.layout.parts | to_entries[] | (.key + 1) as $n | .value
+		 | if .type == "zfs" then
+			if (.mountpoint // "") != "/" then ", part \($n) (zfs): a zfs part is the root pool and needs mountpoint /"
+			elif ((.filesystem // "") | . != "" and . != "zfs") then ", part \($n) (zfs): a zfs part has no filesystem but zfs, not \(.filesystem)"
+			elif ((.raid // 0) | . != 0 and . != 1 and . != 5 and . != 6) then ", part \($n) (zfs): raid \(.raid | tojson) is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"
+			elif ((.name // "zroot") | (test("^[a-z][a-z0-9_-]*$") | not) or test("^(mirror|raidz|draid|spare|log|cache|special|dedup)")) then ", part \($n) (zfs): name \(.name) is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)"
+			else empty end
+		   elif .type != "slice" or ((.filesystem // "") | . != "efi" and . != "bios" and . != "swap") then
+			", part \($n) (\(.type)): beside a zfs part a layout has efi, bios and swap slices only: FreeBSD takes no md, no LVM and none of ext4, xfs, btrfs and vfat, and its loader reads the pool, so there is no /boot"
+		   else empty end]
+		+ (if ([.layout.parts[] | select(.type == "zfs")] | length) > 1 then [": one zfs part makes the root pool, and no other pool is made in this version"] else [] end)
+		| .[0] // empty' <<< "$spec")"
+	[ -z "$bad" ] || die "layout $layout_name$bad"
+}
+
+# fb_image_disks: the disks that get the boot image of the FreeBSD rescue
+# system, one per line: every disk the plan partitions that has 512-byte
+# logical sectors (the image's partition table is laid out for them) and
+# at least 4 GiB, as the boot disk has, and the boot disk itself. The
+# firmware starts whichever of them it tries first. A disk without
+# partitions in the plan gets none: it stays empty.
+fb_image_disks() {
+	local d f
+	for d in "${disks[@]}"; do
+		fb_has_parts "$d" || continue
+		f="$(fb_fact_disk "$d")"
+		[ "$(jq -r .sector <<< "$f")" = 512 ] || continue
+		if [ "$d" = "$boot_disk" ] || [ "$(jq -r .size <<< "$f")" -ge $((4 * 1024 * 1024 * 1024)) ]; then echo "$d"; fi
+	done
+}
+
+# fb_left: the disks of the machine that are not erased, one per line:
+# those --disks leaves alone
+fb_left() {
+	local d
+	for d in "${all_disks[@]}"; do
+		case " ${disks[*]} " in *" $d "*) ;; *) echo "$d" ;; esac
+	done
+}
+
+# fb_labels: the GPT labels the installer for FreeBSD gives the plan's
+# partitions, one per line: boot, efi, swap or zfs, and the number of the
+# disk among the plan's, from 0
+fb_labels() {
+	local i k
+	for k in "${!disks[@]}"; do
+		for i in "${!P_DISK[@]}"; do
+			[ "${P_DISK[$i]}" = "${disks[$k]}" ] || continue
+			case "${P_FS[$i]}" in bios) echo "boot$k" ;; *) echo "${P_FS[$i]}$k" ;; esac
+		done
+	done
+}
+
+# fb_check_machine: what is known here, before anything is touched, not
+# to work: a boot disk the image is not laid out for, no disk to put the
+# image on, nobody who could log in to the FreeBSD rescue system; and
+# what the installer for FreeBSD would refuse once the disks are wiped:
+# two parts of a kind on a disk, an efi part too small for its FAT32,
+# parts that do not fit their disk,
+# and a disk left alone that holds a member of a pool with the new
+# pool's name (FreeBSD takes its root pool by name, and started the old
+# one) or a GPT label the plan makes (/dev/gpt has one of the two)
+fb_check_machine() {
+	local s d i size fixed kinds holds l
+	if fb_has_parts "$boot_disk"; then
+		s="$(jq -r .sector <<< "$(fb_fact_disk "$boot_disk")")"
+		[ "$s" = 512 ] || die "the boot disk $boot_disk has $s-byte logical sectors, and the boot image of the UMP FreeBSD rescue system is laid out for 512: FreeBSD is not installed on such a disk in this version"
+	fi
+	[ -n "$(fb_image_disks)" ] || die "no disk of the plan can carry the boot image of the UMP FreeBSD rescue system (512-byte logical sectors, 4 GiB or more)"
+	[ -n "$(fb_fact_keys)" ] || die "root has no SSH key here (/root/.ssh/authorized_keys): nobody could log in to the UMP FreeBSD rescue system"
+	for d in "${disks[@]}"; do
+		fb_has_parts "$d" || continue
+		size="$(jq -r .size <<< "$(fb_fact_disk "$d")")"; fixed=0; kinds=""
+		for i in "${!P_DISK[@]}"; do
+			[ "${P_DISK[$i]}" = "$d" ] || continue
+			case " $kinds " in *" ${P_FS[$i]} "*) die "$d would get two ${P_FS[$i]} parts: FreeBSD has one of a kind on a disk" ;; esac
+			kinds="$kinds ${P_FS[$i]}"
+			s="$(fb_size "$d" "${P_SIZE[$i]}" "${P_FS[$i]}")"
+			[ "$s" != rest ] || continue
+			fixed=$(( fixed + $(fb_bytes "$s") ))
+			[ "${P_FS[$i]}" != efi ] || [ "$(fb_bytes "$s")" -ge $((33 * 1048576)) ] || die "partition ${P_INDEX[$i]} of $d: an efi part of $s is too small for FreeBSD's FAT32 (33M at least)"
+		done
+		[ $(( fixed + 64 * 1048576 )) -le "$size" ] || die "the parts of $d ($(( fixed / 1048576 )) MB without the one that takes the rest) do not fit on it ($(( size / 1048576 )) MB)"
+	done
+	while IFS= read -r d; do
+		[ -n "$d" ] || continue
+		holds="$(fb_fact_holds "$d")"
+		jq -e --arg pool "$Z_POOL" 'all(.[]; .fstype != "zfs_member" or .label != $pool)' >/dev/null <<< "$holds" \
+			|| die "$d, which is left alone, holds a member of a pool named $Z_POOL, and so would the new system's be: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation (--disks), or give the layout's zfs part another pool name (name: NAME)"
+		while IFS= read -r l; do
+			jq -e --arg l "$l" 'all(.[]; .partlabel != $l)' >/dev/null <<< "$holds" \
+				|| die "$d, which is left alone, has a partition with the GPT label $l, and so would the new system: FreeBSD finds one of the two under /dev/gpt/$l. Give that partition another label, or put the disk into the installation (--disks)"
+		done < <(fb_labels)
+	done < <(fb_left)
+}
+
+# fb_size DISK SIZE KIND: a part's size as the plan carries it: a number
+# with K, M, G or T (binary units), or rest. A share of the disk is
+# worked out here, as for the other systems. A bios part is FreeBSD's
+# freebsd-boot partition and 512K whatever the layout says: pmbr loads
+# the whole of it, and gpart(8) wants it under 545K.
+fb_size() {
+	case "$3:$2" in
+	bios:*) echo 512K ;;
+	*:rest|*:all|*:100%) echo rest ;;
+	*:*%) echo "$(( $(jq -r .size <<< "$(fb_fact_disk "$1")") / 100 * ${2%\%} / 1024 / 1024 ))M" ;;
+	*) echo "$2" ;;
+	esac
+}
+
+# fb_pool_mb: what the pool will hold, roughly, in MB: its members'
+# sizes, joined as its vdev joins them
+fb_pool_mb() {
+	local i j d m size n=0 min=0 sum=0
+	for i in "${!P_DISK[@]}"; do
+		[ "${P_FS[$i]}" = zfs ] || continue
+		d="${P_DISK[$i]}"
+		m="$(fb_size "$d" "${P_SIZE[$i]}" zfs)"
+		if [ "$m" = rest ]; then
+			# the disk without its other partitions, and its tables
+			size=$(( $(jq -r .size <<< "$(fb_fact_disk "$d")") - 2 * 1048576 ))
+			for j in "${!P_DISK[@]}"; do
+				if [ "${P_DISK[$j]}" = "$d" ] && [ "$j" != "$i" ]; then size=$(( size - $(fb_bytes "$(fb_size "$d" "${P_SIZE[$j]}" "${P_FS[$j]}")") )); fi
+			done
+		else
+			size="$(fb_bytes "$m")"
+		fi
+		m=$(( size / 1048576 )); n=$((n + 1)); sum=$((sum + m))
+		if [ "$n" = 1 ] || [ "$m" -lt "$min" ]; then min=$m; fi
+	done
+	case "$Z_VDEV" in
+	mirror) echo "$min" ;;
+	raidz) echo $(( min * (n - 1) )) ;;
+	raidz2) echo $(( min * (n - 2) )) ;;
+	raidz3) echo $(( min * (n - 3) )) ;;
+	*) echo "$sum" ;;
+	esac
+}
+
+# fb_plan: plan.json. disks are the disks of the installation, all of
+# them erased, each with its parts in the order they are made (by
+# number, the one that takes the rest last; none for a disk no part of
+# the layout matches, which stays empty); left are the other disks of
+# the machine, those --disks leaves alone, which the installer for
+# FreeBSD must not take for one of the plan's.
+fb_plan() {
+	local d i f pass order parts ds='[]' left='[]'
+	while IFS= read -r d; do
+		[ -n "$d" ] || continue
+		f="$(fb_fact_disk "$d")"
+		left="$(jq -c --arg n "$d" --argjson f "$f" '. + [{name: $n, size: $f.size, serial: $f.serial}]' <<< "$left")"
+	done < <(fb_left)
+	for d in "${disks[@]}"; do
+		f="$(fb_fact_disk "$d")"; parts='[]'
+		order="$(for i in "${!P_DISK[@]}"; do if [ "${P_DISK[$i]}" = "$d" ]; then echo "${P_INDEX[$i]} $i"; fi; done | sort -n | cut -d' ' -f2)"
+		for pass in fixed rest; do
+			for i in $order; do
+				case "${P_SIZE[$i]}" in rest|all|100%) [ "$pass" = rest ] || continue ;; *) [ "$pass" = fixed ] || continue ;; esac
+				parts="$(jq -c --argjson n "${P_INDEX[$i]}" --arg kind "${P_FS[$i]}" --arg size "$(fb_size "$d" "${P_SIZE[$i]}" "${P_FS[$i]}")" '. + [{index: $n, kind: $kind, size: $size}]' <<< "$parts")"
+			done
+		done
+		ds="$(jq -c --arg n "$d" --argjson f "$f" --argjson parts "$parts" '. + [{name: $n, size: $f.size, serial: $f.serial, wwn: $f.wwn, parts: $parts}]' <<< "$ds")"
+	done
+	jq -n --arg firmware "$([ "$efi" = 1 ] && echo uefi || echo bios)" --arg boot "$boot_disk" --argjson disks "$ds" --argjson left "$left" \
+		--arg pool "$Z_POOL" --arg vdev "$Z_VDEV" --arg mount "$Z_MOUNT" \
+		'{version: 1, firmware: $firmware, boot_disk: $boot, disks: $disks, left: $left, pool: {name: $pool, vdev: $vdev, mountpoint: $mount}}'
+}
+
+# fb_cmdline: ump/cmdline, the words the FreeBSD rescue system starts
+# with: what this rescue system has itself, so that it answers where
+# this one does: the hostname, the uplink by its MAC with its addresses
+# and gateways, the resolvers, the interface of a network boot, and the
+# time, for a clock that is off
+fb_cmdline() {
+	local h d r b line
+	h="$(fb_word ump.hostname)"; [ -n "$h" ] || h="$(fb_fact_hostname)"
+	line="ump.hostname=$h"
+	[ -z "$rescue_mac" ] || line="$line ump.mac=$rescue_mac"
+	[ -z "$rescue_ip4" ] || line="$line ump.ip=$rescue_ip4"
+	[ -z "$rescue_ip6" ] || line="$line ump.ip6=$rescue_ip6"
+	# the resolvers this system was given; those of a lease by their
+	# addresses, since an address a lease gave here is a static one there
+	d="$(fb_word ump.dns)"
+	case "$d" in
+	""|dhcp)
+		r="$(fb_fact_resolvers)"
+		if [ -n "$r" ]; then d="$r"; elif [ -n "$rescue_ip4$rescue_ip6" ]; then d=""; fi ;;
+	esac
+	[ -z "$d" ] || line="$line ump.dns=$d"
+	b="$(fb_word ump.boot-mac)"
+	[ -z "$b" ] || line="$line ump.boot-mac=$b"
+	echo "$line ump.time=$(fb_fact_time)"
+}
+
+# fb_tunables: what the profile's kernel section means on FreeBSD, for
+# the plan: loader tunables
+fb_tunables() {
+	local t=""
+	[ "$mitigations" = true ] || [ "$arch" != amd64 ] || t="vm.pmap.pti=0"
+	t="$t${kernel_extra:+ $kernel_extra}"; t="${t# }"
+	echo "${t:-none}"
+}
+
+# fb_was: says what the FreeBSD rescue system of an earlier attempt left
+# on the disks: the log of its boot, which tells why it did not answer
+fb_was() {
+	local d out part
+	for d in "${all_disks[@]}"; do
+		out="$(fb_fact_was "$d")"
+		[ -n "$out" ] || continue
+		part="$(head -n 1 <<< "$out")"; out="$(tail -n +2 <<< "$out")"
+		if [ -n "$out" ]; then
+			log "a FreeBSD rescue system was here and left its boot log ($part):"
+			sed 's/^\(.\)/    \1/' <<< "$out"
+		else
+			log "a FreeBSD rescue system was put on $d and left no boot log ($part): the firmware did not start it, or its kernel did not come as far as its rc scripts"
+		fi
+	done
+}
+
+# fb_manifest: FreeBSD's manifest, and that of the rescue system it is
+# installed from (rescue/NAME/ARCH of the same storage); what they say
+# this machine cannot do stops the installation here, before the wipe
+fb_manifest() {
+	local k have need d m
+	for k in base.txz kernel.txz packages.tar; do
+		[ -n "$(jq -r --arg k "$k" '.files[$k].sha256 // empty' <<< "$manifest")" ] || die "the FreeBSD manifest names no $k checksum"
+	done
+	fb_rescue="$(jq -r '.rescue // empty' <<< "$manifest")"
+	[[ "$fb_rescue" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "the FreeBSD manifest names no rescue image to install from (rescue)"
+	fb_rescue_url="$storage/rescue/$fb_rescue/$arch"
+	m="$(fb_fact_fetch "$fb_rescue_url/manifest.json")" || die "cannot fetch $fb_rescue_url/manifest.json; the storage must serve the FreeBSD rescue image that $os is installed from"
+	[ "$(jq -r '.system // empty' <<< "$m")" = freebsd ] || die "$fb_rescue_url is no FreeBSD rescue image (its manifest's system)"
+	jq -e '.features // [] | index("boot-config") != null' >/dev/null <<< "$m" || die "the FreeBSD rescue image $fb_rescue takes no boot config (its manifest's features)"
+	fb_image_sum="$(jq -r '.files["disk.img.zst"].sha256 // empty' <<< "$m")"
+	[ -n "$fb_image_sum" ] || die "the manifest of the FreeBSD rescue image names no disk.img.zst checksum"
+	need="$(jq -r '.memory_mb // 0' <<< "$m")"
+	log "image $os version ${image_version:-?}: FreeBSD $(jq -r '.release // "?"' <<< "$manifest"), installed from the UMP FreeBSD rescue system ($fb_rescue $(jq -r '.version // "?"' <<< "$m"), $need MB of memory at least)"
+	have="$(fb_fact_memory)"
+	[ "$have" -ge "$need" ] || die "this machine has $have MB of memory, and the UMP FreeBSD rescue system ($fb_rescue) needs $need MB: it runs from memory, and the installation with it"
+	need="$(jq -r '.disk_mb // 0' <<< "$m")"
+	while IFS= read -r d; do
+		have=$(( $(jq -r .size <<< "$(fb_fact_disk "$d")") / 1048576 ))
+		[ "$have" -gt "$need" ] || die "$d ($have MB) is too small for the boot image of the UMP FreeBSD rescue system ($need MB)"
+	done < <(fb_image_disks)
+	# the pool must hold twice the system, as a root file system must
+	need=$(( ${unpacked_mb:-0} * 2 )); have="$(fb_pool_mb)"
+	[ "$have" -ge "$need" ] || die "the pool $Z_POOL would hold about $have MB, too little for $os ($unpacked_mb MB unpacked)"
+}
+
 # --- the disks ---------------------------------------------------------
 
 # keep-data: however the run ends from here on, its status says whether
@@ -2095,7 +2445,7 @@ disks=()
 wanted="$(jq -r '.disks // [] | .[]' <<< "$spec")"
 if [ -n "$wanted" ]; then
 	for d in $wanted; do
-		[ -b "$d" ] || die "$d is not a block device"
+		is_block "$d" || die "$d is not a block device"
 		[ "$(lsblk -dnr -o TYPE "$d")" = disk ] || die "$d is not a whole disk"
 		disks+=("$d")
 	done
@@ -2129,6 +2479,8 @@ P_DISK=(); P_INDEX=(); P_SIZE=(); P_FS=(); P_MOUNT=(); P_LABEL=(); P_VG=(); P_MD
 M_LEVEL=(); M_FS=(); M_MOUNT=(); M_LABEL=(); M_VG=(); M_DEV=()
 # logical volumes
 L_VG=(); L_NAME=(); L_SIZE=(); L_RAID=(); L_FS=(); L_MOUNT=(); L_LABEL=(); L_DEV=()
+# the ZFS pool of a zfs part (FreeBSD's root): its name (the part's name), how its disks are joined (by the part's raid level), where it is mounted
+Z_POOL=""; Z_VDEV=""; Z_MOUNT=""
 declare -A VG_PVS=()        # volume group -> physical volume devices
 declare -A VG_NPV=()        # volume group -> number of physical volumes
 declare -A DISK_REST=()     # disk -> 1 when a partition takes the rest
@@ -2175,6 +2527,7 @@ min_members() { # min_members LEVEL KIND(md|lvm)
 # (the layout's plan and the whole-disk steps are functions, for a run
 # that applies the layout; --keep-data calls none of them)
 plan_layout() {
+[ "$fb" = 0 ] || fb_check_layout
 nparts="$(jq '.layout.parts | length' <<< "$spec")"
 for ((n = 0; n < nparts; n++)); do
 	part="$(jq -c ".layout.parts[$n]" <<< "$spec")"
@@ -2204,6 +2557,19 @@ for ((n = 0; n < nparts; n++)); do
 		name="$(f .name)"
 		L_VG+=("$vg"); L_NAME+=("$name"); L_SIZE+=("$size"); L_RAID+=("$raid"); L_FS+=("$fs"); L_MOUNT+=("$mount"); L_LABEL+=("$label"); L_DEV+=("/dev/$vg/$name")
 		;;
+	zfs)
+		# a partition on every matching disk and one pool over them, which
+		# the installer for FreeBSD makes
+		mapfile -t targets < <(match_disks "$(jq -c '.target // []' <<< "$part")")
+		[ -n "${targets[0]:-}" ] || die "$at: no disk matches $(jq -c '.target' <<< "$part") (disks: ${disks[*]})"
+		Z_POOL="$(f .name)"; [ -n "$Z_POOL" ] || Z_POOL=zroot
+		Z_VDEV="$(fb_vdev "$raid")"
+		[ -n "$Z_VDEV" ] || die "$at: raid $raid is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"
+		Z_MOUNT="$mount"
+		need="$(fb_need "$Z_VDEV")"
+		[ ${#targets[@]} -ge "$need" ] || die "$at: $Z_VDEV needs $need disks, ${#targets[@]} match"
+		for d in "${targets[@]}"; do plan_partition "$d" "$(next_index "$d")" "$size" zfs "" "" "" ""; done
+		;;
 	*) die "$at: unknown part type" ;;
 	esac
 done
@@ -2229,10 +2595,13 @@ done
 [ "$has_efi" = 1 ] || [ "$efi" = 0 ] || die "this machine boots with UEFI and the layout has no efi part"
 [ "$has_bios" = 1 ] || [ "$efi" = 1 ] || [ "$arch" != amd64 ] || die "this machine boots with BIOS and the layout has no bios part"
 jq -e '[.layout.parts[] | select(.mountpoint == "/")] | length == 1' >/dev/null <<< "$spec" || die "the layout must mount exactly one part at /"
+[ "$fb" = 0 ] || fb_check_machine
 return 0
 }
 has_bios=0; has_efi=0; root_dev=""
 if [ "$keep" = 0 ]; then plan_layout; fi
+
+# --- the uplink of this machine, and its interfaces ------------------------
 
 # the network: the uplink of the specification where it has one (a PXE
 # machine's), else what the rescue system was given on its kernel command
@@ -2258,6 +2627,9 @@ if [ -z "$mac" ]; then
 		[ -n "$a" ] && ip6="$a${g:+,$g}"
 	fi
 fi
+# (what this rescue system has itself, whatever the specification gives
+# the new system: the FreeBSD rescue system is started with it)
+rescue_mac="$mac"; rescue_ip4="$ip4"; rescue_ip6="$ip6"
 if [ -n "$uplink_spec" ]; then
 	net_from_spec "$uplink_spec"
 else
@@ -2330,7 +2702,10 @@ for x in "${disks[@]}"; do
 		what="${P_FS[$i]}"
 		[ "${P_FS[$i]}" = lvm ] && what="lvm (${P_VG[$i]})"
 		[ "${P_FS[$i]}" = md ] && what="md${P_MD[$i]} member"
-		line="${line:+$line, }${P_INDEX[$i]}: ${P_SIZE[$i]} $what${P_MOUNT[$i]:+ at ${P_MOUNT[$i]}}"
+		[ "${P_FS[$i]}" = zfs ] && what="zfs ($Z_POOL)"
+		# (FreeBSD: the size as its plan carries it)
+		psize="${P_SIZE[$i]}"; [ "$fb" = 0 ] || psize="$(fb_size "$x" "$psize" "${P_FS[$i]}")"
+		line="${line:+$line, }${P_INDEX[$i]}: $psize $what${P_MOUNT[$i]:+ at ${P_MOUNT[$i]}}"
 	done
 	log "  $x: ${line:-untouched}"
 done
@@ -2342,6 +2717,10 @@ for k in "${!L_VG[@]}"; do
 	r="linear"; [ "${L_RAID[$k]}" != none ] && r="raid ${L_RAID[$k]}"
 	log "  ${L_VG[$k]}/${L_NAME[$k]}: ${L_SIZE[$k]} $r ${L_FS[$k]}${L_MOUNT[$k]:+ at ${L_MOUNT[$k]}}"
 done
+if [ -n "$Z_POOL" ]; then
+	log "  $Z_POOL: $Z_VDEV over $(for i in "${!P_DISK[@]}"; do if [ "${P_FS[$i]}" = zfs ]; then echo "${P_DISK[$i]}"; fi; done | paste -sd' ' -), at $Z_MOUNT"
+	log "  made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to $(fb_image_disks | paste -sd, - | sed 's/,/, /g') and starts from there"
+fi
 return 0
 }
 if [ "$keep" = 0 ]; then print_layout; fi
@@ -2358,7 +2737,13 @@ if [ -n "$private_list" ]; then
 fi
 log "users: $(jq -r '[.users[] | "\(.name) (\(.keys | length) key(s)\(if .sudo then ", sudo" else "" end))"] | join(", ")' <<< "$spec")"
 log "userdata: $(jq -r '.userdata | if length == 0 then "none" else map(.name) | join(" ") end' <<< "$spec"); firewall: $(jq -r '.firewall | if .policy == "drop" then "drop, allow " + ([.allow[] | if .proto == "icmp" then "icmp" else "\(.proto)/\(.port)\(if .from then " from " + .from else "" end)" end] | join(", ")) else "none" end' <<< "$spec")"
+if [ "$fb" = 1 ]; then
+	log "loader tunables: $(fb_tunables)"
+else
 log "kernel command line: $kernel_cmdline"
+fi
+# what an earlier attempt at FreeBSD left: its rescue system's boot log
+[ "$keep" = 1 ] || fb_was
 if [ "$dry" = 1 ] && [ "$keep" = 0 ]; then
 	log "dry run: stopping here, no disk was touched"
 	exit 0
@@ -2405,8 +2790,19 @@ arch)
 		log "image $os: Arch Linux from $(printf '%s' "$manifest" | jq -r .mirror) (bootstrap $(printf '%s' "$manifest" | jq -r .bootstrap.release)), installed with pacstrap"
 	fi
 	;;
-*) die "the manifest's family $family is not one this installer knows (image, nixos, arch)" ;;
+freebsd)
+	# (keep-data refuses the family below, whatever the layout)
+	if [ "$keep" = 0 ]; then
+		if [ "$fb" = 0 ]; then
+			fb=1
+			die "layout $layout_name has no zfs part: $os is FreeBSD, whose root is a ZFS pool; its layouts are the ZFS ones (zfs, zfs-mirror, zfs-raidz)"
+		fi
+		fb_manifest
+	fi
+	;;
+*) die "the manifest's family $family is not one this installer knows (image, nixos, arch, freebsd)" ;;
 esac
+[ "$fb" = 0 ] || [ "$family" = freebsd ] || die "layout $layout_name is a ZFS layout, which only FreeBSD takes; $os is of the family $family"
 # the userdata must be of the kind the system takes
 want_ud=bash; [ "$family" = nixos ] && want_ud=nix
 bad_ud="$(jq -r --arg t "$want_ud" '[.userdata[] | select((.type // "bash") != $t) | .name] | join(", ")' <<< "$spec")"
@@ -2490,6 +2886,7 @@ for dm in /sys/block/dm-*; do
 done
 command -v mdadm >/dev/null && mdadm --stop --scan >/dev/null 2>&1 || true
 
+fb_wrote=1
 log "wiping the disks"
 for x in "${disks[@]}"; do
 	for p in $(lsblk -nr -o PATH "$x" | tail -n +2); do wipefs -af "$p" >/dev/null 2>&1 || true; done
@@ -2500,6 +2897,8 @@ done
 partprobe >/dev/null 2>&1 || true
 udevadm settle
 pvscan --cache >/dev/null 2>&1 || true
+# FreeBSD: its installer partitions, in its own rescue system
+[ "$family" != freebsd ] || return 0
 
 log "partitioning"
 sg_size() { # sg_size DISK SIZE -> the end argument for sgdisk
@@ -2566,6 +2965,50 @@ add_pv() { VG_PVS[$1]="${VG_PVS[$1]:-}${VG_PVS[$1]:+ }$2"; }
 
 make_layout() {
 [ "$keep" = 0 ] || die "keep-data: no layout is made"
+if [ "$family" = freebsd ]; then
+	# FreeBSD: no layout is made here. The disks get the boot image of the
+	# UMP FreeBSD rescue system instead, each straight from the download,
+	# and on its partition umpboot the boot config: the words that system
+	# starts with, root's keys, and the plan for its installer.
+	mapfile -t fb_disks < <(fb_image_disks)
+	log "writing the FreeBSD rescue system to $(printf '%s\n' "${fb_disks[@]}" | paste -sd, - | sed 's/,/, /g')"
+	fb_conf="$(mktemp -d)"
+	mkdir "$fb_conf/mnt"
+	fb_cmdline > "$fb_conf/cmdline"; fb_fact_keys > "$fb_conf/authorized_keys"; fb_plan > "$fb_conf/plan.json"
+	for x in "${fb_disks[@]}"; do
+		sumfile="$(mktemp)"
+		rm -f "$sumfile"
+		curl -fsSL "$fb_rescue_url/disk.img.zst" \
+			| tee >(sha256sum | cut -d' ' -f1 > "$sumfile") \
+			| zstd -dc \
+			| dd of="$x" bs=1M conv=fsync status=none || die "writing the boot image of the FreeBSD rescue system to $x failed"
+		for _ in $(seq 1 100); do [ -s "$sumfile" ] && break; sleep 0.1; done
+		have_sum="$(cat "$sumfile" 2>/dev/null || true)"
+		rm -f "$sumfile"
+		[ "$have_sum" = "$fb_image_sum" ] || die "checksum mismatch for disk.img.zst: manifest $fb_image_sum, download ${have_sum:-?}; $x holds what was downloaded"
+		# the image's backup partition table is where the image ended: it
+		# moves to the end of the disk; and the disk and its partitions get
+		# GUIDs of their own, the image being on several disks
+		sgdisk -e -G "$x" >/dev/null 2>&1 || die "the partition table of the boot image on $x could not be fitted to the disk"
+		partprobe "$x" >/dev/null 2>&1 || true
+		udevadm settle
+		p=""
+		for _ in $(seq 1 50); do
+			p="$(lsblk -lnpo NAME,PARTLABEL "$x" 2>/dev/null | awk '$2 == "umpboot" {print $1; exit}')"
+			[ -z "$p" ] || break
+			sleep 0.2
+		done
+		[ -n "$p" ] || die "the boot image on $x has no partition umpboot"
+		mount -t vfat "$p" "$fb_conf/mnt" || die "mounting $p, the partition umpboot of $x, failed"
+		mkdir -p "$fb_conf/mnt/ump"
+		cp "$fb_conf/cmdline" "$fb_conf/authorized_keys" "$fb_conf/plan.json" "$fb_conf/mnt/ump/" || die "writing the boot config to $p failed"
+		umount "$fb_conf/mnt" || die "unmounting $p failed"
+	done
+	sync
+	rm -f "$fb_conf/cmdline" "$fb_conf/authorized_keys" "$fb_conf/plan.json"
+	rmdir "$fb_conf/mnt" "$fb_conf"
+	return 0
+fi
 log "file systems"
 for i in "${!P_DISK[@]}"; do
 	format "${P_DEV[$i]}" "${P_FS[$i]}" "${P_LABEL[$i]}"
@@ -2606,6 +3049,13 @@ if [ "$keep" = 1 ]; then
 else
 	wipe_disks
 	make_layout
+fi
+# FreeBSD: nothing more from here. Its rescue system is on the disks, the
+# firmware starts it at the next boot, and its installer does the rest
+# with the same specification.
+if [ "$family" = freebsd ]; then
+	log "staged: the UMP FreeBSD rescue system is on the disks, with its boot config; a reboot starts it, and the installation goes on there"
+	exit 0
 fi
 
 # --- mounting: root first, then the rest by depth -------------------------

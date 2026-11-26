@@ -18,6 +18,16 @@ systems](oses.md).
 | [`manual`](#manual-servers-manual) | servers added by hand | no | stops: the server must let ump in beforehand |
 | [`pxe`](#pxe-machines-pxe) | machines booted over the network: your own hardware, an ISP's private network | yes: a network boot from the PXE server of its site | goes through the network boot: power-cycle the machine |
 
+A server that runs [FreeBSD](oses.md#leaving-freebsd-again) is in the
+last column's case even when it lets ump in: no kexec leads from
+FreeBSD into the UMP rescue system, so its `rescue` and every later
+`reinstall` take the provider's way. Where the table says `stops`
+(DigitalOcean, servers added by hand), FreeBSD can be installed once
+and not left again by ump: the provider's panel brings a Linux back.
+Where it says that the provider reinstalls or rebuilds the machine
+(Vultr, an OVHcloud VPS), `reinstall` does that and `rescue` stops. No
+real server of any provider has been installed with FreeBSD yet.
+
 ## Hetzner Robot (`hetzner-robot`)
 
 - Dedicated servers. The server name is a free label at Hetzner, not

@@ -1,0 +1,6 @@
+==> the plan
+disks (1): vtbd0 (10 GiB)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: mirror over vtbd0, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: mirror needs 2 disks, and the plan gives it 1
+(exit status 1)

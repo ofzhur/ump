@@ -1,0 +1,2 @@
+install.sh: layout data-pool, part 3 (zfs): a second zfs part; this version makes the root pool and no other
+(exit status 1)

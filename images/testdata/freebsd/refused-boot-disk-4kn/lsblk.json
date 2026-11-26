@@ -1,0 +1,6 @@
+{
+   "blockdevices": [
+      {"path": "/dev/nvme0n1", "type": "disk", "ro": false, "tran": "nvme", "size": 3840755982336, "rota": false, "model": "Micron_7450_MTFDKCC3T8TFR", "serial": "2318409F2B11", "wwn": "eui.000000000000000100a075234209f2b1", "log-sec": 4096},
+      {"path": "/dev/sda", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3C", "wwn": "0x5000c500a1b2c3d4", "log-sec": 512}
+   ]
+}

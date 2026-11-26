@@ -1,0 +1,38 @@
+==> /etc/rc.conf
+# /etc/rc.conf, written by UMP at installation (profile freebsd-15.1); sysrc
+# changes it, /etc/defaults/rc.conf has what is not set here.
+hostname="web-01.example.net"
+zfs_enable="YES"
+sshd_enable="YES"
+ntpd_enable="YES"
+ntpd_sync_on_start="YES"
+sendmail_enable="NONE"
+syslogd_flags="-ss"
+# the firewall: /etc/pf.conf
+pf_enable="YES"
+pflog_enable="YES"
+# the interfaces by MAC address (/usr/local/etc/rc.d/ump_ifnames renames
+# them before the network starts): ext01, ... the uplink and those with a
+# public address, int01, ... the rest
+ump_ifnames_enable="YES"
+ump_ifnames="int01=0c:c4:7a:aa:bb:10 ext01=0c:c4:7a:aa:bb:11"
+ifconfig_int01="up"
+ifconfig_ext01="inet 192.0.2.17/24"
+defaultrouter="192.0.2.1"
+ifconfig_ext01_ipv6="inet6 2001:db8::17 prefixlen 64"
+ipv6_defaultrouter="fe80::1%ext01"
+==> /etc/resolv.conf
+# written by UMP at installation: the resolvers of the specification (network.uplink.dns)
+nameserver 192.0.2.53
+nameserver 2001:db8::53
+==> /etc/resolvconf.conf
+# written by UMP at installation: /etc/resolv.conf is as the installation
+# wrote it, and neither a DHCP lease nor a router advertisement replaces
+# it. Remove this file to take the lease's resolvers.
+resolvconf=NO
+==> /etc/ump/install (the network)
+network=static
+network6=static
+dns=192.0.2.53,2001:db8::53
+==> the plan
+ext01 (0c:c4:7a:aa:bb:11) IPv4 static 192.0.2.17/24,192.0.2.1, IPv6 static 2001:db8::17/64,fe80::1 (the specification's uplink); IPv6 on; DNS 192.0.2.53 2001:db8::53

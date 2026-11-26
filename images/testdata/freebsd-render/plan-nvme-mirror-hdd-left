@@ -1,0 +1,53 @@
+==> the plan
+disks (2): nda0 (476.9 GiB, S4EWNX0N123456, /dev/nvme0n1 in the plan, found by serial number), nda1 (476.9 GiB, S4EWNX0N123457, /dev/nvme1n1 in the plan, found by serial number); left alone: ada0 (3726 GiB, ZC1A2B3C, /dev/sda in the plan)
+  nda0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  nda1: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: mirror over nda0 nda1, at /; the system in zroot/ROOT/default, a boot environment
+==> the disks
+clear_disk nda0
+gpart create -s gpt nda0
+gpart add -a 4k -t freebsd-boot -i 1 -l boot0 -s 512k nda0
+gpart add -a 1m -t efi -i 2 -l efi0 -s 512m nda0
+gpart add -a 1m -t freebsd-swap -i 3 -l swap0 -s 2g nda0
+gpart add -a 1m -t freebsd-zfs -i 4 -l zfs0 nda0
+zero_ends nda0p1
+zero_ends nda0p2
+zero_ends nda0p3
+zero_ends nda0p4
+clear_disk nda1
+gpart create -s gpt nda1
+gpart add -a 4k -t freebsd-boot -i 1 -l boot1 -s 512k nda1
+gpart add -a 1m -t efi -i 2 -l efi1 -s 512m nda1
+gpart add -a 1m -t freebsd-swap -i 3 -l swap1 -s 2g nda1
+gpart add -a 1m -t freebsd-zfs -i 4 -l zfs1 nda1
+zero_ends nda1p1
+zero_ends nda1p2
+zero_ends nda1p3
+zero_ends nda1p4
+==> the pool
+zpool create -f -o altroot=/mnt -o ashift=12 -O compression=lz4 -O atime=off -O mountpoint=none zroot mirror /dev/gpt/zfs0 /dev/gpt/zfs1
+zfs create -o mountpoint=none zroot/ROOT
+zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/default
+zfs mount zroot/ROOT/default
+zfs create -o mountpoint=/home zroot/home
+zfs create -o mountpoint=/tmp -o setuid=off zroot/tmp
+zfs create -o mountpoint=/usr -o canmount=off zroot/usr
+zfs create -o mountpoint=/var -o canmount=off zroot/var
+zfs create -o exec=off -o setuid=off zroot/var/audit
+zfs create -o exec=off -o setuid=off zroot/var/crash
+zfs create -o exec=off -o setuid=off zroot/var/log
+zfs create -o atime=on zroot/var/mail
+zfs create -o setuid=off zroot/var/tmp
+zpool set bootfs=zroot/ROOT/default zroot
+==> /etc/fstab
+# /etc/fstab, written by UMP at installation (layout plan-nvme-mirror-hdd-left over nda0 nda1).
+# The datasets of zroot mount themselves (zfs_enable in /etc/rc.conf).
+# failok and no check at boot: the system starts without this disk too
+/dev/gpt/efi0	/boot/efi	msdosfs	rw,failok	0	0
+/dev/gpt/swap0	none	swap	sw	0	0
+/dev/gpt/swap1	none	swap	sw	0	0
+==> /etc/ump/install (the disks)
+layout=plan-nvme-mirror-hdd-left
+disks=/dev/nda0 /dev/nda1
+boot_disk=/dev/nda0
+root=zroot/ROOT/default

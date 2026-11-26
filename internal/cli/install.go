@@ -213,6 +213,26 @@ the old root gone or moved aside and the volumes the plan keeps with
 their data, and the same command again plans from what the installer
 saved of the old system. The state records the layout keep-data.
 
+FreeBSD (--profile freebsd-15.1 or freebsd-14.5, with a ZFS layout:
+zfs, zfs-mirror, zfs-raidz; docs/oses.md) is installed in two steps.
+The installer in the UMP rescue system plans, wipes the disks and puts
+the UMP FreeBSD rescue system on them; ump tells the provider to start
+the server from its disks, reboots it, waits until that system answers
+and runs the installer for FreeBSD there, with the same profile; then
+the server reboots into FreeBSD. --dry-run prints the plan of the first
+step and writes nothing; --no-reboot leaves the server in the FreeBSD
+rescue system, FreeBSD on its disks. When the FreeBSD rescue system
+does not answer in time (exit status 5), or its installer fails (exit
+status 1), the old system is gone and the disks hold that rescue system
+alone, or what the installer came to: the same command again starts
+over through the provider's rescue system. Not with --keep-data or
+--unattended (exit status 2). No kexec leads from FreeBSD into the UMP
+rescue system, so every later reinstall of the server, to whatever
+system, and ump server rescue go through the provider's rescue system
+(exit status 5 with --via direct, and where the provider has none and
+cannot put a stock Linux on the server): on such a provider the
+question says that FreeBSD cannot be left again from there.
+
 --unattended has the machine install by itself at its next boot,
 without UMP's SSH session (a PXE machine's network boot; docs/pxe.md):
 the installation is rendered and checked as above, the disks it may
@@ -243,6 +263,7 @@ disarmed and gives them back (exit status 5).`,
   ump server reinstall db-01 --keep-data --dry-run
   ump server reinstall db-01 --keep-data --format /var
   ump server reinstall db-01 --keep-data --root /dev/vg0/root --keep-root
+  ump server reinstall bsd-01 --profile freebsd-15.1 --layout zfs-mirror
   ump server reinstall pxe/web-07 --unattended
   ump server reinstall pxe/web-07 --unattended --no-wait --disks nvme-eui.0025388b91c0a1b2`,
 		Args: usageArgs(cobra.ExactArgs(1)),
@@ -654,6 +675,13 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 	if err != nil {
 		return err
 	}
+	// FreeBSD is installed in two steps, the second from the UMP FreeBSD
+	// rescue system (installStaged), and ump drives both over SSH: a
+	// machine that installs by itself would stop after the first, its
+	// disks wiped
+	if o.unattended && profile.Family(spec.OS) == "freebsd" {
+		return withExit(exitUsage, fmt.Errorf("%s is installed in two steps that ump drives over SSH, the second from its FreeBSD rescue system; an unattended installation of it is not in this version. Without --unattended, ump installs it on %s as on any server. %s was not touched", spec.OS, p.m.Ref(), p.m.Name))
+	}
 	// the private networks: --private-network, else the profile's
 	var networks map[string]*profile.PrivateNetwork
 	names := prof.PrivateNetworkNames()
@@ -818,6 +846,9 @@ func (a *app) installServer(cmd *cobra.Command, ref string, o installOptions) er
 	}
 	if noRescueWarning(m, prov) != "" {
 		question += " There is no rescue system to fall back on: a failed installation is yours to recover."
+		if profile.Family(p.spec.OS) == "freebsd" {
+			question += " " + noWayBack
+		}
 	}
 	if !o.noProvision {
 		question += " Then ump provision runs " + run.String() + "."
@@ -1055,6 +1086,12 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 	// the fetch that failed
 	ran := installerRan(out)
 	result.written = !r.dryRun && (code == 0 || code == 255 && ran)
+	if p.spec.Layout.IsZFS() {
+		// FreeBSD's installation refuses at length before it writes; a
+		// connection that ended before the installer said that it does
+		// left the disks as they were
+		result.written = !r.dryRun && (code == 0 || code == 255 && strings.Contains(out, releasingDisks))
+	}
 	switch {
 	case code == 255:
 		return result, nil, withExit(exitUnreachable, fmt.Errorf("the connection to %s ended during the installation; the server is in the UMP rescue system, look there (%s)", e.addr, e.staging))
@@ -1069,6 +1106,13 @@ func (a *app) runInstall(cmd *cobra.Command, p *installPlan, r installRun) (inst
 		fmt.Fprintf(a.stderr, "Dry run done; %s stays in the UMP rescue system (%s).\n", m.Name, e.staging)
 		return result, nil, nil
 	}
+	// an installation in two steps (FreeBSD): the installer staged it, and
+	// the rest happens in the rescue system it put on the disks
+	if installerStaged(out) {
+		if err := a.installStaged(ctx, p, e); err != nil {
+			return result, nil, err
+		}
+	}
 	return a.startInstalled(cmd, p, r, e, result)
 }
 
@@ -1080,6 +1124,22 @@ type installEntry struct {
 	*imageEntry
 	system  string
 	staging string
+	// freebsd says that the server is in the UMP FreeBSD rescue system by
+	// now, where the second step of FreeBSD's installation runs
+	// (installStaged); the provider was told to start the server from its
+	// disks before it went there (prepared), and diskBoot says that it
+	// takes the provider's reboot for that
+	freebsd  bool
+	prepared bool
+	diskBoot bool
+}
+
+// rescue is the rescue system the server is in, by name.
+func (e *installEntry) rescue() string {
+	if e.freebsd {
+		return "UMP FreeBSD rescue system"
+	}
+	return "UMP rescue system"
 }
 
 // stagingRun is the command line that runs a command in the rescue
@@ -1148,21 +1208,13 @@ func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e
 	ctx := cmd.Context()
 	m, prov, ref, spec := p.m, p.prov, p.ref, p.spec
 	entry, system := e.imageEntry, e.system
-	// providers that keep the rescue system as the boot option until told
-	// otherwise would boot it again
-	if rs, ok := prov.(provider.Rescue); ok {
-		if on, err := rs.RescueEnabled(ctx, m); err == nil && on {
-			if err := rs.DisableRescue(ctx, m); err != nil {
-				return result, nil, fmt.Errorf("account %s: %s is installed, but the provider's rescue system could not be disabled, and would boot again: %w", m.Account, spec.OS, err)
-			}
-		}
-	}
-	// providers that boot their own kernel or boot loader by default are
-	// told to boot the installed system's
-	db, diskBoot := prov.(provider.DiskBooter)
-	if diskBoot {
-		if err := db.BootFromDisk(ctx, m); err != nil {
-			return result, nil, fmt.Errorf("account %s: %s is installed, but the provider could not be switched to boot it from its disks: %w", m.Account, spec.OS, err)
+	// the provider starts the server from its disks; an installation in
+	// two steps told it so before its first reboot
+	diskBoot := e.diskBoot
+	if !e.prepared {
+		var err error
+		if diskBoot, err = bootFromDisks(ctx, m, prov, spec.OS+" is installed"); err != nil {
+			return result, nil, err
 		}
 	}
 	if r.noReboot {
@@ -1176,25 +1228,17 @@ func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e
 		if diskBoot {
 			how = "a reboot through the provider (ump server reboot " + ref + ")"
 		}
-		fmt.Fprintf(a.stderr, "Installed; %s stays in the UMP rescue system, %s starts %s.\n", m.Name, how, spec.OS)
+		fmt.Fprintf(a.stderr, "Installed; %s stays in the %s, %s starts %s.\n", m.Name, e.rescue(), how, spec.OS)
 		return result, &record, nil
 	}
 
 	fmt.Fprintf(a.stderr, "Rebooting %s into %s ...\n", m.Name, spec.OS)
-	reboot := withSSHOptions(a.sshTo(entry.user, entry.addr, []string{p.keyPath}, true, true, []string{"systemctl reboot"}), batchOptions(10*time.Second)...)
-	// a changed boot configuration takes effect with the provider's reboot
-	code, rerr := 0, error(nil)
-	if !diskBoot {
-		code, rerr = a.sshExec(ctx, reboot, nil, io.Discard, io.Discard)
+	command := "systemctl reboot"
+	if e.freebsd {
+		command = "shutdown -r now"
 	}
-	if diskBoot || rerr != nil || (code != 0 && code != 255) {
-		pw, ok := prov.(provider.Power)
-		if !ok {
-			return result, nil, fmt.Errorf("%s is installed, but could not be rebooted over SSH, and provider type %s cannot reboot it; reboot it yourself", m.Name, m.Provider)
-		}
-		if err := pw.Reboot(ctx, m, provider.RebootHard); err != nil {
-			return result, nil, fmt.Errorf("account %s: %s is installed, but the reboot failed: %w", m.Account, m.Name, err)
-		}
+	if err := a.rebootEntry(ctx, p, e, command, diskBoot, m.Name+" is installed"); err != nil {
+		return result, nil, err
 	}
 	result.Rebooted = true
 	// the rescue system's host keys pinned there are not the new system's
@@ -1214,6 +1258,54 @@ func (a *app) startInstalled(cmd *cobra.Command, p *installPlan, r installRun, e
 	result.InstalledAt = &record.At
 	fmt.Fprintf(a.stderr, "%s is up: %s, hostname %s, root on %s; log in as %s (ump ssh %s).\n", m.Name, sys.Name, p.hostname, sys.Root, admin, m.Name)
 	return result, &record, nil
+}
+
+// bootFromDisks tells the provider of m to start the server from its
+// disks at its next boot: a rescue system that stays the boot option
+// until told otherwise is turned off (provider.Rescue), and a provider
+// that boots its own kernel or boot loader by default is switched to the
+// disks' (provider.DiskBooter); that switch takes effect with the
+// provider's reboot alone, which diskBoot says. lead says what the disks
+// hold, for the errors.
+func bootFromDisks(ctx context.Context, m provider.Machine, prov provider.Provider, lead string) (diskBoot bool, err error) {
+	if rs, ok := prov.(provider.Rescue); ok {
+		if on, err := rs.RescueEnabled(ctx, m); err == nil && on {
+			if err := rs.DisableRescue(ctx, m); err != nil {
+				return false, fmt.Errorf("account %s: %s, but the provider's rescue system could not be disabled, and would boot again: %w", m.Account, lead, err)
+			}
+		}
+	}
+	db, diskBoot := prov.(provider.DiskBooter)
+	if diskBoot {
+		if err := db.BootFromDisk(ctx, m); err != nil {
+			return true, fmt.Errorf("account %s: %s, but the provider could not be switched to boot it from its disks: %w", m.Account, lead, err)
+		}
+	}
+	return diskBoot, nil
+}
+
+// rebootEntry reboots a server out of the rescue system it is in (e):
+// over SSH with command, or through its provider, where a changed boot
+// configuration takes effect with the provider's reboot alone
+// (byProvider) or the reboot over SSH fails. lead says in what state the
+// server is, for the errors.
+func (a *app) rebootEntry(ctx context.Context, p *installPlan, e *installEntry, command string, byProvider bool, lead string) error {
+	m := p.m
+	reboot := withSSHOptions(a.sshTo(e.user, e.addr, []string{p.keyPath}, true, true, []string{command}), batchOptions(10*time.Second)...)
+	code, rerr := 0, error(nil)
+	if !byProvider {
+		code, rerr = a.sshExec(ctx, reboot, nil, io.Discard, io.Discard)
+	}
+	if byProvider || rerr != nil || (code != 0 && code != 255) {
+		pw, ok := p.prov.(provider.Power)
+		if !ok {
+			return fmt.Errorf("%s, but could not be rebooted over SSH, and provider type %s cannot reboot it; reboot it yourself", lead, m.Provider)
+		}
+		if err := pw.Reboot(ctx, m, provider.RebootHard); err != nil {
+			return fmt.Errorf("account %s: %s, but the reboot failed: %w", m.Account, lead, err)
+		}
+	}
+	return nil
 }
 
 // serverRecord is an installation to record: the server, the record and
@@ -1615,7 +1707,9 @@ func (a *app) installReport(r installResult, format outputFormat) error {
 // installedSystem asks the machine, as user with UMP's key, what it runs
 // now.
 func (a *app) installedSystem(ctx context.Context, addr, keyPath, user string) (*installedSystem, bool) {
-	const query = `sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'; findmnt -no SOURCE / ; cat /etc/ump/install 2>/dev/null | tr '\n' ' '`
+	// findmnt is Linux's; FreeBSD's mount -p prints the mounted file
+	// systems as fstab has them
+	const query = `sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'; { findmnt -no SOURCE / 2>/dev/null || mount -p 2>/dev/null | awk '$2 == "/" {print $1}'; }; cat /etc/ump/install 2>/dev/null | tr '\n' ' '`
 	argv := withSSHOptions(a.sshTo(user, addr, []string{keyPath}, true, true, []string{query}), batchOptions(10*time.Second)...)
 	var out bytes.Buffer
 	code, err := a.sshExec(ctx, argv, nil, &out, io.Discard)

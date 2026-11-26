@@ -1,0 +1,7 @@
+{
+   "blockdevices": [
+      {"path": "/dev/sda", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3C", "wwn": "0x5000c500a1b2c3d4", "log-sec": 512},
+      {"path": "/dev/sdb", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3D", "wwn": "0x5000c500a1b2c3d5", "log-sec": 512},
+      {"path": "/dev/nvme0n1", "type": "disk", "ro": false, "tran": "nvme", "size": 512110190592, "rota": false, "model": "SAMSUNG MZVLB512HBJQ-00000", "serial": "S4EWNX0N123456", "wwn": "eui.0025388b01234567", "log-sec": 512}
+   ]
+}

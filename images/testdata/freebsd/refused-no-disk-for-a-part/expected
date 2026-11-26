@@ -1,0 +1,3 @@
+install.sh: layout nvme-mirror, part 1 (slice): no disk matches ["nvme.*"] (disks: /dev/sda /dev/sdb)
+install.sh: nothing was written to the disks
+(exit status 2)

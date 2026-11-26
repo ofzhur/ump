@@ -21,7 +21,7 @@ func TestPublishedNetworks(t *testing.T) {
 		t.Errorf("default: %v, size %d", err, n.Size())
 	}
 	// every published profile names it
-	for _, name := range []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux", "cachyos"} {
+	for _, name := range []string{"ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04", "debian-13", "debian-12", "nixos-25.11", "archlinux", "cachyos", "freebsd-15.1", "freebsd-14.5"} {
 		p, err := Parse(repoFile(t, name+".yaml"))
 		if err != nil {
 			t.Fatal(err)

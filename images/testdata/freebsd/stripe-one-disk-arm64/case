@@ -1,0 +1,4 @@
+arch=arm64; memory=3814; layout=zfs
+mac=96:00:03:aa:bb:cc; ip4=203.0.113.77/32,172.31.1.1; ip6=2001:db8:1c1c::1/64,fe80::1
+words="console=ttyAMA0 ump.hostname=arm-01 ump.mac=96:00:03:aa:bb:cc ump.ip=203.0.113.77/32,172.31.1.1 ump.ip6=2001:db8:1c1c::1/64,fe80::1 ump.dns=1.1.1.1,8.8.8.8"
+hostname=arm-01; rescue_memory_mb=526; rescue_disk_mb=164

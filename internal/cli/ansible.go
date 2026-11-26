@@ -23,6 +23,7 @@ import (
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/cache"
 	"github.com/ofzhur/ump/internal/config"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 	"github.com/ofzhur/ump/internal/pxe"
 	"github.com/ofzhur/ump/internal/state"
@@ -652,9 +653,11 @@ type hostFile struct {
 // gave the one. ansible_ssh_common_args takes a host behind a jump host
 // through it (ProxyJump), with ump's own choice for host keys
 // (ansibleSSHArgs), since a host's variable replaces what ansible.cfg
-// and ump's runs set.
+// and ump's runs set. ansible_python_interpreter is that of a FreeBSD
+// host (freebsdPython).
 type hostVars struct {
 	AnsibleHost    string                 `json:"ansible_host,omitempty" yaml:"ansible_host,omitempty"`
+	AnsiblePython  string                 `json:"ansible_python_interpreter,omitempty" yaml:"ansible_python_interpreter,omitempty"`
 	AnsibleSSHArgs string                 `json:"ansible_ssh_common_args,omitempty" yaml:"ansible_ssh_common_args,omitempty"`
 	UMPAdmin       string                 `json:"ump_admin,omitempty" yaml:"ump_admin,omitempty"`
 	UMPName        string                 `json:"ump_name,omitempty" yaml:"ump_name,omitempty"`
@@ -689,15 +692,25 @@ func primaryAddress(m provider.Machine) string {
 	return m.IPv6
 }
 
+// freebsdPython is the Python of a FreeBSD that ump installed, from its
+// packages: FreeBSD has no /usr/bin/python3, where an ansible.cfg may
+// tell Ansible to look. The host's variable says it whatever the
+// repository's configuration has.
+const freebsdPython = "/usr/local/bin/python3"
+
 // hostVarsFor is what the host file says about a server ump installed;
 // admin is the administrator of the installation, private the server's
-// private addresses, in order.
+// private addresses, in order. A server whose recorded system is of the
+// family freebsd has its Python named.
 func hostVarsFor(m provider.Machine, rec state.Install, admin string, private []state.Private) hostVars {
 	v := hostVars{
 		AnsibleHost: primaryAddress(m), UMPAdmin: admin,
 		UMPName: m.Name, UMPRef: m.Ref(), UMPProvider: m.Provider, UMPAccount: m.Account,
 		UMPLocation: m.Location, UMPProduct: m.Product, UMPOS: rec.OS, UMPProfile: rec.Profile,
 		UMPAttributes: m.Attributes,
+	}
+	if profile.Family(rec.OS) == "freebsd" {
+		v.AnsiblePython = freebsdPython
 	}
 	if m.Jump != "" {
 		v.AnsibleSSHArgs = "-o ProxyJump=" + m.Jump + " " + ansibleSSHArgs[0].value
@@ -922,6 +935,9 @@ type hostFiles struct {
 	// storage's URL.
 	where  string
 	plugin string
+	// stored says that the files are objects of a storage, not files of
+	// the repository.
+	stored bool
 	files  map[string][]byte
 	// gone are the files ump wrote for servers that are gone, by name:
 	// taken out of files (forget), for removeGone.
@@ -936,7 +952,7 @@ func (r *infraRepo) readHostFiles(ctx context.Context) (*hostFiles, error) {
 	if r.pointer == nil {
 		h.objects, h.where = &backend.Directory{Dir: filepath.Join(r.dir, hostsDir), DirMode: 0o755, FileMode: 0o644}, hostsDir
 	} else {
-		h.objects, h.where = r.store, r.store.String()
+		h.objects, h.where, h.stored = r.store, r.store.String(), true
 	}
 	files, err := h.objects.All(ctx)
 	if err != nil {
@@ -1125,8 +1141,17 @@ func (a *app) putInInventory(ctx context.Context, h *hostFiles, hostname string,
 	return a.writeHost(ctx, h, hostname, groups, v)
 }
 
-// writeHost writes the host file of a host and says what changed.
+// writeHost writes the host file of a host and says what changed. A
+// host file in a storage names no Python: the collection's inventory
+// plugin takes no ansible_* variable but ansible_host from there (a
+// connection variable would run commands on every machine that reads
+// the storage) and fails the whole inventory on one. Ansible finds
+// FreeBSD's Python by itself, and inventory/host_vars/ names it where
+// the repository's configuration keeps it from looking.
 func (a *app) writeHost(ctx context.Context, h *hostFiles, hostname string, groups []string, v hostVars) error {
+	if h.stored {
+		v.AnsiblePython = ""
+	}
 	data, err := renderHostFile(hostname, groups, v)
 	if err != nil {
 		return err

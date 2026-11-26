@@ -1,0 +1,7 @@
+{
+   "blockdevices": [
+      {"path": "/dev/loop0", "type": "loop", "ro": false, "size": 104857600, "rota": false, "log-sec": 512},
+      {"path": "/dev/nvme0n1", "type": "disk", "ro": false, "tran": "nvme", "size": 512110190592, "rota": false, "model": "SAMSUNG MZVLB512HBJQ-00000", "serial": "S4EWNX0N123456", "wwn": "eui.0025388b01234567", "log-sec": 512},
+      {"path": "/dev/nvme1n1", "type": "disk", "ro": false, "tran": "nvme", "size": 512110190592, "rota": false, "model": "SAMSUNG MZVLB512HBJQ-00000", "serial": "S4EWNX0N123457", "wwn": "eui.0025388b01234568", "log-sec": 512}
+   ]
+}

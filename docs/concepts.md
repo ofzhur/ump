@@ -100,7 +100,8 @@ The **OS image** is a complete root file system as a `tar.zst` with a
 manifest that pins its checksum, built by this project from Ubuntu
 (26.04, 24.04, 22.04) or Debian (13, 12) for amd64 and arm64 ([the base
 images](../images/base/README.md)); NixOS is installed from its own
-channel instead ([operating systems](oses.md)).
+channel instead, and FreeBSD from its release's distribution sets in
+the storage ([operating systems](oses.md)).
 The **installer** is a script fetched from the storage and run in the
 rescue system with the resolved profile as a JSON **specification**: it
 plans the layout against the disks, wipes them, builds partitions, md and

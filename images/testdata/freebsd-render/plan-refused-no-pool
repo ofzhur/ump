@@ -1,0 +1,6 @@
+==> the plan
+disks (1): vtbd0 (10 GiB, /dev/vda in the plan, found by size)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap
+  zroot: stripe over , at /; the system in zroot/ROOT/default, a boot environment
+install.sh: the plan has no zfs part: FreeBSD is installed with its root on ZFS (the layouts zfs, zfs-mirror and zfs-raidz)
+(exit status 1)

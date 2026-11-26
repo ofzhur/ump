@@ -14,7 +14,7 @@ stopped:
 
 | Step | Output | When it fails |
 |---|---|---|
-| Root on the server | `Checking root access ...`, `Going through the provider's rescue system.` | exit 5 with `--via direct`; the provider's rescue system is used otherwise |
+| Root on the server | `Checking root access ...`, `Going through the provider's rescue system.` | exit 5 with `--via direct`; the provider's rescue system is used otherwise, also for a server that runs FreeBSD, which lets UMP in and cannot make the jump |
 | The provider's rescue system | `Waiting for SSH on ...`, `Provider rescue system reached (...)` | exit 5; the provider's own rescue system did not come up |
 | Loading the UMP rescue image | `==> downloading`, `==> verifying checksums`, `==> memory`, `==> loading` | an error from `kexec-into-rescue.sh`, exit 3 when the memory is too small; the server keeps running what it ran |
 | The jump | `==> booting into the UMP rescue system` | nothing more is printed: see [the rescue system does not answer](#the-rescue-system-does-not-answer) |
@@ -22,6 +22,8 @@ stopped:
 | The installation | the installer's `==>` lines | exit 1; the server stays in the rescue system, where you can log in and look |
 | The plan of `--keep-data` | `Keep-data plan for ...`, the installer's FORMAT, KEEP, ... | exit 3: the installer refused the machine ([what to do](keep-data.md#what-is-refused)), you the plan, or `--yes` did not take it; exit 1: the plan run failed, or the plan could not be read back. Nothing was written, and the last line says how the old system starts again ([the way back](keep-data.md#a-no-and-the-way-back)) |
 | The installation of `--keep-data` | `==> keep-data: writing begins` | before that line nothing was written, and the message says so: exit 3 when the installer stopped by itself, 1 when it failed. After it exit 1: the old root is gone or moved aside, the volumes the plan keeps hold their data, and the same command again recovers ([after a failure](keep-data.md#after-a-failure)) |
+| FreeBSD: the second rescue system | `==> staged:`, `Rebooting ... into the UMP FreeBSD rescue system`, `Waiting for the UMP FreeBSD rescue system ... up after ...` | exit 5 after the wait: the disks hold that rescue system alone, see [the FreeBSD rescue system does not answer](#the-freebsd-rescue-system-does-not-answer) |
+| FreeBSD: the installation there | the `==>` lines of the installer for FreeBSD | exit 1 (5 when the connection ended); the server stays in the FreeBSD rescue system (`ump ssh NAME --staging`). A refusal wrote nothing; after a failure a reboot finds no system. The same command again starts over through the provider's rescue system |
 | The first boot | `Waiting for ... the new system` | exit 5: see [the installed system does not boot](#the-installed-system-does-not-boot) |
 
 ## Getting a server back
@@ -143,6 +145,77 @@ Persistent logs are no way out here: the provider's rescue systems lack
 `ramoops`, a Robot reset of an AX server cuts the power (memory is lost), and the
 disks are not to be written while debugging.
 
+## The FreeBSD rescue system does not answer
+
+An installation of [FreeBSD](oses.md#freebsd) reboots twice. After the
+first step (`==> staged:`) the disks are wiped and hold the boot image
+of the UMP FreeBSD rescue system, which the machine's firmware starts;
+ump waits for it where the UMP rescue system answered, and ends with
+exit status 5 when it does not come:
+
+```
+ump: the UMP FreeBSD rescue system on 203.0.113.10 did not answer within 15m. The disks of web-01 hold that rescue system and nothing else: the old system is gone, and freebsd-15.1 is not installed. ...
+```
+
+Nothing runs on the server that ump could ask, and the old system is
+gone, as after the wipe of any installation. The way back is the
+provider's rescue system:
+
+```console
+$ ump server reinstall web-01 --profile freebsd-15.1 --dry-run   # the plan, and the boot log of the attempt before
+$ ump server reinstall web-01                                    # or another system
+$ ump server rescue web-01                                       # or a look at the machine first
+```
+
+Where the provider has none (DigitalOcean, a server added by hand), it
+is the provider's console, recovery system or rebuild; ump said so in
+its question before the installation.
+
+Why it did not come, most likely first:
+
+1. **FreeBSD does not drive the network card**, or the disk controller.
+   The rescue system runs, at its login prompt on the console, and
+   nothing reaches it. Typical for real hardware; virtual machines have
+   virtio.
+2. **The firmware did not start the disk.** A provider that still
+   starts its own rescue system or kernel, a boot order with another
+   disk first (with `--disks`, a disk that was left alone and still
+   holds a system), Secure Boot.
+3. **The kernel stops before its network scripts**: a panic (it reboots
+   after 15 seconds, into the same image, again and again), too little
+   memory (checked before the wipe), a CPU or firmware it does not take.
+4. **The address is not the one ump waits at.** The rescue system gets
+   the address, gateway and MAC the UMP rescue system had, static.
+
+The FreeBSD rescue system tells which, without a console: once its
+network scripts ran, with an address or without, it writes a log to
+its boot partition, and the installer in the UMP rescue system prints a
+log it finds on a disk after its plan, before it wipes, also with
+`--dry-run`:
+
+```
+==> a FreeBSD rescue system was here and left its boot log (/dev/vda1):
+    UMP FreeBSD rescue system 2026.11.26, FreeBSD 15.1-RELEASE arm64, web-01, written 2026-11-26T18:20:47Z
+    == setup
+    vtnet0: ump.ip=203.0.113.10/26,203.0.113.1
+    ...
+```
+
+It has what the setup decided, the interfaces with their state and
+addresses, the routes, the network and storage devices with the drivers
+that took them (`no driver attached` names the first cause), the disks
+with sizes and serial numbers, and the kernel's messages. `==> a
+FreeBSD rescue system was put on /dev/vda and left no boot log` means
+causes 2 or 3: the console, where there is one, shows the firmware or
+the kernel. A second attempt costs nothing more than the first: the
+disks are wiped already.
+
+A FreeBSD rescue system that does answer, with an installer that
+refused or failed there, is the other case: `ump ssh NAME --staging`
+is its root shell, `/etc/ump/boot/plan.json` the plan it was given,
+`geom disk list` and `gpart show` what it sees of the disks, and
+`/var/log/ump-rescue-setup.log` what its setup decided.
+
 ## The installed system does not boot
 
 The installation finished, the server rebooted, and the new system does
@@ -186,6 +259,18 @@ What to check, most likely first:
 Fix it in place (edit, `chroot /mnt` for `update-grub` or `netplan
 generate`), then `ump server unrescue NAME --reboot`; or change the
 profile and run `ump server reinstall` again.
+
+A FreeBSD server's disks hold a ZFS pool, which the UMP rescue system,
+a Linux without ZFS, cannot import: `lsblk -f` shows its partitions
+(`zfs_member`, with the pool's name as label) and the EFI system
+partition, whose `EFI/BOOT` has FreeBSD's loader, and no more. What
+FreeBSD wrote is read from FreeBSD. A reinstall with `--no-reboot`
+leaves the server in the UMP FreeBSD rescue system with the new system
+on its disks, to look at before its first boot (`zpool import -R /mnt
+zroot && zfs mount zroot/ROOT/default`, then `/mnt/etc/rc.conf`,
+`/mnt/etc/pf.conf`, `/mnt/boot/loader.conf`); for a system that ran,
+the provider's FreeBSD rescue system or install media, where it has
+one.
 
 ## Case study: Hetzner AX41-NVMe, 2026-10-16
 

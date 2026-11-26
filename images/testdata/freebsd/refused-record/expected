@@ -1,0 +1,3 @@
+install.sh: --record: this run stages FreeBSD's installation, which ends in the UMP FreeBSD rescue system; the record is made there, by its installer
+install.sh: nothing was written to the disks
+(exit status 2)

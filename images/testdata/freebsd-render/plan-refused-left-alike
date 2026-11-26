@@ -1,0 +1,2 @@
+install.sh: the disks are not those of the plan: /dev/vda (10737418240 bytes) cannot be told from vtbd1, which the plan leaves alone: the same size, and no serial number says which is which (this machine has vtbd0 (10737418240 bytes), vtbd1 (10737418240 bytes))
+(exit status 1)

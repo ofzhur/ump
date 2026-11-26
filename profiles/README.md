@@ -15,11 +15,12 @@ reinstall NAME` works with the published `ubuntu-26.04` out of the box.
 | [`nixos-25.11.yaml`](nixos-25.11.yaml) | the same for NixOS 25.11 from its stable channel, with the userdata `nixos` | [NixOS](../docs/oses.md#nixos) |
 | [`archlinux.yaml`](archlinux.yaml) | the same for Arch Linux, the rolling release from its mirrors (amd64 only), with the userdata `archlinux` | [Arch Linux](../docs/oses.md#arch-linux) |
 | [`cachyos.yaml`](cachyos.yaml) | the same for CachyOS, Arch Linux with CachyOS's x86-64-v3 packages and server kernel (amd64 only), with the userdata `cachyos` | [CachyOS](../docs/oses.md#cachyos) |
-| [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example` | [Disk layouts](../docs/disk-layouts.md) |
+| [`freebsd-15.1.yaml`](freebsd-15.1.yaml), [`freebsd-14.5.yaml`](freebsd-14.5.yaml) | the same for FreeBSD 15.1 and 14.5, from the release's distribution sets, on every disk as one ZFS pool (the layout `zfs`), with the userdata `freebsd` | [FreeBSD's layouts](../docs/disk-layouts.md#zfs-freebsds-layouts) |
+| [`layouts.yaml`](layouts.yaml) | the named disk layouts `lvm-linear`, `lvm-striped`, `lvm-raid1` and `lvm-example`, and FreeBSD's, `zfs`, `zfs-mirror` and `zfs-raidz` | [Disk layouts](../docs/disk-layouts.md) |
 | [`firewalls.yaml`](firewalls.yaml) | the named firewalls `default`, `web` and `open` | [Firewalls](../docs/firewalls.md) |
 | [`networks.yaml`](networks.yaml) | the named private network `default`, `10.0.0.0/24`, which every published profile names | [Private networks](../docs/networks.md) |
 | [`users.yaml`](users.yaml) | the named user `ump`, the administrator UMP provides | [Users](../docs/users.md) |
-| [`userdata.yaml`](userdata.yaml) | the named userdata `ubuntu`, `debian`, `archlinux` and `cachyos` (the scripts each of those systems runs before its first boot) and `nixos` (the module every NixOS gets), which do nothing yet | [Userdata](../docs/userdata.md) |
+| [`userdata.yaml`](userdata.yaml) | the named userdata `ubuntu`, `debian`, `archlinux`, `cachyos` and `freebsd` (the scripts each of those systems runs before its first boot) and `nixos` (the module every NixOS gets), which do nothing yet | [Userdata](../docs/userdata.md) |
 
 A change here reaches every ump without a local copy of the file at the
 next `make upload`; the installer that consumes the resolved profile is

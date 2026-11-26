@@ -5,6 +5,8 @@ https://ump.zhurko.de
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 The operating system images UMP builds and publishes (the Ubuntu and
-Debian base images, the Debian-based rescue image) and the software in them remain
-under their own licenses; this license covers UMP's code, scripts,
-documentation and the recipes the images are built with.
+Debian base images, the Debian-based rescue image, the FreeBSD rescue
+image), FreeBSD's distribution sets and packages, which it publishes
+as they are, and the software in all of them remain under their own
+licenses; this license covers UMP's code, scripts, documentation and
+the recipes the images are built with.

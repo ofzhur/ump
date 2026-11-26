@@ -1,0 +1,6 @@
+==> the plan
+disks (1): vtbd0 (10 GiB, /dev/vda in the plan, found by size)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: raid5 over vtbd0, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: vdev "raid5" is not stripe, mirror, raidz, raidz2 or raidz3
+(exit status 1)

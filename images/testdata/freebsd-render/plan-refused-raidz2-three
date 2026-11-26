@@ -1,0 +1,8 @@
+==> the plan
+disks (3): ada0 (3726 GiB, ZC1A0001, /dev/sda in the plan, found by serial number), ada1 (3726 GiB, ZC1A0002, /dev/sdb in the plan, found by serial number), ada2 (3726 GiB, ZC1A0003, /dev/sdc in the plan, found by serial number)
+  ada0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  ada1: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  ada2: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: raidz2 over ada0 ada1 ada2, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: raidz2 needs 4 disks, and the plan gives it 3
+(exit status 1)

@@ -1,0 +1,4 @@
+{"name": "bios-only", "parts": [
+  {"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
+  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/"}
+]}

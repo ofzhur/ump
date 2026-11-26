@@ -89,6 +89,19 @@ The UMP rescue system runs from RAM, so any reset leaves it. Hetzner
 clears its rescue flag once its rescue system booted; OVHcloud dedicated
 servers keep rescue as their boot option until `unrescue`.
 
+FreeBSD (`--profile freebsd-15.1`, `freebsd-14.5`; ump versions after
+v0.9.0) is installed in two steps, the second from the UMP FreeBSD
+rescue system, which the first writes to the wiped disks. `--dry-run`
+is the first step's plan and leaves the server in the UMP rescue
+system, as above. `--no-reboot`, and an installer that refused or
+failed in the second step, leave it in the FreeBSD rescue system (`ump
+ssh NAME --staging`, a FreeBSD shell): after `--no-reboot` a reboot
+starts FreeBSD, after a failure a reboot may find no system. From
+FreeBSD, running or rescue, no kexec leads into the UMP rescue system:
+`rescue` and every reinstall go through the provider's rescue system,
+and end with exit code 5 with `--via direct` or where the provider has
+none. Not with `--keep-data` or `--unattended` (exit code 2).
+
 ## JSON for scripts
 
 ```sh
@@ -114,5 +127,5 @@ Machine fields: `provider`, `account`, `id`, `name`, `kind`, `ipv4`,
 | 2 | usage or validation error |
 | 3 | aborted: the question was answered no or left, or there was no terminal and no `--yes` |
 | 4 | provider API error, or an account that could not be listed |
-| 5 | the server did not answer in time (rescue system, reboot, new system) |
+| 5 | the server did not answer in time (rescue system, the FreeBSD rescue system of an installation of FreeBSD, reboot, new system), or runs FreeBSD and the provider's rescue system is no way |
 | 6 | provisioning failed: Ansible did not complete; the hosts that failed or were unreachable are named (after a reinstall, the server is installed and recorded) |

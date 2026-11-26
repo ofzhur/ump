@@ -1,0 +1,3 @@
+install.sh: layout tank, part 3 (zfs): name Tank is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)
+install.sh: nothing was written to the disks
+(exit status 2)

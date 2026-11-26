@@ -1,0 +1,21 @@
+/dev/nvme0n1p1
+UMP FreeBSD rescue system 2026.11.26, FreeBSD 15.1-RELEASE amd64, booted 2026-11-26T16:02:11Z
+
+== interfaces
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+	inet 127.0.0.1 netmask 0xff000000
+
+== routes
+Routing tables
+
+== network and storage devices
+none0@pci0:1:0:0:	class=0x020000 rev=0x00 hdr=0x00 vendor=0x1d6a device=0x94c0 subvendor=0x1043 subdevice=0x8811
+    vendor     = 'Aquantia Corp.'
+nvme0@pci0:2:0:0:	class=0x010802 rev=0x00 hdr=0x00 vendor=0x144d device=0xa808 subvendor=0x144d subdevice=0xa801
+    vendor     = 'Samsung Electronics Co Ltd'
+
+== disks
+nda1 nda0
+
+== kernel messages
+pci1: <network, ethernet> at device 0.0 (no driver attached)

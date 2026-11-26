@@ -13,7 +13,9 @@ its stdin; it can be run by hand just the same, with a specification
 file or with the flags alone (which give the `lvm-linear` layout with
 root and the keys of a file). With `--keep-data` it erases no disk: it
 replaces the old system and leaves its data, see [Keeping the
-data](#keeping-the-data).
+data](#keeping-the-data). FreeBSD it does not install itself: it plans
+it, and puts the rescue system on the disks that does, see
+[FreeBSD](#freebsd).
 
 ## What it does
 
@@ -54,7 +56,9 @@ data](#keeping-the-data).
    installer writes the profile, what it found on the machine and the
    firewall ruleset next to UMP's NixOS module ([`nixos/ump.nix`](nixos/ump.nix)),
    with the userdata as NixOS modules, and runs `nixos-install` from the
-   manifest's channel instead (see [NixOS](../docs/oses.md#how-the-installation-runs)).
+   manifest's channel instead (see [NixOS](../docs/oses.md#how-the-installation-runs));
+   for `freebsd` the installer builds no layout and unpacks nothing: the
+   steps from 5 on are another system's ([FreeBSD](#freebsd)).
 7. **Configures the machine:** hostname, `/etc/fstab` by UUID (swap
    included), a netplan file with every wired interface matched by MAC
    and, unless the profile says `network: {rename: false}`, renamed
@@ -159,6 +163,9 @@ Exit status 0 means the machine is ready to reboot; 2 is a usage or
 environment problem (not the rescue system, a missing tool), 1 a failed
 step, with the reason on stderr. A failed installation leaves the
 machine in the rescue system, with whatever was mounted unmounted again.
+With `--keep-data` and for FreeBSD the statuses say more: whether
+anything was written ([Keeping the data](#keeping-the-data),
+[FreeBSD](#freebsd)).
 
 ## Keeping the data
 
@@ -412,6 +419,143 @@ LUKS volumes during the installation (a kept `/home` inside one does
 not get the profile's users: their keys are outside it), replaying the
 log of a file system that was not unmounted cleanly.
 
+## FreeBSD
+
+FreeBSD is installed with FreeBSD's own tools, in a rescue system of
+its own: the UMP FreeBSD rescue system, which runs from memory, and its
+installer (`install/freebsd/install.sh` on the storage). Nothing jumps
+from Linux into a FreeBSD kernel, so that system is started by the
+firmware, from a disk, and `install.sh` is what puts it there. For a
+specification whose layout has a `zfs` part (a [ZFS
+layout](../docs/disk-layouts.md#zfs-freebsds-layouts): FreeBSD's root is
+a pool) it runs the steps 1 to 4 above as for every system, and then
+stages the installation instead of making it:
+
+1. **Plans** the layout against the disks, in the Linux rescue system's
+   names, as for every system: the partitions per disk, the pool with
+   its name (the zfs part's `name`, `zroot` without one), the way its
+   disks are joined (the part's `raid`: none or 0 a stripe, 1 a mirror,
+   5 raidz, 6 raidz2) and the disks under it, the disks that get the
+   boot image. Refused here, before anything is fetched: a layout that
+   breaks the rules of a ZFS layout (a second pool, a pool that is not
+   the root or has a name ZFS does not take, a raid level a pool has
+   not, an md or lvm part or a file system beside it), a pool with too
+   few disks (a mirror needs 2, raidz 3, raidz2 4), a UEFI machine
+   without an `efi` part or a BIOS machine without a `bios` part, a
+   first disk with 4096-byte logical sectors (the boot image's
+   partition table is laid out for 512), a rescue system without keys
+   for root, which nobody could log in to afterwards, and `--record`:
+   the record is made where the installation ends, by the installer
+   for FreeBSD. And what that
+   installer would refuse, when the disks are wiped already: two parts
+   of a kind on a disk, an `efi` part under 33 MiB, parts that do not
+   fit their disk, and a disk left alone (`--disks`) that holds a
+   member of a pool with the new pool's name (FreeBSD takes its root
+   pool by name, and started the old one) or a partition with a GPT
+   label the installation makes (`boot0`, `efi0`, `swap0`, `zfs0`,
+   ...). In the plan a `bios` part is 512K whatever the layout
+   says (FreeBSD's `freebsd-boot` partition), a share of a disk (`20%`)
+   is worked out, and the kernel command line gives way to the loader
+   tunables the profile's kernel section means on FreeBSD. `--dry-run`
+   stops here.
+2. **Shows the boot log of an earlier attempt:** a FreeBSD rescue
+   system that was started leaves `ump/boot.log` on its boot partition
+   (interfaces, routes, the network and storage devices with their
+   drivers, the kernel's messages), whether it reached the network or
+   not. Found on a disk, it is printed under `==> a FreeBSD rescue
+   system was here and left its boot log (DEVICE):`, also by a dry run
+   and for whatever system is installed next, so the second attempt
+   says why the first did not answer; a boot partition without a log
+   says that too (the firmware did not start the disk, or the kernel
+   did not come as far as its rc scripts). The partition is mounted
+   read-only for it.
+3. **Fetches the manifests:** the system's (`family` `freebsd`, with the
+   checksums of `base.txz`, `kernel.txz` and `packages.tar`, and
+   `rescue`, the name of the rescue image it is installed from) and
+   that image's, `rescue/NAME/ARCH/manifest.json` of the same storage
+   (`system` `freebsd`, `boot-config` among its `features`, the
+   checksum of `disk.img.zst`, `memory_mb`, `disk_mb`). Refused here: a
+   layout without a zfs part for FreeBSD, a ZFS layout for another
+   system, a storage without that rescue image, a machine with less
+   memory than `memory_mb` (the rescue system and the installation run
+   from memory), a pool that would not hold twice the system.
+4. **Releases and wipes the disks**, as for every system: from here on
+   the old system is gone.
+5. **Writes the boot image** `disk.img.zst` to the start of every disk
+   of the plan that can carry it (512-byte logical sectors and at least
+   4 GiB, and the first disk; not a disk the plan puts no partition
+   on), straight from the download, its SHA-256 compared with the
+   manifest's; moves the image's backup partition table to the end of
+   the disk and gives disk and partitions GUIDs of their own (`sgdisk
+   -e -G`). Whichever of those disks the firmware tries, it finds the
+   FreeBSD rescue system.
+6. **Writes the boot config** into the directory `ump` of the image's
+   FAT partition (GPT label `umpboot`) on each of them:
+
+   | File | What |
+   |---|---|
+   | `cmdline` | one line of the words [the rescue images take at boot](../images/rescue/README.md#configuration-at-boot): `ump.hostname=` (the rescue system's own), `ump.mac=`, `ump.ip=ADDRESS/PREFIX,GATEWAY` and `ump.ip6=` (the uplink as this rescue system has it: the FreeBSD one answers where this one did, whatever the specification gives the new system), `ump.dns=` (the resolvers it was started with; those of a lease by their addresses), `ump.boot-mac=` (a network boot's), `ump.time=` (the clock, in seconds since 1970) |
+   | `authorized_keys` | root's keys here, without comments: what opens this rescue system opens that one |
+   | `plan.json` | the plan, below |
+
+   No secret is among them: the specification goes to the installer
+   for FreeBSD over SSH, as it came here.
+7. Ends with `==> staged: the UMP FreeBSD rescue system is on the
+   disks, with its boot config; a reboot starts it, and the installation
+   goes on there`, where an installation ends with `==> installed:`.
+   The caller reboots the machine, waits for the FreeBSD rescue system
+   and runs its installer there with the same specification.
+
+Exit status for FreeBSD: 0 staged; 2 nothing was written (every refusal
+and failure before the wipe; the line `install.sh: nothing was written
+to the disks` says so); 1 a failure after it (a download that broke, a
+checksum that does not match): the disks are wiped, and the same
+command again is the way on.
+
+The plan travels because the two systems name the disks differently
+(`/dev/nvme0n1` here is `nda0` there). `plan.json`:
+
+```json
+{
+  "version": 1,
+  "firmware": "uefi",
+  "boot_disk": "/dev/nvme0n1",
+  "disks": [
+    {"name": "/dev/nvme0n1", "size": 512110190592, "serial": "S4EWNX0N123456", "wwn": "eui.0025388b01234567",
+     "parts": [{"index": 1, "kind": "bios", "size": "512K"}, {"index": 2, "kind": "efi", "size": "512M"},
+               {"index": 3, "kind": "swap", "size": "2G"}, {"index": 4, "kind": "zfs", "size": "rest"}]},
+    {"name": "/dev/nvme1n1", "size": 512110190592, "serial": "S4EWNX0N123457", "wwn": "eui.0025388b01234568", "parts": ["..."]}
+  ],
+  "left": [{"name": "/dev/sda", "size": 4000787030016, "serial": "ZC1A2B3C"}],
+  "pool": {"name": "zroot", "vdev": "mirror", "mountpoint": "/"}
+}
+```
+
+| Key | What |
+|---|---|
+| `version` | 1 |
+| `firmware` | `uefi` or `bios`, as this rescue system was started |
+| `boot_disk` | the disk `first` means |
+| `disks` | the disks of the installation, all of them wiped here, in the installer's order (NVMe first, then by name): `name` (the Linux path), `size` in bytes (`blockdev --getsize64`), `serial` and `wwn` (as `lsblk` tells them, without blanks around; empty where the disk tells none), and `parts` in the order they are made, by number, the one that takes the rest last: `index` (the partition number), `kind` (`bios`, `efi`, `swap`, `zfs`), `size` (a number with `K`, `M`, `G` or `T`, binary units, or `rest`). A disk no part of the layout matches has no parts, and stays empty |
+| `left` | every other disk of the machine, those `--disks` leaves alone: `name`, `size`, `serial`. The installer for FreeBSD must not take one of them for a disk of the plan, and refuses where it cannot tell them apart |
+| `pool` | `name`, `vdev` (`stripe`, `mirror`, `raidz` or `raidz2`, from the zfs part's `raid`; the installer for FreeBSD takes `raidz3` too, which no layout asks for in this version), `mountpoint` (`/`) |
+
+[`images/test-freebsd-plan.sh`](../images/test-freebsd-plan.sh) (`make
+freebsd-plan-test`, part of `make check`) plans the machines of
+[`images/testdata/freebsd`](../images/testdata/freebsd) (`lsblk`'s
+output, the rescue system's own start, the storage's manifests) without
+a machine and compares the plan, `cmdline`, `authorized_keys` and
+`plan.json`, or the refusal with its status; then what the staging
+runs, command by command, and that a checksum which does not match
+stops it. [`images/test-install.sh`](../images/test-install.sh)
+`freebsd-15.1` runs the whole chain in QEMU: the dry run, around which
+every disk is read whole and must not differ by a byte, the staging,
+the FreeBSD rescue system started by the firmware with its settings
+from the boot config, its installer, and the new system; `SECOND=1` a
+second attempt after a rescue system that nobody reached, whose boot
+log the next run must show, `SPARE=10` a disk the specification leaves
+out, which must be as it was at the end.
+
 ## The uplink of the specification
 
 A machine whose provider knows its network (a PXE machine, from
@@ -452,3 +596,12 @@ IPv6 add the address and the default route to `/etc/netplan/10-ump.yaml`
 (`netplan apply` or `netplan try`), and reboot. `ump server reinstall
 --mitigations --ipv6` installs with both on, as does `kernel: {mitigations:
 true, ipv6: true}` in the [profile](../docs/profiles.md).
+
+## FreeBSD
+
+FreeBSD has an installer of its own, [`freebsd/install.sh`](freebsd/install.sh):
+it runs in the UMP FreeBSD rescue system with the same specification
+and installs the release's distribution sets with the root on ZFS, with
+FreeBSD's tools. [freebsd/README.md](freebsd/README.md) describes it:
+the steps, the plan it takes from this installer, what of the
+specification applies there, the exit statuses.

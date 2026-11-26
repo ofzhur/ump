@@ -17,6 +17,7 @@ import (
 	"github.com/ofzhur/ump/internal/backend"
 	"github.com/ofzhur/ump/internal/config"
 	"github.com/ofzhur/ump/internal/plan"
+	"github.com/ofzhur/ump/internal/profile"
 	"github.com/ofzhur/ump/internal/provider"
 )
 
@@ -286,12 +287,17 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 	}()
 
 	// one table, one question
-	var noRescue []string
+	// noBack are those of them that get FreeBSD, which no reinstall by
+	// ump leaves again there
+	var noRescue, noBack []string
 	for _, p := range plans {
 		a.warnNoRescue(p.m, p.prov)
 		a.warnPreflight(ctx, p.m, p.prov)
 		if noRescueWarning(p.m, p.prov) != "" {
 			noRescue = append(noRescue, p.ref)
+			if profile.Family(p.spec.OS) == "freebsd" {
+				noBack = append(noBack, p.ref)
+			}
 		}
 	}
 	for _, w := range warnings {
@@ -334,6 +340,13 @@ func (a *app) multiInstall(cmd *cobra.Command, refs []string, o multiOptions) er
 		question += " " + noRescue[0] + " has no rescue system to fall back on: a failed installation is yours to recover."
 	default:
 		question += " " + strings.Join(noRescue, ", ") + " have no rescue system to fall back on: a failed installation is yours to recover."
+	}
+	switch len(noBack) {
+	case 0:
+	case 1:
+		question += " FreeBSD cannot be left again from " + noBack[0] + ": the next reinstall of this server is the provider's."
+	default:
+		question += " FreeBSD cannot be left again from " + strings.Join(noBack, ", ") + ": the next reinstall of these servers is the provider's."
 	}
 	switch {
 	case noWait:

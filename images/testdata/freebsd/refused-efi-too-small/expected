@@ -1,0 +1,3 @@
+install.sh: partition 2 of /dev/nvme0n1: an efi part of 16M is too small for FreeBSD's FAT32 (33M at least)
+install.sh: nothing was written to the disks
+(exit status 2)

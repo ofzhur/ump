@@ -1,0 +1,6 @@
+==> the plan
+disks (1): vtbd0 (3 GiB, /dev/vda in the plan, found by size)
+  vtbd0: 1: 512K bios, 2: 512M efi, 3: 2G swap, 4: rest zfs (zroot)
+  zroot: stripe over vtbd0, at /; the system in zroot/ROOT/default, a boot environment
+install.sh: the pool would hold 509 MB, and the system needs 1494 MB (twice its 747 MB)
+(exit status 1)

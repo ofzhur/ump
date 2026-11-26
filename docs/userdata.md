@@ -13,12 +13,13 @@ NAME        TYPE   LINES   STATE   DESCRIPTION
 archlinux   bash   8       ok      what every Arch Linux gets; nothing yet
 cachyos     bash   8       ok      what every CachyOS gets; nothing yet
 debian      bash   8       ok      what every Debian gets; nothing yet
+freebsd     bash   9       ok      what every FreeBSD gets; nothing yet
 nixos       nix    12      ok      what every NixOS gets; nothing yet
 ubuntu      bash   7       ok      what every Ubuntu gets; nothing yet
 ```
 
-An entry is a bash script (type `bash`) for Ubuntu, Debian and Arch
-Linux, or a NixOS module
+An entry is a bash script (type `bash`) for Ubuntu, Debian, Arch
+Linux and FreeBSD, or a NixOS module
 (type `nix`) for [NixOS](oses.md#nixos), where it is merged with UMP's own
 module instead of run. A profile takes the type its system takes, and
 ump refuses a mix before it touches the machine. Other systems that take
@@ -86,7 +87,7 @@ script: |                     # the script itself
 |---|---|
 | `name` | Lower-case letters, digits, `.`, `_` and `-`, starting with a letter or digit. In `userdata.yaml` the entry's key is the name. |
 | `description` | One line, shown by `ump config userdata list`. |
-| `type` | `bash`: a script run by bash, for Ubuntu, Debian, Arch Linux and CachyOS (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](oses.md#userdata-on-nixos)). |
+| `type` | `bash`: a script run by bash, for Ubuntu, Debian, Arch Linux, CachyOS and FreeBSD (the default). `nix`: a NixOS module, for NixOS, merged with UMP's own (see [NixOS](oses.md#userdata-on-nixos)). |
 | `script` | The script or the module, not empty. A shebang line is not needed, bash runs it either way. |
 
 ## How it runs
@@ -101,6 +102,12 @@ started (`policy-rc.d` says so during the run, so `apt-get install`
 does not start what it installs; `systemctl enable` works). The
 package lists are those of the image; run `apt-get update` first when
 the script needs the archive's latest.
+
+On [FreeBSD](oses.md#freebsd) the installer for FreeBSD runs the
+entries the same way, from the UMP FreeBSD rescue system, with the
+package's bash (`/usr/local/bin/bash`): `pkg install -y nginx` installs
+from `pkg.FreeBSD.org` and starts nothing, `sysrc nginx_enable=YES` and
+`service nginx enable` take effect at the first boot.
 
 The environment names the context: `UMP_USERDATA` (the entry's name),
 `UMP_HOSTNAME`, `UMP_OS`, `UMP_PROFILE` and `UMP_ADMIN` (the

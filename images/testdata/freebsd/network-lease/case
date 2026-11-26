@@ -1,0 +1,3 @@
+efi=0; memory=1967
+mac=52:54:00:12:34:56; ip4=10.0.2.15/24,10.0.2.2
+words="console=ttyS0 ump.hostname=rescue ump.authorized_keys=c3NoLWVkMjU1MTkK"; hostname=rescue; resolvers="1.1.1.1,8.8.8.8"

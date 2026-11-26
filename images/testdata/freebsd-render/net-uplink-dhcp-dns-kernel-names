@@ -1,0 +1,32 @@
+==> /etc/rc.conf
+# /etc/rc.conf, written by UMP at installation (profile freebsd-15.1); sysrc
+# changes it, /etc/defaults/rc.conf has what is not set here.
+hostname="web-01.example.net"
+zfs_enable="YES"
+sshd_enable="YES"
+ntpd_enable="YES"
+ntpd_sync_on_start="YES"
+sendmail_enable="NONE"
+syslogd_flags="-ss"
+# the firewall: /etc/pf.conf
+pf_enable="YES"
+pflog_enable="YES"
+ifconfig_igb0="up"
+ifconfig_igb1="DHCP"
+ifconfig_igb1_ipv6="inet6 accept_rtadv"
+rtsold_enable="YES"
+==> /etc/resolv.conf
+# written by UMP at installation: the resolvers of the specification (network.uplink.dns)
+nameserver 192.0.2.53
+nameserver 2001:db8::53
+==> /etc/resolvconf.conf
+# written by UMP at installation: /etc/resolv.conf is as the installation
+# wrote it, and neither a DHCP lease nor a router advertisement replaces
+# it. Remove this file to take the lease's resolvers.
+resolvconf=NO
+==> /etc/ump/install (the network)
+network=dhcp
+network6=auto
+dns=192.0.2.53,2001:db8::53
+==> the plan
+igb1 (0c:c4:7a:aa:bb:11) IPv4 dhcp (client ID: MAC), IPv6 auto (the specification's uplink); IPv6 on; DNS 192.0.2.53 2001:db8::53, not the lease's

@@ -401,6 +401,9 @@ type testEnv struct {
 	installed bool
 	booted    bool
 	bootFails bool
+	// fb plays FreeBSD: the installation in two steps and the machines
+	// that run FreeBSD (freebsd_test.go)
+	fb fakeFreeBSD
 
 	// repo is the infrastructure repository ump provisions from: a
 	// directory with ansible.cfg, inventory/ and playbooks/00-base.yml.
@@ -467,6 +470,7 @@ func (h *hookReader) Read(p []byte) (int, error) {
 type fakeMachine struct {
 	kexeced, installed, booted bool
 	versionPolls               int
+	fb                         freebsdMachine
 }
 
 // isDown says that the machine was shut down over SSH and not reset
@@ -681,10 +685,10 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 					e.machines[addr] = m
 				}
 				exit := e.installExit
-				e.kexeced, e.installed, e.booted, e.versionPolls = m.kexeced, m.installed, m.booted, m.versionPolls
+				e.kexeced, e.installed, e.booted, e.versionPolls, e.fb.freebsdMachine = m.kexeced, m.installed, m.booted, m.versionPolls, m.fb
 				e.installExit = e.installExitAt[addr]
 				defer func() {
-					m.kexeced, m.installed, m.booted, m.versionPolls = e.kexeced, e.installed, e.booted, e.versionPolls
+					m.kexeced, m.installed, m.booted, m.versionPolls, m.fb = e.kexeced, e.installed, e.booted, e.versionPolls, e.fb.freebsdMachine
 					e.installExit = exit
 				}()
 			}
@@ -696,6 +700,7 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	}
 	e.kexeced, e.versionPolls = false, 0
 	e.installed, e.booted, e.reboots, e.haltedAt = false, false, 0, 0
+	e.fb.freebsdMachine = freebsdMachine{}
 	if e.machines != nil {
 		e.machines = map[string]*fakeMachine{}
 	}
@@ -878,6 +883,9 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 	}
 	inProviderRescue := fakePower.rescue["fake/1"]
 	umpKeyOnly := strings.Contains(strings.Join(argv, " "), "IdentitiesOnly=yes")
+	if stdout, stderr, code, ok := e.remoteFreeBSD(argv, cmd, inProviderRescue); ok {
+		return stdout, stderr, code
+	}
 	switch {
 	case strings.HasPrefix(cmd, "# ump key roll\n"):
 		e.keyAdds = append(e.keyAdds, "roll")
@@ -3017,7 +3025,7 @@ provision: {type: ansible-pull, repo: https://git.example.net/infra.git}
 	// local copy: the first run downloads them into the profiles directory
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/debian-13.yaml", "/profiles/debian-12.yaml", "/profiles/nixos-25.11.yaml", "/profiles/archlinux.yaml", "/profiles/cachyos.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/networks.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
+		case "/profiles/ubuntu-26.04.yaml", "/profiles/ubuntu-24.04.yaml", "/profiles/ubuntu-22.04.yaml", "/profiles/debian-13.yaml", "/profiles/debian-12.yaml", "/profiles/nixos-25.11.yaml", "/profiles/archlinux.yaml", "/profiles/cachyos.yaml", "/profiles/freebsd-15.1.yaml", "/profiles/freebsd-14.5.yaml", "/profiles/layouts.yaml", "/profiles/firewalls.yaml", "/profiles/networks.yaml", "/profiles/users.yaml", "/profiles/userdata.yaml":
 			data, _ := os.ReadFile(filepath.Join("..", "..", "profiles", filepath.Base(r.URL.Path)))
 			w.Write(data)
 		default:
@@ -3234,7 +3242,7 @@ func TestConfigDiskLayout(t *testing.T) {
 		return nil
 	}
 	out, _, code = e.run("", true, "config", "dl", "edit")
-	if code != 0 || edited != 1 || !strings.Contains(out, "5 layouts, all valid: lvm-example, lvm-linear, lvm-raid1, lvm-striped, nvme-raid1.") {
+	if code != 0 || edited != 1 || !strings.Contains(out, "8 layouts, all valid: lvm-example, lvm-linear, lvm-raid1, lvm-striped, nvme-raid1, zfs, zfs-mirror, zfs-raidz.") {
 		t.Errorf("edit: code %d, edited %d\n%s", code, edited, out)
 	}
 	e.editorHook = func(path string) error {
@@ -3650,7 +3658,7 @@ func TestConfigOSUpdate(t *testing.T) {
 	if _, _, code := e.run("", false, "config", "os", "list"); code != 0 {
 		t.Fatal("first list failed")
 	}
-	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\ndebian-13.yaml: up to date\ndebian-12.yaml: up to date\nnixos-25.11.yaml: up to date\narchlinux.yaml: up to date\ncachyos.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nnetworks.yaml: up to date\nusers.yaml: updated\n") {
+	if out, _, code := e.run("", false, "config", "os", "update"); code != 0 || !strings.Contains(out, "ubuntu-26.04.yaml: up to date\nubuntu-24.04.yaml: up to date\nubuntu-22.04.yaml: up to date\ndebian-13.yaml: up to date\ndebian-12.yaml: up to date\nnixos-25.11.yaml: up to date\narchlinux.yaml: up to date\ncachyos.yaml: up to date\nfreebsd-15.1.yaml: up to date\nfreebsd-14.5.yaml: up to date\nlayouts.yaml: updated\nfirewalls.yaml: updated\nnetworks.yaml: up to date\nusers.yaml: updated\n") {
 		t.Errorf("update when current: code %d\n%s", code, out)
 	}
 
@@ -3769,7 +3777,7 @@ func TestProfileWizard(t *testing.T) {
 	}
 	for _, want := range []string{"Operating system image (from " + srv.URL + "/os/)", "1) ubuntu-22.04  (kernel 7.0.0-14, built 2026.10.13)", "Choice [3]:",
 		"Disk layout (ump config disk-layout)", "1) lvm-example", "Firewall (ump config firewall)", "2) open  (no firewall)", "Users come from users.yaml (ump config user): ump.",
-		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): archlinux, cachyos, debian, nixos, ubuntu.", "Userdata (comma-separated, in order; none for nothing; bash for ubuntu-24.04) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Description",
+		"Users (comma-separated; a new name is defined next) [ump]:", "ops is not in users.yaml yet; defining it now.", "ops: sudo without a password (an administrator)? [Y/n]:", "Shell of ops", "Keys of ops", "Description of ops", "Added ops to " + dir + "/users.yaml.", "mitigations on?", "IPv6 on?", "Time zone [UTC]:", "Userdata comes from userdata.yaml (ump config userdata): archlinux, cachyos, debian, freebsd, nixos, ubuntu.", "Userdata (comma-separated, in order; none for nothing; bash for ubuntu-24.04) [ubuntu]:", "nope is not in userdata.yaml; ump config userdata create nope makes it.", "Uniform interface names", "Description",
 		"Saved " + dir + "/web.yaml. Use it with ump server reinstall NAME --profile web", "Open it in your editor now? [y/N]:"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("wizard output lacks %q:\n%s", want, errOut)
@@ -4041,7 +4049,7 @@ func TestReinstallUserdata(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{[]string{"--userdata", "nope"}, 2, "--userdata nope: not in userdata.yaml (known: archlinux, cachyos, debian, nixos, ubuntu; ump config userdata create nope makes it)"},
+		{[]string{"--userdata", "nope"}, 2, "--userdata nope: not in userdata.yaml (known: archlinux, cachyos, debian, freebsd, nixos, ubuntu; ump config userdata create nope makes it)"},
 		{[]string{"--userdata", "ubuntu,Bad"}, 2, `--userdata "ubuntu,Bad": "Bad" is not a userdata name`},
 		{[]string{"--userdata", "nixos"}, 1, "userdata nixos is nix, and ubuntu-26.04 takes bash userdata"},
 	} {

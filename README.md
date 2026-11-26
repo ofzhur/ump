@@ -13,7 +13,7 @@ images and its own way of doing networking. UMP hides all of that behind
 one CLI. `ump server list` shows the servers of every configured account;
 `ump server reinstall NAME` boots a server into UMP's own rescue system,
 erases its disks and installs an operating system (Ubuntu, Debian,
-NixOS, Arch Linux or CachyOS) the way a profile says, or with
+NixOS, Arch Linux, CachyOS or FreeBSD) the way a profile says, or with
 `--keep-data` replaces the old system alone and keeps its data volumes
 where they were; `ump ssh NAME` logs in. The result is a homogeneous fleet: the same
 base system, disk layout, users and keys, firewall and interface names on
@@ -90,7 +90,13 @@ profile as NixOS modules; and, on amd64, Arch Linux and CachyOS
 (experimental), rolling, installed with `pacstrap` from their mirrors.
 Each gets the
 same disks, users and keys, interface names, firewall and message of
-the day. See [operating systems](docs/oses.md).
+the day. FreeBSD 15.1 and 14.5 are new: the release's own distribution
+sets with the root on ZFS, the same users, keys, interface names and
+firewall rules (as pf), installed through a second rescue system that
+is FreeBSD itself; shown in QEMU so far, on no real server yet, and
+without some of what the others have
+([FreeBSD](docs/oses.md#freebsd)). See [operating
+systems](docs/oses.md).
 
 **Provisioning** follows the installation: run from the root of your
 infrastructure repository, `ump server reinstall` puts the new server
@@ -123,7 +129,7 @@ file):
 | [Firewalls](docs/firewalls.md) | `ump config firewall` | the input policy and the allowed ports, on the host and for the ports containers publish |
 | [Private networks](docs/networks.md) | `ump config network` | an IPv4 network in which every server ump installs gets an address of its own, kept across reinstalls, for the roles that connect the servers |
 | [Users](docs/users.md) | `ump config user` | the accounts of an installed system: sudo, groups, shell, keys; listed by name in profiles, the first with sudo is the administrator |
-| [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, Debian, Arch Linux and CachyOS, a NixOS module for NixOS; listed by name in profiles |
+| [Userdata](docs/userdata.md) | `ump config userdata` | what a freshly installed system gets on top of the profile: a script for Ubuntu, Debian, Arch Linux, CachyOS and FreeBSD, a NixOS module for NixOS; listed by name in profiles |
 | [Keys](docs/keys.md) | `ump config key` | UMP's own SSH key, and public keys kept under names for the users |
 | [PXE machines](docs/pxe.md) | `ump config pxe` | the machines ump boots over the network: their MACs, sites and jump hosts, how they boot, their installed system's network |
 
@@ -135,8 +141,11 @@ group, the sudo user `ump` with your keys, ICMP and SSH open),
 stable channel, see [NixOS](docs/oses.md#nixos)), `archlinux` (Arch
 Linux from its mirrors, see [Arch Linux](docs/oses.md#arch-linux)) and
 `cachyos` (experimental: Arch with CachyOS's x86-64-v3 packages, see
-[CachyOS](docs/oses.md#cachyos)), the layouts `lvm-linear`,
-`lvm-striped`, `lvm-raid1` and `lvm-example`, the firewalls `default`,
+[CachyOS](docs/oses.md#cachyos)), `freebsd-15.1` and `freebsd-14.5`
+(FreeBSD with its root on ZFS, see [FreeBSD](docs/oses.md#freebsd)),
+the layouts `lvm-linear`,
+`lvm-striped`, `lvm-raid1` and `lvm-example`, and for FreeBSD `zfs`,
+`zfs-mirror` and `zfs-raidz`, the firewalls `default`,
 `web` and `open`, the private network `default` (`10.0.0.0/24`, which
 every published profile names) and the user `ump`. They are templates: make your own
 from them (`ump config os create`, `ump config user create`, ...), and
@@ -198,7 +207,7 @@ own](images/rescue/README.md#your-own-storage).
 | [Platforms](docs/platforms.md) | what ump works with: providers, operating systems, configuration management (Ansible) |
 | [ISPs](docs/isps.md) | what each provider type does in detail: IDs, prices, power, reverse DNS, the way into a rescue system, what reinstall needs |
 | [PXE serving](docs/pxe.md) | machines booted over the network on a private network: `pxe.yaml`, sites and jump hosts, unattended installations, `ump pxe serve`, the DHCP server's recipes (dnsmasq, ISC dhcpd, Kea), troubleshooting |
-| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), what every system gets, how each is installed, NixOS configuration and userdata as modules |
+| [Operating systems](docs/oses.md) | what ump installs out of the box: Ubuntu 26.04, 24.04, 22.04, Debian 13, 12, NixOS 25.11, Arch Linux and CachyOS (experimental), FreeBSD 15.1 and 14.5 (new, shown in QEMU), what every system gets, how each is installed, NixOS configuration and userdata as modules, FreeBSD's two rescue systems and what is not there yet |
 | [Benchmarks](docs/benchmarks.md) | the eight systems on one bare-metal server: installation times, tuning, CPU, memory, disk, network and HTTP results |
 | [Base images](images/base/README.md) | the Ubuntu and Debian systems UMP builds, what they hold and their defaults |
 
@@ -277,4 +286,5 @@ running your infrastructure with it, write to the address above.
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Use it,
 change it, ship it, commercially or not; keep the license and the
 notice with copies, and name your changes. The images it installs stay
-under their own licenses (Ubuntu, Debian and the software in them).
+under their own licenses (Ubuntu, Debian, FreeBSD and the software in
+them).

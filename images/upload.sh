@@ -26,15 +26,24 @@
 #   rescue/kexec-into-rescue.sh
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, kexec-tools-<version>.tar.xz, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
+#   rescue/freebsd-<release>/<arch>/manifest.json, disk.img.zst, ...   the FreeBSD rescue image
+#                                          (and packages-source.tar, when a package in it asks for its source)
+#   rescue/freebsd-<release>/v/<version>/<arch>/...                    (kept for rollbacks)
 #   install/install.sh, install/nixos/ump.nix, install/motd.sh, install/bashrc.sh
+#   install/freebsd/install.sh             the installer for FreeBSD
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/networks.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
+#   os/freebsd-<release>/<arch>/manifest.json, base.txz, kernel.txz, packages.tar, ...
+#   os/freebsd-<release>/<arch>/src.txz, packages-source.tar           their source: FreeBSD's own, and that of
+#                                          the packages whose licenses ask for it
 #   os/<os>/v/<version>/<arch>/...         (kept for rollbacks)
 #
 # Large files go up once, under v/, and are copied to the current path on
 # the target side. Per image, manifest.json is uploaded last, so a reader
-# never sees a manifest that points to files which are not there yet.
+# never sees a manifest that points to files which are not there yet. The
+# FreeBSD rescue images go up after the systems for the same reason: their
+# manifests name the source of their FreeBSD, src.txz beside the sets.
 #
 # Usage: upload.sh [rescue|os|index|bin|pkg|scripts|profiles]...  (os: OS_LIST="a b" limits it to those images)
 #  (default: everything that is built;
@@ -175,8 +184,8 @@ list_dirs() { # list_dirs PREFIX: the directory names right below it
 # --- what is published ----------------------------------------------------
 
 # publish_image DIR KIND NAME: the files of a built image directory to
-# <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the rescue
-# image has no name level: rescue/<arch>/)
+# <kind>/<name>/<arch>/ and <kind>/<name>/v/<version>/<arch>/ (the Linux
+# rescue image has no name level: rescue/<arch>/)
 publish_image() {
 	local d="$1" k="$2" name="$3" arch version base files f src
 	arch="$(basename "$d")"
@@ -184,12 +193,21 @@ publish_image() {
 	[ -n "$version" ] || { echo "upload.sh: no version in $d/manifest.json" >&2; exit 2; }
 	base="$k${name:+/$name}"
 	files=()
-	for f in vmlinuz initrd.zst kexec rootfs.tar.zst SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
+	for f in vmlinuz initrd.zst kexec rootfs.tar.zst disk.img.zst base.txz kernel.txz packages.tar src.txz packages-source.tar SHA256SUMS packages.txt; do [ -f "$d/$f" ] && files+=("$f"); done
 	# the static kexec (GPL-2.0) goes out with its source, or not at all
 	if [ -f "$d/kexec" ]; then
 		src="$(cd "$d" && ls kexec-tools-*.tar.xz 2>/dev/null | head -n 1 || true)"
 		[ -n "$src" ] || { echo "upload.sh: $d/kexec without its source (kexec-tools-*.tar.xz); build the image again" >&2; exit 2; }
 		files+=("$src")
+	fi
+	# so do FreeBSD's sets (src.txz, the release's source) and FreeBSD's
+	# packages: the manifest names packages-source.tar when one of them
+	# asks for its source
+	if [ -f "$d/base.txz" ] && [ ! -f "$d/src.txz" ]; then
+		echo "upload.sh: $d/base.txz without the release's source (src.txz); build the image again" >&2; exit 2
+	fi
+	if grep -q '"packages-source.tar"' "$d/manifest.json" && [ ! -f "$d/packages-source.tar" ]; then
+		echo "upload.sh: $d/manifest.json names packages-source.tar, the source of its packages, and it is not there; build the image again" >&2; exit 2
 	fi
 	echo "==> uploading $base $arch, version $version, to $TARGET"
 	for f in "${files[@]}"; do put "$d/$f" "$base/v/$version/$arch/$f"; done
@@ -209,7 +227,37 @@ publish_os_index() {
 	rm -f "$f"
 }
 
-built=0
+# publish_freebsd_rescue: the FreeBSD rescue images, one per release, to
+# rescue/freebsd-<release>/<arch>/. An image goes out when the source of
+# its FreeBSD does: src.txz of the same build, which os publishes beside
+# the sets (os/freebsd-<release>/<arch>/), where the manifest says it is.
+# Every image is looked at before the first goes up.
+publish_freebsd_rescue() {
+	local d name arch i dirs=() names=()
+	for d in "$HERE"/freebsd/out/rescue/*/*/; do
+		[ -f "$d/manifest.json" ] || continue
+		name="$(sed -n 's/.*"system": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)-$(sed -n 's/.*"release": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
+		case "$name" in
+		freebsd-[0-9]*) ;;
+		*) echo "upload.sh: no system and release in $d/manifest.json" >&2; exit 2 ;;
+		esac
+		arch="$(basename "$d")"
+		if ! grep -q "\"path\": \"os/$name/$arch/src.txz\"" "$d/manifest.json" || [ ! -f "$HERE/freebsd/out/os/$name/$arch/src.txz" ]; then
+			echo "upload.sh: ${d%/} without the source of its FreeBSD (its manifest's source, and os/$name/$arch/src.txz of the same build); build the image again" >&2; exit 2
+		fi
+		dirs+=("${d%/}"); names+=("$name")
+	done
+	for i in ${dirs[@]+"${!dirs[@]}"}; do
+		d="${dirs[$i]}"; name="${names[$i]}"; arch="$(basename "$d")"
+		case " $published " in
+		*" os/$name/$arch "*) ;;
+		*) echo "upload.sh: rescue/$name/$arch names os/$name/$arch/src.txz as the source of its FreeBSD, and this run does not publish it: the storage must have it already (upload.sh os)" >&2 ;;
+		esac
+		publish_image "$d" rescue "$name"; built=1
+	done
+}
+
+built=0 freebsd_rescue=0 published=""
 for w in "${what[@]}"; do
 	case "$w" in
 	rescue)
@@ -217,15 +265,18 @@ for w in "${what[@]}"; do
 			[ -f "$d/manifest.json" ] || continue
 			publish_image "${d%/}" rescue ""; built=1
 		done
+		# (the FreeBSD rescue images: after everything else)
+		freebsd_rescue=1
 		;;
 	os)
-		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/ "$HERE"/arch/out/*/*/; do
+		for d in "$HERE"/base/out/*/*/ "$HERE"/nixos/out/*/*/ "$HERE"/arch/out/*/*/ "$HERE"/freebsd/out/os/*/*/; do
 			[ -f "$d/manifest.json" ] || continue
 			name="$(sed -n 's/.*"os": "\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n 1)"
 			[ -n "$name" ] || { echo "upload.sh: no os name in $d/manifest.json" >&2; exit 2; }
 			# OS_LIST="debian-13 debian-12" publishes those only
 			case " ${OS_LIST:-$name} " in *" $name "*) ;; *) continue ;; esac
 			publish_image "${d%/}" os "$name"; built=1
+			published+=" os/$name/$(basename "$d")"
 		done
 		[ "$built" = 1 ] && publish_os_index
 		;;
@@ -282,6 +333,7 @@ for w in "${what[@]}"; do
 		echo "==> uploading the scripts to $TARGET"
 		put "$HERE/rescue/kexec-into-rescue.sh" rescue/kexec-into-rescue.sh
 		put "$HERE/../install/install.sh" install/install.sh
+		put "$HERE/../install/freebsd/install.sh" install/freebsd/install.sh
 		put "$HERE/../install/nixos/ump.nix" install/nixos/ump.nix
 		put "$HERE/../install/motd.sh" install/motd.sh
 		put "$HERE/../install/bashrc.sh" install/bashrc.sh
@@ -296,5 +348,6 @@ for w in "${what[@]}"; do
 	*) echo "upload.sh: unknown item $w (rescue, os, index, bin, pkg, scripts, profiles)" >&2; exit 2 ;;
 	esac
 done
-[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make dist, make packages)" >&2; exit 2; }
+[ "$freebsd_rescue" = 0 ] || publish_freebsd_rescue
+[ "$built" = 1 ] || { echo "upload.sh: nothing to upload; build first (make rescue-image, make os-image, make freebsd-image, make dist, make packages)" >&2; exit 2; }
 echo "==> done: the URL that serves $TARGET is the storage (ump's storage setting)"

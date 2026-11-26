@@ -1,0 +1,3 @@
+install.sh: the boot disk /dev/nvme0n1 has 4096-byte logical sectors, and the boot image of the UMP FreeBSD rescue system is laid out for 512: FreeBSD is not installed on such a disk in this version
+install.sh: nothing was written to the disks
+(exit status 2)

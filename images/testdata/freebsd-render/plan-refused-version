@@ -1,0 +1,2 @@
+install.sh: plan.json cannot be read: its version is 2, and this installer reads version 1
+(exit status 1)

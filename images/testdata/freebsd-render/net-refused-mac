@@ -1,0 +1,2 @@
+install.sh: network.uplink.mac: 0c:c4:7a:aa:bb is not a MAC address
+(exit status 1)

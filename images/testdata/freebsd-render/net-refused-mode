@@ -1,0 +1,2 @@
+install.sh: network.uplink.ipv4: mode auto is not static, dhcp or none
+(exit status 1)

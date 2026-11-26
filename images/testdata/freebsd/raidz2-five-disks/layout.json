@@ -1,0 +1,5 @@
+{"name": "inline", "parts": [
+  {"type": "slice", "target": [".*"], "size": "512K", "filesystem": "bios"},
+  {"type": "slice", "target": [".*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
+  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/", "raid": 6}
+]}

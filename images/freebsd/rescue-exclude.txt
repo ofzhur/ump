@@ -1,0 +1,156 @@
+# What the UMP FreeBSD rescue image leaves out of the release's
+# distribution sets: base.txz, the memory root, and kernel.txz, the
+# modules in it. One pattern of GNU tar per line, anchored at the
+# archive's root (every member begins with ./); a * matches a / too, and
+# a directory takes what is under it. A hard link to an excluded file is
+# listed with it, or build.sh stops: tar cannot make it.
+
+# the compiler, the linker and the debugger, their libraries (over
+# 200 MB) and the tools that are linked to them, under both their names
+./usr/lib/clang
+./usr/lib/libprivateclang*
+./usr/lib/libprivatelldb*
+./usr/lib/libprivatellvm*
+./usr/bin/c++
+./usr/bin/cc
+./usr/bin/clang*
+./usr/bin/cpp
+./usr/bin/ld
+./usr/bin/ld.lld
+./usr/bin/lldb*
+./usr/bin/llvm-*
+./usr/bin/addr2line
+./usr/bin/ar
+./usr/bin/c++filt
+./usr/bin/gcov
+./usr/bin/nm
+./usr/bin/objcopy
+./usr/bin/objdump
+./usr/bin/ranlib
+./usr/bin/readelf
+./usr/bin/size
+./usr/bin/strip
+
+# what only a build needs: static libraries, headers, the makefiles, the
+# 32-bit libraries, debug files
+./usr/lib/*.a
+./usr/lib/debug
+./usr/lib32
+./usr/libdata/lint
+./usr/include
+./usr/share/mk
+
+# tests, with their libraries' tools
+./usr/tests
+./usr/bin/kyua
+./usr/share/atf
+./usr/share/kyua
+
+# documentation, and the data of programs nobody runs here. Of
+# /usr/share/doc the directories with license files stay, as /COPYRIGHT
+# does: legal (firmware), llvm (the C++ library and the compiler's
+# runtime), atf and kyua, a few files. build.sh stops when /COPYRIGHT,
+# legal or llvm's license is not in the memory root
+./usr/share/man
+./usr/share/doc/IPv6
+./usr/share/doc/ntp
+./usr/share/doc/pjdfstest
+./usr/share/examples
+./usr/share/openssl
+./usr/share/dict
+./usr/share/games
+./usr/share/calendar
+./usr/share/misc/magic*
+./usr/share/sendmail
+./usr/share/bsdconfig
+./usr/share/dtrace
+./usr/lib/dtrace
+./var/db/etcupdate
+
+# locales but C.UTF-8, without which tar complains at every run
+./usr/share/i18n
+./usr/share/locale/[!C]*
+
+# the console's fonts and key maps
+./usr/share/vt
+./usr/share/syscons
+
+# the statically linked tools of /rescue: the userland is whole here
+./rescue
+
+# virtual machines and the resolver daemon
+./usr/sbin/bhyve*
+./usr/sbin/unbound*
+./usr/sbin/local-unbound*
+
+# the kernel once more, as a raw image for other boot loaders (arm64, 14.5)
+./boot/kernel/kernel.bin
+
+# modules: wireless LAN with its firmware
+./boot/kernel/ath_*
+./boot/kernel/bcma*
+./boot/kernel/bhnd*
+./boot/kernel/if_ath*
+./boot/kernel/if_bwi*
+./boot/kernel/if_bwn*
+./boot/kernel/if_ipw*
+./boot/kernel/if_iwi*
+./boot/kernel/if_iwl*
+./boot/kernel/if_iwm*
+./boot/kernel/if_iwn*
+./boot/kernel/if_iwx*
+./boot/kernel/if_malo*
+./boot/kernel/if_mt7*
+./boot/kernel/if_mtw*
+./boot/kernel/if_mwl*
+./boot/kernel/if_otus*
+./boot/kernel/if_ral*
+./boot/kernel/if_rsu*
+./boot/kernel/if_rtw*
+./boot/kernel/if_rum*
+./boot/kernel/if_run*
+./boot/kernel/if_uath*
+./boot/kernel/if_upgt*
+./boot/kernel/if_ural*
+./boot/kernel/if_urtw*
+./boot/kernel/if_wpi*
+./boot/kernel/if_zyd*
+./boot/kernel/ipw_*
+./boot/kernel/iwi_*
+./boot/kernel/iwm*fw*
+./boot/kernel/iwn*fw*
+./boot/kernel/linuxkpi_wlan*
+./boot/kernel/mt76*
+./boot/kernel/mw88W8363fw*
+./boot/kernel/otusfw*
+./boot/kernel/rsu-*
+./boot/kernel/rt2*fw*
+./boot/kernel/rtw*
+./boot/kernel/runfw*
+./boot/kernel/siba*
+./boot/kernel/urtwn*
+./boot/kernel/wlan*
+./boot/kernel/wpifw*
+./boot/kernel/wtap*
+
+# modules: sound
+./boot/kernel/snd_*
+./boot/kernel/sound.ko
+
+# modules: Bluetooth
+./boot/kernel/ng_bluetooth*
+./boot/kernel/ng_btsocket*
+./boot/kernel/ng_hci*
+./boot/kernel/ng_l2cap*
+./boot/kernel/ng_ubt*
+./boot/kernel/ubtbcmfw*
+
+# modules: graphics, screen savers and splash screens
+./boot/kernel/*_saver.ko
+./boot/kernel/drm*
+./boot/kernel/linuxkpi_hdmi*
+./boot/kernel/linuxkpi_video*
+./boot/kernel/splash_*
+
+# modules: the QuickAssist accelerators with their firmware (13 MB on amd64)
+./boot/kernel/qat*

@@ -1,0 +1,5 @@
+{"name": "nvme-mirror", "parts": [
+  {"type": "slice", "target": ["nvme.*"], "size": "512K", "filesystem": "bios"},
+  {"type": "slice", "target": ["nvme.*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
+  {"type": "zfs", "target": ["nvme.*"], "size": "rest", "mountpoint": "/", "raid": 1}
+]}
