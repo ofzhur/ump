@@ -1,11 +1,16 @@
 # The UMP skill
 
-> **Design outline.** The skill described here does not exist yet, and
-> neither do the `ump` commands it relies on (`ump plan`, `ump approve`,
-> `ump inventory`, `ump repo`, `ump machine import`, `ump skill`,
-> `ump doctor`). This document records the intent so that the tool grows
-> toward it; the [roadmap](roadmap.md) says where it stands. Everything
-> that exists today is in the [CLI reference](cli.md).
+> **Design outline, partly built.** A first skill for today's commands
+> is in [`skills/ump/`](../skills/ump/SKILL.md): the rules, the tiers,
+> runbooks for installing, provisioning, a server that is down and the
+> inventory, with `--dry-run` output and a human's explicit approval in
+> the conversation standing in for a plan and its approval. The `ump`
+> commands this outline relies on do not exist yet (`ump plan`, `ump
+> approve`, `ump inventory`, `ump repo`, `ump machine import`, `ump
+> skill`, `ump doctor`), and neither do the Terraform parts. This
+> document records the intent so that the tool grows toward it; the
+> [roadmap](roadmap.md) says where it stands. Everything that exists
+> today is in the [CLI reference](cli.md).
 
 UMP is meant to ship in two parts that are designed together:
 
