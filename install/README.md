@@ -452,3 +452,12 @@ IPv6 add the address and the default route to `/etc/netplan/10-ump.yaml`
 (`netplan apply` or `netplan try`), and reboot. `ump server reinstall
 --mitigations --ipv6` installs with both on, as does `kernel: {mitigations:
 true, ipv6: true}` in the [profile](../docs/profiles.md).
+
+## FreeBSD
+
+FreeBSD has an installer of its own, [`freebsd/install.sh`](freebsd/install.sh):
+it runs in the UMP FreeBSD rescue system with the same specification
+and installs the release's distribution sets with the root on ZFS, with
+FreeBSD's tools. [freebsd/README.md](freebsd/README.md) describes it:
+the steps, the plan it takes from this installer, what of the
+specification applies there, the exit statuses.

@@ -27,6 +27,7 @@
 #   rescue/<arch>/manifest.json, vmlinuz, initrd.zst, kexec, kexec-tools-<version>.tar.xz, ...
 #   rescue/v/<version>/<arch>/...          (kept for rollbacks)
 #   install/install.sh, install/nixos/ump.nix, install/motd.sh, install/bashrc.sh
+#   install/freebsd/install.sh             the installer for FreeBSD
 #   profiles/ubuntu-26.04.yaml, ... , profiles/layouts.yaml, profiles/firewalls.yaml, profiles/networks.yaml, profiles/users.yaml, profiles/userdata.yaml
 #   os/index.json                          the image names (for the profile wizard)
 #   os/<os>/<arch>/manifest.json, rootfs.tar.zst, ...
@@ -282,6 +283,7 @@ for w in "${what[@]}"; do
 		echo "==> uploading the scripts to $TARGET"
 		put "$HERE/rescue/kexec-into-rescue.sh" rescue/kexec-into-rescue.sh
 		put "$HERE/../install/install.sh" install/install.sh
+		put "$HERE/../install/freebsd/install.sh" install/freebsd/install.sh
 		put "$HERE/../install/nixos/ump.nix" install/nixos/ump.nix
 		put "$HERE/../install/motd.sh" install/motd.sh
 		put "$HERE/../install/bashrc.sh" install/bashrc.sh
