@@ -1,0 +1,1 @@
+mitigations=true; kernel_extra="kern.ipc.somaxconn=4096 vfs.zfs.arc_max=8G"

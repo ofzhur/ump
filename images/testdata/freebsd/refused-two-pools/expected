@@ -1,0 +1,3 @@
+install.sh: layout two-pools, part 4 (zfs): a zfs part is the root pool and needs mountpoint /
+install.sh: nothing was written to the disks
+(exit status 2)

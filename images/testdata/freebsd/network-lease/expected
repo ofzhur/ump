@@ -1,0 +1,56 @@
+==> disks (1): /dev/vda (40G SSD virtio)
+==>   /dev/vda: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   zroot: stripe over /dev/vda, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/vda and starts from there
+==> loader tunables: vm.pmap.pti=0
+==> fetching the manifest
+==> image freebsd-15.1 version 2026.11.26: FreeBSD 15.1-RELEASE, installed from the UMP FreeBSD rescue system (freebsd-15.1 2026.11.26, 619 MB of memory at least)
+--- ump/cmdline
+ump.hostname=rescue ump.mac=52:54:00:12:34:56 ump.ip=10.0.2.15/24,10.0.2.2 ump.dns=1.1.1.1,8.8.8.8 ump.time=1795708800
+--- ump/authorized_keys
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe1 key-1@test
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe2 key-2@test
+--- ump/plan.json
+{
+  "version": 1,
+  "firmware": "bios",
+  "boot_disk": "/dev/vda",
+  "disks": [
+    {
+      "name": "/dev/vda",
+      "size": 42949672960,
+      "serial": "",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "swap",
+          "size": "2G"
+        },
+        {
+          "index": 4,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    }
+  ],
+  "left": [],
+  "pool": {
+    "name": "zroot",
+    "vdev": "stripe",
+    "mountpoint": "/"
+  }
+}
+--- the boot image goes to
+/dev/vda

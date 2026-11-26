@@ -1,0 +1,81 @@
+==> disks (2): /dev/nvme0n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000), /dev/nvme1n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000)
+==>   /dev/nvme0n1: 127: 512K bios, 128: 260M efi at /boot/efi, 1: 24419M swap, 2: 390709M zfs (zroot)
+==>   /dev/nvme1n1: 127: 512K bios, 128: 260M efi at /boot/efi, 1: 390709M zfs (zroot)
+==>   zroot: stripe over /dev/nvme0n1 /dev/nvme1n1, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/nvme0n1, /dev/nvme1n1 and starts from there
+==> loader tunables: kern.ipc.somaxconn=4096 vfs.zfs.arc_max=8G
+==> fetching the manifest
+==> image freebsd-15.1 version 2026.11.26: FreeBSD 15.1-RELEASE, installed from the UMP FreeBSD rescue system (freebsd-15.1 2026.11.26, 619 MB of memory at least)
+--- ump/cmdline
+ump.hostname=web-01 ump.mac=0c:c4:7a:aa:bb:11 ump.ip=203.0.113.10/26,203.0.113.1 ump.dns=1.1.1.1,8.8.8.8 ump.time=1795708800
+--- ump/authorized_keys
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe1 key-1@test
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe2 key-2@test
+--- ump/plan.json
+{
+  "version": 1,
+  "firmware": "uefi",
+  "boot_disk": "/dev/nvme0n1",
+  "disks": [
+    {
+      "name": "/dev/nvme0n1",
+      "size": 512110190592,
+      "serial": "S4EWNX0N123456",
+      "wwn": "eui.0025388b01234567",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "swap",
+          "size": "24419M"
+        },
+        {
+          "index": 2,
+          "kind": "zfs",
+          "size": "390709M"
+        },
+        {
+          "index": 127,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 128,
+          "kind": "efi",
+          "size": "260M"
+        }
+      ]
+    },
+    {
+      "name": "/dev/nvme1n1",
+      "size": 512110190592,
+      "serial": "S4EWNX0N123457",
+      "wwn": "eui.0025388b01234568",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "zfs",
+          "size": "390709M"
+        },
+        {
+          "index": 127,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 128,
+          "kind": "efi",
+          "size": "260M"
+        }
+      ]
+    }
+  ],
+  "left": [],
+  "pool": {
+    "name": "zroot",
+    "vdev": "stripe",
+    "mountpoint": "/"
+  }
+}
+--- the boot image goes to
+/dev/nvme0n1
+/dev/nvme1n1

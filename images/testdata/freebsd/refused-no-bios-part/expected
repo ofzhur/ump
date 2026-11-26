@@ -1,0 +1,3 @@
+install.sh: this machine boots with BIOS and the layout has no bios part
+install.sh: nothing was written to the disks
+(exit status 2)

@@ -1,0 +1,7 @@
+{"name": "two-swaps", "parts": [
+  {"type": "slice", "target": [".*"], "size": "512K", "filesystem": "bios"},
+  {"type": "slice", "target": [".*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
+  {"type": "slice", "target": ["first"], "size": "2G", "filesystem": "swap"},
+  {"type": "slice", "target": [".*"], "size": "2G", "filesystem": "swap"},
+  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/"}
+]}

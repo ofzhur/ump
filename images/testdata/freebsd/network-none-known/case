@@ -1,0 +1,1 @@
+mac=""; ip4=""; ip6=""; words="console=ttyS0 ump.dns=dhcp"; resolvers=""; hostname=ump-rescue

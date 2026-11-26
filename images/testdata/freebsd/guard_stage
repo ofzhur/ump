@@ -1,0 +1,34 @@
+=== the boot image and the boot config, on every disk of the mirror: status 0
+==> writing the FreeBSD rescue system to /dev/nvme0n1, /dev/nvme1n1
+it ran:
+  curl -fsSL https://ump.example.net/dl/rescue/freebsd-15.1/amd64/disk.img.zst
+  dd of=/dev/nvme0n1 bs=1M conv=fsync status=none
+  sgdisk -e -G /dev/nvme0n1
+  partprobe /dev/nvme0n1
+  mount -t vfat /dev/nvme0n1p1 BOX/conf/mnt
+  umount BOX/conf/mnt
+    on it: ump/authorized_keys (184 bytes)
+    on it: ump/cmdline (125 bytes)
+    on it: ump/plan.json (1193 bytes)
+  curl -fsSL https://ump.example.net/dl/rescue/freebsd-15.1/amd64/disk.img.zst
+  dd of=/dev/nvme1n1 bs=1M conv=fsync status=none
+  sgdisk -e -G /dev/nvme1n1
+  partprobe /dev/nvme1n1
+  mount -t vfat /dev/nvme1n1p1 BOX/conf/mnt
+  umount BOX/conf/mnt
+    on it: ump/authorized_keys (184 bytes)
+    on it: ump/cmdline (125 bytes)
+    on it: ump/plan.json (1193 bytes)
+left behind: 
+=== a download with another checksum than the manifest's: status 1
+==> writing the FreeBSD rescue system to /dev/nvme0n1, /dev/nvme1n1
+install.sh: checksum mismatch for disk.img.zst: manifest 99b4666494b93270957c6705cecdeb0a6396bd5e810e72ca30ca2803ea41cf6c, download 97e9d7a16021e6d07fbe28cce398f5847fc00c574991fbff65d95fd5e032d389; /dev/nvme0n1 holds what was downloaded
+it ran:
+  curl -fsSL https://ump.example.net/dl/rescue/freebsd-15.1/amd64/disk.img.zst
+  dd of=/dev/nvme0n1 bs=1M conv=fsync status=none
+left behind: ./conf ./conf/authorized_keys ./conf/cmdline ./conf/mnt ./conf/plan.json
+=== with --keep-data: status 2
+install.sh: keep-data: no layout is made
+install.sh: keep-data: nothing was written to the disks
+it ran:
+left behind: 

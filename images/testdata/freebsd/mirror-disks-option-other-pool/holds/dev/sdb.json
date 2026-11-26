@@ -1,0 +1,4 @@
+[
+  {"fstype": "", "label": "", "partlabel": ""},
+  {"fstype": "zfs_member", "label": "tank", "partlabel": "zfs8"}
+]

@@ -1,0 +1,1 @@
+layout=zfs-mirror; wanted="/dev/nvme0n1 /dev/nvme1n1"

@@ -1,0 +1,3 @@
+install.sh: /dev/nvme0n1 would get two swap parts: FreeBSD has one of a kind on a disk
+install.sh: nothing was written to the disks
+(exit status 2)

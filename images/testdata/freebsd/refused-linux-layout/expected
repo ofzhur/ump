@@ -1,0 +1,9 @@
+==> disks (2): /dev/nvme0n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000), /dev/nvme1n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000)
+==>   /dev/nvme0n1: 127: 1M bios, 128: 512M efi at /boot/efi, 1: 1G ext4 at /boot, 2: rest lvm (data)
+==>   /dev/nvme1n1: 127: 1M bios, 128: 512M efi at /boot/efi, 1: rest lvm (data)
+==>   data/swap: 8G raid 0 swap
+==>   data/root: rest raid 1 ext4 at /
+==> fetching the manifest
+install.sh: layout lvm-raid1 has no zfs part: freebsd-15.1 is FreeBSD, whose root is a ZFS pool; its layouts are the ZFS ones (zfs, zfs-mirror, zfs-raidz)
+install.sh: nothing was written to the disks
+(exit status 2)

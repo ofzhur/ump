@@ -36,7 +36,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-plan-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
 
 all: build
 
@@ -70,7 +70,10 @@ network-test: ## render the network configuration of install.sh for every case a
 keep-plan-test: ## make the keep-data plan of install.sh for every machine of images/testdata/keep-data and compare; check its guards (needs bash 4 or later and jq)
 	@images/test-keep-plan.sh
 
-check: fmt-check vet test scripts-check network-test keep-plan-test ## gofmt, go vet, the tests, the script syntax checks, the network test and the keep-data plan test
+freebsd-plan-test: ## plan FreeBSD with install.sh for every machine of images/testdata/freebsd and compare: the plan, the boot config and plan.json for its rescue system, the refusals; check the staging (needs bash 4 or later and jq)
+	@images/test-freebsd-plan.sh
+
+check: fmt-check vet test scripts-check network-test keep-plan-test freebsd-plan-test ## gofmt, go vet, the tests, the script syntax checks, the network test, the keep-data plan test and the FreeBSD plan test
 
 FUZZTIME ?= 10s
 

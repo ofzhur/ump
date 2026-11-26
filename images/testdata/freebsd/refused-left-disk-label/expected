@@ -1,0 +1,3 @@
+install.sh: /dev/sdb, which is left alone, has a partition with the GPT label zfs1, and so would the new system: FreeBSD finds one of the two under /dev/gpt/zfs1. Give that partition another label, or put the disk into the installation (--disks)
+install.sh: nothing was written to the disks
+(exit status 2)

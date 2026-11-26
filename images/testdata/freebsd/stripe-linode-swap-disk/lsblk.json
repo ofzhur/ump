@@ -1,0 +1,6 @@
+{
+   "blockdevices": [
+      {"path": "/dev/sda", "type": "disk", "ro": false, "size": 86436216832, "rota": true, "model": "QEMU HARDDISK", "log-sec": 512},
+      {"path": "/dev/sdb", "type": "disk", "ro": false, "size": 536870912, "rota": true, "model": "QEMU HARDDISK", "log-sec": 512}
+   ]
+}
