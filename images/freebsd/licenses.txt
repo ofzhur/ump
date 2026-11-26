@@ -1,0 +1,125 @@
+# The licenses of FreeBSD's packages, by the names FreeBSD's ports give
+# them (LICENSE in a port's Makefile, licenses in a package's manifest
+# and in the catalogue; Mk/bsd.licenses.db.mk of the ports tree defines
+# the common ones), each with what build.sh does about a package under
+# it:
+#
+#   source   the license asks whoever passes the program on for its
+#            source, or to say where the source is: the package goes
+#            out with its source, in packages-source.tar (README.md,
+#            Licenses and sources)
+#   -        it asks for no source; the package carries the license in
+#            /usr/local/share/licenses, and nothing is added
+#
+# A package under several licenses goes out with its source when one of
+# them is of the first kind, whether it is under all of them or under
+# any. build.sh stops at a package with a license that has no line
+# here, and at one that names no license: somebody reads the license
+# then and adds the line. That is why NONE has no line, and why the
+# licenses that restrict passing a package on itself have none
+# (CC-BY-NC-*, CC-BY-ND-*). A GNU license, MPL, CDDL, EPL or EUPL with
+# a "-" is refused.
+
+# the GNU licenses
+AGPLv3		source
+AGPLv3+		source
+GPLv1		source
+GPLv1+		source
+GPLv2		source
+GPLv2+		source
+GPLv3		source
+GPLv3+		source
+GPLv3RLE	source
+GPLv3RLE+	source
+GMGPL		source
+LGPL20		source
+LGPL20+		source
+LGPL21		source
+LGPL21+		source
+LGPL3		source
+LGPL3+		source
+# (documentation: a copy that can be edited)
+GFDL		source
+
+# Mozilla, Sun and Eclipse, and what follows them
+MPL10		source
+MPL11		source
+MPL20		source
+CDDL		source
+EPL		source
+EUPL11		source
+EUPL12		source
+CPAL-1.0	source
+
+# binaries with the source, or with where the standard version is
+ART10		source
+ARTPERL10	source
+ART20		source
+ClArtistic	source
+RUBY		source
+LPPL10		source
+LPPL11		source
+LPPL12		source
+LPPL13		source
+LPPL13a		source
+LPPL13b		source
+LPPL13c		source
+# (a database: its changed form is offered)
+ODbL		source
+
+# BSD, MIT and their kind: the notice stays with the copies
+BSD		-
+BSD0CLAUSE	-
+BSD2CLAUSE	-
+BSD3CLAUSE	-
+BSD4CLAUSE	-
+MIT		-
+ISCL		-
+NCSA		-
+ZLIB		-
+BSL		-
+OpenSSL		-
+PostgreSQL	-
+PSFL		-
+ZPL21		-
+PHP202		-
+PHP30		-
+PHP301		-
+APACHE10	-
+APACHE11	-
+APACHE20	-
+OWL		-
+
+# no conditions
+PD		-
+CC0-1.0		-
+UNLICENSE	-
+WTFPL		-
+WTFPL1		-
+
+# fonts, texts and pictures: attribution, and the same license for what
+# is made of them
+OFL10		-
+OFL11		-
+CC-BY-1.0	-
+CC-BY-2.0	-
+CC-BY-2.5	-
+CC-BY-3.0	-
+CC-BY-4.0	-
+CC-BY-SA-1.0	-
+CC-BY-SA-2.0	-
+CC-BY-SA-2.5	-
+CC-BY-SA-3.0	-
+CC-BY-SA-4.0	-
+
+# Licenses a port defines for itself, each read in the package's
+# /usr/local/share/licenses.
+# security/sudo: the ISC license, with files under BSD licenses and zlib's
+sudo		-
+
+# Packages, by name: "package NAME source REASON" for one that goes out
+# with its source whatever its own licenses ask, "package NAME - REASON"
+# for one that names no license. The reason of the first kind is printed
+# in the README of packages-source.tar.
+package python312 source its module readline is linked with libreadline of the package readline (GPLv3)
+package python3 - a metaport: symbolic links to the programs of python312
