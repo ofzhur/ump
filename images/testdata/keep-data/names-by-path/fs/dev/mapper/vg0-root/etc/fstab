@@ -1,0 +1,8 @@
+/dev/disk/by-uuid/fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+/dev/disk/by-partuuid/fcc53c4b-d426-5c98-ab54-235eb7b7da7c /boot ext4 defaults 0 2
+PARTUUID=8f6c858e-e788-5657-8024-d8b581b12b42 /boot/efi vfat umask=0077 0 1
+PARTLABEL=plain-part /srv/plain ext4 defaults 0 2
+/dev/disk/by-label/plain /srv/again ext4 noauto 0 0
+/dev/disk/by-id/dm-name-vg0-data /data xfs defaults 0 2
+/dev/disk/by-id/virtio-gone-part9 /mnt/gone ext4 defaults 0 2
+/dev/dm-1 /srv/var ext4 defaults 0 2

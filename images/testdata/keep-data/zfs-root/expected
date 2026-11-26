@@ -1,0 +1,6 @@
+refused: no old system is found (a file system with /etc/fstab and /etc/os-release), and /dev/vda2, /dev/vda3 are members of ZFS pools, not imported here: a ZFS root is not supported; --root DEVICE names a root on another file system
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "no old system is found (a file system with /etc/fstab and /etc/os-release), and /dev/vda2, /dev/vda3 are members of ZFS pools, not imported here: a ZFS root is not supported; --root DEVICE names a root on another file system"
+}

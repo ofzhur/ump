@@ -1,0 +1,246 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) (old.example.net) on /dev/mapper/vg0-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/mapper/vg0-root  ext4  /  (10G)
+  /dev/vda2             ext4  /boot  (1G)
+KEEP (as they are, mounted where they were)
+  /dev/vda1             vfat  /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/mapper/vg0-data  xfs   10G
+  /dev/mapper/vg0-swap  swap  1G
+  /dev/mapper/vg0-var   ext4  5G
+  /dev/vda4             ext4  8G  plain
+LOST (on the old root, beyond the system itself)
+  /backup  2M
+  /etc  6M
+  /home/alice  1.1G
+  /home/bob  1M
+  /opt  245M
+  /root  1M
+  /usr/local  69M
+  /var/lib/apt  176M
+  /var/lib/docker  8.5G
+WARNINGS
+  /dev/mapper/cswap (none) of the old fstab is dropped: its encrypted volume cswap is dropped: it is made anew at every boot (swap), and /dev/vda4 holds a file system now (ext4, label plain, 8G), which that would overwrite
+  /dev/mapper/ctmp (/tmp) of the old fstab is dropped: its encrypted volume ctmp is dropped: it is made anew at every boot (tmp), and /dev/mapper/vg0-data holds a file system now (xfs, 10G), which that would overwrite
+  cswap of the old crypttab is dropped: it is made anew at every boot (swap), and /dev/vda4 holds a file system now (ext4, label plain, 8G), which that would overwrite
+  ctmp of the old crypttab is dropped: it is made anew at every boot (tmp), and /dev/mapper/vg0-data holds a file system now (xfs, 10G), which that would overwrite
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-vg0-root  /  ext4  defaults,errors=remount-ro  0 1
+UUID=NEW-vda2  /boot  ext4  defaults  0 2
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "old.example.net",
+    "fstab_sha256": "be5480d4f7e8717345007a0b0d96bdedf859550eafb88736dd7dcb0b8e5e8074"
+  },
+  "root": {
+    "device": "/dev/mapper/vg0-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+    "size_mb": 10240,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "/dev/vda2",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
+      "size_mb": 10240
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "ext4",
+      "mountpoint": "/boot",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
+      "size_mb": 1024
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    }
+  ],
+  "volatile": [],
+  "aside": [],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/mapper/vg0-data",
+      "filesystem": "xfs",
+      "label": "",
+      "size_mb": 10240,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-swap",
+      "filesystem": "swap",
+      "label": "",
+      "size_mb": 1024,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-var",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/vda4",
+      "filesystem": "ext4",
+      "label": "plain",
+      "size_mb": 8192,
+      "note": ""
+    }
+  ],
+  "dropped": [
+    {
+      "spec": "/dev/mapper/cswap",
+      "mountpoint": "none",
+      "reason": "its encrypted volume cswap is dropped: it is made anew at every boot (swap), and /dev/vda4 holds a file system now (ext4, label plain, 8G), which that would overwrite"
+    },
+    {
+      "spec": "/dev/mapper/ctmp",
+      "mountpoint": "/tmp",
+      "reason": "its encrypted volume ctmp is dropped: it is made anew at every boot (tmp), and /dev/mapper/vg0-data holds a file system now (xfs, 10G), which that would overwrite"
+    }
+  ],
+  "lost": [
+    {
+      "path": "/backup",
+      "mb": 2
+    },
+    {
+      "path": "/etc",
+      "mb": 6
+    },
+    {
+      "path": "/home/alice",
+      "mb": 1172
+    },
+    {
+      "path": "/home/bob",
+      "mb": 1
+    },
+    {
+      "path": "/opt",
+      "mb": 245
+    },
+    {
+      "path": "/root",
+      "mb": 1
+    },
+    {
+      "path": "/usr/local",
+      "mb": 69
+    },
+    {
+      "path": "/var/lib/apt",
+      "mb": 176
+    },
+    {
+      "path": "/var/lib/docker",
+      "mb": 8790
+    }
+  ],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "/dev/mapper/cswap (none) of the old fstab is dropped: its encrypted volume cswap is dropped: it is made anew at every boot (swap), and /dev/vda4 holds a file system now (ext4, label plain, 8G), which that would overwrite",
+    "/dev/mapper/ctmp (/tmp) of the old fstab is dropped: its encrypted volume ctmp is dropped: it is made anew at every boot (tmp), and /dev/mapper/vg0-data holds a file system now (xfs, 10G), which that would overwrite",
+    "cswap of the old crypttab is dropped: it is made anew at every boot (swap), and /dev/vda4 holds a file system now (ext4, label plain, 8G), which that would overwrite",
+    "ctmp of the old crypttab is dropped: it is made anew at every boot (tmp), and /dev/mapper/vg0-data holds a file system now (xfs, 10G), which that would overwrite"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "errors=remount-ro",
+      "device": "/dev/mapper/vg0-root",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/boot",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vda2",
+      "action": "boot"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    },
+    {
+      "spec": "/dev/mapper/cswap",
+      "mountpoint": "none",
+      "type": "swap",
+      "options": "sw",
+      "device": null,
+      "action": "drop"
+    },
+    {
+      "spec": "/dev/mapper/ctmp",
+      "mountpoint": "/tmp",
+      "type": "ext4",
+      "options": "defaults",
+      "device": null,
+      "action": "drop"
+    }
+  ],
+  "hash": "3eff8ccc1d0e80639d3853845a1b0a24e68c82e74dbbf0be7e81cdbc0daa9a7f"
+}

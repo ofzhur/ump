@@ -1,0 +1,11 @@
+{"blockdevices":[
+{"name":"sda","kname":"sda","path":"/dev/sda","type":"disk","size":107374182400,"pttype":"gpt","children":[
+ {"name":"sda1","kname":"sda1","path":"/dev/sda1","type":"part","size":536870912,"fstype":"vfat","uuid":"AAAA-0001","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","pttype":"gpt"},
+ {"name":"sda2","kname":"sda2","path":"/dev/sda2","type":"part","size":21474836480,"fstype":"ext4","uuid":"aaaaaaaa-0000-4000-8000-000000000002","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","pttype":"gpt"},
+ {"name":"sda3","kname":"sda3","path":"/dev/sda3","type":"part","size":53687091200,"fstype":"linux_raid_member","uuid":"11111111-2222-3333-4444-555555555555","parttype":"a19d880f-05fc-4d3b-a006-743f0f84911e","pttype":"gpt","children":[{"name":"md127","kname":"md127","path":"/dev/md127","type":"raid1","size":53687091200,"fstype":"ext4","uuid":"cccccccc-0000-4000-8000-000000000001"}]},
+ {"name":"sda4","kname":"sda4","path":"/dev/sda4","type":"part","size":1073741824,"fstype":"reiserfs","uuid":"dddddddd-0000-4000-8000-000000000001","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","pttype":"gpt"},
+ {"name":"sda5","kname":"sda5","path":"/dev/sda5","type":"part","size":1073741824,"fstype":"ext3","uuid":"dddddddd-0000-4000-8000-000000000002","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","pttype":"gpt"},
+ {"name":"sda6","kname":"sda6","path":"/dev/sda6","type":"part","size":1073741824,"fstype":"ext4","uuid":"dddddddd-0000-4000-8000-000000000003","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","pttype":"gpt"}]},
+{"name":"sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":107374182400,"pttype":"gpt","children":[
+ {"name":"sdb3","kname":"sdb3","path":"/dev/sdb3","type":"part","size":53687091200,"fstype":"linux_raid_member","uuid":"11111111-2222-3333-4444-555555555555","parttype":"a19d880f-05fc-4d3b-a006-743f0f84911e","pttype":"gpt","children":[{"name":"md127","kname":"md127","path":"/dev/md127","type":"raid1","size":53687091200,"fstype":"ext4","uuid":"cccccccc-0000-4000-8000-000000000001"}]}]}
+]}

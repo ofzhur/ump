@@ -55,6 +55,12 @@ layout to start from.`,
 		}
 		return rows, nil
 	},
+	name: func(name string) error {
+		if name == profile.KeepDataLayout {
+			return fmt.Errorf("%s is taken: it is what an installation that kept the data is recorded with (ump server reinstall --keep-data), which applies no layout", name)
+		}
+		return nil
+	},
 	check: func(data []byte) error {
 		layouts, err := profile.ParseLayouts(data)
 		if err != nil {

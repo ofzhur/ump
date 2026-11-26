@@ -172,7 +172,7 @@ kernel:                       # optional; both switches off unless set
   mitigations: false          # mitigations=off on the kernel command line when false or absent
   ipv6: false                 # ipv6.disable=1 when false or absent
   extra: ""                   # anything else for the kernel command line
-disks: lvm-linear             # a layout name from layouts.yaml, or an inline layout
+disks: lvm-linear             # a layout name from layouts.yaml, or an inline layout; with reinstall --keep-data only the root's file system is taken from it
 users:
   - ump                       # a user from users.yaml (ump config user), by name
   - name: ops                 # or an inline user, with the same fields

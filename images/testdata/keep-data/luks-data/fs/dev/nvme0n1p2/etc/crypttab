@@ -1,0 +1,7 @@
+# <target name> <source device> <key file> <options>
+data UUID=a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b /etc/keys/data.key luks,discard
+vault /dev/nvme0n1p4 none luks
+usbkey UUID=3aa708e0-3ff4-585d-a3b2-2108e00fa4ec /media/key/usb.key luks
+gone UUID=99999999-9999-9999-9999-999999999999 /etc/keys/gone.key luks
+stale UUID=a3d03e2b-aeef-51cb-96ca-33ecc95e86df /etc/keys/stale.key
+cswap /dev/nvme0n1p6 /dev/urandom swap,cipher=aes-xts-plain64,size=256

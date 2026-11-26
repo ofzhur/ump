@@ -1,0 +1,65 @@
+{
+ "blockdevices": [
+  {
+   "name": "sda",
+   "kname": "sda",
+   "path": "/dev/sda",
+   "type": "disk",
+   "size": 107374182400,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "sda1",
+     "kname": "sda1",
+     "path": "/dev/sda1",
+     "type": "part",
+     "size": 536870912,
+     "fstype": "vfat",
+     "uuid": "3E86-EC85",
+     "partuuid": "12e6e457-a09c-5332-ac42-70b93ca32b55",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sda2",
+     "kname": "sda2",
+     "path": "/dev/sda2",
+     "type": "part",
+     "size": 1073741824,
+     "fstype": "ext4",
+     "uuid": "c0656983-1a4a-5b40-aeb7-035fe1005302",
+     "partuuid": "42250a61-6d27-55d4-8bc1-fb501bc8207c",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sda3",
+     "kname": "sda3",
+     "path": "/dev/sda3",
+     "type": "part",
+     "size": 105226698752,
+     "fstype": "crypto_LUKS",
+     "uuid": "e24ca7db-f88d-50a2-beb0-f73f17be22ee",
+     "partuuid": "f13f815a-3378-5a7f-9228-aa2bc2e3e8a1",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "sda3_crypt",
+       "kname": "dm-0",
+       "path": "/dev/mapper/sda3_crypt",
+       "type": "crypt",
+       "size": 105226698752,
+       "fstype": "ext4",
+       "uuid": "971f1ae8-da7e-5dc0-be0f-a5875689e12b"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

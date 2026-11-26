@@ -1,0 +1,265 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) (old.example.net) on /dev/mapper/vg0-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/mapper/vg0-root  ext4   /  (10G)
+KEEP (as they are, mounted where they were)
+  /dev/vda1             vfat   /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+  /dev/mapper/vg0-swap  swap   swap
+  /dev/mapper/vg0-data  xfs    /data
+  /dev/vda4             ext4   /srv/plain
+  tmpfs                 tmpfs  /tmp
+ASIDE (kept, under another name)
+  /dev/mapper/vg0-var   ext4   /var -> /var.old  (mounted)
+UNUSED (left as they are, not mounted by the new system)
+  /dev/vda2             ext4   /boot  (too small for the new system's kernels (200 MB, 300 MB at least): /boot is on the root)
+LOST (on the old root, beyond the system itself)
+  /backup  2M
+  /etc  6M
+  /home/alice  1.1G
+  /home/bob  1M
+  /opt  245M
+  /root  1M
+  /usr/local  69M
+  /var/lib/apt  176M
+  /var/lib/docker  8.5G
+WARNINGS
+  the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least): it is left as it is, and /boot is on the root
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-vg0-root  /  ext4  defaults,errors=remount-ro  0 1
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+/dev/mapper/vg0-swap  none  swap  sw  0 0
+/dev/mapper/vg0-var  /var.old  ext4  defaults  0 2
+/dev/vg0/data  /data  xfs  defaults,noatime  0 2
+LABEL=plain  /srv/plain  ext4  defaults  0 2
+tmpfs  /tmp  tmpfs  nosuid,nodev,size=1G  0 0
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "old.example.net",
+    "fstab_sha256": "d9b75628b78377c30433487b910facba1612fcb0df602bc463124a01f9525832"
+  },
+  "root": {
+    "device": "/dev/mapper/vg0-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+    "size_mb": 10240,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
+      "size_mb": 10240
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/mapper/vg0-swap",
+      "filesystem": "swap",
+      "mountpoint": "swap",
+      "uuid": "fd9ce27b-0fe3-51fa-a45f-1803eeddc39d",
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-data",
+      "filesystem": "xfs",
+      "mountpoint": "/data",
+      "uuid": "2965d074-059c-5b05-b3e0-3ac532dc79b5",
+      "note": ""
+    },
+    {
+      "device": "/dev/vda4",
+      "filesystem": "ext4",
+      "mountpoint": "/srv/plain",
+      "uuid": "0def8361-4fc3-5016-a46a-7427924b4dd8",
+      "note": ""
+    },
+    {
+      "device": null,
+      "filesystem": "tmpfs",
+      "mountpoint": "/tmp",
+      "note": "",
+      "spec": "tmpfs"
+    }
+  ],
+  "volatile": [],
+  "aside": [
+    {
+      "device": "/dev/mapper/vg0-var",
+      "filesystem": "ext4",
+      "from": "/var",
+      "mountpoint": "/var.old",
+      "uuid": "77c86345-9a61-5dbf-9a5d-d648dd9ab76f",
+      "how": "mounted"
+    }
+  ],
+  "unused": [
+    {
+      "device": "/dev/vda2",
+      "filesystem": "ext4",
+      "mountpoint": "/boot",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "note": "too small for the new system's kernels (200 MB, 300 MB at least): /boot is on the root"
+    }
+  ],
+  "untouched": [],
+  "dropped": [],
+  "lost": [
+    {
+      "path": "/backup",
+      "mb": 2
+    },
+    {
+      "path": "/etc",
+      "mb": 6
+    },
+    {
+      "path": "/home/alice",
+      "mb": 1172
+    },
+    {
+      "path": "/home/bob",
+      "mb": 1
+    },
+    {
+      "path": "/opt",
+      "mb": 245
+    },
+    {
+      "path": "/root",
+      "mb": 1
+    },
+    {
+      "path": "/usr/local",
+      "mb": 69
+    },
+    {
+      "path": "/var/lib/apt",
+      "mb": 176
+    },
+    {
+      "path": "/var/lib/docker",
+      "mb": 8790
+    }
+  ],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "the old /boot (/dev/vda2, 200 MB) is too small for the new system's kernels (300 MB at least): it is left as it is, and /boot is on the root"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "errors=remount-ro",
+      "device": "/dev/mapper/vg0-root",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/boot",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vda2",
+      "action": "unused"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    },
+    {
+      "spec": "/dev/mapper/vg0-var",
+      "mountpoint": "/var",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/vg0-var",
+      "action": "aside"
+    },
+    {
+      "spec": "/dev/vg0/data",
+      "mountpoint": "/data",
+      "type": "xfs",
+      "options": "defaults,noatime",
+      "device": "/dev/mapper/vg0-data",
+      "action": "keep"
+    },
+    {
+      "spec": "LABEL=plain",
+      "mountpoint": "/srv/plain",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/vda4",
+      "action": "keep"
+    },
+    {
+      "spec": "/dev/mapper/vg0-swap",
+      "mountpoint": "none",
+      "type": "swap",
+      "options": "sw",
+      "device": "/dev/mapper/vg0-swap",
+      "action": "swap"
+    },
+    {
+      "spec": "tmpfs",
+      "mountpoint": "/tmp",
+      "type": "tmpfs",
+      "options": "nosuid,nodev,size=1G",
+      "device": null,
+      "action": "text"
+    }
+  ],
+  "hash": "a3b88e3999da09cb941ca09e6874e4287d51d6ed91d62349892c8ecef28cdc5f"
+}

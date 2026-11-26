@@ -1,0 +1,6 @@
+refused: the old root /dev/sdz2 is on a USB or removable device: the installer installs onto none
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root /dev/sdz2 is on a USB or removable device: the installer installs onto none"
+}

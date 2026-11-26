@@ -1,0 +1,32 @@
+the commands that erase are in 4 functions (wipe_disks, make_layout, format, swap_on_target)
+the commands that delete, move and overwrite, by function:
+  arch_pacstrap: mv: 1
+  arch_pacstrap: rm -rf: 1
+  arch_pacstrap: sed -i: 2
+  cachyos_conf: mv: 1
+  cachyos_repos: sed -i: 1
+  install_image: chown -R: 1
+  install_image: grub-install: 5
+  install_image: mv: 1
+  install_image: sed -i: 4
+  install_nixos: rm -rf: 1
+  kd_cleanup: blockdev --setro, --setrw: 1
+  kd_cleanup: rm -rf: 1
+  kd_done: rm -rf: 3
+  kd_esp_aside: mv: 2
+  kd_home_take: chown -R: 1
+  kd_look: blockdev --setro, --setrw: 1
+  kd_marker_write: mv: 2
+  kd_marker_write: rm -rf: 1
+  kd_save_old: mv: 1
+  kd_save_old: rm -rf: 1
+  kd_state_set: mv: 2
+  kd_unlook: blockdev --setro, --setrw: 1
+  kd_write: btrfs subvolume create: 1
+  kd_write: btrfs subvolume delete: 2
+  kd_write: btrfs subvolume set-default: 2
+  kd_write: mdadm --readwrite: 2
+  kd_write: mv: 3
+  wipe_disks: rm -rf: 1
+	wipe_disks 	make_layout
+called where keep is 0 alone

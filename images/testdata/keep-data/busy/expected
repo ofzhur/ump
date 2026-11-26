@@ -1,0 +1,6 @@
+refused: the disks are in use: /dev/mapper/vg0-root (/mnt/target), /dev/mapper/vg0-swap (swap); unmount them (umount, swapoff) or reboot the rescue system
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the disks are in use: /dev/mapper/vg0-root (/mnt/target), /dev/mapper/vg0-swap (swap); unmount them (umount, swapoff) or reboot the rescue system"
+}

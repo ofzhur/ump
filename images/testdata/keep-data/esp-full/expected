@@ -1,0 +1,6 @@
+refused: the EFI system partition /dev/vda1 has 3 MB free: too little for the new boot loader (16 MB); remove what is not needed from it in the rescue system
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the EFI system partition /dev/vda1 has 3 MB free: too little for the new boot loader (16 MB); remove what is not needed from it in the rescue system"
+}

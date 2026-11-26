@@ -1,0 +1,3 @@
+/dev/mapper/vg0-root|linear|active|r
+/dev/mapper/vg0-data|linear|active|d
+/dev/mapper/vg0-cache|cache||c

@@ -34,7 +34,16 @@ type Values struct {
 	Mitigations *bool   `yaml:"mitigations"`
 	Via         *string `yaml:"via"`
 	Storage     *string `yaml:"storage"`
+	// the keep-data installation (ump server reinstall --keep-data)
+	KeepData *bool   `yaml:"keep-data"`
+	Root     *string `yaml:"root"`
+	KeepRoot *bool   `yaml:"keep-root"`
+	Format   List    `yaml:"format"`
 }
+
+// KeepDataKeys are the keys of a keep-data installation: a file whose
+// installations run without a question (pxe.yaml) takes none of them.
+var KeepDataKeys = []string{"keep-data", "root", "keep-root", "format"}
 
 // List is the value of a repeatable flag: a list, or one value.
 type List []string

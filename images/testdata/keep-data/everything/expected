@@ -1,0 +1,414 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) (everything) on /dev/mapper/sys-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/mapper/sys-root           ext4   /  (8G)
+KEEP (as they are, mounted where they were)
+  /dev/sda1                      vfat   /boot/efi  (the EFI system partition, found by its partition type: not formatted, the new boot loader is added)
+  /dev/mapper/sys-docker         xfs    /var/lib/docker
+  /dev/mapper/sys-home           ext4   /home
+  /dev/mapper/sys-thin           ext4   /srv/thin
+  /dev/sdb                       ext4   /scratch
+  nas.example.net:/export/media  nfs4   /srv/media
+  //files.example.net/share      cifs   /srv/share
+  /var/lib/docker/volumes        none   /srv/volumes
+  /opt/old/app                   none   /srv/app
+  /srv/My\040Files               none   /mnt/my\040files
+  tmpfs                          tmpfs  /run/shm
+ASIDE (kept, under another name)
+  /dev/mapper/sys-var            xfs    /var -> /var.old  (mounted)
+UNUSED (left as they are, not mounted by the new system)
+  /dev/mapper/sys-usr            ext4   /usr
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/mapper/sys-pool_tmeta     -      1G  (no file system)
+  /dev/mapper/sys-spare          ext4   5G
+  /dev/mapper/sys-was_ext4       xfs    5G
+  /dev/sda2                      -      2M  (the BIOS boot partition)
+  /dev/sdc                       -      100G  (no file system)
+LOST (on the old root, beyond the system itself)
+  nothing found
+PACKAGES (installed for what is kept): thin-provisioning-tools, nfs-common, cifs-utils
+WARNINGS
+  /dev/mapper/sys-was_ext4 (/srv/changed) of the old fstab is dropped: the old fstab says ext4, /dev/mapper/sys-was_ext4 holds xfs
+  /dev/mapper/sys-nothere (/srv/nothere) of the old fstab is dropped: the device is not there
+  /dev/sr0 (/media/cdrom0) of the old fstab is dropped: the device is not there
+  /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
+  the source /opt/old/app of the bind mount at /srv/app was on the old root: the new system gets an empty directory there, so that the mount does not fail
+  the source /srv/My\040Files of the bind mount at /mnt/my\040files was on the old root: the new system gets an empty directory there, so that the mount does not fail
+  network file systems are kept as the old fstab has them; nfs-common or cifs-utils is installed for them on Ubuntu and Debian
+  the logical volume /dev/mapper/sys-frozen is not active here (linear): what is on it is not seen
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-sys-root  /  ext4  defaults,errors=remount-ro  0 1
+UUID=3E86-EC85  /boot/efi  vfat  umask=0077  0 1
+/dev/mapper/sys-var  /var.old  xfs  defaults  0 2
+/dev/mapper/sys-docker  /var/lib/docker  xfs  defaults,pquota  0 2
+/dev/mapper/sys-home  /home  ext4  defaults,usrquota  0 2
+/dev/mapper/sys-thin  /srv/thin  ext4  defaults  0 2
+LABEL=scratch  /scratch  ext4  defaults,nofail  0 2
+nas.example.net:/export/media  /srv/media  nfs4  ro,_netdev  0 0
+//files.example.net/share  /srv/share  cifs  credentials=/root/.smb,password=hunter2,uid=1000  0 0
+/var/lib/docker/volumes  /srv/volumes  none  bind  0 0
+/opt/old/app  /srv/app  none  bind  0 0
+/srv/My\040Files  /mnt/my\040files  none  bind  0 0
+tmpfs  /run/shm  tmpfs  defaults  0 0
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "everything",
+    "fstab_sha256": "0ba905d65b5420bf6814ef62907113194f30f6293f31d494e640f668054a969f"
+  },
+  "root": {
+    "device": "/dev/mapper/sys-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "95df4a58-77cd-5c92-8c9e-ebf4f7c4e8ff",
+    "size_mb": 8192,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/mapper/sys-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "everything",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/sda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/sda",
+    "disks": [
+      "/dev/sda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/mapper/sys-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "95df4a58-77cd-5c92-8c9e-ebf4f7c4e8ff",
+      "label": "",
+      "size_mb": 8192
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/sda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "3E86-EC85",
+      "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/mapper/sys-docker",
+      "filesystem": "xfs",
+      "mountpoint": "/var/lib/docker",
+      "uuid": "a9d927f4-dfd2-5766-9efc-e97d28c60dde",
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/sys-home",
+      "filesystem": "ext4",
+      "mountpoint": "/home",
+      "uuid": "fb127515-8ca0-524a-8bb3-c5c748af5873",
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/sys-thin",
+      "filesystem": "ext4",
+      "mountpoint": "/srv/thin",
+      "uuid": "41a4e43f-57fb-5239-8444-7eae17ac9e1c",
+      "note": ""
+    },
+    {
+      "device": "/dev/sdb",
+      "filesystem": "ext4",
+      "mountpoint": "/scratch",
+      "uuid": "c227728e-95d2-5cc8-a6f4-768104907412",
+      "note": ""
+    },
+    {
+      "device": null,
+      "filesystem": "nfs4",
+      "mountpoint": "/srv/media",
+      "note": "",
+      "spec": "nas.example.net:/export/media"
+    },
+    {
+      "device": null,
+      "filesystem": "cifs",
+      "mountpoint": "/srv/share",
+      "note": "",
+      "spec": "//files.example.net/share"
+    },
+    {
+      "device": null,
+      "filesystem": "none",
+      "mountpoint": "/srv/volumes",
+      "note": "",
+      "spec": "/var/lib/docker/volumes"
+    },
+    {
+      "device": null,
+      "filesystem": "none",
+      "mountpoint": "/srv/app",
+      "note": "",
+      "spec": "/opt/old/app"
+    },
+    {
+      "device": null,
+      "filesystem": "none",
+      "mountpoint": "/mnt/my\\040files",
+      "note": "",
+      "spec": "/srv/My\\040Files"
+    },
+    {
+      "device": null,
+      "filesystem": "tmpfs",
+      "mountpoint": "/run/shm",
+      "note": "",
+      "spec": "tmpfs"
+    }
+  ],
+  "volatile": [],
+  "aside": [
+    {
+      "device": "/dev/mapper/sys-var",
+      "filesystem": "xfs",
+      "from": "/var",
+      "mountpoint": "/var.old",
+      "uuid": "b44449d8-270d-543a-bf72-88aa86bdc0ad",
+      "how": "mounted"
+    }
+  ],
+  "unused": [
+    {
+      "device": "/dev/mapper/sys-usr",
+      "filesystem": "ext4",
+      "mountpoint": "/usr",
+      "uuid": "53218ee5-e860-5404-90ca-2f054b9ac16f"
+    }
+  ],
+  "untouched": [
+    {
+      "device": "/dev/mapper/sys-pool_tmeta",
+      "filesystem": "",
+      "label": "",
+      "size_mb": 1024,
+      "note": "no file system"
+    },
+    {
+      "device": "/dev/mapper/sys-spare",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/sys-was_ext4",
+      "filesystem": "xfs",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/sda2",
+      "filesystem": "",
+      "label": "",
+      "size_mb": 2,
+      "note": "the BIOS boot partition"
+    },
+    {
+      "device": "/dev/sdc",
+      "filesystem": "",
+      "label": "",
+      "size_mb": 102400,
+      "note": "no file system"
+    }
+  ],
+  "dropped": [
+    {
+      "spec": "/dev/mapper/sys-was_ext4",
+      "mountpoint": "/srv/changed",
+      "reason": "the old fstab says ext4, /dev/mapper/sys-was_ext4 holds xfs"
+    },
+    {
+      "spec": "/dev/mapper/sys-nothere",
+      "mountpoint": "/srv/nothere",
+      "reason": "the device is not there"
+    },
+    {
+      "spec": "/dev/sr0",
+      "mountpoint": "/media/cdrom0",
+      "reason": "the device is not there"
+    }
+  ],
+  "lost": [],
+  "crypttab": [],
+  "packages": [
+    "thin-provisioning-tools",
+    "nfs-common",
+    "cifs-utils"
+  ],
+  "warnings": [
+    "/dev/mapper/sys-was_ext4 (/srv/changed) of the old fstab is dropped: the old fstab says ext4, /dev/mapper/sys-was_ext4 holds xfs",
+    "/dev/mapper/sys-nothere (/srv/nothere) of the old fstab is dropped: the device is not there",
+    "/dev/sr0 (/media/cdrom0) of the old fstab is dropped: the device is not there",
+    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)",
+    "the source /opt/old/app of the bind mount at /srv/app was on the old root: the new system gets an empty directory there, so that the mount does not fail",
+    "the source /srv/My\\040Files of the bind mount at /mnt/my\\040files was on the old root: the new system gets an empty directory there, so that the mount does not fail",
+    "network file systems are kept as the old fstab has them; nfs-common or cifs-utils is installed for them on Ubuntu and Debian",
+    "the logical volume /dev/mapper/sys-frozen is not active here (linear): what is on it is not seen"
+  ],
+  "entries": [
+    {
+      "spec": "/dev/mapper/sys-root",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "noatime,errors=remount-ro",
+      "device": "/dev/mapper/sys-root",
+      "action": "root"
+    },
+    {
+      "spec": "/dev/mapper/sys-usr",
+      "mountpoint": "/usr",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/sys-usr",
+      "action": "unused"
+    },
+    {
+      "spec": "/dev/mapper/sys-var",
+      "mountpoint": "/var",
+      "type": "xfs",
+      "options": "defaults",
+      "device": "/dev/mapper/sys-var",
+      "action": "aside"
+    },
+    {
+      "spec": "/dev/mapper/sys-docker",
+      "mountpoint": "/var/lib/docker",
+      "type": "xfs",
+      "options": "defaults,pquota",
+      "device": "/dev/mapper/sys-docker",
+      "action": "keep"
+    },
+    {
+      "spec": "/dev/mapper/sys-home",
+      "mountpoint": "/home",
+      "type": "ext4",
+      "options": "defaults,usrquota",
+      "device": "/dev/mapper/sys-home",
+      "action": "keep"
+    },
+    {
+      "spec": "/dev/mapper/sys-thin",
+      "mountpoint": "/srv/thin",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/sys-thin",
+      "action": "keep"
+    },
+    {
+      "spec": "/dev/mapper/sys-was_ext4",
+      "mountpoint": "/srv/changed",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/mapper/sys-was_ext4",
+      "action": "drop"
+    },
+    {
+      "spec": "/dev/mapper/sys-nothere",
+      "mountpoint": "/srv/nothere",
+      "type": "ext4",
+      "options": "defaults",
+      "device": null,
+      "action": "drop"
+    },
+    {
+      "spec": "LABEL=scratch",
+      "mountpoint": "/scratch",
+      "type": "ext4",
+      "options": "defaults,nofail",
+      "device": "/dev/sdb",
+      "action": "keep"
+    },
+    {
+      "spec": "nas.example.net:/export/media",
+      "mountpoint": "/srv/media",
+      "type": "nfs4",
+      "options": "ro,_netdev",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "//files.example.net/share",
+      "mountpoint": "/srv/share",
+      "type": "cifs",
+      "options": "credentials=/root/.smb,password=***,uid=1000",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "/var/lib/docker/volumes",
+      "mountpoint": "/srv/volumes",
+      "type": "none",
+      "options": "bind",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "/opt/old/app",
+      "mountpoint": "/srv/app",
+      "type": "none",
+      "options": "bind",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "/srv/My\\040Files",
+      "mountpoint": "/mnt/my\\040files",
+      "type": "none",
+      "options": "bind",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "tmpfs",
+      "mountpoint": "/run/shm",
+      "type": "tmpfs",
+      "options": "defaults",
+      "device": null,
+      "action": "text"
+    },
+    {
+      "spec": "/dev/sr0",
+      "mountpoint": "/media/cdrom0",
+      "type": "udf,iso9660",
+      "options": "user,noauto",
+      "device": null,
+      "action": "drop"
+    }
+  ],
+  "hash": "e19c468b46cb1335daaa285672b2b0cbaaa0fea8f4e2ba456263f9c665abe080"
+}

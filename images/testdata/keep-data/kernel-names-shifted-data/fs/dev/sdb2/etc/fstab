@@ -1,0 +1,3 @@
+/dev/sda2 / ext4 errors=remount-ro 0 1
+/dev/sdb1 /data ext4 defaults 0 2
+/dev/sda1 none swap sw 0 0

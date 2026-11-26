@@ -266,7 +266,12 @@ disappears, and so does that of a server gone from its provider
 `ump server reinstall` when the new system answered, from what
 `/etc/ump/install` on the machine says (with `--no-reboot` when the
 installer finished, without the image version, kernel and interfaces),
-and shown by `ump server show`.
+and shown by `ump server show`. An installation that [kept the
+data](keep-data.md) has `layout: keep-data`, the name no layout can
+have, and nothing else of its own: no key was added for it, and an ump
+from before `--keep-data` reads such a state as any other. The old
+root and the plan that was confirmed are on the server
+(`/etc/ump/install`, `/etc/ump/keep-data.json`).
 `groups` are the server's Ansible groups besides `common`
 ([provisioning](provisioning.md)): set by `ump server reinstall
 --group`, changed by `ump server set --group` and `--ungroup`; the

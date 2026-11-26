@@ -207,11 +207,12 @@ var (
 )
 
 // machinePlanKeys are reinstall's values a machine takes: all but via,
-// which its mode says.
+// which its mode says, and those of a keep-data installation, which
+// asks about its plan.
 func machinePlanKeys() []string {
 	var keys []string
 	for _, k := range plan.Keys() {
-		if k != "via" {
+		if k != "via" && !slices.Contains(plan.KeepDataKeys, k) {
 			keys = append(keys, k)
 		}
 	}
@@ -223,6 +224,8 @@ func refusedAt(level, key string) string {
 	switch {
 	case key == "via" && level == "machine":
 		return "via is no key here: the mode says how the machine boots"
+	case slices.Contains(plan.KeepDataKeys, key):
+		return key + " is no key here: a machine's installation here runs unattended, and one that keeps the data asks about its plan (ump server reinstall NAME --keep-data)"
 	case key == "unattended":
 		return "unattended is no key here: mode install says it"
 	case key == "jump" && level == "machine":

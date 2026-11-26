@@ -1,0 +1,131 @@
+keep-data: the old system on /dev/mapper/vg0-root (--root); UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/mapper/vg0-root  ext4  /  (10G)
+KEEP (as they are, mounted where they were)
+  /dev/vda1             vfat  /boot/efi  (the EFI system partition, found by its partition type: not formatted, the new boot loader is added)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/mapper/vg0-data  xfs   10G
+  /dev/mapper/vg0-swap  swap  1G
+  /dev/mapper/vg0-var   ext4  5G
+  /dev/vda2             ext4  1G
+  /dev/vda4             ext4  8G  plain
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  /dev/mapper/vg0-root holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-vg0-root  /  ext4  defaults,errors=remount-ro  0 1
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "/dev/mapper/vg0-root",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "",
+    "hostname": "",
+    "fstab_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "root": {
+    "device": "/dev/mapper/vg0-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+    "size_mb": 10240,
+    "by": "option",
+    "known": false
+  },
+  "candidates": [],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "label": "",
+      "size_mb": 10240
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition, found by its partition type: not formatted, the new boot loader is added"
+    }
+  ],
+  "volatile": [],
+  "aside": [],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/mapper/vg0-data",
+      "filesystem": "xfs",
+      "label": "",
+      "size_mb": 10240,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-swap",
+      "filesystem": "swap",
+      "label": "",
+      "size_mb": 1024,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-var",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 1024,
+      "note": ""
+    },
+    {
+      "device": "/dev/vda4",
+      "filesystem": "ext4",
+      "label": "plain",
+      "size_mb": 8192,
+      "note": ""
+    }
+  ],
+  "dropped": [],
+  "lost": [],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "/dev/mapper/vg0-root holds no old system (no /etc/fstab and /etc/os-release): it becomes the root because --root says so, and no other volume is mounted in the new system"
+  ],
+  "entries": [],
+  "hash": "5eb8245bb60d5033985137884b6c0b0ae7e232769ff55fcb34d0fc2aea0c9c26"
+}

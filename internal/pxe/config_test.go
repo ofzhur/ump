@@ -194,6 +194,8 @@ func TestParseRefuses(t *testing.T) {
 		{"machines:\n  a:\n    mac:\n", "line 3: machines.a: mac has no value"},
 		{"machines:\n  a:\n    via: provider\n", "line 3: machines.a: via is no key here: the mode says how the machine boots"},
 		{"machines:\n  a:\n    jump: pxe1\n", "line 3: machines.a: jump is a site's (sites.NAME.jump) or for all (defaults.jump)"},
+		{"machines:\n  a:\n    keep-data: true\n", "line 3: machines.a: keep-data is no key here: a machine's installation here runs unattended, and one that keeps the data asks about its plan (ump server reinstall NAME --keep-data)"},
+		{"machines:\n  a:\n    format: /var\n", "line 3: machines.a: format is no key here: a machine's installation here runs unattended, and one that keeps the data asks about its plan (ump server reinstall NAME --keep-data)"},
 		{"machines:\n  a:\n    ipxe: undionly.kkpxe\n", "line 3: machines.a: ipxe is no key here: the site's DHCP server names the iPXE file (docs/pxe.md)"},
 		{"defaults:\n  profile: web\n", "line 2: defaults: profile is a machine's alone: reinstall's values are per machine"},
 		{"sites:\n  s:\n    mac: 0c:c4:7a:aa:bb:01\n", "line 3: sites.s: mac is a machine's alone"},

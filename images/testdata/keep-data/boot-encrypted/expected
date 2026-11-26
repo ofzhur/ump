@@ -1,0 +1,6 @@
+refused: the old /boot (/dev/mapper/cboot) is encrypted
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot (/dev/mapper/cboot) is encrypted"
+}

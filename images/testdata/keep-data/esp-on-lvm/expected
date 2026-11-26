@@ -1,0 +1,6 @@
+refused: the EFI system partition /dev/mapper/vg0-data is not a plain partition
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the EFI system partition /dev/mapper/vg0-data is not a plain partition"
+}

@@ -1,0 +1,6 @@
+refused: the old root is the top of the btrfs /dev/vda2, and /home is a subvolume of the same file system: not supported in this version (the root as a subvolume of its own is)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root is the top of the btrfs /dev/vda2, and /home is a subvolume of the same file system: not supported in this version (the root as a subvolume of its own is)"
+}

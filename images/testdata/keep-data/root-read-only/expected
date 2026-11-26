@@ -1,0 +1,6 @@
+refused: the old root /dev/mapper/vg0-root is read-only (a write-protected disk, or blockdev --setro): nothing can be installed onto it
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root /dev/mapper/vg0-root is read-only (a write-protected disk, or blockdev --setro): nothing can be installed onto it"
+}

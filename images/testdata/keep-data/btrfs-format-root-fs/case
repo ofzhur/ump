@@ -1,0 +1,2 @@
+keep_root_arg=/dev/vda2:@
+keep_format=(/home)

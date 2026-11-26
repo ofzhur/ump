@@ -91,9 +91,20 @@ func (f *fakeProvider) PowerOff(ctx context.Context, m provider.Machine, hard bo
 	return nil
 }
 
+// fakeRescueErr makes the fake providers fail to say whether their
+// rescue system is enabled.
+var fakeRescueErr error
+
+// RescueEnabled ends with its context, as the real providers' calls do.
 func (f *fakeProvider) RescueEnabled(ctx context.Context, m provider.Machine) (bool, error) {
 	if f.logf != nil {
 		f.logf("fake: GET /servers/%s/rescue", m.ID)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if fakeRescueErr != nil {
+		return false, fakeRescueErr
 	}
 	return fakePower.rescue[m.Ref()], nil
 }
@@ -119,7 +130,14 @@ func (f *fakeProvider) InstallStock(ctx context.Context, m provider.Machine, key
 	return &provider.StockInstall{Image: "Debian 13", Address: m.IPv4, Keys: fakeStockKeys}, nil
 }
 
+// fakeRescueFails makes the fake providers fail to enable their rescue
+// system.
+var fakeRescueFails bool
+
 func (f *fakeProvider) EnableRescue(ctx context.Context, m provider.Machine, opts provider.RescueOptions) (*provider.RescueInfo, error) {
+	if fakeRescueFails {
+		return nil, &provider.APIError{Provider: "fake", Message: "no rescue system today"}
+	}
 	fakePower.rescue[m.Ref()] = true
 	fakePower.keys = nil
 	for _, k := range opts.Keys {
@@ -345,10 +363,44 @@ type testEnv struct {
 	installHook     func()
 	installExit     int
 	installNoScript bool
-	reboots         int
-	installed       bool
-	booted          bool
-	bootFails       bool
+	// the installer with --keep-data (keepdata_test.go): keepCase is the
+	// machine of images/testdata/keep-data it plans for (lvm when empty),
+	// keepCaseAt that per address; keepExit is the exit status of the run
+	// that writes (1: after it began to write, 2: before), keepDrift makes
+	// that run plan another machine than the one confirmed, keepNoFile
+	// leaves no plan file; keepFiles are the plan files in the rescue
+	// systems, by address. keepPlanExit is the exit status of a plan run
+	// that ends badly after it printed its plan (255: the connection
+	// ended), keepPlanFile what the plan file holds when not the plan
+	// that was printed; keepBefore makes the run that writes fail with
+	// keepExit before the installer says that it writes, and keepQuiet
+	// before the installer says anything
+	keepCase     string
+	keepCaseAt   map[string]string
+	keepExit     int
+	keepDrift    string
+	keepNoFile   bool
+	keepFiles    map[string]string
+	keepPlanExit int
+	keepPlanFile string
+	keepBefore   bool
+	keepQuiet    bool
+	// the running system shut down over SSH before a provider's reset
+	// (keep-data): halts are the shutdowns asked, each as USER: COMMAND;
+	// haltExit makes the shutdown fail, haltHangs leaves the system up
+	// after it, and refusals is how many times the machine, its SSH
+	// server gone, still refuses a connection before it answers nothing;
+	// haltedAt says since which of the provider's actions it is down: a
+	// hard reset after it brings the machine up again
+	halts     []string
+	haltExit  int
+	haltHangs bool
+	refusals  int
+	haltedAt  int
+	reboots   int
+	installed bool
+	booted    bool
+	bootFails bool
 
 	// repo is the infrastructure repository ump provisions from: a
 	// directory with ansible.cfg, inventory/ and playbooks/00-base.yml.
@@ -389,6 +441,11 @@ type testEnv struct {
 	remoteGate    func(addr string, argv []string)
 	// onAsk runs when ump first reads stdin: when it asks
 	onAsk func()
+	// holdStdin leaves stdin open after what the run was given, as a
+	// terminal is: a question beyond it waits; interrupt interrupts the
+	// run, as Ctrl-C does
+	holdStdin bool
+	interrupt func()
 }
 
 // hookReader calls hook before its first read.
@@ -410,6 +467,14 @@ func (h *hookReader) Read(p []byte) (int, error) {
 type fakeMachine struct {
 	kexeced, installed, booted bool
 	versionPolls               int
+}
+
+// isDown says that the machine was shut down over SSH and not reset
+// since.
+func (e *testEnv) isDown() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.haltedAt > 0 && len(fakePower.actions) >= e.haltedAt-1 && !slices.Contains(fakePower.actions[e.haltedAt-1:], "reboot:hard")
 }
 
 // sshAddr is the address an ssh command line connects to.
@@ -443,9 +508,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Setenv("FAKE_PASS", "s3cret")
 	// the fake probe always answers, so the "wait for SSH to go down" phase
 	// would otherwise last its full real-world duration
-	oldDown, oldPoll := waitDownTime, waitPoll
-	waitDownTime, waitPoll = 20*time.Millisecond, 5*time.Millisecond
-	t.Cleanup(func() { waitDownTime, waitPoll = oldDown, oldPoll })
+	oldDown, oldPoll, oldKeepDown, oldKeepGrace := waitDownTime, waitPoll, keepDownWait, keepDownGrace
+	waitDownTime, waitPoll, keepDownWait, keepDownGrace = 20*time.Millisecond, 5*time.Millisecond, 100*time.Millisecond, 0
+	t.Cleanup(func() {
+		waitDownTime, waitPoll, keepDownWait, keepDownGrace = oldDown, oldPoll, oldKeepDown, oldKeepGrace
+	})
 	repo := filepath.Join(dir, "infra")
 	os.MkdirAll(filepath.Join(repo, "inventory"), 0o755)
 	os.MkdirAll(filepath.Join(repo, "playbooks"), 0o755)
@@ -505,13 +572,30 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 	var out, errb bytes.Buffer
 	ctx, interrupt := context.WithCancel(context.Background())
 	defer interrupt()
-	a := &app{stdin: &hookReader{r: strings.NewReader(stdin), hook: e.onAsk}, stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
+	e.interrupt = interrupt
+	var input io.Reader = strings.NewReader(stdin)
+	if e.holdStdin {
+		pr, pw := io.Pipe()
+		defer pw.Close()
+		go io.WriteString(pw, stdin)
+		input = pr
+	}
+	a := &app{stdin: &hookReader{r: input, hook: e.onAsk}, stdout: &out, stderr: &errb, now: func() time.Time { return e.now }, tz: time.UTC,
 		ssh: func(argv []string, interactive bool) (int, error) {
 			e.sshCalls = append(e.sshCalls, argv)
 			e.sshInteractive = append(e.sshInteractive, interactive)
 			return e.sshExit, nil
 		},
-		probe:      func(ctx context.Context, addr string) bool { return true },
+		probe: func(ctx context.Context, addr string) bool { return !e.isDown() },
+		refuses: func(ctx context.Context, addr string) bool {
+			if !e.isDown() {
+				return false
+			}
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			e.refusals--
+			return e.refusals >= 0
+		},
 		httpClient: localOnlyClient,
 		forgetHostKey: func(addr string) (bool, error) {
 			e.mu.Lock()
@@ -611,7 +695,7 @@ func (e *testEnv) run(stdin string, tty bool, args ...string) (stdout, stderr st
 		},
 	}
 	e.kexeced, e.versionPolls = false, 0
-	e.installed, e.booted, e.reboots = false, false, 0
+	e.installed, e.booted, e.reboots, e.haltedAt = false, false, 0, 0
 	if e.machines != nil {
 		e.machines = map[string]*fakeMachine{}
 	}
@@ -839,6 +923,27 @@ func (e *testEnv) remote(argv []string) (stdout, stderr string, code int) {
 		}
 		e.kexeced = true
 		return "==> downloading the rescue image for amd64\n==> booting into the UMP rescue system; reconnect as root@203.0.113.10\n", "Connection reset by peer\n", 255
+	case strings.Contains(cmd, "systemctl halt || shutdown -H now"):
+		user, _, _ := strings.Cut(argv[slices.Index(argv, "--")-1], "@")
+		e.halts = append(e.halts, user+": "+cmd)
+		if e.haltExit != 0 {
+			return "", "Failed to halt system via logind: Interactive authentication required.\n", e.haltExit
+		}
+		if !e.haltHangs {
+			e.haltedAt = len(fakePower.actions) + 1
+		}
+		return "", "", 0
+	case cmd == "cat /tmp/ump-keep-data.json":
+		if file, ok := e.keepFiles[sshAddr(argv)]; ok {
+			return file, "", 0
+		}
+		return "", "cat: /tmp/ump-keep-data.json: No such file or directory\n", 1
+	case strings.Contains(cmd, "/install/install.sh") && strings.Contains(cmd, " --keep-data"):
+		e.installs = append(e.installs, cmd)
+		if e.installNoScript {
+			return "", "curl: (22) The requested URL returned error: 404\n", 22
+		}
+		return e.keepInstaller(sshAddr(argv), cmd)
 	case strings.Contains(cmd, "/install/install.sh"):
 		e.installs = append(e.installs, cmd)
 		if e.installNoScript {

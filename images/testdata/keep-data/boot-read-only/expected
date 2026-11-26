@@ -1,0 +1,6 @@
+refused: the old /boot (/dev/vda2) is read-only
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old /boot (/dev/vda2) is read-only"
+}

@@ -1,0 +1,6 @@
+refused: --root /dev/sda1 holds vfat: the root to replace is an ext4, xfs or btrfs file system
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--root /dev/sda1 holds vfat: the root to replace is an ext4, xfs or btrfs file system"
+}

@@ -110,6 +110,11 @@ func (d Disks) MarshalYAML() (any, error) {
 	return d.Name, nil
 }
 
+// KeepDataLayout is the name an installation that kept the data of the
+// old system is recorded and listed with (ump server reinstall
+// --keep-data applies no layout): no layout has it.
+const KeepDataLayout = "keep-data"
+
 // Layout is a disk layout: parts applied in order.
 type Layout struct {
 	Name        string `yaml:"-" json:"name"`
@@ -573,6 +578,9 @@ var filesystems = map[string]bool{"ext4": true, "xfs": true, "btrfs": true, "vfa
 // volume groups, the raid levels, and that the root and the boot
 // partitions are where the boot loader can use them.
 func (l *Layout) Validate() error {
+	if l.Name == KeepDataLayout {
+		return fmt.Errorf("layout %s: the name is taken: it is what an installation that kept the data is recorded with (ump server reinstall --keep-data), which applies no layout; give the layout another name", l.Name)
+	}
 	if len(l.Parts) == 0 {
 		return fmt.Errorf("layout %s has no parts", l.Name)
 	}

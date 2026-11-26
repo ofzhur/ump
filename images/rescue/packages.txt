@@ -57,6 +57,9 @@ gdisk
 parted
 mdadm
 lvm2
+# thin pools are activated with it: without it the volumes of one are not
+# there for the installer's keep-data to find
+thin-provisioning-tools
 cryptsetup
 e2fsprogs
 xfsprogs

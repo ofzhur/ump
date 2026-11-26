@@ -1,0 +1,6 @@
+refused: --format /srv/plain: /dev/vda4 is read-only
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /srv/plain: /dev/vda4 is read-only"
+}

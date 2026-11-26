@@ -1,0 +1,16 @@
+refused: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d, which the /etc/fstab on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)) mounts at /, is on several devices here (/dev/mapper/vg0-root, /dev/mapper/vg0-rootsnap): a copy or a snapshot of a volume is among them: which one is the old root is not certain; --root DEVICE names it
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d, which the /etc/fstab on /dev/mapper/vg0-root (Debian GNU/Linux 12 (bookworm)) mounts at /, is on several devices here (/dev/mapper/vg0-root, /dev/mapper/vg0-rootsnap): a copy or a snapshot of a volume is among them: which one is the old root is not certain; --root DEVICE names it",
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": false
+    }
+  ]
+}

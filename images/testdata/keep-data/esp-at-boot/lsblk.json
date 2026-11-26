@@ -1,0 +1,54 @@
+{
+ "blockdevices": [
+  {
+   "name": "nvme0n1",
+   "kname": "nvme0n1",
+   "path": "/dev/nvme0n1",
+   "type": "disk",
+   "size": 268435456000,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "nvme0n1p1",
+     "kname": "nvme0n1p1",
+     "path": "/dev/nvme0n1p1",
+     "type": "part",
+     "size": 1073741824,
+     "fstype": "vfat",
+     "uuid": "5A46-6FAB",
+     "partuuid": "57774d44-d260-5ce3-86e3-4670f66e6c2b",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p2",
+     "kname": "nvme0n1p2",
+     "path": "/dev/nvme0n1p2",
+     "type": "part",
+     "size": 107374182400,
+     "fstype": "ext4",
+     "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
+     "partuuid": "d56172fb-46f3-5b9e-aafb-0894cc407dc1",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p3",
+     "kname": "nvme0n1p3",
+     "path": "/dev/nvme0n1p3",
+     "type": "part",
+     "size": 159987531776,
+     "fstype": "ext4",
+     "uuid": "a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b",
+     "partuuid": "4c95c570-480b-5530-b334-e88b141a9275",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    }
+   ]
+  }
+ ]
+}

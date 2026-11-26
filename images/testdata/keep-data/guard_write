@@ -1,0 +1,355 @@
+=== lvm
+==> keep-data: writing begins
+==> formatting /dev/mapper/vg0-root (ext4, /)
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mv BOX/old/etc/fstab.new BOX/old/etc/fstab
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/mapper/vg0-root
+  mount /dev/mapper/vg0-root BOX/top
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-2 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data
+saved for a second attempt: state aside= device=/dev/mapper/vg0-root root=gone stamp=20260102-030405 subvolume= uuid_new=new-uuid-1 uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 new-uuid-2; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== lvm-format
+==> keep-data: writing begins
+==> formatting /dev/mapper/vg0-root (ext4, /)
+==> formatting /dev/vda2 (ext4, /boot)
+==> formatting /dev/mapper/vg0-var (ext4, /var)
+==> formatting /dev/vda4 (ext4, /srv/plain)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mv BOX/old/etc/fstab.new BOX/old/etc/fstab
+  mv BOX/old/etc/fstab.new BOX/old/etc/fstab
+  mv BOX/old/etc/fstab.new BOX/old/etc/fstab
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/mapper/vg0-root
+  mount /dev/mapper/vg0-root BOX/top
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-2 /dev/vda2
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-3 /dev/mapper/vg0-var
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -L plain -U new-uuid-4 /dev/vda4
+  umount BOX/top
+the root's file system after: .ump-keep-data
+saved for a second attempt: state aside= device=/dev/mapper/vg0-root root=gone stamp=20260102-030405 subvolume= uuid_new=new-uuid-1 uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 new-uuid-2,77c86345-9a61-5dbf-9a5d-d648dd9ab76f new-uuid-3,0def8361-4fc3-5016-a46a-7427924b4dd8 new-uuid-4; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: UUID=77c86345-9a61-5dbf-9a5d-d648dd9ab76f /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: UUID=0def8361-4fc3-5016-a46a-7427924b4dd8 /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== lvm-keep-root
+==> keep-data: writing begins
+==> the old system moves into /old-root-20260102-030405 on /dev/mapper/vg0-root
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mv BOX/old/etc/fstab.new BOX/old/etc/fstab
+  mount -t ext4 /dev/mapper/vg0-root BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mv BOX/top/etc BOX/top/old-root-20260102-030405/
+  mv BOX/top/.ump-keep-data/state.tmp BOX/top/.ump-keep-data/state.new
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data old-root-20260102-030405
+saved for a second attempt: state aside=old-root-20260102-030405 device=/dev/mapper/vg0-root root=aside stamp=20260102-030405 subvolume= uuid_new= uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 new-uuid-1; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== btrfs-subvolumes
+==> keep-data: writing begins
+==> deleting the old root subvolume @ of /dev/vda2
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 /dev/vda2 BOX/top
+  mount -t btrfs -o subvolid=5 /dev/vda2 BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  btrfs subvolume delete BOX/top/@/var/lib/machines
+  btrfs subvolume delete BOX/top/@
+  btrfs subvolume create BOX/top/@
+  umount BOX/top
+the root's file system after: .ump-keep-data @ @home @snapshots
+saved for a second attempt: state aside= default= device=/dev/vda2 root=gone stamp=20260102-030405 subvolume=@ uuid_new= uuid_old=715fc437-210c-5242-bc49-5a07f9b90747; in memory: a copy, and on the root
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs subvol=@,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=/@home,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /.snapshots btrfs subvol=@snapshots 0 0
+  fstab: UUID=769B-CE7F /boot/efi vfat umask=0077 0 1
+=== btrfs-subvolumes-keep-root
+==> keep-data: writing begins
+==> the old root subvolume @ is now @-old-20260102-030405
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 /dev/vda2 BOX/top
+  mount -t btrfs -o subvolid=5 /dev/vda2 BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mv BOX/top/@ BOX/top/@-old-20260102-030405
+  mv BOX/top/.ump-keep-data/state.tmp BOX/top/.ump-keep-data/state.new
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  btrfs subvolume create BOX/top/@
+  umount BOX/top
+the root's file system after: .ump-keep-data @ @-old-20260102-030405 @home @snapshots
+saved for a second attempt: state aside=@-old-20260102-030405 default= device=/dev/vda2 root=aside stamp=20260102-030405 subvolume=@ uuid_new= uuid_old=715fc437-210c-5242-bc49-5a07f9b90747; in memory: a copy, and on the root
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs subvol=@,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=/@home,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /.snapshots btrfs subvol=@snapshots 0 0
+  fstab: UUID=769B-CE7F /boot/efi vfat umask=0077 0 1
+=== btrfs-default-named
+==> keep-data: writing begins
+==> the default subvolume of /dev/vda2 is its top while @ is replaced
+==> deleting the old root subvolume @ of /dev/vda2
+==> the default subvolume of /dev/vda2 is the new @
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 /dev/vda2 BOX/top
+  mount -t btrfs -o subvolid=5 /dev/vda2 BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  btrfs subvolume set-default 5 BOX/top
+  btrfs subvolume delete BOX/top/@/var/lib/machines
+  btrfs subvolume delete BOX/top/@
+  btrfs subvolume create BOX/top/@
+  btrfs subvolume set-default 256 BOX/top
+  umount BOX/top
+the root's file system after: .ump-keep-data @ @home @snapshots
+saved for a second attempt: state aside= default=restore device=/dev/vda2 root=gone stamp=20260102-030405 subvolume=@ uuid_new= uuid_old=715fc437-210c-5242-bc49-5a07f9b90747; in memory: a copy, and on the root
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs subvol=@,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=/@home,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /.snapshots btrfs subvol=@snapshots 0 0
+  fstab: UUID=769B-CE7F /boot/efi vfat umask=0077 0 1
+=== md-home-reiserfs
+==> keep-data: writing begins
+==> formatting /dev/sda2 (ext4, /)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/sda2 BOX/top
+  mdadm --readwrite /dev/md127
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/sda2
+  mount /dev/sda2 BOX/top
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  umount BOX/top
+the root's file system after: .ump-keep-data
+saved for a second attempt: state aside= device=/dev/sda2 root=gone stamp=20260102-030405 subvolume= uuid_new=new-uuid-1 uuid_old=aaaaaaaa-0000-4000-8000-000000000002; in memory: a copy, and on the root
+  fstab: UUID=aaaaaaaa-0000-4000-8000-000000000002 / ext4 errors=remount-ro 0 1
+  fstab: UUID=AAAA-0001 /boot/efi vfat umask=0077 0 1
+  fstab: UUID=cccccccc-0000-4000-8000-000000000001 /home ext4 defaults 0 2
+  fstab: UUID=dddddddd-0000-4000-8000-000000000001 /srv/old reiserfs defaults 0 2
+  fstab: UUID=dddddddd-0000-4000-8000-000000000002 /var/lib ext3 defaults 0 2
+  fstab: UUID=dddddddd-0000-4000-8000-000000000003 /var/cache ext4 defaults 0 2
+=== resume
+==> keep-data: writing begins
+==> formatting /dev/mapper/vg0-root (ext4, /)
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/mapper/vg0-root
+  mount /dev/mapper/vg0-root BOX/top
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-2 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data
+saved for a second attempt: state aside= device=/dev/mapper/vg0-root root=gone stamp=20260102-030405 subvolume= uuid_new=new-uuid-1 uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 0000bbbb-0000-0000-0000-00000000bbbb,0000bbbb-0000-0000-0000-00000000bbbb new-uuid-2; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== resume-keep-root
+==> keep-data: writing begins
+==> what the interrupted installation unpacked moves into /failed-install-20260102-030405 on /dev/mapper/vg0-root (it can be removed)
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mount -t ext4 /dev/mapper/vg0-root BOX/top
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  rm -f BOX/unsaved
+  mv BOX/top/etc BOX/top/failed-install-20260102-030405/
+  mv BOX/top/usr BOX/top/failed-install-20260102-030405/
+  mv BOX/top/.ump-keep-data/state.tmp BOX/top/.ump-keep-data/state.new
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data failed-install-20260102-030405 old-root-20260101-000000
+saved for a second attempt: state aside=old-root-20260101-000000 device=/dev/mapper/vg0-root root=aside stamp=20260101-000000 subvolume= uuid_new= uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 0000bbbb-0000-0000-0000-00000000bbbb,0000bbbb-0000-0000-0000-00000000bbbb new-uuid-1; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== resume-move
+==> keep-data: writing begins
+==> the old system moves into /old-root-20260101-000000 on /dev/mapper/vg0-root
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t ext4 -o ro,noload,errors=continue /dev/mapper/vg0-root BOX/top
+  mount -t ext4 /dev/mapper/vg0-root BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  rm -f BOX/unsaved
+  mv BOX/top/home BOX/top/old-root-20260101-000000/
+  mv BOX/top/srv BOX/top/old-root-20260101-000000/
+  mv BOX/top/var BOX/top/old-root-20260101-000000/
+  mv BOX/top/.ump-keep-data/state.tmp BOX/top/.ump-keep-data/state.new
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data old-root-20260101-000000
+saved for a second attempt: state aside=old-root-20260101-000000 device=/dev/mapper/vg0-root root=aside stamp=20260101-000000 subvolume= uuid_new= uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 new-uuid-1; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== resume-ram
+==> keep-data: writing begins
+==> formatting /dev/mapper/vg0-root (ext4, /)
+==> formatting /dev/vda2 (ext4, /boot)
+kd_write: status 0; it ran:
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-1 /dev/mapper/vg0-root
+  mount /dev/mapper/vg0-root BOX/top
+  rm -rf BOX/top/.ump-keep-data BOX/top/.ump-keep-data.new
+  mv BOX/top/.ump-keep-data.new BOX/top/.ump-keep-data
+  rm -f BOX/unsaved
+  mkfs.ext4 -q -F -O ^orphan_file,^metadata_csum_seed -U new-uuid-2 /dev/vda2
+  umount BOX/top
+the root's file system after: .ump-keep-data
+saved for a second attempt: state aside= device=/dev/mapper/vg0-root root=gone stamp=20260102-030405 subvolume= uuid_new=new-uuid-1 uuid_old=fdefec4e-baf2-514b-be0a-48bf9c43a89d; formats 715fc437-210c-5242-bc49-5a07f9b90747 new-uuid-2; in memory: a copy, and on the root
+  fstab: # /etc/fstab: static file system information.
+  fstab: UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d / ext4 errors=remount-ro 0 1
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /boot ext4 defaults 0 2
+  fstab: UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+  fstab: /dev/mapper/vg0-var /var ext4 defaults 0 2
+  fstab: /dev/vg0/data /data xfs defaults,noatime 0 2
+  fstab: LABEL=plain /srv/plain ext4 defaults 0 2
+  fstab: /dev/mapper/vg0-swap none swap sw 0 0
+  fstab: tmpfs /tmp tmpfs nosuid,nodev,size=1G 0 0
+=== resume-btrfs
+==> keep-data: writing begins
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 /dev/vda2 BOX/top
+  mount -t btrfs -o subvolid=5 /dev/vda2 BOX/top
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.tmp BOX/old/state.new
+  mv BOX/old/state.new BOX/old/state
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  rm -f BOX/unsaved
+  btrfs subvolume create BOX/top/@
+  umount BOX/top
+the root's file system after: .ump-keep-data @ @home @snapshots
+saved for a second attempt: state aside= default= device=/dev/vda2 root=gone stamp=20260102-030405 subvolume=@ uuid_new= uuid_old=; in memory: a copy, and on the root
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs subvol=@,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=/@home,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /.snapshots btrfs subvol=@snapshots 0 0
+  fstab: UUID=769B-CE7F /boot/efi vfat umask=0077 0 1
+=== resume-btrfs-keep-root
+==> keep-data: writing begins
+==> the subvolume @ of the interrupted installation is now @-failed-20260102-030405 (it can be deleted)
+kd_write: status 0; it ran:
+  rm -rf BOX/old BOX/unsaved
+  mount -t btrfs -o ro,rescue=nologreplay,subvolid=5 /dev/vda2 BOX/top
+  mount -t btrfs -o subvolid=5 /dev/vda2 BOX/top
+  mv BOX/top/.ump-keep-data/state.new BOX/top/.ump-keep-data/state
+  rm -f BOX/unsaved
+  mv BOX/top/@ BOX/top/@-failed-20260102-030405
+  btrfs subvolume create BOX/top/@
+  umount BOX/top
+the root's file system after: .ump-keep-data @ @-failed-20260102-030405 @-old-20260101-000000 @home @snapshots
+saved for a second attempt: state aside=@-old-20260101-000000 device=/dev/vda2 root=aside stamp=20260101-000000 subvolume=@ uuid_new= uuid_old=; in memory: a copy, and on the root
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 / btrfs subvol=@,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=/@home,compress=zstd 0 0
+  fstab: UUID=715fc437-210c-5242-bc49-5a07f9b90747 /.snapshots btrfs subvol=@snapshots 0 0
+  fstab: UUID=769B-CE7F /boot/efi vfat umask=0077 0 1
+=== a plan with the root's own file system among what it formats: refused (install.sh: keep-data: the plan formats /dev/vda2 twice, or under the root or the EFI system partition: nothing is written (a fault of the installer: report it)); called: nothing

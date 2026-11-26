@@ -1,0 +1,117 @@
+{
+ "blockdevices": [
+  {
+   "name": "nvme0n1",
+   "kname": "nvme0n1",
+   "path": "/dev/nvme0n1",
+   "type": "disk",
+   "size": 536870912000,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "nvme0n1p1",
+     "kname": "nvme0n1p1",
+     "path": "/dev/nvme0n1p1",
+     "type": "part",
+     "size": 536870912,
+     "fstype": "vfat",
+     "uuid": "5A46-6FAB",
+     "partuuid": "57774d44-d260-5ce3-86e3-4670f66e6c2b",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p2",
+     "kname": "nvme0n1p2",
+     "path": "/dev/nvme0n1p2",
+     "type": "part",
+     "size": 53687091200,
+     "fstype": "ext4",
+     "uuid": "d7afa461-ad0d-5a32-a925-7c2126ebe2c3",
+     "partuuid": "d56172fb-46f3-5b9e-aafb-0894cc407dc1",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p3",
+     "kname": "nvme0n1p3",
+     "path": "/dev/nvme0n1p3",
+     "type": "part",
+     "size": 107374182400,
+     "fstype": "crypto_LUKS",
+     "uuid": "a8d9f7b1-8cbd-5249-bb38-d2235e7f5e5b",
+     "partuuid": "4c95c570-480b-5530-b334-e88b141a9275",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p4",
+     "kname": "nvme0n1p4",
+     "path": "/dev/nvme0n1p4",
+     "type": "part",
+     "size": 107374182400,
+     "fstype": "crypto_LUKS",
+     "uuid": "6be8065f-32ef-56e9-b7b0-bbadbf1e21f5",
+     "partuuid": "99b0fe7f-5134-5c93-9ad1-41c11b29d48d",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p5",
+     "kname": "nvme0n1p5",
+     "path": "/dev/nvme0n1p5",
+     "type": "part",
+     "size": 107374182400,
+     "fstype": "crypto_LUKS",
+     "uuid": "3aa708e0-3ff4-585d-a3b2-2108e00fa4ec",
+     "partuuid": "6a15a211-098d-5c30-b428-f1f75ee4f6d9",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p6",
+     "kname": "nvme0n1p6",
+     "path": "/dev/nvme0n1p6",
+     "type": "part",
+     "size": 8589934592,
+     "partuuid": "51de5d8f-48da-5e9c-ad8a-d886d6428dbe",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p7",
+     "kname": "nvme0n1p7",
+     "path": "/dev/nvme0n1p7",
+     "type": "part",
+     "size": 53687091200,
+     "fstype": "crypto_LUKS",
+     "uuid": "08235c8f-7930-5d28-904a-7d0033e4584e",
+     "partuuid": "a0c37da6-82e0-5ca4-83c1-25412666ebc4",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "nvme0n1p8",
+     "kname": "nvme0n1p8",
+     "path": "/dev/nvme0n1p8",
+     "type": "part",
+     "size": 53687091200,
+     "fstype": "crypto_LUKS",
+     "uuid": "a3d03e2b-aeef-51cb-96ca-33ecc95e86df",
+     "partuuid": "4675ffcd-af1d-594a-82be-ca5bb21518cb",
+     "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+     "pttype": "gpt",
+     "tran": "virtio"
+    }
+   ]
+  }
+ ]
+}

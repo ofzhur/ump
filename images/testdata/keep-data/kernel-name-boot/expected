@@ -1,0 +1,6 @@
+refused: the old fstab names /boot by a kernel name (/dev/vdb1), which is /dev/vdb1 here (ext4, label archive, 499G), and that does not hold the old system's kernels (no vmlinuz-VERSION is on it; the old root has no kernel modules to tell by): it is not formatted; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL=
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old fstab names /boot by a kernel name (/dev/vdb1), which is /dev/vdb1 here (ext4, label archive, 499G), and that does not hold the old system's kernels (no vmlinuz-VERSION is on it; the old root has no kernel modules to tell by): it is not formatted; name /boot by UUID= in the old /etc/fstab (blkid shows it), or by LABEL="
+}

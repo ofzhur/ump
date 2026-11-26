@@ -1,0 +1,6 @@
+refused: --format /boot/efi: the EFI system partition is never formatted (other systems' boot loaders may be on it)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /boot/efi: the EFI system partition is never formatted (other systems' boot loaders may be on it)"
+}

@@ -1,0 +1,6 @@
+refused: the old root /dev/mapper/vg0-root (10240 MB) is too small for ubuntu-26.04 (6000 MB unpacked; twice that is needed): grow it in the rescue system first (a logical volume: lvextend -r -L 12000M /dev/mapper/vg0-root), or install without --keep-data
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root /dev/mapper/vg0-root (10240 MB) is too small for ubuntu-26.04 (6000 MB unpacked; twice that is needed): grow it in the rescue system first (a logical volume: lvextend -r -L 12000M /dev/mapper/vg0-root), or install without --keep-data"
+}

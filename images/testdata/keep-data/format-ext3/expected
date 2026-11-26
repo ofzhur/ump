@@ -1,0 +1,192 @@
+keep-data: the old system Debian GNU/Linux 8 (jessie) on /dev/sda2; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/sda2   ext4      /  (20G)
+  /dev/sda5   ext4      /var/lib  (1G, was ext3)
+KEEP (as they are, mounted where they were)
+  /dev/sda1   vfat      /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+  /dev/md127  ext4      /home
+  /dev/sda4   reiserfs  /srv/old  (reiserfs: with nofail, the new system may not be able to mount it)
+ASIDE (kept, under another name)
+  /dev/sda6   ext4      /var/cache -> /var/cache.old  (mounted)
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  /home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)
+  /dev/sda4 (/srv/old) is reiserfs, which the new system may not be able to mount: kept with nofail, so that it boots without it
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-sda2  /  ext4  defaults,errors=remount-ro  0 1
+UUID=AAAA-0001  /boot/efi  vfat  umask=0077  0 1
+UUID=cccccccc-0000-4000-8000-000000000001  /home  ext4  defaults  0 2
+UUID=dddddddd-0000-4000-8000-000000000001  /srv/old  reiserfs  defaults,nofail  0 2
+UUID=NEW-sda5  /var/lib  ext4  defaults  0 2
+UUID=dddddddd-0000-4000-8000-000000000003  /var/cache.old  ext4  defaults  0 2
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": [
+      "/var/lib"
+    ]
+  },
+  "old": {
+    "system": "Debian GNU/Linux 8 (jessie)",
+    "hostname": "",
+    "fstab_sha256": "e7761e1c033706deba4430e8564ef246f78289d8498fcb65776870d2dbdf69a5"
+  },
+  "root": {
+    "device": "/dev/sda2",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "aaaaaaaa-0000-4000-8000-000000000002",
+    "size_mb": 20480,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/sda2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 8 (jessie)",
+      "hostname": "",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/sda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/sda",
+    "disks": [
+      "/dev/sda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/sda2",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "ext4",
+      "uuid": "aaaaaaaa-0000-4000-8000-000000000002",
+      "label": "",
+      "size_mb": 20480
+    },
+    {
+      "device": "/dev/sda5",
+      "filesystem": "ext4",
+      "mountpoint": "/var/lib",
+      "how": "mkfs",
+      "was": "ext3",
+      "uuid": "dddddddd-0000-4000-8000-000000000002",
+      "label": "",
+      "size_mb": 1024
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/sda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "AAAA-0001",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/md127",
+      "filesystem": "ext4",
+      "mountpoint": "/home",
+      "uuid": "cccccccc-0000-4000-8000-000000000001",
+      "note": ""
+    },
+    {
+      "device": "/dev/sda4",
+      "filesystem": "reiserfs",
+      "mountpoint": "/srv/old",
+      "uuid": "dddddddd-0000-4000-8000-000000000001",
+      "note": "reiserfs: with nofail, the new system may not be able to mount it"
+    }
+  ],
+  "volatile": [],
+  "aside": [
+    {
+      "device": "/dev/sda6",
+      "filesystem": "ext4",
+      "from": "/var/cache",
+      "mountpoint": "/var/cache.old",
+      "uuid": "dddddddd-0000-4000-8000-000000000003",
+      "how": "mounted"
+    }
+  ],
+  "unused": [],
+  "untouched": [],
+  "dropped": [],
+  "lost": [],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "/home is kept: the profile's users get their home directories and keys there; a home directory that is there already goes to the user of its name (its files change owner where the user's ID differs), its authorized_keys is replaced (the old one saved beside it)",
+    "/dev/sda4 (/srv/old) is reiserfs, which the new system may not be able to mount: kept with nofail, so that it boots without it"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=aaaaaaaa-0000-4000-8000-000000000002",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "errors=remount-ro",
+      "device": "/dev/sda2",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=AAAA-0001",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/sda1",
+      "action": "esp"
+    },
+    {
+      "spec": "UUID=cccccccc-0000-4000-8000-000000000001",
+      "mountpoint": "/home",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/md127",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=dddddddd-0000-4000-8000-000000000001",
+      "mountpoint": "/srv/old",
+      "type": "reiserfs",
+      "options": "defaults",
+      "device": "/dev/sda4",
+      "action": "keep"
+    },
+    {
+      "spec": "UUID=dddddddd-0000-4000-8000-000000000002",
+      "mountpoint": "/var/lib",
+      "type": "ext3",
+      "options": "defaults",
+      "device": "/dev/sda5",
+      "action": "format"
+    },
+    {
+      "spec": "UUID=dddddddd-0000-4000-8000-000000000003",
+      "mountpoint": "/var/cache",
+      "type": "ext4",
+      "options": "defaults",
+      "device": "/dev/sda6",
+      "action": "aside"
+    }
+  ],
+  "hash": "3f43d021513ec879b263503e1e5bd1a99f2aaca55d18de9778740c1729d1cb0a"
+}

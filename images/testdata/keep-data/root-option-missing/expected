@@ -1,0 +1,6 @@
+refused: --root /dev/sdz9: no such device on this machine
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--root /dev/sdz9: no such device on this machine"
+}

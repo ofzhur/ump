@@ -1,0 +1,114 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) on /dev/vda2; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  /dev/vda2  btrfs  /  (99G)
+KEEP (as they are, mounted where they were)
+  /dev/vda1  vfat   /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+LOST (on the old root, beyond the system itself)
+  nothing found
+WARNINGS
+  the subvolumes of the old root's btrfs go with it, which is made anew: var/lib/machines
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the root made anew, the old system's other volumes as they were)
+UUID=NEW-vda2  /  btrfs  defaults  0 1
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-26.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": false,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "",
+    "fstab_sha256": "f270b5034b2c5bf736c42081ebb591f22680f6c775be9c26062461e48d25bf23"
+  },
+  "root": {
+    "device": "/dev/vda2",
+    "subvolume": "",
+    "filesystem": "btrfs",
+    "was": "btrfs",
+    "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+    "size_mb": 101376,
+    "by": "detection"
+  },
+  "candidates": [
+    {
+      "device": "/dev/vda2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [
+    {
+      "device": "/dev/vda2",
+      "filesystem": "btrfs",
+      "mountpoint": "/",
+      "how": "mkfs",
+      "was": "btrfs",
+      "uuid": "715fc437-210c-5242-bc49-5a07f9b90747",
+      "label": "",
+      "size_mb": 101376
+    }
+  ],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    }
+  ],
+  "volatile": [],
+  "aside": [],
+  "unused": [],
+  "untouched": [],
+  "dropped": [],
+  "lost": [],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "the subvolumes of the old root's btrfs go with it, which is made anew: var/lib/machines"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=715fc437-210c-5242-bc49-5a07f9b90747",
+      "mountpoint": "/",
+      "type": "btrfs",
+      "options": "defaults",
+      "device": "/dev/vda2",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    }
+  ],
+  "hash": "eeed09c790a04d7d064ec284ca0d45a5a687f08e8e5896299f8f6c6dd9f7eb08"
+}

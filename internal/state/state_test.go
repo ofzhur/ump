@@ -209,3 +209,27 @@ func TestForget(t *testing.T) {
 		t.Errorf("nothing named: %+v", d.Servers)
 	}
 }
+
+// TestKeepDataLayout: an installation that kept the data is recorded
+// with the layout keep-data and nothing else: the record has the keys
+// it always had, which every ump reads.
+func TestKeepDataLayout(t *testing.T) {
+	d, err := Parse([]byte("version: 3\nservers:\n  fake/1:\n    installed:\n      os: ubuntu-26.04\n      profile: db\n      layout: keep-data\n      hostname: db-01\n      at: 2026-11-13T10:12:00Z\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := d.Servers["fake/1"].Installed; in == nil || in.Layout != "keep-data" {
+		t.Errorf("installed: %+v", in)
+	}
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(out); !strings.Contains(s, "version: 3\n") || !strings.Contains(s, "      profile: db\n      layout: keep-data\n      hostname: db-01\n      at: ") {
+		t.Errorf("written:\n%s", s)
+	}
+	// no key of its own
+	if _, err := Parse([]byte("servers:\n  fake/1:\n    installed:\n      os: x\n      profile: y\n      layout: keep-data\n      keep_data:\n        root: /dev/sda1\n      at: 2026-11-13T10:12:00Z\n")); err == nil || !strings.Contains(err.Error(), "field keep_data not found") {
+		t.Errorf("a key of its own: %v", err)
+	}
+}

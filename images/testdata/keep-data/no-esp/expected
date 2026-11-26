@@ -1,0 +1,6 @@
+refused: this machine boots with UEFI and has no EFI system partition: it cannot be made bootable without repartitioning, which keep-data never does
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "this machine boots with UEFI and has no EFI system partition: it cannot be made bootable without repartitioning, which keep-data never does"
+}

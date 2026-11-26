@@ -1,0 +1,6 @@
+refused: the EFI system partition /dev/vda1 is read-only: the new boot loader cannot be put there
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the EFI system partition /dev/vda1 is read-only: the new boot loader cannot be put there"
+}

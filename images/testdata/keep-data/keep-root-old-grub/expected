@@ -1,0 +1,162 @@
+keep-data: the old system Debian GNU/Linux 12 (bookworm) (old.example.net) on /dev/mapper/vg0-root; UEFI firmware; the layout of the profile is not applied, no disk is wiped or partitioned
+FORMAT (what is on them is lost)
+  nothing
+KEEP (as they are, mounted where they were)
+  /dev/vda1             vfat  /boot/efi  (the EFI system partition: not formatted, the new boot loader is added)
+  /dev/mapper/vg0-root  ext4  /  (the root file system, not formatted: the new system is unpacked beside the old one, which moves into /old-root-DATE)
+ASIDE (kept, under another name)
+  /dev/mapper/vg0-root  ext4  / -> /old-root-DATE  (moved)
+UNTOUCHED (not in the old fstab: left as they are)
+  /dev/mapper/vg0-data  xfs   10G
+  /dev/mapper/vg0-swap  swap  1G
+  /dev/mapper/vg0-var   ext4  5G
+  /dev/vda2             ext4  1G
+  /dev/vda4             ext4  8G  plain
+WARNINGS
+  the root file system has the ext4 features orphan_file metadata_csum_seed, which the GRUB of ubuntu-22.04 cannot read, and /boot is on it: the new system may not boot
+--- /etc/fstab
+# /etc/fstab, written by UMP (keep-data: the new system beside the old one, which was set aside; the old system's other volumes as they were)
+UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d  /  ext4  errors=remount-ro  0 1
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1
+--- the plan (--plan)
+{
+  "version": 1,
+  "os": "ubuntu-22.04",
+  "image": {
+    "version": "2026.10.12",
+    "sha256": "6f1ed002ab5595859014ebf0951522d95f0c1d0a5d2c47d9d9a3c7c6f7a3b4e1"
+  },
+  "firmware": "uefi",
+  "arch": "arm64",
+  "options": {
+    "root": "",
+    "keep_root": true,
+    "format": []
+  },
+  "old": {
+    "system": "Debian GNU/Linux 12 (bookworm)",
+    "hostname": "old.example.net",
+    "fstab_sha256": "9e03b88046d655071ae9eb9278031b8270c681023614a4ef9888f46da6563aaf"
+  },
+  "root": {
+    "device": "/dev/mapper/vg0-root",
+    "subvolume": "",
+    "filesystem": "ext4",
+    "was": "ext4",
+    "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+    "size_mb": 10240,
+    "by": "detection",
+    "free_mb": 6300
+  },
+  "candidates": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 12 (bookworm)",
+      "hostname": "old.example.net",
+      "resume": false,
+      "consistent": true
+    }
+  ],
+  "boot": {
+    "esp": "/dev/vda1",
+    "boot": "",
+    "bios_disks": [],
+    "bios_optional": [],
+    "disk": "/dev/vda",
+    "disks": [
+      "/dev/vda"
+    ]
+  },
+  "format": [],
+  "keep": [
+    {
+      "device": "/dev/vda1",
+      "filesystem": "vfat",
+      "mountpoint": "/boot/efi",
+      "uuid": "769B-CE7F",
+      "note": "the EFI system partition: not formatted, the new boot loader is added"
+    },
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "mountpoint": "/",
+      "uuid": "fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "note": "the root file system, not formatted: the new system is unpacked beside the old one, which moves into /old-root-DATE"
+    }
+  ],
+  "volatile": [],
+  "aside": [
+    {
+      "device": "/dev/mapper/vg0-root",
+      "filesystem": "ext4",
+      "from": "/",
+      "mountpoint": "/old-root-DATE",
+      "how": "moved"
+    }
+  ],
+  "unused": [],
+  "untouched": [
+    {
+      "device": "/dev/mapper/vg0-data",
+      "filesystem": "xfs",
+      "label": "",
+      "size_mb": 10240,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-swap",
+      "filesystem": "swap",
+      "label": "",
+      "size_mb": 1024,
+      "note": ""
+    },
+    {
+      "device": "/dev/mapper/vg0-var",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 5120,
+      "note": ""
+    },
+    {
+      "device": "/dev/vda2",
+      "filesystem": "ext4",
+      "label": "",
+      "size_mb": 1024,
+      "note": ""
+    },
+    {
+      "device": "/dev/vda4",
+      "filesystem": "ext4",
+      "label": "plain",
+      "size_mb": 8192,
+      "note": ""
+    }
+  ],
+  "dropped": [],
+  "lost": [],
+  "crypttab": [],
+  "packages": [],
+  "warnings": [
+    "the root file system has the ext4 features orphan_file metadata_csum_seed, which the GRUB of ubuntu-22.04 cannot read, and /boot is on it: the new system may not boot"
+  ],
+  "entries": [
+    {
+      "spec": "UUID=fdefec4e-baf2-514b-be0a-48bf9c43a89d",
+      "mountpoint": "/",
+      "type": "ext4",
+      "options": "errors=remount-ro",
+      "device": "/dev/mapper/vg0-root",
+      "action": "root"
+    },
+    {
+      "spec": "UUID=769B-CE7F",
+      "mountpoint": "/boot/efi",
+      "type": "vfat",
+      "options": "umask=0077",
+      "device": "/dev/vda1",
+      "action": "esp"
+    }
+  ],
+  "hash": "916828a2ec7ee351ac3ece669a46d15170eb360cfdd994936490d69dd6423be5"
+}

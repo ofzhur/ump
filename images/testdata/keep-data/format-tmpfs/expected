@@ -1,0 +1,6 @@
+refused: --format /tmp: not a volume of this machine (tmpfs, tmpfs)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "--format /tmp: not a volume of this machine (tmpfs, tmpfs)"
+}

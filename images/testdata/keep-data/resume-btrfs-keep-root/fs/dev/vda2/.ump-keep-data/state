@@ -1,0 +1,7 @@
+device=/dev/vda2
+subvolume=@
+stamp=20260101-000000
+root=aside
+aside=@-old-20260101-000000
+uuid_old=
+uuid_new=

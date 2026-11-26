@@ -1,0 +1,6 @@
+refused: the interrupted installation replaced the old root on /dev/mapper/vg0-root already: --keep-root has nothing left to keep; run it without --keep-root
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the interrupted installation replaced the old root on /dev/mapper/vg0-root already: --keep-root has nothing left to keep; run it without --keep-root"
+}

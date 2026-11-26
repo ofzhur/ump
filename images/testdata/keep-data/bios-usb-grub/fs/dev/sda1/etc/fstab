@@ -1,0 +1,7 @@
+/dev/sda1 / ext4 errors=remount-ro 0 1
+/dev/sda2 none swap sw 0 0
+/swapfile none swap sw 0 0
+/dev/sda3 /home ext4 defaults 0 2
+/dev/sdb1 /srv/big xfs noatime,nofail 0 2
+/dev/sdc1 /mnt/usb ext4 noauto 0 0
+proc /proc proc defaults 0 0

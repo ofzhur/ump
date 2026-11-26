@@ -1,0 +1,6 @@
+refused: the old crypttab's LABEL=plain (vault) names several devices here (/dev/mapper/vg0-data, /dev/vda4)
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old crypttab's LABEL=plain (vault) names several devices here (/dev/mapper/vg0-data, /dev/vda4)"
+}

@@ -419,6 +419,14 @@ type entryOptions struct {
 	// users where root cannot log in (loginUsers); root and ump when
 	// empty.
 	users []string
+	// keepData says that the way in is for a keep-data installation: a
+	// provider's stock installation, which erases the machine, is not
+	// one, and where it would be the only one the refusal says so; and
+	// the running system, which has the volumes that are kept mounted,
+	// is shut down over SSH before a provider resets the server, where
+	// it lets UMP in (shutDownFirst); on the direct way, which is a jump
+	// and no shutdown, a line says what becomes of it.
+	keepData bool
 }
 
 // imageEntry is how a server was brought into the UMP rescue system and
@@ -528,6 +536,11 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 				return nil, err
 			}
 			fmt.Fprintf(a.stderr, "Loading the UMP rescue image from %s on %s, without the provider's rescue system.\n", imageURL, m.Name)
+			if o.keepData {
+				// the jump is no shutdown, and the volumes that are kept are
+				// mounted there
+				fmt.Fprintf(a.stderr, "The running system of %s ends with the jump: its file systems are synced and remounted read-only before it, its services are not stopped.\n", m.Name)
+			}
 			if err := a.enterImage(ctx, user, addr, identities, false, imageURL, hostname, keys); err != nil {
 				return nil, err
 			}
@@ -547,6 +560,8 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		if !hasRescue {
 			if si, ok := prov.(provider.StockInstaller); ok && o.stock {
 				return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("Provider type %s has no rescue system and the running system does not let UMP in", m.Provider))
+			} else if ok && o.keepData {
+				return nil, withExit(exitUnreachable, keepNoWay("no root access to "+addr+" over SSH", fmt.Sprintf("provider type %s has no rescue system", m.Provider)))
 			}
 			return nil, withExit(exitUnreachable, fmt.Errorf("no root access to %s over SSH, and provider type %s has no rescue system: ump installs such a server only through its running system, so it must let UMP in (as root or a sudo user, with one of your keys, ~/.ssh or the ssh-agent, or UMP's own, ump config key show); put one there, at the provider when the server is created, and run this again. Nothing was changed", addr, m.Provider))
 		}
@@ -577,14 +592,37 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 	if kr, ok := prov.(provider.KeylessRescue); ok && kr.RescueTakesNoKey(m) {
 		if si, ok := prov.(provider.StockInstaller); ok && o.stock && addr != "" {
 			return a.stockThenImage(ctx, m, si, keys, keyPath, imageURL, hostname, fmt.Sprintf("The provider's rescue system of %s takes no SSH key", m.Name))
+		} else if ok && o.keepData && addr != "" {
+			// with --via provider the running system was not asked
+			first := "no root access to " + addr + " over SSH"
+			if o.via == "provider" {
+				first = "--via provider leaves the running system of " + addr + " aside"
+			}
+			return nil, withExit(exitUnreachable, keepNoWay(first, fmt.Sprintf("the provider's rescue system of %s takes no SSH key", m.Name)))
 		}
 		return nil, withExit(exitUnreachable, fmt.Errorf("the provider's rescue system of %s takes no SSH key (the password goes by mail), so UMP could not get in by itself; give UMP root access to the running system (UMP's key in root's authorized_keys, see ump config key) for the direct way, or use ump server rescue --no-image with the mailed password", m.Name))
 	}
 	if err := ask(fmt.Sprintf("Boot %s into the UMP rescue system through the provider's rescue system?", describeRef(m))); err != nil {
 		return nil, err
 	}
+	// the provider's way in is a reset; a system whose volumes are kept
+	// is shut down before it, where it lets UMP in
+	down := false
+	if o.keepData {
+		users := o.users
+		if len(users) == 0 {
+			users = []string{"root", defaultAdmin}
+		}
+		down = a.shutDownFirst(ctx, m, addr, users, keyPath, o.via != "provider")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	info, user, _, wasUp, err := a.enableProviderRescue(ctx, m, rs, pw, keys, keyPath, keyPaths, out, false)
 	if err != nil {
+		if down {
+			return nil, fmt.Errorf("%w; the running system of %s was shut down for it: ump server reboot %s --hard starts it again", err, m.Name, m.Name)
+		}
 		return nil, err
 	}
 	if info.Address == "" {
@@ -612,6 +650,78 @@ func (a *app) bringToImage(cmd *cobra.Command, m provider.Machine, prov provider
 		return nil, err
 	}
 	return &imageEntry{addr: info.Address, user: "root", version: version, via: "provider", info: info}, nil
+}
+
+// keepDownWait is how long a running system that ump shut down over SSH
+// may take to be down before its provider resets the server as it is,
+// and keepDownGrace how long ump waits once it answers nothing any
+// more: a system that takes its network down on the way unmounts its
+// file systems after that.
+var (
+	keepDownWait  = 5 * time.Minute
+	keepDownGrace = 10 * time.Second
+)
+
+// shutDownFirst shuts the running system of m down over SSH before its
+// provider resets the server into the rescue system, for an
+// installation that keeps the volumes that system has mounted
+// (keep-data): its services end as they would at any shutdown and its
+// file systems are unmounted, where a reset would cut them off. The
+// system is halted, not switched off, so that the provider's reset
+// finds a machine with its power on. ump waits until it is down: until
+// its SSH port neither answers nor refuses (a kernel that still runs
+// refuses once the SSH server ended), keepDownWait at most. A system
+// that does not let UMP in (tried says that the caller found that out
+// already), one whose shutdown fails and one that is not down in time
+// are left to the provider's reset as they run, and a line says so. It
+// reports whether the system is down.
+func (a *app) shutDownFirst(ctx context.Context, m provider.Machine, addr string, users []string, keyPath string, tried bool) bool {
+	hard := func(why string) bool {
+		fmt.Fprintf(a.stderr, "%s: the provider resets %s hard, as it runs.\n", why, m.Name)
+		return false
+	}
+	if tried || addr == "" {
+		return hard("The running system does not let UMP in to shut it down first")
+	}
+	fmt.Fprintf(a.stderr, "Checking root access to %s over SSH, to shut the running system down first ...", addr)
+	identities := append([]string{keyPath}, sshkey.DefaultIdentityFiles()...)
+	user, p, ok, _ := a.probeAdmin(ctx, users, addr, identities, false)
+	switch {
+	case !ok:
+		fmt.Fprintf(a.stderr, " no (tried %s).\n", strings.Join(users, ", "))
+		return hard("The running system does not let UMP in to shut it down first")
+	case p.version != "":
+		fmt.Fprintf(a.stderr, " %s runs the UMP rescue system %s: no system to shut down.\n", m.Name, p.version)
+		return false
+	}
+	command := "systemctl halt || shutdown -H now"
+	if !p.root {
+		command = "sudo -n sh -c " + shellJoin([]string{command})
+	}
+	argv := withSSHOptions(a.sshTo(user, addr, identities, false, true, []string{command}), batchOptions(10*time.Second)...)
+	code, err := a.sshExec(ctx, argv, nil, io.Discard, io.Discard)
+	if err != nil || code != 0 && code != 255 {
+		fmt.Fprintf(a.stderr, " yes, as %s, but the shutdown failed (exit status %d).\n", user, code)
+		return hard("The running system was not shut down")
+	}
+	fmt.Fprintf(a.stderr, " yes; shutting it down as %s (up to %s) ...", user, fmtWait(keepDownWait))
+	start := time.Now()
+	for a.answers(ctx, addr) || a.refused(ctx, addr) {
+		if time.Since(start) > keepDownWait {
+			fmt.Fprintln(a.stderr, " not down yet.")
+			return hard(fmt.Sprintf("The running system is not down after %s", fmtWait(keepDownWait)))
+		}
+		if err := sleepCtx(ctx, waitPoll); err != nil {
+			fmt.Fprintln(a.stderr)
+			return false
+		}
+	}
+	if err := sleepCtx(ctx, keepDownGrace); err != nil {
+		fmt.Fprintln(a.stderr)
+		return false
+	}
+	fmt.Fprintf(a.stderr, " down after %s.\n", time.Since(start).Round(time.Second))
+	return true
 }
 
 // waitedRescue is the provider's way for a provider whose rescue system

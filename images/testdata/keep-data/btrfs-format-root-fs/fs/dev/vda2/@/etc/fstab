@@ -1,0 +1,3 @@
+/dev/sdz2 / btrfs subvol=@ 0 0
+UUID=715fc437-210c-5242-bc49-5a07f9b90747 /home btrfs subvol=@home 0 0
+UUID=769B-CE7F  /boot/efi  vfat  umask=0077  0 1

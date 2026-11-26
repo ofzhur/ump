@@ -1,0 +1,16 @@
+refused: an old system's files are on /dev/sdb2 (Debian GNU/Linux 7 (wheezy)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "an old system's files are on /dev/sdb2 (Debian GNU/Linux 7 (wheezy)), but the /etc/fstab there does not mount it at /: the root is not identified; --root DEVICE names it",
+  "candidates": [
+    {
+      "device": "/dev/sdb2",
+      "subvolume": "",
+      "system": "Debian GNU/Linux 7 (wheezy)",
+      "hostname": "",
+      "resume": false,
+      "consistent": false
+    }
+  ]
+}

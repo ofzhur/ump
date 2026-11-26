@@ -1,0 +1,152 @@
+{
+ "blockdevices": [
+  {
+   "name": "sda",
+   "kname": "sda",
+   "path": "/dev/sda",
+   "type": "disk",
+   "size": 214748364800,
+   "pttype": "gpt",
+   "tran": "virtio",
+   "children": [
+    {
+     "name": "sda1",
+     "kname": "sda1",
+     "path": "/dev/sda1",
+     "type": "part",
+     "size": 314572800,
+     "fstype": "vfat",
+     "uuid": "3E86-EC85",
+     "partuuid": "12e6e457-a09c-5332-ac42-70b93ca32b55",
+     "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sda2",
+     "kname": "sda2",
+     "path": "/dev/sda2",
+     "type": "part",
+     "size": 2097152,
+     "partuuid": "42250a61-6d27-55d4-8bc1-fb501bc8207c",
+     "parttype": "21686148-6449-6e6f-744e-656564454649",
+     "pttype": "gpt",
+     "tran": "virtio"
+    },
+    {
+     "name": "sda3",
+     "kname": "sda3",
+     "path": "/dev/sda3",
+     "type": "part",
+     "size": 161061273600,
+     "fstype": "LVM2_member",
+     "uuid": "AWqBkf-aNNy-kuRJ-THBK-NOZW-ZHcX-yPhspz",
+     "partuuid": "f13f815a-3378-5a7f-9228-aa2bc2e3e8a1",
+     "parttype": "e6d6d379-f507-44c2-a23c-238f2a3df928",
+     "pttype": "gpt",
+     "tran": "virtio",
+     "children": [
+      {
+       "name": "sys-root",
+       "kname": "dm-0",
+       "path": "/dev/mapper/sys-root",
+       "type": "lvm",
+       "size": 8589934592,
+       "fstype": "ext4",
+       "uuid": "95df4a58-77cd-5c92-8c9e-ebf4f7c4e8ff"
+      },
+      {
+       "name": "sys-usr",
+       "kname": "dm-1",
+       "path": "/dev/mapper/sys-usr",
+       "type": "lvm",
+       "size": 12884901888,
+       "fstype": "ext4",
+       "uuid": "53218ee5-e860-5404-90ca-2f054b9ac16f"
+      },
+      {
+       "name": "sys-var",
+       "kname": "dm-2",
+       "path": "/dev/mapper/sys-var",
+       "type": "lvm",
+       "size": 21474836480,
+       "fstype": "xfs",
+       "uuid": "b44449d8-270d-543a-bf72-88aa86bdc0ad"
+      },
+      {
+       "name": "sys-docker",
+       "kname": "dm-3",
+       "path": "/dev/mapper/sys-docker",
+       "type": "lvm",
+       "size": 42949672960,
+       "fstype": "xfs",
+       "uuid": "a9d927f4-dfd2-5766-9efc-e97d28c60dde"
+      },
+      {
+       "name": "sys-home",
+       "kname": "dm-4",
+       "path": "/dev/mapper/sys-home",
+       "type": "lvm",
+       "size": 32212254720,
+       "fstype": "ext4",
+       "uuid": "fb127515-8ca0-524a-8bb3-c5c748af5873"
+      },
+      {
+       "name": "sys-pool_tmeta",
+       "kname": "dm-5",
+       "path": "/dev/mapper/sys-pool_tmeta",
+       "type": "lvm",
+       "size": 1073741824
+      },
+      {
+       "name": "sys-thin",
+       "kname": "dm-6",
+       "path": "/dev/mapper/sys-thin",
+       "type": "lvm",
+       "size": 21474836480,
+       "fstype": "ext4",
+       "uuid": "41a4e43f-57fb-5239-8444-7eae17ac9e1c"
+      },
+      {
+       "name": "sys-spare",
+       "kname": "dm-7",
+       "path": "/dev/mapper/sys-spare",
+       "type": "lvm",
+       "size": 5368709120,
+       "fstype": "ext4",
+       "uuid": "b8e14720-19a9-5f5c-a325-4461dd13bd45"
+      },
+      {
+       "name": "sys-was_ext4",
+       "kname": "dm-8",
+       "path": "/dev/mapper/sys-was_ext4",
+       "type": "lvm",
+       "size": 5368709120,
+       "fstype": "xfs",
+       "uuid": "1c861154-b180-5092-969d-f2fca6996371"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdb",
+   "kname": "sdb",
+   "path": "/dev/sdb",
+   "type": "disk",
+   "size": 107374182400,
+   "fstype": "ext4",
+   "uuid": "c227728e-95d2-5cc8-a6f4-768104907412",
+   "label": "scratch",
+   "tran": "virtio"
+  },
+  {
+   "name": "sdc",
+   "kname": "sdc",
+   "path": "/dev/sdc",
+   "type": "disk",
+   "size": 107374182400,
+   "tran": "virtio"
+  }
+ ]
+}

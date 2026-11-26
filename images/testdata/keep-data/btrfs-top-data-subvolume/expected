@@ -1,0 +1,6 @@
+refused: the old root is the top of the btrfs /dev/vda2, which holds the subvolumes home, home/.snapshots: made anew, the file system would take them with it; --keep-root keeps the file system, and the old system moves into /old-root-DATE
+--- the plan (--plan)
+{
+  "version": 1,
+  "refused": "the old root is the top of the btrfs /dev/vda2, which holds the subvolumes home, home/.snapshots: made anew, the file system would take them with it; --keep-root keeps the file system, and the old system moves into /old-root-DATE"
+}

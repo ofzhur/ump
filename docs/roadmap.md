@@ -45,6 +45,14 @@ As of November 2026, ump does what the [README](../README.md) and the
   command line, UEFI and BIOS boot; `--dry-run`; Ubuntu 26.04, 24.04
   and 22.04 and Debian 13 and 12 from UMP's base images, NixOS 25.11,
   Arch Linux and CachyOS (experimental); `ump ssh`.
+- **Keeping the data:** `ump server reinstall --keep-data` (and
+  `multiinstall`) replaces the old system and leaves its data: the old
+  root found from its own fstab, formatted or with `--keep-root` moved
+  aside, every other volume kept and mounted where it was (plain
+  partitions, LVM, md, LUKS data volumes, btrfs subvolumes, ZFS pools),
+  a plan with a hash shown and confirmed before anything is written;
+  Ubuntu and Debian as the new system ([keeping the
+  data](keep-data.md)).
 - **Provisioning:** Ansible from the infrastructure repository: `ump
   server reinstall` (`--group`) puts the server into the inventory, as
   a host file in the repository or in a central storage, or with ump as
@@ -95,6 +103,13 @@ As of November 2026, ump does what the [README](../README.md) and the
   cloud-init images may follow as userdata types.
 - **Layouts.** LUKS with remote unlock, btrfs subvolumes, swap on a plain
   partition.
+- **Keeping the data, the rest.** An encrypted root and a ZFS root;
+  NixOS, Arch Linux and CachyOS as the new system; LUKS volumes opened
+  during the installation; unattended installations that keep the
+  data; a shutdown of the running system before the kexec of the direct
+  way, which today syncs and remounts read-only and stops no service;
+  runs on real hardware, which the QEMU test's machines stand in for
+  so far ([what was tested](keep-data.md#tests)).
 - **Network.** IPv6 addresses from the provider's network information
   where the rescue system cannot see them; bonds and VLANs.
 - **A way into locked-out servers.** At DigitalOcean (and for servers
