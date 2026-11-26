@@ -655,12 +655,21 @@ Everything an installation needs; nothing comes from
 - `os/freebsd-15.1/<arch>/`: `base.txz`, `kernel.txz`, `packages.tar`
   (the packages as FreeBSD built them) and the manifest (`"family":
   "freebsd"`, the release, the rescue image it is installed from, the
-  packages with their checksums);
+  packages with their checksums). Beside them is their source, which
+  no installation fetches: `src.txz`, the release's own, and
+  `packages-source.tar`, the ports and distribution files of the
+  packages whose licenses ask for it (bash, readline, gettext-runtime,
+  and python312, which is linked with readline);
 - `rescue/freebsd-15.1/<arch>/`: the UMP FreeBSD rescue image,
   `disk.img.zst`, 69 to 90 MB, with its manifest (the memory it needs).
   One per release, because the pool is made by the release that
-  imports it ([the image](../images/freebsd/README.md));
+  imports it ([the image](../images/freebsd/README.md)). Its manifest
+  names the same `src.txz` as the source of its FreeBSD;
 - `install/freebsd/install.sh`: the installer for FreeBSD.
+
+FreeBSD and its packages stay under their own licenses; which package
+asks for its source, and what the storage has for it, is in
+[licenses and sources](../images/freebsd/README.md#licenses-and-sources).
 
 `make freebsd-image` builds the images, on Linux, without a FreeBSD
 host; `images/test-install.sh freebsd-15.1` runs the chain in QEMU

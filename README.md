@@ -286,4 +286,5 @@ running your infrastructure with it, write to the address above.
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Use it,
 change it, ship it, commercially or not; keep the license and the
 notice with copies, and name your changes. The images it installs stay
-under their own licenses (Ubuntu, Debian and the software in them).
+under their own licenses (Ubuntu, Debian, FreeBSD and the software in
+them).

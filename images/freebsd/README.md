@@ -31,18 +31,25 @@ $ make freebsd-image FREEBSD_LIST=15.1 FREEBSD_ARCH=arm64   # one release, one a
 ```
 
 or, on a Debian trixie host as root, `images/freebsd/build.sh arm64 15.1`.
-[`build.sh`](build.sh) takes three things from FreeBSD:
+[`build.sh`](build.sh) takes these from FreeBSD:
 
-- **The distribution sets** `base.txz` and `kernel.txz` of the release,
-  from `download.freebsd.org`, checked against
-  [`SHA256SUMS`](SHA256SUMS), which has their checksums from each
-  release's `MANIFEST`. Another release needs its lines there first.
+- **The distribution sets** `base.txz` and `kernel.txz` of the release
+  and its source, `src.txz`, from `download.freebsd.org`, checked
+  against [`SHA256SUMS`](SHA256SUMS), which has their checksums from
+  each release's `MANIFEST`. Another release needs its lines there
+  first.
 - **The package catalogue** of the release's quarterly repository at
   `pkg.FreeBSD.org`. It must be signed by a key the release trusts: the
   fingerprints are those of `/usr/share/keys/pkg/trusted` in `base.txz`.
 - **Packages**, each checked against the catalogue's checksum: those of
   [`packages.txt`](packages.txt) with what they depend on, for the
   installed system, and `pkg` and `jq` for the rescue system.
+- **The source of the packages** whose licenses ask for it
+  ([below](#licenses-and-sources)): the port each was built from, out
+  of FreeBSD's ports tree (`git.FreeBSD.org`) at the commit the package
+  names, and the files that port's `distinfo` names, from FreeBSD's
+  distribution files (`distcache.FreeBSD.org`), each checked against
+  the `distinfo`.
 
 The memory root is `base.txz` without the patterns of
 [`rescue-exclude.txt`](rescue-exclude.txt), the modules of `kernel.txz`
@@ -50,10 +57,12 @@ without those of the same list, three files from the packages, and
 [`overlay/`](overlay). `tar` unpacks, Debian's `makefs` makes the two
 UFS file systems, `mkfs.vfat` and `mtools` the FAT one, `sgdisk` the
 partition table. `VERSION` (default: the date), `OUT`, `MIRROR`,
-`PKG_MIRROR` and `PKG_BRANCH` can be set in the environment. A second
-build takes the sets and the packages that the first left in `out/`,
-when their checksums still hold, and downloads little more than the
-catalogue; an image then takes about a minute.
+`PKG_MIRROR`, `PKG_BRANCH`, `DISTCACHE` and `PORTS_GIT` can be set in
+the environment. A second build takes the sets, the source and the
+packages that the first left in `out/`, when their checksums still
+hold, and the distribution files and ports of `out/cache/`, and
+downloads little more than the catalogue; an image then takes about a
+minute.
 
 The result is two directories per release and architecture, named as
 the storage has them. `images/freebsd/out/rescue/freebsd-<release>/<arch>/`
@@ -62,7 +71,7 @@ is the rescue image:
 | File | What |
 |---|---|
 | `disk.img.zst` | the disk image, zstd-compressed |
-| `manifest.json` | version, `system` (`freebsd`), release, kernel, what the image can do (`features`), the memory it needs (`memory_mb`), the size of the disk image (`disk_mb`), SHA-256 and size of `disk.img.zst`; uploaded last |
+| `manifest.json` | version, `system` (`freebsd`), release, kernel, what the image can do (`features`), the memory it needs (`memory_mb`), the size of the disk image (`disk_mb`), SHA-256 and size of `disk.img.zst`, where the storage has the source of its FreeBSD (`source`: the path of `src.txz`, its SHA-256 and size), and the packages whose files are in the image, with their licenses (`packages`); uploaded last |
 | `SHA256SUMS` | the same for `sha256sum -c` |
 | `packages.txt` | the packages whose files are in the image |
 
@@ -73,7 +82,9 @@ puts onto the disks. FreeBSD is not unpacked from an image UMP builds:
 |---|---|
 | `base.txz`, `kernel.txz` | the release's distribution sets, as FreeBSD publishes them |
 | `packages.tar` | FreeBSD's packages, each as `NAME-VERSION.pkg`, in a tar without compression (they are compressed themselves) |
-| `manifest.json` | version, `os` (`freebsd-15.1`), `family` (`freebsd`), release, kernel, the rescue image the system is installed from (`rescue`), the size of the installed system (`unpacked_mb`), SHA-256 and size of the three files, and every package: name, version, file, SHA-256, size, and whether `packages.txt` names it (`wanted`) or another package needs it |
+| `src.txz` | the release's source, as FreeBSD publishes it: the source of both sets |
+| `packages-source.tar` | the source of the packages whose licenses ask for it ([below](#licenses-and-sources)), in a tar without compression |
+| `manifest.json` | version, `os` (`freebsd-15.1`), `family` (`freebsd`), release, kernel, the rescue image the system is installed from (`rescue`), the size of the installed system (`unpacked_mb`), SHA-256 and size of the five files, and every package: name, version, file, SHA-256, size, whether `packages.txt` names it (`wanted`) or another package needs it, the port it was built from (`origin`), its `licenses`, and whether its source is in `packages-source.tar` (`source`) |
 | `SHA256SUMS`, `packages.txt` | for people |
 
 With both in the storage, an installation needs neither
@@ -88,6 +99,86 @@ the day the image was built.
 beside the Linux rescue image and the other systems; see
 [the storage layout](../rescue/README.md#your-own-storage).
 `images/upload.sh rescue os` publishes the images alone.
+
+## Licenses and sources
+
+UMP's [license](../../LICENSE) covers this directory: the scripts, the
+lists and the overlay. What they put into the storage is FreeBSD's and
+stays under its own licenses, and it is published with its source
+wherever a license asks for that, in the same place as the binaries.
+No installer fetches a source: it is there for whoever takes the
+binaries from the storage.
+
+**FreeBSD itself**, the two sets and what the rescue image has of
+them, is under BSD licenses for the most part, as `/COPYRIGHT` of
+`base.txz` says, with parts under others: ZFS and DTrace under the
+CDDL, the C++ library under the Apache license with LLVM's exceptions,
+a few programs and files under GNU licenses. `src.txz` is the release's
+own source of all of it, taken from where the sets are and checked
+against [`SHA256SUMS`](SHA256SUMS) as they are. The storage has it
+beside them, `os/freebsd-<release>/<arch>/src.txz`: one file per
+release, the same for both architectures.
+
+**The packages** are FreeBSD's as well, as its repository has them,
+each with its license inside (`/usr/local/share/licenses/NAME-VERSION/`).
+[`licenses.txt`](licenses.txt) has the license names of FreeBSD's
+ports, each with whether it asks whoever passes a program on for the
+source. `build.sh` decides by it, from the licenses the signed
+catalogue names for a package, and stops at a package under a license
+the list lacks and at one that names none: somebody reads the license
+first. Of today's packages:
+
+| Package | Licenses | With its source |
+|---|---|---|
+| `bash` | GPLv3+ | yes |
+| `readline` | GPLv3 | yes |
+| `gettext-runtime` | GPLv3+ and LGPL21+ | yes |
+| `python312` | PSFL | yes: its module `readline` is linked with the library of `readline`, and a line of `licenses.txt` says so |
+| `expat`, `libffi` | MIT | no |
+| `indexinfo`, `mpdecimal`, `pkg` | BSD2CLAUSE | no |
+| `sudo` | its own: ISC, with files under BSD licenses and zlib's | no |
+| `python3` | none: symbolic links to the programs of `python312` | no |
+
+`packages-source.tar`, beside `packages.tar`, has that source as
+FreeBSD built the packages from it: a `README`, and per package
+`NAME-VERSION/` with
+
+- `ports/`: the port's directory of FreeBSD's ports tree as it was at
+  the commit the package names (`ports_top_git_hash`), and the
+  directories its makefiles take files from (`devel/gettext` for
+  `gettext-runtime`): the Makefile, the `distinfo`, FreeBSD's patches,
+  the packing list; with them the tree's `COPYRIGHT`;
+- `distfiles/`: every file the `distinfo` names, the authors' release
+  and their patches, each with the size and the SHA-256 the `distinfo`
+  has for it.
+
+The directory comes out of the ports tree's repository by that commit,
+so git's hashes hold for it from the commit down; the commit is the one
+the catalogue has for the package. FreeBSD's distribution files are
+served without TLS, as the ports tree has their address, and the
+`distinfo` is what vouches for them. Nothing is built from the source
+here: that it gives the package again is FreeBSD's word, the port and
+its `distinfo` at that commit.
+
+**The rescue image** has the release's kernel and a part of its base,
+so its source is the same `src.txz`: the image's manifest names it
+(`source`), and so does `/etc/ump-rescue-source` in the image, with the
+checksum. The image keeps FreeBSD's notices, `/COPYRIGHT` and the
+license files of `/usr/share/doc` (`legal`, `llvm`, `atf`, `kyua`), and
+has the licenses of `pkg`, `jq` and `oniguruma` beside the files taken
+from them, in `/usr/local/share/licenses`. None of the three asks for
+its source (BSD2CLAUSE, MIT, BSD2CLAUSE); one that did would have it in
+a `packages-source.tar` beside `disk.img.zst`.
+
+In a build's output the sources are `src.txz` and `packages-source.tar`
+of `out/os/freebsd-<release>/<arch>/`, and what was downloaded for the
+second stays in `out/cache/`. `build.sh` ends with
+[`test-sources.sh`](test-sources.sh), which fails a build whose
+packages are not all decided, or whose sources are not all there
+([Testing](#testing)), and [`images/upload.sh`](../upload.sh) refuses
+the sets without `src.txz`, a manifest that names a
+`packages-source.tar` which is not there, and a rescue image without
+the `src.txz` of its build.
 
 ## The disk image
 
@@ -162,7 +253,11 @@ over SSH.
   an installer takes the boot code from the system it installed.
 - **From packages:** `pkg-static`, with which an installer adds
   packages to a new system, and `jq` with its two libraries, since the
-  base has no tool for JSON.
+  base has no tool for JSON; the licenses of the three packages.
+- **Notices:** `/COPYRIGHT` and the license files of `/usr/share/doc`,
+  as `base.txz` has them, and `/etc/ump-rescue-source`: what the
+  image is made of, and where the source is
+  ([Licenses and sources](#licenses-and-sources)).
 - **UMP's:** `/etc/ump-rescue-version`, the rc scripts
   [`ump_rescue_setup`](overlay/etc/rc.d/ump_rescue_setup) and
   [`ump_rescue_report`](overlay/etc/rc.d/ump_rescue_report),
@@ -256,6 +351,7 @@ log is written after that.
 $ make freebsd-test TEST_ARCH=arm64                        # both releases; default: this machine's architecture
 $ images/freebsd/test-boot.sh amd64 14.5                   # one image, with UEFI and then BIOS
 $ FIRMWARE=bios images/freebsd/test-boot.sh amd64 15.1     # one firmware
+$ make freebsd-sources-test                                # the sources of every built image; no machine
 ```
 
 [`test-boot.sh`](test-boot.sh) stages a disk as above (the image,
@@ -270,8 +366,9 @@ firmware:
   mounted, the boot config in `/etc/ump/boot`, sshd's settings, every
   tool an installer calls, `jq` and `pkg-static` running, `pf.ko`
   loading and `pfctl` taking a ruleset, the time zones, the CA
-  certificates where OpenSSL finds them, a GPT, a FAT32 file system
-  and a ZFS pool made on a second disk, the drivers
+  certificates where OpenSSL finds them, FreeBSD's notices, the
+  packages' licenses and `/etc/ump-rescue-source`, a GPT, a FAT32 file
+  system and a ZFS pool made on a second disk, the drivers
   of server NICs and storage controllers in the kernel or loading
   (QEMU only has virtio, and a driver loads without its hardware), and
   no program or library left without a library it needs. After the
@@ -297,6 +394,20 @@ too is not known yet. The disk is written by `zstd`, `sgdisk` and
 the host lacks one of them. `MEM`, `TIMEOUT`, `PORT` and `KEEP=1` (the
 serial logs stay) are in the script's header.
 
+[`test-sources.sh`](test-sources.sh) needs no machine: it reads the two
+directories of a build, with `tar`, `zstd` and `jq`. `src.txz` must
+have the checksum `SHA256SUMS` pins, and the manifests must name it.
+Every package of `packages.tar` is asked for its licenses, in its own
+manifest, and `licenses.txt` must decide it. Each package that goes
+out with its source must have its port in `packages-source.tar`, with
+the ports tree's `COPYRIGHT` and a `distinfo`, and under `distfiles/`
+every file the `distinfo` names, with that size and SHA-256, and no
+other; the distribution files the
+package itself says it was built from (`catalog.mk`, beside its
+license) must be among them. The same holds for the packages whose
+files are in the rescue image, by the licenses its manifest has for
+them.
+
 ## Memory
 
 The memory root is held unpacked: the loader hands it to the kernel as
@@ -314,6 +425,7 @@ what the running system writes. On the builds of 2026-11-26:
 | `memory_mb` | 592 | 582 | 524 | 514 |
 | free after a boot with that much | 167 MB | 173 MB | 199 MB | 201 MB |
 | the sets and `packages.tar` | 247 MB | 249 MB | 223 MB | 224 MB |
+| their source: `src.txz` and `packages-source.tar` | 241 + 45 MB | 215 + 45 MB | 241 + 45 MB | 215 + 45 MB |
 
 `memory_mb` is the memory root, twice the kernel, and 288 MB for the
 running system, an installer and ZFS's cache; whatever stages the image
@@ -337,3 +449,7 @@ firmware's time.
 - The image is the release as published, without its patches, and the
   packages are a quarterly snapshot of the build day; the manifests pin
   what was built.
+- Whether a package asks for its source is decided by the license its
+  port names. A package linked with the library of another one that
+  does is found by reading, not by the build: `python312` has its line
+  in `licenses.txt`, and a new package needs the same look.
