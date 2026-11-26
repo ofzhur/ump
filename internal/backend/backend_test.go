@@ -653,6 +653,40 @@ func TestLocalUnlockDots(t *testing.T) {
 	}
 }
 
+// TestLocalListGone: a file deleted while the home is listed (here a
+// link to nothing: there when its directory is read, gone when it is)
+// is left out and the rest listed. The listing came back empty and
+// without an error, and a PXE server reading it dropped its site.
+func TestLocalListGone(t *testing.T) {
+	dir := t.TempDir()
+	b := &Local{Dir: dir}
+	ctx := context.Background()
+	for _, p := range []string{".pxe/fra1/site.json", ".pxe/fra1/outcome/web-07.json", "state.yaml"} {
+		if _, err := b.Write(ctx, p, []byte("{}\n"), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arms := filepath.Join(dir, ".pxe", "fra1", "arm")
+	if err := os.MkdirAll(arms, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "nothing"), filepath.Join(arms, "web-07.json")); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		got = append(got, e.Path)
+	}
+	sort.Strings(got)
+	if want := ".pxe/fra1/outcome/web-07.json .pxe/fra1/site.json state.yaml"; strings.Join(got, " ") != want {
+		t.Fatalf("listed %q, want %q", got, want)
+	}
+}
+
 func TestValidPath(t *testing.T) {
 	for p, want := range map[string]bool{
 		"config.yaml":                  true,
