@@ -1,0 +1,227 @@
+#!/bin/sh
+#
+# Configure the UMP FreeBSD rescue system from its boot config. Runs once
+# early at boot, before the hostname, the network and sshd.
+#
+# The boot config is what the UMP Linux rescue system wrote beside the
+# image: the directory ump of the FAT partition with the GPT label
+# umpboot, with the two files a network boot of the Linux rescue image
+# takes (images/rescue/README.md), under the same names:
+#
+#   ump/cmdline            words of a kernel command line:
+#     ump.hostname=NAME
+#     ump.mac=aa:bb:cc:dd:ee:ff            the interface to configure
+#     ump.ip=203.0.113.10/26,203.0.113.1   IPv4 address/prefix and gateway (on-link)
+#     ump.ip6=2001:db8::2/64,fe80::1       IPv6 address/prefix and gateway
+#     ump.dns=10.0.0.53,10.0.0.54          resolvers; default 1.1.1.1 and 8.8.8.8; dhcp
+#                                          for the DHCP lease's
+#     ump.boot-mac=aa:bb:cc:dd:ee:ff       DHCP on that interface alone
+#     ump.time=EPOCH                       the clock, when it is more than 5 minutes off
+#     ump.authorized_keys=BASE64           authorized_keys for root, base64 (one line)
+#   ump/authorized_keys    root's authorized_keys; it wins over the word
+#
+# Every file of the directory but boot.log is copied to /etc/ump/boot
+# (0700), where the installer finds its plan. A word that cmdline lacks
+# is looked up in the kernel environment (kenv), which the loader fills
+# from its loader.conf, under UEFI from efi/freebsd/loader.env of the
+# same partition, and from what is set at its prompt. Without ump.ip,
+# ump.ip6 and ump.boot-mac every Ethernet interface uses DHCP.
+#
+# The settings go to /etc/rc.conf.local, which the scripts that follow
+# read, and what was decided to /var/log/ump-rescue-setup.log.
+
+# PROVIDE: ump_rescue_setup
+# REQUIRE: FILESYSTEMS kld devmatch
+# BEFORE: hostname netif routing sshd
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="ump_rescue_setup"
+desc="Configure the UMP rescue system from its boot config"
+rcvar="ump_rescue_setup_enable"
+start_cmd="ump_rescue_setup_start"
+stop_cmd=":"
+
+ump_boot=/etc/ump/boot
+ump_log=/var/log/ump-rescue-setup.log
+
+ump_note()
+{
+	echo "ump_rescue_setup: $*"
+	echo "$*" >> "$ump_log"
+}
+
+# ump_param NAME: the value of a word of cmdline, else of the kernel
+# environment
+ump_param()
+{
+	local w
+	for w in $ump_cmdline; do
+		case "$w" in
+		"$1="*) printf '%s' "${w#*=}"; return 0 ;;
+		esac
+	done
+	kenv -q "$1" 2>/dev/null
+}
+
+# ump_plain NAME VALUE CHARACTERS: the value when it has no other
+# character (rc.conf.local is read by the shell), else nothing, and a
+# note beside the output, which is the value
+ump_plain()
+{
+	case "$2" in
+	*[!$3]*) ump_note "$1=$2 is not what it should be; ignored" >&2 ;;
+	*) printf '%s' "$2" ;;
+	esac
+}
+
+# ump_iface MAC: the Ethernet interface with that address
+ump_iface()
+{
+	local i
+	for i in $(ifconfig -l ether); do
+		if [ "$(ifconfig "$i" ether | awk '$1 == "ether" {print $2}')" = "$1" ]; then
+			echo "$i"
+			return 0
+		fi
+	done
+	return 1
+}
+
+ump_rescue_setup_start()
+{
+	local mnt f n t off host keys ip4 ip6 dns mac bootmac iface g s
+
+	set -f
+	: > "$ump_log"
+	mkdir -p -m 700 "$ump_boot"
+	if [ -e /dev/gpt/umpboot ]; then
+		mnt="$(mktemp -d /tmp/umpboot.XXXXXX)"
+		if mount -t msdosfs -o ro,longnames /dev/gpt/umpboot "$mnt" 2>/dev/null; then
+			set +f
+			for f in "$mnt"/[Uu][Mm][Pp]/*; do
+				# whatever wrote the names, in capitals or not
+				n="$(basename "$f" | tr 'A-Z' 'a-z')"
+				[ -f "$f" ] && [ "$n" != boot.log ] && install -m 600 "$f" "$ump_boot/$n"
+			done
+			set -f
+			umount "$mnt"
+		else
+			ump_note "cannot mount /dev/gpt/umpboot: no boot config"
+		fi
+		rmdir "$mnt"
+	else
+		ump_note "no partition with the GPT label umpboot: no boot config"
+	fi
+	ump_cmdline=""
+	[ ! -f "$ump_boot/cmdline" ] || ump_cmdline="$(tr '\r\n' '  ' < "$ump_boot/cmdline")"
+
+	# a new board's clock is often years behind, and TLS then fails
+	t="$(ump_param ump.time)"
+	case "$t" in
+	"") ;;
+	*[!0-9]*) ump_note "ump.time=$t is not seconds since 1970" ;;
+	*)
+		off=$((t - $(date +%s)))
+		[ "$off" -ge 0 ] || off=$((-off))
+		if [ "$off" -gt 300 ]; then
+			date -f %s "$t" >/dev/null && ump_note "the clock was $off s off; set from ump.time"
+		fi
+		;;
+	esac
+
+	: > /etc/rc.conf.local
+	host="$(ump_plain ump.hostname "$(ump_param ump.hostname)" 'A-Za-z0-9.-')"
+	[ -z "$host" ] || echo "hostname=\"$host\"" >> /etc/rc.conf.local
+
+	mkdir -p -m 700 /root/.ssh
+	keys="$(ump_param ump.authorized_keys)"
+	if [ -s "$ump_boot/authorized_keys" ]; then
+		install -m 600 "$ump_boot/authorized_keys" /root/.ssh/authorized_keys
+	elif [ -n "$keys" ]; then
+		if printf '%s\n' "$keys" | b64decode -r > /root/.ssh/authorized_keys 2>/dev/null; then
+			chmod 600 /root/.ssh/authorized_keys
+		else
+			ump_note "ump.authorized_keys is not valid base64"
+			rm -f /root/.ssh/authorized_keys
+		fi
+	fi
+	[ -s /root/.ssh/authorized_keys ] || ump_note "no keys for root: nobody logs in over SSH"
+
+	ip4="$(ump_plain ump.ip "$(ump_param ump.ip)" '0-9./,')"
+	ip6="$(ump_plain ump.ip6 "$(ump_param ump.ip6)" '0-9A-Fa-f:/,')"
+	dns="$(ump_plain ump.dns "$(ump_param ump.dns)" '0-9A-Za-z:.,')"
+	[ -n "$dns" ] || dns="1.1.1.1,8.8.8.8"
+	mac="$(ump_plain ump.mac "$(ump_param ump.mac | tr 'A-F-' 'a-f:')" '0-9a-f:')"
+	bootmac="$(ump_plain ump.boot-mac "$(ump_param ump.boot-mac | tr 'A-F-' 'a-f:')" '0-9a-f:')"
+	iface=""
+	if [ -n "$ip4$ip6" ]; then
+		[ -z "$mac" ] || iface="$(ump_iface "$mac")" || ump_note "no interface has the address $mac of ump.mac"
+		# no interface named, or none with that address: the first Ethernet interface
+		[ -n "$iface" ] || iface="$(ifconfig -l ether | awk '{print $1}')"
+	elif [ -n "$bootmac" ]; then
+		iface="$(ump_iface "$bootmac")" || ump_note "no interface has the address $bootmac of ump.boot-mac"
+	fi
+	if [ -n "$ip4$ip6" ] && [ -n "$iface" ]; then
+		ump_note "$iface:${ip4:+ ump.ip=$ip4}${ip6:+ ump.ip6=$ip6}"
+		{
+			if [ -n "$ip4" ]; then
+				echo "ifconfig_${iface}=\"inet ${ip4%%,*}\""
+			else
+				echo "ifconfig_${iface}=\"up\""
+			fi
+			# the gateway on-link first, then the default route through it, so
+			# that an address with /32 works; defaultrouter would come first
+			case "$ip4" in
+			*,*)
+				g="${ip4#*,}"
+				echo "static_routes=\"umpgw umpdefault\""
+				echo "route_umpgw=\"-host $g -interface $iface\""
+				echo "route_umpdefault=\"default $g\""
+				;;
+			esac
+			[ -z "$ip6" ] || echo "ifconfig_${iface}_ipv6=\"inet6 ${ip6%%,*}\""
+			case "$ip6" in
+			*,[Ff][Ee]80:*)
+				echo "ipv6_static_routes=\"umpdefault\""
+				echo "ipv6_route_umpdefault=\"default ${ip6#*,}%$iface\""
+				;;
+			*,*)
+				g="${ip6#*,}"
+				echo "ipv6_static_routes=\"umpgw umpdefault\""
+				echo "ipv6_route_umpgw=\"-host $g -interface $iface\""
+				echo "ipv6_route_umpdefault=\"default $g\""
+				;;
+			esac
+			# the other interfaces up, without addresses
+			echo "ifconfig_DEFAULT=\"up\""
+		} >> /etc/rc.conf.local
+	elif [ -n "$bootmac" ] && [ -n "$iface" ]; then
+		ump_note "$iface: DHCP, the interface of ump.boot-mac"
+		{
+			echo "ifconfig_${iface}=\"SYNCDHCP\""
+			echo "ifconfig_DEFAULT=\"up\""
+		} >> /etc/rc.conf.local
+	else
+		ump_note "DHCP on every Ethernet interface"
+		echo "ifconfig_DEFAULT=\"SYNCDHCP\"" >> /etc/rc.conf.local
+	fi
+	if [ "$dns" != dhcp ]; then
+		# these resolvers, whatever a lease says
+		echo "resolvconf=NO" > /etc/resolvconf.conf
+		: > /etc/resolv.conf
+		for s in $(echo "$dns" | tr ',' ' '); do
+			echo "nameserver $s" >> /etc/resolv.conf
+		done
+	fi
+	set +f
+	# /etc/rc reads rc.conf again on SIGALRM, for the scripts that follow;
+	# started by hand, there is no /etc/rc to tell
+	case "$0" in
+	/etc/rc) kill -ALRM $$ ;;
+	esac
+}
+
+load_rc_config $name
+run_rc_command "$1"

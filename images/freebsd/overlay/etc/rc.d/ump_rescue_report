@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Leave a log of this boot of the UMP FreeBSD rescue system where the UMP
+# Linux rescue system can read it: ump/boot.log on the FAT partition with
+# the GPT label umpboot. A machine without a console whose FreeBSD rescue
+# system never answered tells there how far it came. The log is written
+# once the network scripts ran, whether they got an address or not: what
+# ump_rescue_setup decided, the interfaces, the routes, the resolvers,
+# the network and storage devices with the drivers that took them (none0
+# is a device without one), the disks and the kernel's messages. No log
+# after a boot means the kernel did not reach its rc scripts.
+
+# PROVIDE: ump_rescue_report
+# REQUIRE: NETWORKING
+# BEFORE: LOGIN
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="ump_rescue_report"
+desc="Write the boot log of the UMP rescue system to its boot partition"
+rcvar="ump_rescue_report_enable"
+start_cmd="ump_rescue_report_start"
+stop_cmd=":"
+
+ump_rescue_report_log()
+{
+	echo "UMP FreeBSD rescue system $(cat /etc/ump-rescue-version), $(uname -srm), $(hostname), written $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	echo; echo "== setup"; cat /var/log/ump-rescue-setup.log /etc/rc.conf.local
+	echo; echo "== interfaces"; ifconfig -a
+	echo; echo "== routes"; netstat -rn
+	echo; echo "== resolvers"; cat /etc/resolv.conf
+	echo; echo "== network and storage devices"
+	pciconf -lv | awk '/^[a-z]/ {dev = $0} /class *= (network|mass storage)/ {print dev; getline; print}'
+	echo; echo "== disks"; geom disk list
+	echo; echo "== kernel messages"; dmesg
+}
+
+ump_rescue_report_start()
+{
+	local mnt
+
+	[ -e /dev/gpt/umpboot ] || return 0
+	mnt="$(mktemp -d /tmp/umpboot.XXXXXX)" || return 0
+	if mount -t msdosfs -o longnames /dev/gpt/umpboot "$mnt" 2>/dev/null; then
+		mkdir -p "$mnt/ump"
+		ump_rescue_report_log > "$mnt/ump/boot.log" 2>&1
+		umount "$mnt"
+	fi
+	rmdir "$mnt"
+}
+
+load_rc_config $name
+run_rc_command "$1"

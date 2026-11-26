@@ -1,0 +1,4 @@
+
+  UMP FreeBSD rescue system: it runs from memory, and no disk is mounted.
+  Its version is in /etc/ump-rescue-version, its boot config in /etc/ump/boot.
+
