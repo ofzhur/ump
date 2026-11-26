@@ -123,7 +123,8 @@ type Layout struct {
 }
 
 // Part is one step of a layout: a slice (a partition on every matching
-// disk), an md array, or a logical volume.
+// disk), an md array, a logical volume, or a ZFS pool (a partition on
+// every matching disk and one pool over them: FreeBSD's root).
 type Part struct {
 	Type       string   `yaml:"type" json:"type"`
 	Target     []string `yaml:"target,omitempty" json:"target,omitempty"`
@@ -135,6 +136,8 @@ type Part struct {
 	VG         string   `yaml:"vg,omitempty" json:"vg,omitempty"`
 	Name       string   `yaml:"name,omitempty" json:"name,omitempty"`
 	Raid       *int     `yaml:"raid,omitempty" json:"raid,omitempty"`
+	Pool       string   `yaml:"pool,omitempty" json:"pool,omitempty"`
+	Vdev       string   `yaml:"vdev,omitempty" json:"vdev,omitempty"`
 }
 
 // User is an account of the new system: inline in a profile (with its
@@ -228,10 +231,14 @@ type Userdata struct {
 var UserdataTypes = []string{"bash", "nix"}
 
 // Family is the kind of system an image name installs: nixos for the
-// nixos-* images, image (unpacked and configured in place) for the rest.
+// nixos-* images, freebsd for the freebsd-* ones, image (unpacked and
+// configured in place) for the rest.
 func Family(os string) string {
-	if strings.HasPrefix(os, "nixos") {
+	switch {
+	case strings.HasPrefix(os, "nixos"):
 		return "nixos"
+	case strings.HasPrefix(os, "freebsd"):
+		return "freebsd"
 	}
 	return "image"
 }
@@ -565,6 +572,7 @@ var (
 	userName   = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	nameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	vgName     = regexp.MustCompile(`^[A-Za-z0-9_.+-]+$`)
+	poolName   = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 	sizeSpec   = regexp.MustCompile(`^([0-9]+)([KMGT]|%)$`)
 	portSpec   = regexp.MustCompile(`^([0-9]{1,5})(-([0-9]{1,5}))?$`)
 	keyLine    = regexp.MustCompile(`^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$`)
@@ -574,9 +582,90 @@ var (
 // filesystems the installer can make, and the special ones.
 var filesystems = map[string]bool{"ext4": true, "xfs": true, "btrfs": true, "vfat": true, "swap": true, "efi": true, "bios": true, "lvm": true, "none": true}
 
+// Vdevs are the ways a zfs part joins its disks into the pool, each with
+// the disks it needs: stripe makes every disk a device of its own, the
+// others one device over all of them.
+var Vdevs = map[string]int{"stripe": 1, "mirror": 2, "raidz": 3, "raidz2": 4, "raidz3": 5}
+
+// IsZFS reports whether the layout has a zfs part. Such a layout is
+// FreeBSD's, whose root is a ZFS pool; the other systems take none.
+func (l *Layout) IsZFS() bool {
+	for _, p := range l.Parts {
+		if p.Type == "zfs" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateZFS checks a zfs part by itself: the root pool, on a partition
+// of every disk its target matches.
+func (p *Part) validateZFS(at string) error {
+	if p.Filesystem != "" && p.Filesystem != "zfs" {
+		return fmt.Errorf("%s: a zfs part has no filesystem but zfs, not %q", at, p.Filesystem)
+	}
+	if p.Size != "rest" && p.Size != "all" && !sizeSpec.MatchString(p.Size) {
+		return fmt.Errorf("%s: size %q is not like 1M, 512M, 1G, 20%% or rest", at, p.Size)
+	}
+	if len(p.Target) == 0 {
+		return fmt.Errorf("%s: no target (first, or a regular expression on the disk path)", at)
+	}
+	for _, t := range p.Target {
+		if t == "first" {
+			continue
+		}
+		if _, err := regexp.Compile(t); err != nil {
+			return fmt.Errorf("%s: target %q: %v", at, t, err)
+		}
+	}
+	if p.Mountpoint != "/" {
+		return fmt.Errorf("%s: a zfs part is the root pool and needs mountpoint /", at)
+	}
+	if p.Pool != "" {
+		// (as the installer for FreeBSD takes it)
+		reserved := false
+		for _, w := range []string{"mirror", "raidz", "draid", "spare", "log", "cache", "special", "dedup"} {
+			reserved = reserved || strings.HasPrefix(p.Pool, w)
+		}
+		if !poolName.MatchString(p.Pool) || reserved {
+			return fmt.Errorf("%s: pool %q is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)", at, p.Pool)
+		}
+	}
+	if _, ok := Vdevs[p.Vdev]; p.Vdev != "" && !ok {
+		return fmt.Errorf("%s: vdev %q is not stripe, mirror, raidz, raidz2 or raidz3", at, p.Vdev)
+	}
+	if p.Index != 0 || p.Label != "" || p.VG != "" || p.Name != "" || p.Raid != nil {
+		return fmt.Errorf("%s: a zfs part has target, size, pool, vdev and mountpoint; no index, label, vg, name or raid (vdev says how the disks are joined)", at)
+	}
+	return nil
+}
+
+// validateZFSLayout checks what stands beside the zfs part of a layout:
+// only what FreeBSD boots from and swaps to, with an EFI system
+// partition that holds its FAT32.
+func (l *Layout) validateZFSLayout() error {
+	for i, p := range l.Parts {
+		if p.Type == "zfs" {
+			continue
+		}
+		if p.Type != "slice" || (p.Filesystem != "efi" && p.Filesystem != "bios" && p.Filesystem != "swap") {
+			return fmt.Errorf("layout %s, part %d (%s): beside a zfs part a layout has efi, bios and swap slices only: FreeBSD takes no md, no LVM and none of ext4, xfs, btrfs and vfat, and its loader reads the pool, so there is no /boot", l.Name, i+1, p.Type)
+		}
+		if m := sizeSpec.FindStringSubmatch(p.Size); p.Filesystem == "efi" && m != nil && m[2] != "%" {
+			n, _ := strconv.ParseUint(m[1], 10, 64)
+			if n < 33*1024*1024/map[string]uint64{"K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}[m[2]] {
+				return fmt.Errorf("layout %s, part %d (%s): an efi part of %s is too small for FreeBSD's FAT32 (33M at least)", l.Name, i+1, p.Type, p.Size)
+			}
+		}
+	}
+	return nil
+}
+
 // Validate checks a layout: types, sizes, file systems, mountpoints, the
 // volume groups, the raid levels, and that the root and the boot
-// partitions are where the boot loader can use them.
+// partitions are where the boot loader can use them; of a layout with a
+// zfs part (FreeBSD's) also that the pool is the root and stands beside
+// efi, bios and swap slices alone.
 func (l *Layout) Validate() error {
 	if l.Name == KeepDataLayout {
 		return fmt.Errorf("layout %s: the name is taken: it is what an installation that kept the data is recorded with (ump server reinstall --keep-data), which applies no layout; give the layout another name", l.Name)
@@ -589,6 +678,23 @@ func (l *Layout) Validate() error {
 	rootOn := ""
 	for i, p := range l.Parts {
 		at := fmt.Sprintf("layout %s, part %d (%s)", l.Name, i+1, p.Type)
+		if p.Type == "zfs" {
+			if rootOn == "zfs" {
+				return fmt.Errorf("%s: a second zfs part: one makes the root pool, and no other pool is made in this version", at)
+			}
+			if err := p.validateZFS(at); err != nil {
+				return err
+			}
+			if mounts[p.Mountpoint] {
+				return fmt.Errorf("%s: mountpoint %s is used twice", at, p.Mountpoint)
+			}
+			mounts[p.Mountpoint] = true
+			rootOn = p.Type
+			continue
+		}
+		if p.Pool != "" || p.Vdev != "" {
+			return fmt.Errorf("%s: pool and vdev belong to a zfs part", at)
+		}
 		if !filesystems[p.Filesystem] {
 			return fmt.Errorf("%s: unknown filesystem %q", at, p.Filesystem)
 		}
@@ -667,8 +773,11 @@ func (l *Layout) Validate() error {
 				return fmt.Errorf("%s: a logical volume cannot be %s", at, p.Filesystem)
 			}
 		default:
-			return fmt.Errorf("%s: unknown part type %q (slice, md, lvm)", at, p.Type)
+			return fmt.Errorf("%s: unknown part type %q (slice, md, lvm, zfs)", at, p.Type)
 		}
+	}
+	if l.IsZFS() {
+		return l.validateZFSLayout()
 	}
 	if rootOn == "" {
 		return fmt.Errorf("layout %s: no part is mounted at /", l.Name)
@@ -845,6 +954,13 @@ func (p *Profile) Resolve(layouts map[string]*Layout, firewalls map[string]*Fire
 			return nil, err
 		}
 		layout = l
+	}
+	// a ZFS layout is FreeBSD's, and FreeBSD takes no other
+	switch family := Family(p.OS); {
+	case family == "freebsd" && !layout.IsZFS():
+		return nil, fmt.Errorf("profile %s: layout %s has md, LVM or Linux file systems, which %s does not take; its layouts are ZFS ones (zfs, zfs-mirror, zfs-raidz in layouts.yaml)", p.Name, layout.Name, p.OS)
+	case family != "freebsd" && layout.IsZFS():
+		return nil, fmt.Errorf("profile %s: layout %s is a ZFS layout, which only FreeBSD takes; %s takes the others (lvm-linear, ...)", p.Name, layout.Name, p.OS)
 	}
 	firewall := Firewall{Policy: "accept", Allow: []Allow{}}
 	switch {

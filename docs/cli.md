@@ -1219,7 +1219,7 @@ profile and opens it in your editor, `edit NAME` opens it and checks it
 afterwards (an invalid profile is kept, with the problem named; a
 published profile is refused, make your own from it), `delete NAME`
 removes it, `update` fetches the published profiles (`ubuntu-26.04`,
-`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`, `cachyos`) and the published entries of
+`ubuntu-24.04`, `ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`, `cachyos`, `freebsd-15.1`, `freebsd-14.5`) and the published entries of
 `layouts.yaml`, `firewalls.yaml`, `users.yaml` and `userdata.yaml`
 again, replacing them and keeping yours, and adds the published
 networks `networks.yaml` lacks, keeping the others, a published one you

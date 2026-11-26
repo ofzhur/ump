@@ -6,7 +6,8 @@
 # (userdata: [ubuntu, web]), or inline entries. A failing script fails
 # the installation.
 #
-#   type     bash (a script, for Ubuntu) or nix (a NixOS module, for NixOS)
+#   type     bash (a script, for Ubuntu, Debian, Arch Linux and FreeBSD) or
+#            nix (a NixOS module, for NixOS)
 #   script   the script, or the module
 #
 # ump config userdata (ud) lists, prints, creates, edits and deletes them.
@@ -60,6 +61,19 @@ userdata:
       set -euo pipefail
       echo "userdata cachyos: nothing to do on $(hostname)"
       # pacman -S --noconfirm --needed docker
+  freebsd:
+    description: what every FreeBSD gets; nothing yet
+    type: bash
+    script: |
+      #!/usr/local/bin/bash
+      # Runs as root in the freshly installed FreeBSD, before its first
+      # boot, with network. Put what every FreeBSD of yours needs here,
+      # or make your own entry (ump config userdata create NAME) and
+      # list it in the profile after this one.
+      set -euo pipefail
+      echo "userdata freebsd: nothing to do on $(hostname)"
+      # pkg install -y nginx
+      # sysrc nginx_enable=YES
   nixos:
     description: what every NixOS gets; nothing yet
     type: nix

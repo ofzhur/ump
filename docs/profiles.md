@@ -39,8 +39,11 @@ something to look at and start from.
 [`debian-13.yaml`](../profiles/debian-13.yaml),
 [`debian-12.yaml`](../profiles/debian-12.yaml): the same profile with
 each image and the userdata of its distribution; [`nixos-25.11.yaml`](../profiles/nixos-25.11.yaml) and
-[`archlinux.yaml`](../profiles/archlinux.yaml), the same for NixOS, Arch Linux and CachyOS) and the published entries of the named files (the
-layouts `lvm-*`, the firewalls `default`, `web` and `open`, the network
+[`archlinux.yaml`](../profiles/archlinux.yaml), the same for NixOS, Arch Linux and CachyOS;
+[`freebsd-15.1.yaml`](../profiles/freebsd-15.1.yaml) and
+[`freebsd-14.5.yaml`](../profiles/freebsd-14.5.yaml), the same for
+FreeBSD, with a ZFS layout) and the published entries of the named files (the
+layouts `lvm-*` and `zfs*`, the firewalls `default`, `web` and `open`, the network
 `default`, the user `ump`) are templates: `ump config os update` fetches them again and
 replaces them, which is why `ump config os edit` refuses a published
 profile. Make your own instead: `ump config os create NAME` (guided) or
@@ -138,11 +141,16 @@ publishes:
 | `nixos-25.11` | NixOS 25.11 from its stable channel, installed by `nixos-install` (see [NixOS](oses.md#nixos)) | `nixos-25.11` |
 | `archlinux` | Arch Linux, the rolling release, installed by `pacstrap` from its mirrors, amd64 only (see [Arch Linux](oses.md#arch-linux)) | `archlinux` |
 | `cachyos` | CachyOS, experimental: Arch Linux with CachyOS's x86-64-v3 packages and server kernel, amd64 only (see [CachyOS](oses.md#cachyos)) | `cachyos` |
+| `freebsd-15.1` | FreeBSD 15.1, from its release's distribution sets, with its root on ZFS (see [its layouts](disk-layouts.md#zfs-freebsds-layouts)) | `freebsd-15.1` |
+| `freebsd-14.5` | FreeBSD 14.5, the same | `freebsd-14.5` |
 
 The published Ubuntu profiles are the same apart from the image, and
 the NixOS one apart from the image and its userdata (`nixos`, a NixOS
-module, where the Ubuntu profiles have `ubuntu`, a script). A system or
-release is chosen in one of three ways:
+module, where the Ubuntu profiles have `ubuntu`, a script). The FreeBSD
+profiles differ in the image, the userdata (`freebsd`, a script) and
+the layout: `zfs`, where the others have `lvm-linear`
+([below](#freebsd)). A system or release is chosen in one of three
+ways:
 
 - **A profile per release:** `ump server reinstall NAME --profile
   ubuntu-24.04`, or `ump server set NAME --profile ubuntu-24.04` once,
@@ -153,13 +161,34 @@ release is chosen in one of three ways:
   makes it the default.
 - **For one installation:** `ump server reinstall NAME --os
   ubuntu-22.04` overrides the profile's image and changes nothing else
-  (between Ubuntu and NixOS the userdata must change too, so take the
-  other profile instead).
+  (between Ubuntu and NixOS the userdata must change too, and between
+  FreeBSD and the others the layout, so take the other profile
+  instead).
 
 More images come later; [the storage
 layout](../images/rescue/README.md#your-own-storage) says what an image
 directory must hold, and anything that follows it works with any `os`
 name (`ump config os create` takes "another name" for it).
+
+### FreeBSD
+
+[`freebsd-15.1.yaml`](../profiles/freebsd-15.1.yaml) is [the default
+profile](#the-default-profile) with FreeBSD's image, the layout `zfs`
+and the userdata `freebsd`; no field is new, and a few mean what
+FreeBSD has in their place:
+
+| Field | On FreeBSD |
+|---|---|
+| `os` | a name that starts with `freebsd`: that is how ump tells the system's kind before it has seen the image |
+| `disks` | a [ZFS layout](disk-layouts.md#zfs-freebsds-layouts): `zfs` (every disk in one pool), `zfs-mirror`, `zfs-raidz`, or one of yours with a zfs part. Any other layout is refused, as a ZFS layout is for every other system |
+| `kernel.mitigations` | `false` turns page table isolation off on amd64 (`vm.pmap.pti=0` in `/boot/loader.conf`); `true` leaves FreeBSD's defaults |
+| `kernel.ipv6` | `false` gives the server no IPv6 address (FreeBSD's kernel has IPv6 built in, and nothing switches it off); `true` configures the uplink's |
+| `kernel.extra` | loader tunables, `NAME=VALUE` separated by spaces, for `/boot/loader.conf` |
+| `users[].shell` | `/bin/bash`, the default, is `/usr/local/bin/bash` there: bash comes from a package, as sudo does. A shell FreeBSD has neither in its base nor under `/usr/local/bin` stops the installation |
+| `users[].sudo` | a member of `wheel`, with the `NOPASSWD` drop-in under `/usr/local/etc/sudoers.d` |
+| `userdata` | entries of type `bash`, run by `/usr/local/bin/bash` in the new system: `pkg install`, `sysrc` |
+| `firewall` | the same rules, written as `/etc/pf.conf` |
+| `network.rename` | `ext01`, `int01`, ... as everywhere, bound to the MAC addresses |
 
 ## Fields
 
@@ -197,14 +226,14 @@ network:                      # optional
 | `description` | One line, shown by `ump config os list` and recorded on the installed system. |
 | `os` | The image to install, a directory name under `os/` on the storage; `ubuntu-26.04` is the one published. No `/` or spaces. |
 | `timezone` | The time zone of the new system (`Europe/Berlin`, ...). Default `UTC`. |
-| `kernel.mitigations` | `true` keeps the CPU vulnerability mitigations on. Default off, `mitigations=off`. |
+| `kernel.mitigations` | `true` keeps the CPU vulnerability mitigations on. Default off, `mitigations=off`. What it means on FreeBSD: [FreeBSD](#freebsd). |
 | `kernel.ipv6` | `true` keeps IPv6 on and configures the server's IPv6 address. Default off, `ipv6.disable=1`. |
-| `kernel.extra` | Anything else for the kernel command line, as one string. `kho=off` is always added: the kernel's kexec handover would reserve memory and keep ump from re-entering its rescue system. |
-| `disks` | The [disk layout](disk-layouts.md): a name from `layouts.yaml`, or a mapping with `parts` (an inline layout, with the same fields as a named one). Required. |
+| `kernel.extra` | Anything else for the kernel command line, as one string. `kho=off` is always added: the kernel's kexec handover would reserve memory and keep ump from re-entering its rescue system. On FreeBSD loader tunables. |
+| `disks` | The [disk layout](disk-layouts.md): a name from `layouts.yaml`, or a mapping with `parts` (an inline layout, with the same fields as a named one). Required. FreeBSD takes the ZFS layouts, the other systems the others. |
 | `users` | The accounts of the new system, in order: names from `users.yaml`, inline users, or both. At least one, no name twice, and one of them must be able to administer the system (below). |
 | `users[].name` | Lower-case letters, digits, `_` and `-`, up to 32 characters, starting with a letter or `_`. `root` is allowed and special. In `users.yaml` the entry's key is the name. |
 | `users[].sudo` | `true` makes the user a member of `sudo` with a `NOPASSWD` drop-in, since no passwords are set. |
-| `users[].shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell needs its package, installed by userdata. |
+| `users[].shell` | A path. Default `/bin/bash`, which the image ships with a colored prompt and completion; another shell needs its package, installed by userdata. On FreeBSD `/bin/bash` is the package's `/usr/local/bin/bash`. |
 | `users[].groups` | Extra groups, created when missing. |
 | `users[].keys` | Key references (below). Every user needs at least one: without a password, a user without keys could not log in. |
 | `userdata` | What runs in the new system before its first boot, in order: names from `userdata.yaml`, inline entries (`{name: web, script: "..."}`), or both. See [userdata](userdata.md). |
@@ -352,7 +381,9 @@ A profile is valid when:
 
 - `os` is set and looks like an image name;
 - `disks` names a layout or holds one, and the layout passes [its
-  checks](disk-layouts.md#rules);
+  checks](disk-layouts.md#rules); a FreeBSD profile (`os: freebsd-...`)
+  has a [ZFS layout](disk-layouts.md#zfs-freebsds-layouts), and no
+  other profile has one;
 - there is at least one user, no user twice, every named user exists in
   `users.yaml`, every user has at least one key reference, names and
   groups are valid, shells are paths;
@@ -386,7 +417,7 @@ installation:
 
 | Flag | Overrides |
 |---|---|
-| `--layout NAME` | `disks`, with a layout from `layouts.yaml` |
+| `--layout NAME` | `disks`, with a layout from `layouts.yaml` (for FreeBSD a ZFS one, for the other systems one of the others) |
 | `--firewall NAME` | `firewall`, with a firewall from `firewalls.yaml` |
 | `--os NAME` | `os` |
 | `--timezone ZONE` | `timezone` |
