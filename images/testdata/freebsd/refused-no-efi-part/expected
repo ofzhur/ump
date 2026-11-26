@@ -1,0 +1,3 @@
+install.sh: this machine boots with UEFI and the layout has no efi part
+install.sh: nothing was written to the disks
+(exit status 2)

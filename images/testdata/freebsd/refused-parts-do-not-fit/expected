@@ -1,0 +1,3 @@
+install.sh: the parts of /dev/vda (4608 MB without the one that takes the rest) do not fit on it (3072 MB)
+install.sh: nothing was written to the disks
+(exit status 2)

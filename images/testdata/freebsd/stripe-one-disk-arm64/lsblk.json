@@ -1,0 +1,6 @@
+{
+   "blockdevices": [
+      {"path": "/dev/vda", "type": "disk", "ro": false, "tran": "virtio", "size": 42949672960, "rota": false, "log-sec": 512},
+      {"path": "/dev/sr0", "type": "rom", "ro": false, "tran": "sata", "size": 1073741312, "rota": true, "model": "Virtual CDROM", "log-sec": 512}
+   ]
+}

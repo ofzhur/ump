@@ -1,0 +1,8 @@
+{
+   "blockdevices": [
+      {"path": "/dev/sda", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3C", "wwn": "0x5000c500a1b2c3d4", "log-sec": 512},
+      {"path": "/dev/sdb", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3D", "wwn": "0x5000c500a1b2c3d5", "log-sec": 512},
+      {"path": "/dev/sdc", "type": "disk", "ro": false, "tran": "sata", "size": 4000787030016, "rota": true, "model": "ST4000NM0035-1V4107", "serial": "ZC1A2B3E", "wwn": "0x5000c500a1b2c3d6", "log-sec": 512},
+      {"path": "/dev/sdd", "type": "disk", "ro": false, "tran": "usb", "size": 15376318464, "rota": true, "model": "Ultra Fit", "serial": "4C530001230101117392", "log-sec": 512}
+   ]
+}

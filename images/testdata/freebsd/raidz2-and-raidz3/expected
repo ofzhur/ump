@@ -1,0 +1,151 @@
+==> disks (5): /dev/vda (20G SSD virtio), /dev/vdb (20G SSD virtio), /dev/vdc (20G SSD virtio), /dev/vdd (20G SSD virtio), /dev/vde (20G SSD virtio)
+==>   /dev/vda: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
+==>   /dev/vdb: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
+==>   /dev/vdc: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
+==>   /dev/vdd: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
+==>   /dev/vde: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
+==>   zroot: raidz3 over /dev/vda /dev/vdb /dev/vdc /dev/vdd /dev/vde, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/vda, /dev/vdb, /dev/vdc, /dev/vdd, /dev/vde and starts from there
+==> loader tunables: none
+==> fetching the manifest
+==> image freebsd-15.1 version 2026.11.26: FreeBSD 15.1-RELEASE, installed from the UMP FreeBSD rescue system (freebsd-15.1 2026.11.26, 526 MB of memory at least)
+--- ump/cmdline
+ump.hostname=web-01 ump.mac=0c:c4:7a:aa:bb:11 ump.ip=203.0.113.10/26,203.0.113.1 ump.dns=1.1.1.1,8.8.8.8 ump.time=1795708800
+--- ump/authorized_keys
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe1 key-1@test
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe2 key-2@test
+--- ump/plan.json
+{
+  "version": 1,
+  "firmware": "uefi",
+  "boot_disk": "/dev/vda",
+  "disks": [
+    {
+      "name": "/dev/vda",
+      "size": 21474836480,
+      "serial": "disk-a",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    },
+    {
+      "name": "/dev/vdb",
+      "size": 21474836480,
+      "serial": "disk-b",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    },
+    {
+      "name": "/dev/vdc",
+      "size": 21474836480,
+      "serial": "disk-c",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    },
+    {
+      "name": "/dev/vdd",
+      "size": 21474836480,
+      "serial": "disk-d",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    },
+    {
+      "name": "/dev/vde",
+      "size": 21474836480,
+      "serial": "disk-e",
+      "wwn": "",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    }
+  ],
+  "left": [],
+  "pool": {
+    "name": "zroot",
+    "vdev": "raidz3",
+    "mountpoint": "/"
+  }
+}
+--- the boot image goes to
+/dev/vda
+/dev/vdb
+/dev/vdc
+/dev/vdd
+/dev/vde

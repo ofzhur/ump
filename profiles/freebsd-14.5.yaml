@@ -1,0 +1,34 @@
+# The profile for FreeBSD 14.5: what a server becomes with --profile
+# freebsd-14.5. FreeBSD is installed from its release's distribution
+# sets, with its root on ZFS (docs/oses.md#freebsd). Published profiles
+# are replaced by ump config os update, so make your own from this one
+# (ump config os create NAME --from freebsd-14.5) instead of editing it.
+# Every field is described in docs/profiles.md.
+name: freebsd-14.5
+description: FreeBSD 14.5 on every disk as one ZFS pool; the sudo user ump with your keys, no root over SSH; ICMP and SSH open, nothing else.
+
+os: freebsd-14.5
+timezone: UTC
+
+kernel:
+  mitigations: false   # page table isolation off (vm.pmap.pti=0, amd64) when false; FreeBSD's defaults when true
+  ipv6: false          # no IPv6 address when false; turn it on when the server needs it
+  extra: ""            # loader tunables, NAME=VALUE, for /boot/loader.conf
+
+# a ZFS layout from layouts.yaml (zfs, zfs-mirror, zfs-raidz), or an inline one
+disks: zfs
+
+users: [ump]            # as in every profile; bash is /usr/local/bin/bash on FreeBSD
+
+userdata: [freebsd]     # named entries from userdata.yaml (type bash), run in order as root
+                        # in the new system before its first boot; or inline:
+  # - name: web
+  #   script: |
+  #     pkg install -y nginx
+  #     sysrc nginx_enable=YES
+
+firewall: default       # written as /etc/pf.conf
+
+network:
+  rename: true          # ext01, ... and int01, ..., bound to the MAC addresses
+  private: default

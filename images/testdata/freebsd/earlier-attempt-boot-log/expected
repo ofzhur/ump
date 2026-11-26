@@ -1,0 +1,108 @@
+==> disks (2): /dev/nvme0n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000), /dev/nvme1n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000)
+==>   /dev/nvme0n1: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   /dev/nvme1n1: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   zroot: mirror over /dev/nvme0n1 /dev/nvme1n1, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/nvme0n1, /dev/nvme1n1 and starts from there
+==> loader tunables: vm.pmap.pti=0
+==> a FreeBSD rescue system was here and left its boot log (/dev/nvme0n1p1):
+    UMP FreeBSD rescue system 2026.11.26, FreeBSD 15.1-RELEASE amd64, booted 2026-11-26T16:02:11Z
+
+    == interfaces
+    lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+    	inet 127.0.0.1 netmask 0xff000000
+
+    == routes
+    Routing tables
+
+    == network and storage devices
+    none0@pci0:1:0:0:	class=0x020000 rev=0x00 hdr=0x00 vendor=0x1d6a device=0x94c0 subvendor=0x1043 subdevice=0x8811
+        vendor     = 'Aquantia Corp.'
+    nvme0@pci0:2:0:0:	class=0x010802 rev=0x00 hdr=0x00 vendor=0x144d device=0xa808 subvendor=0x144d subdevice=0xa801
+        vendor     = 'Samsung Electronics Co Ltd'
+
+    == disks
+    nda1 nda0
+
+    == kernel messages
+    pci1: <network, ethernet> at device 0.0 (no driver attached)
+==> a FreeBSD rescue system was put on /dev/nvme1n1 and left no boot log (/dev/nvme1n1p1): the firmware did not start it, or its kernel did not come as far as its rc scripts
+==> fetching the manifest
+==> image freebsd-15.1 version 2026.11.26: FreeBSD 15.1-RELEASE, installed from the UMP FreeBSD rescue system (freebsd-15.1 2026.11.26, 619 MB of memory at least)
+--- ump/cmdline
+ump.hostname=web-01 ump.mac=0c:c4:7a:aa:bb:11 ump.ip=203.0.113.10/26,203.0.113.1 ump.dns=1.1.1.1,8.8.8.8 ump.time=1795708800
+--- ump/authorized_keys
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe1 key-1@test
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe2 key-2@test
+--- ump/plan.json
+{
+  "version": 1,
+  "firmware": "uefi",
+  "boot_disk": "/dev/nvme0n1",
+  "disks": [
+    {
+      "name": "/dev/nvme0n1",
+      "size": 512110190592,
+      "serial": "S4EWNX0N123456",
+      "wwn": "eui.0025388b01234567",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "swap",
+          "size": "2G"
+        },
+        {
+          "index": 4,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    },
+    {
+      "name": "/dev/nvme1n1",
+      "size": 512110190592,
+      "serial": "S4EWNX0N123457",
+      "wwn": "eui.0025388b01234568",
+      "parts": [
+        {
+          "index": 1,
+          "kind": "bios",
+          "size": "512K"
+        },
+        {
+          "index": 2,
+          "kind": "efi",
+          "size": "512M"
+        },
+        {
+          "index": 3,
+          "kind": "swap",
+          "size": "2G"
+        },
+        {
+          "index": 4,
+          "kind": "zfs",
+          "size": "rest"
+        }
+      ]
+    }
+  ],
+  "left": [],
+  "pool": {
+    "name": "zroot",
+    "vdev": "mirror",
+    "mountpoint": "/"
+  }
+}
+--- the boot image goes to
+/dev/nvme0n1
+/dev/nvme1n1

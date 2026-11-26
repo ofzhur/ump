@@ -1,0 +1,5 @@
+{
+   "blockdevices": [
+      {"path": "/dev/vda", "type": "disk", "ro": false, "tran": "virtio", "size": 21474836480, "rota": false, "log-sec": 512}
+   ]
+}

@@ -1,0 +1,2 @@
+mac=0c:c4:7a:aa:bb:10; ip4=192.0.2.17/24,192.0.2.1
+words="ump.pxe=https://pxe.example.net:8443 ump.pxe.boot=7f3a ump.hostname=lab-07 ump.boot-mac=0C-C4-7A-AA-BB-10 ump.dns=dhcp ump.time=1795700000 initrd=initrd.zst"; resolvers="192.0.2.53,192.0.2.54"

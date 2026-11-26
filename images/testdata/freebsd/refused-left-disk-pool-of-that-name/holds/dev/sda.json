@@ -1,0 +1,6 @@
+[
+  {"fstype": "", "label": "", "partlabel": ""},
+  {"fstype": "vfat", "label": "EFISYS", "partlabel": "efi7"},
+  {"fstype": "swap", "label": "", "partlabel": "swap7"},
+  {"fstype": "zfs_member", "label": "zroot", "partlabel": "zfs7"}
+]

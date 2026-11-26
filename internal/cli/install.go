@@ -654,6 +654,13 @@ func (a *app) resolveInstall(ctx context.Context, cmd *cobra.Command, cfg *confi
 	if err != nil {
 		return err
 	}
+	// FreeBSD is installed in two steps: the installer in the UMP rescue
+	// system stages it (the disks wiped, the UMP FreeBSD rescue system on
+	// them), and that system's installer does the rest. Until ump runs the
+	// second step, the first alone would leave the server without a system.
+	if profile.Family(spec.OS) == "freebsd" {
+		return withExit(exitUsage, fmt.Errorf("%s is installed in two steps, the second from the UMP FreeBSD rescue system, and this version of ump does not run the second yet; %s was not touched", spec.OS, p.m.Name))
+	}
 	// the private networks: --private-network, else the profile's
 	var networks map[string]*profile.PrivateNetwork
 	names := prof.PrivateNetworkNames()

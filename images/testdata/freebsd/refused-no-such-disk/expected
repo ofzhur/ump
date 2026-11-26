@@ -1,0 +1,3 @@
+install.sh: /dev/sdz is not a block device
+install.sh: nothing was written to the disks
+(exit status 2)

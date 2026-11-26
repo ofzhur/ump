@@ -1,0 +1,1 @@
+layout=zfs-mirror; os=ubuntu-26.04; family=image; rescue=""; unpacked_mb=1614

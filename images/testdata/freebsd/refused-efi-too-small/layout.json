@@ -1,0 +1,5 @@
+{"name": "small-esp", "parts": [
+  {"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
+  {"type": "slice", "target": ["first"], "size": "16M", "filesystem": "efi", "mountpoint": "/boot/efi"},
+  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/"}
+]}

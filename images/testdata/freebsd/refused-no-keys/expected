@@ -1,0 +1,3 @@
+install.sh: root has no SSH key here (/root/.ssh/authorized_keys): nobody could log in to the UMP FreeBSD rescue system
+install.sh: nothing was written to the disks
+(exit status 2)

@@ -1,0 +1,5 @@
+{
+   "blockdevices": [
+      {"path": "/dev/nvme0n1", "type": "disk", "ro": false, "tran": "nvme", "size": 512110190592, "rota": false, "model": "SAMSUNG MZVLB512HBJQ-00000", "serial": "S4EWNX0N123456", "wwn": "eui.0025388b01234567", "log-sec": 512}
+   ]
+}

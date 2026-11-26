@@ -1,0 +1,3 @@
+install.sh: layout with-boot, part 3 (slice): beside a zfs part a layout has efi, bios and swap slices only: FreeBSD takes no md, no LVM and none of ext4, xfs, btrfs and vfat, and its loader reads the pool, so there is no /boot
+install.sh: nothing was written to the disks
+(exit status 2)

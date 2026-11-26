@@ -1,0 +1,10 @@
+==> disks (1): /dev/vda (20G SSD virtio)
+==>   /dev/vda: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   zroot: stripe over /dev/vda, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/vda and starts from there
+==> loader tunables: none
+==> fetching the manifest
+==> image freebsd-15.1 version 2026.11.26: FreeBSD 15.1-RELEASE, installed from the UMP FreeBSD rescue system (freebsd-15.1 2026.11.26, 526 MB of memory at least)
+install.sh: this machine has 457 MB of memory, and the UMP FreeBSD rescue system (freebsd-15.1) needs 526 MB: it runs from memory, and the installation with it
+install.sh: nothing was written to the disks
+(exit status 2)

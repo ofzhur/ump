@@ -21,6 +21,8 @@ network through `ump config pxe`, and the rest is optional.
 │   ├── nixos-25.11.yaml
 │   ├── archlinux.yaml
 │   ├── cachyos.yaml
+│   ├── freebsd-15.1.yaml
+│   ├── freebsd-14.5.yaml
 │   ├── NAME.yaml            your profiles
 │   ├── layouts.yaml         the named disk layouts: the published ones and yours
 │   ├── firewalls.yaml       the named firewalls
@@ -174,7 +176,7 @@ published files from the storage; a named file it lacks (one published
 after it was made, such as `networks.yaml`) is downloaded by the first
 command of its own, and installations read the published one until
 then. The published profiles (`ubuntu-26.04`, `ubuntu-24.04`,
-`ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`, `cachyos`) and the published entries of the named files are
+`ubuntu-22.04`, `debian-13`, `debian-12`, `nixos-25.11`, `archlinux`, `cachyos`, `freebsd-15.1`, `freebsd-14.5`) and the published entries of the named files are
 templates that `ump config os update` replaces (a published network
 it only adds where it is missing, so an edited one survives); what you
 create under names of your own is yours and never touched.

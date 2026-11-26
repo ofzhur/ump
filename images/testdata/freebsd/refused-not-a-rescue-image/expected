@@ -1,0 +1,9 @@
+==> disks (1): /dev/nvme0n1 (476.9G SSD nvme SAMSUNG MZVLB512HBJQ-00000)
+==>   /dev/nvme0n1: 1: 512K bios, 2: 512M efi at /boot/efi, 3: 2G swap, 4: rest zfs (zroot)
+==>   zroot: stripe over /dev/nvme0n1, at /
+==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/nvme0n1 and starts from there
+==> loader tunables: vm.pmap.pti=0
+==> fetching the manifest
+install.sh: https://ump.example.net/dl/rescue/freebsd-15.1/amd64 is no FreeBSD rescue image (its manifest's system)
+install.sh: nothing was written to the disks
+(exit status 2)

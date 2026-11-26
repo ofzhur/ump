@@ -1,0 +1,3 @@
+install.sh: layout zfs-raidz, part 4 (zfs): raidz needs 3 disks, 2 match
+install.sh: nothing was written to the disks
+(exit status 2)

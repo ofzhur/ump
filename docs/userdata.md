@@ -13,12 +13,13 @@ NAME        TYPE   LINES   STATE   DESCRIPTION
 archlinux   bash   8       ok      what every Arch Linux gets; nothing yet
 cachyos     bash   8       ok      what every CachyOS gets; nothing yet
 debian      bash   8       ok      what every Debian gets; nothing yet
+freebsd     bash   9       ok      what every FreeBSD gets; nothing yet
 nixos       nix    12      ok      what every NixOS gets; nothing yet
 ubuntu      bash   7       ok      what every Ubuntu gets; nothing yet
 ```
 
-An entry is a bash script (type `bash`) for Ubuntu, Debian and Arch
-Linux, or a NixOS module
+An entry is a bash script (type `bash`) for Ubuntu, Debian, Arch
+Linux and FreeBSD, or a NixOS module
 (type `nix`) for [NixOS](oses.md#nixos), where it is merged with UMP's own
 module instead of run. A profile takes the type its system takes, and
 ump refuses a mix before it touches the machine. Other systems that take

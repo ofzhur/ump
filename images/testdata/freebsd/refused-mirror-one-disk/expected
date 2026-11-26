@@ -1,0 +1,3 @@
+install.sh: layout zfs-mirror, part 4 (zfs): mirror needs 2 disks, 1 match
+install.sh: nothing was written to the disks
+(exit status 2)
