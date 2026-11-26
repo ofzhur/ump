@@ -413,9 +413,10 @@ and one it does not tried from outside. `LAYOUT=zfs-mirror` and
 leaves the planning to the installer; `SERIALS=1` gives the disks
 serial numbers in another order than the plan's; `LEFT=12` adds a disk
 the plan leaves alone, which must not be written to; `NET=dhcp`,
-`NET=onlink`, `UPLINK=`, `IPV6=` and `RENAME=no` change the network;
-`AGAIN=1` installs a second time over the first; `FIRMWARE=bios` on
-amd64. Emulated amd64 runs with the CPU model `qemu64`: with QEMU's
+`NET=onlink`, `UPLINK=`, `IPV6=`, `RENAME=no` and `NICS=2` change the
+network; `FAIL=1` first runs an installation that fails after the disks
+were cleared; `AGAIN=1` installs a second time over the first;
+`FIRMWARE=bios` on amd64. Emulated amd64 runs with the CPU model `qemu64`: with QEMU's
 newer models the kernel of FreeBSD 15.1 ends in a page fault while
 `zfs.ko` loads.
 

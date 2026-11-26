@@ -36,7 +36,7 @@ TEST_ARCH   ?= $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 IMAGE_VERSION ?= $(shell date -u +%Y.%m.%d)
 CONTAINER  ?= $(shell command -v docker || command -v podman)
 
-.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-render-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
+.PHONY: all build install test vet fmt fmt-check check scripts-check network-test keep-plan-test freebsd-render-test freebsd-install-test keep-loop-test keep-data-test fuzz dist packages package-test notices release release-assets clean help images rescue-image rescue-test pxe-test pxe-install-test os-image upload
 
 all: build
 
@@ -64,6 +64,7 @@ scripts-check: ## syntax-check the shell scripts of the rescue image, the instal
 	@bash -n images/rescue/overlay/usr/local/sbin/ump-pxe
 	@sh -n images/rescue/finish.sh images/rescue/overlay/usr/local/sbin/ump-rescue-setup images/base/finish.sh install/get.sh packaging/scripts/*.sh
 	@for f in install/freebsd/install.sh images/test-freebsd-render.sh; do sh -n "$$f" || exit 1; done
+	@bash -n images/freebsd/test-install.sh
 
 network-test: ## render the network configuration of install.sh for every case and compare it with images/testdata/network (needs bash 4 or later and jq)
 	@images/test-network.sh
@@ -139,6 +140,9 @@ pxe-test: ## boot a machine of TEST_ARCH over the network in QEMU against ump px
 
 pxe-install-test: ## install a machine of TEST_ARCH unattended in QEMU from ump pxe serve, the base image of OS (default: ubuntu-26.04), and a second installation the disk guard refuses (FIRMWARE=bios on amd64)
 	images/test-pxe-install.sh $(TEST_ARCH)
+
+freebsd-install-test: ## install FreeBSD on a machine of TEST_ARCH in QEMU with install/freebsd/install.sh, from the FreeBSD rescue image on staged disks: the refusals, the installation, the new system (LAYOUT=zfs-mirror or zfs-raidz: also without its first disk; PLAN=none, SERIALS=1, LEFT=12, UPLINK=dhcp, AGAIN=1, FIRMWARE=bios on amd64: see the script)
+	images/freebsd/test-install.sh $(TEST_ARCH)
 
 keep-loop-test: ## run the keep-data looks and writes of install.sh on file systems in loop devices: what a look leaves of them, installations that fail half-way and the next ones (as root on Linux; else in a privileged container)
 	CONTAINER=$(CONTAINER) images/test-keep-loop.sh
