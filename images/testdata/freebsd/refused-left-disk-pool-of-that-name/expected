@@ -1,3 +1,3 @@
-install.sh: /dev/sda, which is left alone, holds a member of a pool named zroot, and so would the new system's be: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation (--disks), or give the layout's zfs part another pool name (pool: NAME)
+install.sh: /dev/sda, which is left alone, holds a member of a pool named zroot, and so would the new system's be: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation (--disks), or give the layout's zfs part another pool name (name: NAME)
 install.sh: nothing was written to the disks
 (exit status 2)

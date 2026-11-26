@@ -2152,6 +2152,10 @@ fb_fact_holds() {
 
 # fb_word NAME: a word this rescue system was started with (ump.dns, ...)
 fb_word() { local w; for w in $(fb_fact_words); do case "$w" in "$1="*) printf '%s' "${w#*=}"; return 0 ;; esac; done; return 0; }
+# fb_vdev RAID: how a pool of that raid level joins its disks, as
+# plan.json names it (none is 0, a stripe); nothing for a number that
+# is no level of a pool (raidz3 has none in a layout in this version)
+fb_vdev() { case "$1" in none|0) echo stripe ;; 1) echo mirror ;; 5) echo raidz ;; 6) echo raidz2 ;; esac; }
 # fb_need VDEV: the disks it needs
 fb_need() { case "$1" in mirror) echo 2 ;; raidz) echo 3 ;; raidz2) echo 4 ;; raidz3) echo 5 ;; *) echo 1 ;; esac; }
 # fb_has_parts DISK: the plan puts a partition on it
@@ -2172,8 +2176,8 @@ fb_check_layout() {
 		 | if .type == "zfs" then
 			if (.mountpoint // "") != "/" then ", part \($n) (zfs): a zfs part is the root pool and needs mountpoint /"
 			elif ((.filesystem // "") | . != "" and . != "zfs") then ", part \($n) (zfs): a zfs part has no filesystem but zfs, not \(.filesystem)"
-			elif ((.vdev // "") | . != "" and . != "stripe" and . != "mirror" and . != "raidz" and . != "raidz2" and . != "raidz3") then ", part \($n) (zfs): vdev \(.vdev) is not stripe, mirror, raidz, raidz2 or raidz3"
-			elif ((.pool // "zroot") | (test("^[a-z][a-z0-9_-]*$") | not) or test("^(mirror|raidz|draid|spare|log|cache|special|dedup)")) then ", part \($n) (zfs): pool \(.pool) is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)"
+			elif ((.raid // 0) | . != 0 and . != 1 and . != 5 and . != 6) then ", part \($n) (zfs): raid \(.raid | tojson) is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"
+			elif ((.name // "zroot") | (test("^[a-z][a-z0-9_-]*$") | not) or test("^(mirror|raidz|draid|spare|log|cache|special|dedup)")) then ", part \($n) (zfs): name \(.name) is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)"
 			else empty end
 		   elif .type != "slice" or ((.filesystem // "") | . != "efi" and . != "bios" and . != "swap") then
 			", part \($n) (\(.type)): beside a zfs part a layout has efi, bios and swap slices only: FreeBSD takes no md, no LVM and none of ext4, xfs, btrfs and vfat, and its loader reads the pool, so there is no /boot"
@@ -2256,7 +2260,7 @@ fb_check_machine() {
 		[ -n "$d" ] || continue
 		holds="$(fb_fact_holds "$d")"
 		jq -e --arg pool "$Z_POOL" 'all(.[]; .fstype != "zfs_member" or .label != $pool)' >/dev/null <<< "$holds" \
-			|| die "$d, which is left alone, holds a member of a pool named $Z_POOL, and so would the new system's be: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation (--disks), or give the layout's zfs part another pool name (pool: NAME)"
+			|| die "$d, which is left alone, holds a member of a pool named $Z_POOL, and so would the new system's be: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation (--disks), or give the layout's zfs part another pool name (name: NAME)"
 		while IFS= read -r l; do
 			jq -e --arg l "$l" 'all(.[]; .partlabel != $l)' >/dev/null <<< "$holds" \
 				|| die "$d, which is left alone, has a partition with the GPT label $l, and so would the new system: FreeBSD finds one of the two under /dev/gpt/$l. Give that partition another label, or put the disk into the installation (--disks)"
@@ -2475,7 +2479,7 @@ P_DISK=(); P_INDEX=(); P_SIZE=(); P_FS=(); P_MOUNT=(); P_LABEL=(); P_VG=(); P_MD
 M_LEVEL=(); M_FS=(); M_MOUNT=(); M_LABEL=(); M_VG=(); M_DEV=()
 # logical volumes
 L_VG=(); L_NAME=(); L_SIZE=(); L_RAID=(); L_FS=(); L_MOUNT=(); L_LABEL=(); L_DEV=()
-# the ZFS pool of a zfs part (FreeBSD's root): its name, how its disks are joined, where it is mounted
+# the ZFS pool of a zfs part (FreeBSD's root): its name (the part's name), how its disks are joined (by the part's raid level), where it is mounted
 Z_POOL=""; Z_VDEV=""; Z_MOUNT=""
 declare -A VG_PVS=()        # volume group -> physical volume devices
 declare -A VG_NPV=()        # volume group -> number of physical volumes
@@ -2558,8 +2562,9 @@ for ((n = 0; n < nparts; n++)); do
 		# the installer for FreeBSD makes
 		mapfile -t targets < <(match_disks "$(jq -c '.target // []' <<< "$part")")
 		[ -n "${targets[0]:-}" ] || die "$at: no disk matches $(jq -c '.target' <<< "$part") (disks: ${disks[*]})"
-		Z_POOL="$(f .pool)"; [ -n "$Z_POOL" ] || Z_POOL=zroot
-		Z_VDEV="$(f .vdev)"; [ -n "$Z_VDEV" ] || Z_VDEV=stripe
+		Z_POOL="$(f .name)"; [ -n "$Z_POOL" ] || Z_POOL=zroot
+		Z_VDEV="$(fb_vdev "$raid")"
+		[ -n "$Z_VDEV" ] || die "$at: raid $raid is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"
 		Z_MOUNT="$mount"
 		need="$(fb_need "$Z_VDEV")"
 		[ ${#targets[@]} -ge "$need" ] || die "$at: $Z_VDEV needs $need disks, ${#targets[@]} match"

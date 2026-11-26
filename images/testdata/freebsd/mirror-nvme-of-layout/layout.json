@@ -2,5 +2,5 @@
   {"type": "slice", "target": ["nvme.*"], "size": "512K", "filesystem": "bios"},
   {"type": "slice", "target": ["nvme.*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
   {"type": "slice", "target": ["nvme.*"], "size": "8G", "filesystem": "swap"},
-  {"type": "zfs", "target": ["nvme.*"], "size": "rest", "mountpoint": "/", "pool": "tank", "vdev": "mirror"}
+  {"type": "zfs", "target": ["nvme.*"], "size": "rest", "mountpoint": "/", "name": "tank", "raid": 1}
 ]}

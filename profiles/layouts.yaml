@@ -11,8 +11,8 @@
 #   lvm    a logical volume in a volume group: size, raid (0 striped, 1,
 #          5, 6, 10, none linear), file system, mountpoint
 #   zfs    one ZFS pool over a partition of that size on every matching
-#          disk, FreeBSD's root: pool (its name, zroot), vdev (stripe,
-#          mirror, raidz, raidz2, raidz3), mountpoint /
+#          disk, FreeBSD's root: name (the pool's, zroot), raid (none or
+#          0 a stripe, 1 a mirror, 5 raidz, 6 raidz2), mountpoint /
 #
 # Sizes: 1M, 512M, 1G, 8G, 20% (of the disk or the volume group), rest.
 # The boot loader needs an efi part (UEFI) and, on amd64, a bios part
@@ -69,7 +69,7 @@ layouts:
       - {type: slice, target: [first], size: 512K, filesystem: bios}
       - {type: slice, target: [first], size: 512M, filesystem: efi, mountpoint: /boot/efi}
       - {type: slice, target: [first], size: 2G, filesystem: swap}
-      - {type: zfs, target: [".*"], size: rest, pool: zroot, mountpoint: /}
+      - {type: zfs, target: [".*"], size: rest, name: zroot, mountpoint: /}
 
   zfs-mirror:
     description: FreeBSD, every disk in one mirrored ZFS pool; boot partitions and swap on every disk
@@ -77,7 +77,7 @@ layouts:
       - {type: slice, target: [".*"], size: 512K, filesystem: bios}
       - {type: slice, target: [".*"], size: 512M, filesystem: efi, mountpoint: /boot/efi}
       - {type: slice, target: [".*"], size: 2G, filesystem: swap}
-      - {type: zfs, target: [".*"], size: rest, pool: zroot, vdev: mirror, mountpoint: /}
+      - {type: zfs, target: [".*"], size: rest, name: zroot, raid: 1, mountpoint: /}
 
   zfs-raidz:
     description: FreeBSD, every disk in one raidz ZFS pool (one disk may fail); boot partitions and swap on every disk
@@ -85,4 +85,4 @@ layouts:
       - {type: slice, target: [".*"], size: 512K, filesystem: bios}
       - {type: slice, target: [".*"], size: 512M, filesystem: efi, mountpoint: /boot/efi}
       - {type: slice, target: [".*"], size: 2G, filesystem: swap}
-      - {type: zfs, target: [".*"], size: rest, pool: zroot, vdev: raidz, mountpoint: /}
+      - {type: zfs, target: [".*"], size: rest, name: zroot, raid: 5, mountpoint: /}

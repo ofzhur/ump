@@ -392,7 +392,8 @@ func TestFreeBSDProfilesAndZFSLayouts(t *testing.T) {
 	firewalls, _ := ParseFirewalls(repoFile(t, "firewalls.yaml"))
 	users, _ := ParseUsers(repoFile(t, "users.yaml"))
 	userdata, _ := ParseUserdata(repoFile(t, "userdata.yaml"))
-	for name, vdev := range map[string]string{"zfs": "", "zfs-mirror": "mirror", "zfs-raidz": "raidz"} {
+	// (the level of each: none a stripe, 1 a mirror, 5 raidz)
+	for name, raid := range map[string]int{"zfs": -1, "zfs-mirror": 1, "zfs-raidz": 5} {
 		l := layouts[name]
 		if l == nil {
 			t.Fatalf("layout %s missing", name)
@@ -400,8 +401,12 @@ func TestFreeBSDProfilesAndZFSLayouts(t *testing.T) {
 		if err := l.Validate(); err != nil || !l.IsZFS() {
 			t.Errorf("layout %s: %v, zfs %v", name, err, l.IsZFS())
 		}
-		if p := l.Parts[len(l.Parts)-1]; len(l.Parts) != 4 || p.Type != "zfs" || p.Pool != "zroot" || p.Vdev != vdev || p.Mountpoint != "/" || p.Size != "rest" || p.Filesystem != "" {
+		p := l.Parts[len(l.Parts)-1]
+		if len(l.Parts) != 4 || p.Type != "zfs" || p.Name != "zroot" || p.Mountpoint != "/" || p.Size != "rest" || p.Filesystem != "" {
 			t.Errorf("layout %s: %+v", name, l.Parts)
+		}
+		if (raid < 0 && p.Raid != nil) || (raid >= 0 && (p.Raid == nil || *p.Raid != raid)) {
+			t.Errorf("layout %s: raid %v, want %d (-1: none)", name, p.Raid, raid)
 		}
 	}
 	for _, name := range []string{"lvm-linear", "lvm-striped", "lvm-raid1", "lvm-example"} {
@@ -425,7 +430,7 @@ func TestFreeBSDProfilesAndZFSLayouts(t *testing.T) {
 			t.Errorf("%s: %+v", name, spec)
 		}
 		data, _ := spec.JSON()
-		if !strings.Contains(string(data), `"type": "zfs"`) || !strings.Contains(string(data), `"pool": "zroot"`) || strings.Contains(string(data), `"vdev"`) {
+		if !strings.Contains(string(data), `"type": "zfs"`) || !strings.Contains(string(data), `"name": "zroot"`) || strings.Contains(string(data), `"raid"`) || strings.Contains(string(data), `"pool"`) || strings.Contains(string(data), `"vdev"`) {
 			t.Errorf("%s: the specification's layout:\n%s", name, data)
 		}
 		// the other layouts by name, as --layout gives them
@@ -433,7 +438,7 @@ func TestFreeBSDProfilesAndZFSLayouts(t *testing.T) {
 		if spec, err = q.Resolve(layouts, firewalls, users, userdata, fakeResolver); err != nil {
 			t.Fatalf("%s with zfs-mirror: %v", name, err)
 		}
-		if data, _ = spec.JSON(); !strings.Contains(string(data), `"vdev": "mirror"`) {
+		if data, _ = spec.JSON(); !strings.Contains(string(data), `"name": "zroot"`) || !strings.Contains(string(data), `"raid": 1`) || strings.Contains(string(data), `"pool"`) || strings.Contains(string(data), `"vdev"`) {
 			t.Errorf("%s with zfs-mirror: the specification's layout:\n%s", name, data)
 		}
 		// a layout of the Linux systems, and userdata of NixOS, are refused
@@ -485,9 +490,11 @@ func TestZFSLayoutRules(t *testing.T) {
 	}
 	for _, parts := range []string{
 		boot + "      - {type: zfs, target: [\".*\"], size: rest, mountpoint: /}\n",
-		boot + "      - {type: slice, target: [\".*\"], size: 4G, filesystem: swap}\n      - {type: zfs, target: [\"nvme.*\", \"sd.*\"], size: 80%, filesystem: zfs, pool: tank, vdev: raidz3, mountpoint: /}\n",
-		"      - {type: zfs, target: [first], size: 100G, pool: a0_b-c, vdev: stripe, mountpoint: /}\n      - {type: slice, target: [first], index: 128, size: 33M, filesystem: efi, mountpoint: /boot/efi}\n",
+		boot + "      - {type: slice, target: [\".*\"], size: 4G, filesystem: swap}\n      - {type: zfs, target: [\"nvme.*\", \"sd.*\"], size: 80%, filesystem: zfs, name: tank, raid: 6, mountpoint: /}\n",
+		"      - {type: zfs, target: [first], size: 100G, name: a0_b-c, raid: 0, mountpoint: /}\n      - {type: slice, target: [first], index: 128, size: 33M, filesystem: efi, mountpoint: /boot/efi}\n",
 		"      - {type: slice, target: [first], size: 1%, filesystem: efi, mountpoint: /boot/efi}\n      - {type: zfs, target: [first], size: rest, mountpoint: /}\n",
+		boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: 1, mountpoint: /}\n",
+		boot + "      - {type: zfs, target: [\".*\"], size: rest, name: zroot, raid: 5, mountpoint: /}\n",
 	} {
 		if l := layout(parts); l.Validate() != nil || !l.IsZFS() {
 			t.Errorf("%v:\n%s", l.Validate(), parts)
@@ -495,40 +502,56 @@ func TestZFSLayoutRules(t *testing.T) {
 	}
 	const zfs = "      - {type: zfs, target: [\".*\"], size: rest, mountpoint: /}\n"
 	for _, c := range []struct{ name, parts, want string }{
-		{"two pools", boot + zfs + "      - {type: zfs, target: [\"sd.*\"], size: rest, pool: tank, mountpoint: /data}\n", "layout z, part 4 (zfs): a second zfs part: one makes the root pool, and no other pool is made in this version"},
+		{"two pools", boot + zfs + "      - {type: zfs, target: [\"sd.*\"], size: rest, name: tank, mountpoint: /data}\n", "layout z, part 4 (zfs): a second zfs part: one makes the root pool, and no other pool is made in this version"},
 		{"a root beside the pool", "      - {type: slice, target: [first], size: 20G, filesystem: ext4, mountpoint: /}\n" + zfs, "layout z, part 2 (zfs): mountpoint / is used twice"},
 		{"a pool that is not the root", boot + "      - {type: zfs, target: [\".*\"], size: rest, mountpoint: /data}\n", "layout z, part 3 (zfs): a zfs part is the root pool and needs mountpoint /"},
 		{"a pool without a mountpoint", boot + "      - {type: zfs, target: [\".*\"], size: rest}\n", "a zfs part is the root pool and needs mountpoint /"},
 		{"a file system", boot + "      - {type: zfs, target: [\".*\"], size: rest, filesystem: ext4, mountpoint: /}\n", `a zfs part has no filesystem but zfs, not "ext4"`},
-		{"an unknown vdev", boot + "      - {type: zfs, target: [\".*\"], size: rest, vdev: raid5, mountpoint: /}\n", `vdev "raid5" is not stripe, mirror, raidz, raidz2 or raidz3`},
-		{"a reserved pool name", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: mirror0, mountpoint: /}\n", `pool "mirror0" is not a name for a ZFS pool`},
-		{"a pool name that starts with a digit", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: 9pool, mountpoint: /}\n", `pool "9pool" is not a name for a ZFS pool`},
-		{"the pool name log", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: log, mountpoint: /}\n", `pool "log" is not a name for a ZFS pool`},
-		{"a pool name that begins with one of ZFS's words", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: cache0, mountpoint: /}\n", `pool "cache0" is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)`},
-		{"a pool name with a capital", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: Tank, mountpoint: /}\n", `pool "Tank" is not a name for a ZFS pool`},
-		{"a pool name with a dot", boot + "      - {type: zfs, target: [\".*\"], size: rest, pool: a.b, mountpoint: /}\n", `pool "a.b" is not a name for a ZFS pool`},
+		{"a level of md and LVM that ZFS has not", boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: 10, mountpoint: /}\n", "layout z, part 3 (zfs): raid 10 is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"},
+		{"the level 4", boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: 4, mountpoint: /}\n", "raid 4 is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"},
+		{"a number for raidz3, which has none", boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: 7, mountpoint: /}\n", "raid 7 is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"},
+		{"a level below zero", boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: -1, mountpoint: /}\n", "raid -1 is not a level of a ZFS pool"},
+		{"a reserved pool name", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: mirror0, mountpoint: /}\n", `name "mirror0" is not a name for a ZFS pool`},
+		{"a pool name that starts with a digit", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: 9pool, mountpoint: /}\n", `name "9pool" is not a name for a ZFS pool`},
+		{"the pool name log", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: log, mountpoint: /}\n", `name "log" is not a name for a ZFS pool`},
+		{"a pool name that begins with one of ZFS's words", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: cache0, mountpoint: /}\n", `layout z, part 3 (zfs): name "cache0" is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)`},
+		{"a pool name with a capital", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: Tank, mountpoint: /}\n", `name "Tank" is not a name for a ZFS pool`},
+		{"a pool name with a dot", boot + "      - {type: zfs, target: [\".*\"], size: rest, name: a.b, mountpoint: /}\n", `name "a.b" is not a name for a ZFS pool`},
 		{"an EFI system partition too small", "      - {type: slice, target: [first], size: 32M, filesystem: efi, mountpoint: /boot/efi}\n" + zfs, "layout z, part 1 (slice): an efi part of 32M is too small for FreeBSD's FAT32 (33M at least)"},
 		{"an EFI system partition in kilobytes", "      - {type: slice, target: [first], size: 512K, filesystem: efi, mountpoint: /boot/efi}\n" + zfs, "an efi part of 512K is too small"},
 		{"no target", boot + "      - {type: zfs, size: rest, mountpoint: /}\n", "layout z, part 3 (zfs): no target"},
 		{"a bad target", boot + "      - {type: zfs, target: [\"(\"], size: rest, mountpoint: /}\n", `target "("`},
 		{"a bad size", boot + "      - {type: zfs, target: [\".*\"], size: half, mountpoint: /}\n", `size "half"`},
-		{"a raid level", boot + "      - {type: zfs, target: [\".*\"], size: rest, raid: 1, mountpoint: /}\n", "a zfs part has target, size, pool, vdev and mountpoint; no index, label, vg, name or raid"},
-		{"a volume group", boot + "      - {type: zfs, target: [\".*\"], size: rest, vg: vg0, mountpoint: /}\n", "no index, label, vg, name or raid"},
+		{"a partition number", boot + "      - {type: zfs, target: [\".*\"], index: 3, size: rest, mountpoint: /}\n", "layout z, part 3 (zfs): a zfs part has target, size, name, raid and mountpoint; no index, label or vg"},
+		{"a label", boot + "      - {type: zfs, target: [\".*\"], size: rest, label: root, mountpoint: /}\n", "no index, label or vg"},
+		{"a volume group", boot + "      - {type: zfs, target: [\".*\"], size: rest, vg: vg0, mountpoint: /}\n", "no index, label or vg"},
 		{"/boot beside the pool", boot + "      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}\n" + zfs, "layout z, part 3 (slice): beside a zfs part a layout has efi, bios and swap slices only"},
 		{"a data slice beside the pool", boot + zfs + "      - {type: slice, target: [\"sd.*\"], size: rest, filesystem: xfs, mountpoint: /data}\n", "layout z, part 4 (slice): beside a zfs part a layout has efi, bios and swap slices only"},
 		{"md beside the pool", boot + "      - {type: md, target: [\".*\"], size: 4G, raid: 1, filesystem: swap}\n" + zfs, "layout z, part 3 (md): beside a zfs part a layout has efi, bios and swap slices only"},
 		{"lvm beside the pool", boot + "      - {type: slice, target: [\"sd.*\"], size: rest, filesystem: lvm, vg: vg0}\n      - {type: lvm, vg: vg0, name: data, size: rest, filesystem: ext4, mountpoint: /data}\n" + zfs, "layout z, part 3 (slice): beside a zfs part a layout has efi, bios and swap slices only"},
-		{"a pool on a slice", "      - {type: slice, target: [first], size: rest, filesystem: ext4, pool: zroot, mountpoint: /}\n", "layout z, part 1 (slice): pool and vdev belong to a zfs part"},
-		{"a vdev on an lvm part", "      - {type: slice, target: [first], size: 1G, filesystem: ext4, mountpoint: /boot}\n      - {type: slice, target: [first], size: rest, filesystem: lvm, vg: v}\n      - {type: lvm, vg: v, name: root, size: rest, vdev: mirror, filesystem: ext4, mountpoint: /}\n", "layout z, part 3 (lvm): pool and vdev belong to a zfs part"},
 	} {
 		if err := layout(c.parts).Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
+	// a part has the fields of every layout and no others: a pool's name
+	// is name and its level raid, a number
+	for _, c := range []struct{ name, part, want string }{
+		{"pool", "{type: zfs, target: [\".*\"], size: rest, pool: zroot, mountpoint: /}", "field pool not found in type profile.Part"},
+		{"vdev", "{type: zfs, target: [\".*\"], size: rest, vdev: mirror, mountpoint: /}", "field vdev not found in type profile.Part"},
+		{"a level in words", "{type: zfs, target: [\".*\"], size: rest, raid: mirror, mountpoint: /}", "cannot unmarshal !!str `mirror` into int"},
+	} {
+		if _, err := ParseLayouts([]byte("layouts:\n  z:\n    parts:\n" + boot + "      - " + c.part + "\n")); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s in layouts.yaml: %v, want %q", c.name, err, c.want)
+		}
+		if _, err := Parse([]byte("name: z\nos: freebsd-15.1\nusers: [ump]\ndisks:\n  parts:\n" + strings.ReplaceAll(boot, "      - ", "    - ") + "    - " + c.part + "\n")); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s in a profile's own layout: %v, want %q", c.name, err, c.want)
+		}
+	}
 	if err := layout("      - {type: raid, target: [first], size: rest, filesystem: ext4, mountpoint: /}\n").Validate(); err == nil || !strings.Contains(err.Error(), `unknown part type "raid" (slice, md, lvm, zfs)`) {
 		t.Errorf("an unknown type: %v", err)
 	}
-	if len(Vdevs) != 5 || Vdevs["stripe"] != 1 || Vdevs["mirror"] != 2 || Vdevs["raidz"] != 3 || Vdevs["raidz2"] != 4 || Vdevs["raidz3"] != 5 {
-		t.Errorf("vdevs: %v", Vdevs)
+	if len(ZFSRaid) != 4 || ZFSRaid[0] != "stripe" || ZFSRaid[1] != "mirror" || ZFSRaid[5] != "raidz" || ZFSRaid[6] != "raidz2" {
+		t.Errorf("the levels of a pool: %v", ZFSRaid)
 	}
 }

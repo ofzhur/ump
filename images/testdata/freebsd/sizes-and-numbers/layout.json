@@ -2,5 +2,5 @@
   {"type": "slice", "target": [".*"], "index": 127, "size": "1M", "filesystem": "bios"},
   {"type": "slice", "target": [".*"], "index": 128, "size": "260M", "filesystem": "efi", "mountpoint": "/boot/efi"},
   {"type": "slice", "target": ["first"], "size": "5%", "filesystem": "swap"},
-  {"type": "zfs", "target": [".*"], "size": "80%", "filesystem": "zfs", "vdev": "stripe", "mountpoint": "/"}
+  {"type": "zfs", "target": [".*"], "size": "80%", "filesystem": "zfs", "raid": 0, "mountpoint": "/"}
 ]}

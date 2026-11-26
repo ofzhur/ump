@@ -433,17 +433,20 @@ stages the installation instead of making it:
 
 1. **Plans** the layout against the disks, in the Linux rescue system's
    names, as for every system: the partitions per disk, the pool with
-   its `vdev` and the disks under it, the disks that get the boot image.
-   Refused here, before anything is fetched: a layout that breaks the
-   rules of a ZFS layout (a second pool, a pool that is not the root or
-   has a name ZFS does not take, an md or lvm part or a file system
-   beside it), a `vdev` with too few disks (`mirror` 2, `raidz` 3,
-   `raidz2` 4, `raidz3` 5), a UEFI machine without an `efi` part or a
-   BIOS machine without a `bios` part, a first disk with 4096-byte
-   logical sectors (the boot image's partition table is laid out for
-   512), a rescue system without keys for root, which nobody could log
-   in to afterwards, and `--record`: the record is made where the
-   installation ends, by the installer for FreeBSD. And what that
+   its name (the zfs part's `name`, `zroot` without one), the way its
+   disks are joined (the part's `raid`: none or 0 a stripe, 1 a mirror,
+   5 raidz, 6 raidz2) and the disks under it, the disks that get the
+   boot image. Refused here, before anything is fetched: a layout that
+   breaks the rules of a ZFS layout (a second pool, a pool that is not
+   the root or has a name ZFS does not take, a raid level a pool has
+   not, an md or lvm part or a file system beside it), a pool with too
+   few disks (a mirror needs 2, raidz 3, raidz2 4), a UEFI machine
+   without an `efi` part or a BIOS machine without a `bios` part, a
+   first disk with 4096-byte logical sectors (the boot image's
+   partition table is laid out for 512), a rescue system without keys
+   for root, which nobody could log in to afterwards, and `--record`:
+   the record is made where the installation ends, by the installer
+   for FreeBSD. And what that
    installer would refuse, when the disks are wiped already: two parts
    of a kind on a disk, an `efi` part under 33 MiB, parts that do not
    fit their disk, and a disk left alone (`--disks`) that holds a
@@ -535,7 +538,7 @@ The plan travels because the two systems name the disks differently
 | `boot_disk` | the disk `first` means |
 | `disks` | the disks of the installation, all of them wiped here, in the installer's order (NVMe first, then by name): `name` (the Linux path), `size` in bytes (`blockdev --getsize64`), `serial` and `wwn` (as `lsblk` tells them, without blanks around; empty where the disk tells none), and `parts` in the order they are made, by number, the one that takes the rest last: `index` (the partition number), `kind` (`bios`, `efi`, `swap`, `zfs`), `size` (a number with `K`, `M`, `G` or `T`, binary units, or `rest`). A disk no part of the layout matches has no parts, and stays empty |
 | `left` | every other disk of the machine, those `--disks` leaves alone: `name`, `size`, `serial`. The installer for FreeBSD must not take one of them for a disk of the plan, and refuses where it cannot tell them apart |
-| `pool` | `name`, `vdev` (`stripe`, `mirror`, `raidz`, `raidz2`, `raidz3`), `mountpoint` (`/`) |
+| `pool` | `name`, `vdev` (`stripe`, `mirror`, `raidz` or `raidz2`, from the zfs part's `raid`; the installer for FreeBSD takes `raidz3` too, which no layout asks for in this version), `mountpoint` (`/`) |
 
 [`images/test-freebsd-plan.sh`](../images/test-freebsd-plan.sh) (`make
 freebsd-plan-test`, part of `make check`) plans the machines of

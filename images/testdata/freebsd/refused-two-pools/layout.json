@@ -2,5 +2,5 @@
   {"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
   {"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
   {"type": "zfs", "target": ["nvme.*"], "size": "rest", "mountpoint": "/"},
-  {"type": "zfs", "target": ["sd.*"], "size": "rest", "mountpoint": "/data", "pool": "tank"}
+  {"type": "zfs", "target": ["sd.*"], "size": "rest", "mountpoint": "/data", "name": "tank"}
 ]}

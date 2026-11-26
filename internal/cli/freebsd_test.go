@@ -273,6 +273,10 @@ func TestReinstallFreeBSD(t *testing.T) {
 	if spec["os"] != "freebsd-15.1" || layout["name"] != "zfs" || parts[len(parts)-1].(map[string]any)["type"] != "zfs" {
 		t.Errorf("spec: %v", spec)
 	}
+	// the pool by its name, and no raid level: a stripe
+	if zfs := parts[len(parts)-1].(map[string]any); zfs["name"] != "zroot" || zfs["mountpoint"] != "/" || len(zfs) != 6 || zfs["filesystem"] != "" || zfs["size"] != "rest" {
+		t.Errorf("the specification's zfs part: %v", zfs)
+	}
 	var second map[string]any
 	if err := json.Unmarshal([]byte(e.fb.specs[0]), &second); err != nil || second["os"] != "freebsd-15.1" {
 		t.Errorf("the second specification: %v\n%s", err, e.fb.specs[0])
@@ -319,6 +323,11 @@ func TestReinstallFreeBSD(t *testing.T) {
 	_, errOut, code = e.run("", false, "server", "reinstall", "web-01", "--profile", "freebsd-14.5", "--layout", "zfs-mirror", "--no-provision", "--yes", "--account", "one")
 	if code != 0 || len(fakePower.actions) != 0 || e.lastSpec()["os"] != "freebsd-14.5" || e.lastSpec()["layout"].(map[string]any)["name"] != "zfs-mirror" {
 		t.Errorf("direct: code %d, actions %v\n%s", code, fakePower.actions, errOut)
+	}
+	// the mirror is the pool's raid level, a number
+	mirror := e.lastSpec()["layout"].(map[string]any)["parts"].([]any)
+	if zfs := mirror[len(mirror)-1].(map[string]any); zfs["type"] != "zfs" || zfs["name"] != "zroot" || zfs["raid"] != float64(1) || len(zfs) != 7 {
+		t.Errorf("the specification's zfs part of zfs-mirror: %v", zfs)
 	}
 	inOrder(t, errOut, "Checking root access to 203.0.113.10 over SSH ... yes (Ubuntu 26.04 LTS).\n", "==> staged:", "Waiting for the UMP FreeBSD rescue system on 203.0.113.10", "web-01 is up: FreeBSD 15.1-RELEASE",
 		"Not provisioned (--no-provision); the next ump provision includes it (ump provision --hosts web-01 for it alone).\n")

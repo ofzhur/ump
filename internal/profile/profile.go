@@ -124,7 +124,9 @@ type Layout struct {
 
 // Part is one step of a layout: a slice (a partition on every matching
 // disk), an md array, a logical volume, or a ZFS pool (a partition on
-// every matching disk and one pool over them: FreeBSD's root).
+// every matching disk and one pool over them: FreeBSD's root). Name is
+// a logical volume's name or a pool's, and Raid the level of an md
+// array, of a logical volume or of a pool.
 type Part struct {
 	Type       string   `yaml:"type" json:"type"`
 	Target     []string `yaml:"target,omitempty" json:"target,omitempty"`
@@ -136,8 +138,6 @@ type Part struct {
 	VG         string   `yaml:"vg,omitempty" json:"vg,omitempty"`
 	Name       string   `yaml:"name,omitempty" json:"name,omitempty"`
 	Raid       *int     `yaml:"raid,omitempty" json:"raid,omitempty"`
-	Pool       string   `yaml:"pool,omitempty" json:"pool,omitempty"`
-	Vdev       string   `yaml:"vdev,omitempty" json:"vdev,omitempty"`
 }
 
 // User is an account of the new system: inline in a profile (with its
@@ -582,10 +582,11 @@ var (
 // filesystems the installer can make, and the special ones.
 var filesystems = map[string]bool{"ext4": true, "xfs": true, "btrfs": true, "vfat": true, "swap": true, "efi": true, "bios": true, "lvm": true, "none": true}
 
-// Vdevs are the ways a zfs part joins its disks into the pool, each with
-// the disks it needs: stripe makes every disk a device of its own, the
-// others one device over all of them.
-var Vdevs = map[string]int{"stripe": 1, "mirror": 2, "raidz": 3, "raidz2": 4, "raidz3": 5}
+// ZFSRaid are the raid levels of a zfs part, each with the way it joins
+// its disks into the pool: 0, as no level, makes every disk a device of
+// its own (a stripe), the others one device over all of them (1 a
+// mirror, 5 raidz, where one disk may fail, 6 raidz2, where two may).
+var ZFSRaid = map[int]string{0: "stripe", 1: "mirror", 5: "raidz", 6: "raidz2"}
 
 // IsZFS reports whether the layout has a zfs part. Such a layout is
 // FreeBSD's, whose root is a ZFS pool; the other systems take none.
@@ -621,21 +622,23 @@ func (p *Part) validateZFS(at string) error {
 	if p.Mountpoint != "/" {
 		return fmt.Errorf("%s: a zfs part is the root pool and needs mountpoint /", at)
 	}
-	if p.Pool != "" {
+	if p.Name != "" {
 		// (as the installer for FreeBSD takes it)
 		reserved := false
 		for _, w := range []string{"mirror", "raidz", "draid", "spare", "log", "cache", "special", "dedup"} {
-			reserved = reserved || strings.HasPrefix(p.Pool, w)
+			reserved = reserved || strings.HasPrefix(p.Name, w)
 		}
-		if !poolName.MatchString(p.Pool) || reserved {
-			return fmt.Errorf("%s: pool %q is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)", at, p.Pool)
+		if !poolName.MatchString(p.Name) || reserved {
+			return fmt.Errorf("%s: name %q is not a name for a ZFS pool (a small letter, then small letters, digits, - and _; none that begins with mirror, raidz, draid, spare, log, cache, special or dedup)", at, p.Name)
 		}
 	}
-	if _, ok := Vdevs[p.Vdev]; p.Vdev != "" && !ok {
-		return fmt.Errorf("%s: vdev %q is not stripe, mirror, raidz, raidz2 or raidz3", at, p.Vdev)
+	if p.Raid != nil {
+		if _, ok := ZFSRaid[*p.Raid]; !ok {
+			return fmt.Errorf("%s: raid %d is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)", at, *p.Raid)
+		}
 	}
-	if p.Index != 0 || p.Label != "" || p.VG != "" || p.Name != "" || p.Raid != nil {
-		return fmt.Errorf("%s: a zfs part has target, size, pool, vdev and mountpoint; no index, label, vg, name or raid (vdev says how the disks are joined)", at)
+	if p.Index != 0 || p.Label != "" || p.VG != "" {
+		return fmt.Errorf("%s: a zfs part has target, size, name, raid and mountpoint; no index, label or vg (name is the pool's, and raid says how its disks are joined)", at)
 	}
 	return nil
 }
@@ -691,9 +694,6 @@ func (l *Layout) Validate() error {
 			mounts[p.Mountpoint] = true
 			rootOn = p.Type
 			continue
-		}
-		if p.Pool != "" || p.Vdev != "" {
-			return fmt.Errorf("%s: pool and vdev belong to a zfs part", at)
 		}
 		if !filesystems[p.Filesystem] {
 			return fmt.Errorf("%s: unknown filesystem %q", at, p.Filesystem)

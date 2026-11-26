@@ -4,7 +4,7 @@
 ==>   /dev/vdc: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
 ==>   /dev/vdd: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
 ==>   /dev/vde: 1: 512K bios, 2: 512M efi at /boot/efi, 3: rest zfs (zroot)
-==>   zroot: raidz3 over /dev/vda /dev/vdb /dev/vdc /dev/vdd /dev/vde, at /
+==>   zroot: raidz2 over /dev/vda /dev/vdb /dev/vdc /dev/vdd /dev/vde, at /
 ==>   made by the installer for FreeBSD in the UMP FreeBSD rescue system, whose boot image goes to /dev/vda, /dev/vdb, /dev/vdc, /dev/vdd, /dev/vde and starts from there
 ==> loader tunables: none
 ==> fetching the manifest
@@ -139,7 +139,7 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiy2Pa5thF4H4bUQ5+xccU90Xt+8VpqYwHR9OKucTe2
   "left": [],
   "pool": {
     "name": "zroot",
-    "vdev": "raidz3",
+    "vdev": "raidz2",
     "mountpoint": "/"
   }
 }

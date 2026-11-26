@@ -133,7 +133,7 @@ before an installation:
 What the installer checks against the machine, before any disk is
 touched: a target matches at least one disk (a layout on `nvme.*` stops
 on a machine without NVMe); an md level, an lvm raid level or a pool's
-`vdev` has enough members; only one part takes the rest of a disk; a
+raid level has enough members; only one part takes the rest of a disk; a
 UEFI machine has an `efi` part and a BIOS machine on amd64 a `bios`
 part. GRUB goes on the
 EFI removable path (so the firmware's boot order, with the provider's
@@ -152,8 +152,8 @@ matches, and one pool over them.
 | `type: zfs` | the part |
 | `target` | the disks, as for a slice |
 | `size` | the pool's partition on each disk, in a slice's forms; `rest` in the published layouts |
-| `pool` | the pool's name; `zroot` when absent |
-| `vdev` | how the disks are joined: `stripe` (the default: every disk a device of its own, no redundancy), `mirror`, `raidz`, `raidz2` or `raidz3` (one device over all the disks, which survives the loss of one, two or three of them) |
+| `name` | the pool's name; `zroot` when absent |
+| `raid` | how the disks are joined, in the numbers of md and LVM: absent or `0` a stripe (every disk a device of its own, no redundancy), `1` a mirror, `5` raidz, `6` raidz2 (one device over all the disks, which survives the loss of one disk, with raidz2 of two) |
 | `mountpoint` | `/`: the pool is the root |
 | `filesystem` | absent, or `zfs` |
 
@@ -166,17 +166,18 @@ What makes such a layout valid, beside the [rules](#rules) above:
   none of ext4, xfs, btrfs and vfat, and its loader reads the pool, so
   there is no `/boot`;
 - an `efi` part of a fixed size has 33 MiB at least, for its FAT32;
-- a zfs part has no `index`, `label`, `vg`, `name` or `raid`, and `pool`
-  and `vdev` belong to a zfs part alone;
+- a zfs part has no `index`, `label` or `vg`; its `raid` is 0, 1, 5 or
+  6, and any other number is refused (raidz3 has none: no layout makes
+  it in this version);
 - a pool's name starts with a small letter and goes on with small
   letters, digits, `-` and `_`; it does not begin with one of ZFS's own
   words (`mirror`, `raidz`, `draid`, `spare`, `log`, `cache`,
   `special`, `dedup`).
 
-Against the machine, before any disk is touched: `mirror` needs 2
-disks, `raidz` 3, `raidz2` 4 and `raidz3` 5; a UEFI machine an `efi`
-part, a BIOS machine a `bios` part; a disk gets one part of a kind (one
-`efi`, one `swap`), and its parts fit on it; the pool must hold twice
+Against the machine, before any disk is touched: a mirror needs 2
+disks, raidz 3 and raidz2 4; a UEFI machine an `efi` part, a BIOS
+machine a `bios` part; a disk gets one part of a kind (one `efi`, one
+`swap`), and its parts fit on it; the pool must hold twice
 the installed system; and the first disk (`first`) has 512-byte logical
 sectors, since the FreeBSD rescue system the installation goes through
 starts from it (a disk with 4096-byte logical sectors there is refused
@@ -300,7 +301,7 @@ parts:
   - {type: slice, target: [first], size: 512K, filesystem: bios}
   - {type: slice, target: [first], size: 512M, filesystem: efi, mountpoint: /boot/efi}
   - {type: slice, target: [first], size: 2G, filesystem: swap}
-  - {type: zfs, target: [".*"], size: rest, pool: zroot, mountpoint: /}
+  - {type: zfs, target: [".*"], size: rest, name: zroot, mountpoint: /}
 ```
 
 ### `zfs-mirror`
@@ -317,7 +318,7 @@ parts:
   - {type: slice, target: [".*"], size: 512K, filesystem: bios}
   - {type: slice, target: [".*"], size: 512M, filesystem: efi, mountpoint: /boot/efi}
   - {type: slice, target: [".*"], size: 2G, filesystem: swap}
-  - {type: zfs, target: [".*"], size: rest, pool: zroot, vdev: mirror, mountpoint: /}
+  - {type: zfs, target: [".*"], size: rest, name: zroot, raid: 1, mountpoint: /}
 ```
 
 ### `zfs-raidz`
@@ -330,7 +331,7 @@ parts:
   - {type: slice, target: [".*"], size: 512K, filesystem: bios}
   - {type: slice, target: [".*"], size: 512M, filesystem: efi, mountpoint: /boot/efi}
   - {type: slice, target: [".*"], size: 2G, filesystem: swap}
-  - {type: zfs, target: [".*"], size: rest, pool: zroot, vdev: raidz, mountpoint: /}
+  - {type: zfs, target: [".*"], size: rest, name: zroot, raid: 5, mountpoint: /}
 ```
 
 ## Managing layouts
@@ -427,7 +428,7 @@ system-and-data:
     - {type: lvm, vg: data, name: data, size: rest, raid: 0, filesystem: xfs, mountpoint: /data}
 ```
 
-**FreeBSD on a mirror of the NVMe disks.** A zfs part with a `vdev`,
+**FreeBSD on a mirror of the NVMe disks.** A zfs part with `raid: 1`,
 and the boot partitions and swap on the pool's disks; the other disks
 are erased and stay empty, unless `--disks` names the pair:
 
@@ -438,7 +439,7 @@ zfs-nvme-mirror:
     - {type: slice, target: ["nvme.*"], size: 512K, filesystem: bios}
     - {type: slice, target: ["nvme.*"], size: 512M, filesystem: efi, mountpoint: /boot/efi}
     - {type: slice, target: ["nvme.*"], size: 8G, filesystem: swap}
-    - {type: zfs, target: ["nvme.*"], size: rest, pool: zroot, vdev: mirror, mountpoint: /}
+    - {type: zfs, target: ["nvme.*"], size: rest, name: zroot, raid: 1, mountpoint: /}
 ```
 
 Targets are regular expressions on the whole device path, so `sd[b-z]`

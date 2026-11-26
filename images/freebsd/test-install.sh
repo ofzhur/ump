@@ -80,10 +80,10 @@ RESCUE="${RESCUE:-$HERE/out/rescue/$OS/$ARCH}"
 IMAGE="${IMAGE:-$HERE/out/os/$OS/$ARCH}"
 LAYOUT="${LAYOUT:-zfs}"
 case "$LAYOUT" in
-zfs) need=1; vdev=stripe ;;
-zfs-mirror) need=2; vdev=mirror ;;
-zfs-raidz) need=3; vdev=raidz ;;
-zfs-raidz2) need=4; vdev=raidz2 ;;
+zfs) need=1; vdev=stripe; raid=null ;;
+zfs-mirror) need=2; vdev=mirror; raid=1 ;;
+zfs-raidz) need=3; vdev=raidz; raid=5 ;;
+zfs-raidz2) need=4; vdev=raidz2; raid=6 ;;
 *) echo "LAYOUT is zfs, zfs-mirror, zfs-raidz or zfs-raidz2" >&2; exit 2 ;;
 esac
 DISKS="${DISKS:-$need}"; DISK="${DISK:-10}"
@@ -189,16 +189,17 @@ print(" ".join("%s:%d:%d" % (d["device"], d["stats"]["wr_operations"], d["stats"
 ASK
 }
 
-# the layouts of layouts.yaml
+# the layouts of layouts.yaml, as ump renders them: the pool's name, and
+# its raid level where it has one
 case "$LAYOUT" in
 zfs) boot_target='["first"]' ;;
 *) boot_target='[".*"]' ;;
 esac
-layout="$(jq -n --arg name "$LAYOUT" --arg vdev "$vdev" --argjson boot "$boot_target" '{name: $name, parts: [
+layout="$(jq -n --arg name "$LAYOUT" --argjson raid "$raid" --argjson boot "$boot_target" '{name: $name, parts: [
 	{type: "slice", target: $boot, size: "512K", filesystem: "bios"},
 	{type: "slice", target: $boot, size: "512M", filesystem: "efi", mountpoint: "/boot/efi"},
 	{type: "slice", target: $boot, size: "2G", filesystem: "swap"},
-	{type: "zfs", target: [".*"], size: "rest", pool: "zroot", vdev: $vdev, mountpoint: "/"}]}')"
+	({type: "zfs", target: [".*"], size: "rest", name: "zroot", mountpoint: "/"} + if $raid == null then {} else {raid: $raid} end)]}')"
 # the uplink of a PXE machine: QEMU's user network, by DHCP with its
 # resolver, or the same address static
 case "$UPLINK" in

@@ -1,3 +1,0 @@
-install.sh: layout raid5, part 3 (zfs): vdev raid5 is not stripe, mirror, raidz, raidz2 or raidz3
-install.sh: nothing was written to the disks
-(exit status 2)

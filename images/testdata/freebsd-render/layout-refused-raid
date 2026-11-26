@@ -1,0 +1,2 @@
+install.sh: layout zfs-raid10, part 4 (zfs): raid 10 is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)
+(exit status 1)

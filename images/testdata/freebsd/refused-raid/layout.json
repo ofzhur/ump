@@ -1,5 +1,5 @@
-{"name": "raid5", "parts": [
+{"name": "raid10", "parts": [
   {"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
   {"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
-  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/", "vdev": "raid5"}
+  {"type": "zfs", "target": [".*"], "size": "rest", "mountpoint": "/", "raid": 10}
 ]}

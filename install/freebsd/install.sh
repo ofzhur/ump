@@ -269,7 +269,10 @@ plan_from_file() {
 # plan_from_layout DISKS: without a plan.json, the specification's
 # layout planned here: first is the first disk of at least 4 GiB (the
 # first when none is that big), .* every disk; disks of the
-# specification, when it names any, are FreeBSD's names
+# specification, when it names any, are FreeBSD's names. The zfs part's
+# name is the pool's (zroot when it has none), and its raid level says
+# how the pool joins its disks: none or 0 a stripe, 1 a mirror, 5 raidz,
+# 6 raidz2
 plan_from_layout() {
 	printf '%s' "$spec" | jq -c --argjson have "$1" --arg firmware "$firmware" "$jq_lib"'
 	(.layout.name // "inline") as $layout
@@ -290,6 +293,7 @@ plan_from_layout() {
 			| (if $p.type == "zfs" and (($p.filesystem // "zfs") == "zfs") then "zfs"
 			   elif $p.type == "slice" and ($p.filesystem == "efi" or $p.filesystem == "bios" or $p.filesystem == "swap") then $p.filesystem
 			   else null end) as $kind
+			| ({"0": "stripe", "1": "mirror", "5": "raidz", "6": "raidz2"}[($p.raid // 0) | if type == "number" then tostring else "" end]) as $vdev
 			| [($p.target // [])[] | select(. != "first" and . != ".*")] as $other
 			| ([($p.target // [])[] | if . == "first" then $first.name elif . == ".*" then $disks[].name else empty end]
 				| reduce .[] as $n ([]; if index($n) then . else . + [$n] end)) as $names
@@ -301,8 +305,10 @@ plan_from_layout() {
 				.refused += ["\($at): no target"]
 			  elif $kind == "zfs" and .pool != null then
 				.refused += ["\($at): a second zfs part; this version makes the root pool and no other"]
+			  elif $kind == "zfs" and $vdev == null then
+				.refused += ["\($at): raid \($p.raid | tojson) is not a level of a ZFS pool (0 a stripe, 1 a mirror, 5 raidz, 6 raidz2)"]
 			  else
-				(if $kind == "zfs" then .pool = {name: ($p.pool // "zroot"), vdev: ($p.vdev // "stripe"), mountpoint: ($p.mountpoint // "")} else . end)
+				(if $kind == "zfs" then .pool = {name: ($p.name // "zroot"), vdev: $vdev, mountpoint: ($p.mountpoint // "")} else . end)
 				| .disks |= map(if (.name as $n | $names | index($n)) then
 					.parts += [{index: (if ($p.index // 0) > 0 then $p.index else ([.parts[].index | select(. < 100)] | max // 0) + 1 end), kind: $kind, size: $p.size} | part]
 				  else . end)
@@ -908,7 +914,7 @@ pool="$(printf '%s' "$plan" | jq -r .pool.name)"
 # makes: it would be found under /dev/gpt in the new partition's place.
 for d in $(printf '%s' "$plan" | jq -r '.left[].name'); do
 	for p in "$d" $(gpart show -p "$d" 2>/dev/null | awk -v d="$d" 'NR > 1 && index($3, d) == 1 {print $3}'); do
-		[ "$(zdb -l "/dev/$p" 2>/dev/null | awk '/^ *name:/ {print $2; exit}')" != "'$pool'" ] || die "$p, on a disk the plan leaves alone, belongs to a pool named $pool, and so would the new system's: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation, or give the layout's zfs part another pool name (pool: NAME)"
+		[ "$(zdb -l "/dev/$p" 2>/dev/null | awk '/^ *name:/ {print $2; exit}')" != "'$pool'" ] || die "$p, on a disk the plan leaves alone, belongs to a pool named $pool, and so would the new system's: FreeBSD takes its root pool by name and may start the old one. Put the disk into the installation, or give the layout's zfs part another pool name (name: NAME)"
 	done
 	theirs="$(gpart show -l "$d" 2>/dev/null | awk 'NR > 1 && $3 ~ /^[0-9]+$/ {print $4}')"
 	for l in $(plan_labels "$plan"); do

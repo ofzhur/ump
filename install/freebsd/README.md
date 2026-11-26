@@ -188,8 +188,8 @@ It refuses, before it writes:
 - a disk left alone that holds a member of a pool with the new pool's
   name: the kernel takes its root pool by name, and started the old
   pool in the new one's place when this was tried. The disk goes into
-  the installation, or the layout's `zfs` part gets another `pool`
-  name;
+  the installation, or the pool gets another name (`name` of the
+  layout's `zfs` part);
 - a disk left alone that carries a GPT label the plan makes (`zfs0`,
   ...): FreeBSD would find one of the two under `/dev/gpt`.
 
@@ -206,8 +206,10 @@ itself from the specification's layout, with `first` (the first disk of
 at least 4 GiB) and `.*` (every disk) as the only targets; `disks` of
 the specification then names FreeBSD's disks (`nda0`). The layout's
 parts are slices with the file system `efi`, `bios` or `swap` and one
-part of the type `zfs` with `pool`, `vdev` and `mountpoint: /`; any
-other part is refused.
+part of the type `zfs` with `mountpoint: /`, the pool's `name` (`zroot`
+when absent) and its `raid` level (none or `0` a stripe, `1` a mirror,
+`5` raidz, `6` raidz2; another number is refused); any other part is
+refused.
 
 ## ZFS
 

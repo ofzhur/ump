@@ -176,10 +176,11 @@ jq -n --arg key "$pub" --arg storage "http://10.0.2.2:$HTTP" --arg os "$OS" --ar
 if [ "$family" = freebsd ]; then
 	[ -z "$UPLINK" ] || { echo "UPLINK is not checked on FreeBSD yet" >&2; exit 2; }
 	# a published ZFS layout: its parts in profiles/layouts.yaml are YAML
-	# flow mappings, one line each, which sed turns into JSON; and with
-	# SPARE the disks to use, as --disks names them
+	# flow mappings, one line each, which sed turns into JSON (index and
+	# raid are numbers, as ump renders them); and with SPARE the disks to
+	# use, as --disks names them
 	layout="$(awk -v n="  $LAYOUT:" '$0 == n {on = 1; next} on && /^  [a-z]/ {exit} on && /^      - \{/ {sub(/^      - /, ""); print}' "$ROOT/profiles/layouts.yaml" \
-		| sed -E 's/([{,] *)([a-z]+): /\1"\2": /g; s/: ([^]["{},][^,}]*)/: "\1"/g; s/\[([a-z]+)\]/["\1"]/g' | jq -s -c --arg name "$LAYOUT" '{name: $name, parts: .}')"
+		| sed -E 's/([{,] *)([a-z]+): /\1"\2": /g; s/: ([^]["{},][^,}]*)/: "\1"/g; s/\[([a-z]+)\]/["\1"]/g' | jq -s -c --arg name "$LAYOUT" '{name: $name, parts: map(with_entries(if .key == "index" or .key == "raid" then .value |= tonumber else . end))}')"
 	[ "$(jq '[.parts[] | select(.type == "zfs")] | length' <<< "$layout")" = 1 ] || { echo "LAYOUT=$LAYOUT is no ZFS layout of profiles/layouts.yaml" >&2; exit 2; }
 	use='[]'
 	if [ -n "${SPARE:-}" ]; then use='["/dev/vda"]'; [ -z "${DISK2:-}" ] || use='["/dev/vda", "/dev/vdb"]'; [ -z "${DISK3:-}" ] || use='["/dev/vda", "/dev/vdb", "/dev/vdc"]'; fi

@@ -94,12 +94,15 @@ layout() {
 		{"type": "slice", "target": ["first"], "size": "512K", "filesystem": "bios"},
 		{"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
 		{"type": "slice", "target": ["first"], "size": "2G", "filesystem": "swap"},
-		{"type": "zfs", "target": [".*"], "size": "rest", "pool": "zroot", "mountpoint": "/"}]}' ;;
-	zfs-mirror|zfs-raidz|zfs-raidz2) echo '{"name": "'"$1"'", "parts": [
+		{"type": "zfs", "target": [".*"], "size": "rest", "name": "zroot", "mountpoint": "/"}]}' ;;
+	zfs-mirror|zfs-raidz|zfs-raidz2|zfs-raid10)
+		# (the raid level of each; 10 is none a pool has)
+		case "$1" in zfs-mirror) raid=1 ;; zfs-raidz) raid=5 ;; zfs-raidz2) raid=6 ;; *) raid=10 ;; esac
+		echo '{"name": "'"$1"'", "parts": [
 		{"type": "slice", "target": [".*"], "size": "512K", "filesystem": "bios"},
 		{"type": "slice", "target": [".*"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
 		{"type": "slice", "target": [".*"], "size": "2G", "filesystem": "swap"},
-		{"type": "zfs", "target": [".*"], "size": "rest", "pool": "zroot", "vdev": "'"${1#zfs-}"'", "mountpoint": "/"}]}' ;;
+		{"type": "zfs", "target": [".*"], "size": "rest", "name": "zroot", "raid": '"$raid"', "mountpoint": "/"}]}' ;;
 	lvm-linear) echo '{"name": "lvm-linear", "parts": [
 		{"type": "slice", "target": ["first"], "size": "1M", "filesystem": "bios"},
 		{"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
@@ -112,7 +115,7 @@ layout() {
 	data-pool) echo '{"name": "data-pool", "parts": [
 		{"type": "slice", "target": ["first"], "size": "512M", "filesystem": "efi", "mountpoint": "/boot/efi"},
 		{"type": "zfs", "target": ["first"], "size": "20G", "mountpoint": "/"},
-		{"type": "zfs", "target": [".*"], "size": "rest", "pool": "tank", "mountpoint": "/data"}]}' ;;
+		{"type": "zfs", "target": [".*"], "size": "rest", "name": "tank", "mountpoint": "/data"}]}' ;;
 	esac
 }
 
@@ -285,6 +288,7 @@ cases() {
 	run layout-zfs-every-disk layout_case uefi amd64 nvme2-hdd zfs
 	run layout-refused-mirror-one-disk layout_case uefi arm64 virtio1 zfs-mirror
 	run layout-refused-raidz2-three layout_case uefi amd64 virtio3 zfs-raidz2
+	run layout-refused-raid layout_case uefi amd64 virtio3 zfs-raid10
 	run layout-refused-lvm layout_case uefi amd64 virtio1 lvm-linear
 	run layout-refused-target layout_case uefi amd64 nvme1 nvme-only
 	run layout-refused-second-pool layout_case uefi amd64 nvme1 data-pool
